@@ -19,10 +19,12 @@ not experience a median. Prefixes run to 20 s because
 Sources are real accented speech (the longest EdAcc clip in each L1 group under
 `.bench/accent/`, if `scripts/fetch_accent_data.py` has been run) plus the SAPI
 `long.wav`, so the number is measured on the population the roadmap targets rather
-than on synthesised US English. Decode parameters mirror flow/asr.py's *partial* path
-exactly (`beam_size=1`, `vad_filter=False`, `condition_on_previous_text=False`).
+than on synthesised US English. Decode parameters are imported from
+`flow.asr.decode_options` rather than restated here — a bench that drifts from the app
+measures a build nobody runs.
 
-Usage:  uv run python scripts/asr_bench.py [model ...] [--prefix-only]
+Usage:  uv run python scripts/asr_bench.py [model ...]
+            [--prefix-only] [--finals] [--repeats=N]
         default model: base.en
 """
 
@@ -34,6 +36,9 @@ import wave
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from flow.asr import decode_options  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench"
 ACCENT = BENCH / "accent"
@@ -180,15 +185,12 @@ def prefix_sources() -> list[tuple[str, np.ndarray]]:
     return out
 
 
-def timed_decode(model, audio: np.ndarray, beam: int) -> float:
+def timed_decode(model, audio: np.ndarray, **overrides) -> float:
+    """One decode, timed, with the app's own parameters unless overridden."""
+    opts = decode_options(final=overrides.pop("final", False))
+    opts.update(overrides)
     t = time.perf_counter()
-    segments, _ = model.transcribe(
-        audio,
-        language="en",
-        beam_size=beam,
-        vad_filter=False,
-        condition_on_previous_text=False,
-    )
+    segments, _ = model.transcribe(audio, **opts)
     list(segments)  # the generator is where the decode actually happens
     return time.perf_counter() - t
 
@@ -202,7 +204,7 @@ def prefix_gate(model, sources: list[tuple[str, np.ndarray]], repeats: int = 3) 
     """
     # Warm-up: the first decode after load pays one-off allocation the user only ever
     # pays once per session, and charging it to the 1 s cell would misreport the gate.
-    timed_decode(model, sources[0][1][:SR], 1)
+    timed_decode(model, sources[0][1][:SR])
 
     rows: list[tuple[int, float]] = []
     detail: list[dict] = []
@@ -212,7 +214,7 @@ def prefix_gate(model, sources: list[tuple[str, np.ndarray]], repeats: int = 3) 
             if n > len(audio):
                 continue
             times = [
-                timed_decode(model, audio[:n], 1)  # beam 1 mirrors flow/asr.py partials
+                timed_decode(model, audio[:n])  # the app's own partial options
                 for _ in range(repeats)
             ]
             cell = median(times)
@@ -251,7 +253,10 @@ def finals_cost(model, sources: list[tuple[str, np.ndarray]], repeats: int = 2) 
                 if len(clip) < SR:
                     continue
                 dur = len(clip) / SR
-                cell = median([timed_decode(model, clip, beam) for _ in range(repeats)])
+                cell = median([
+                    timed_decode(model, clip, final=True, beam_size=beam)
+                    for _ in range(repeats)
+                ])
                 key = f"beam{beam}/{'5s' if secs else 'full'}"
                 agg = out.setdefault(key, {"beam": beam, "n": 0, "times": [],
                                            "audio_s": 0.0})

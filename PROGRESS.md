@@ -850,3 +850,63 @@ says.
 
 **109 tests green** (91 + 18: `invented_reason` attribution and the reason/boolean
 agreement property in `test_clean.py`, `apply_filters` accounting in `test_bench.py`).
+
+### 2026-07-31 — Phase 1: decode parameters, and the loops the cap lets through
+
+Two Phase 0 items were left. The Svarah dictation-register slice is **blocked on a
+human**: `ai4bharat/Svarah` returns 401 (gated — someone must accept the terms and
+supply an `HF_TOKEN`), VoxPopuli `en_accented`'s paged endpoint returns 500 on every
+attempt leaving only 100 reachable rows (5 Spanish, no other anchor group), Common
+Voice is 401/501, and L2-ARCTIC is a request form. Every WER number in this project
+therefore remains a *conversational* stress test until a human unblocks that. The order
+advanced to Phase 1.
+
+**What changed.** `flow/asr.py` grew `decode_options(final)` — one place that owns the
+decode parameters, imported by both benches so they cannot drift from the app. Partials
+now decode at `temperature=(0.0,)` and finals at `(0.0, 0.2, 0.4)` with `beam_size=5`
+(was 2). `flow/clean.py` grew `collapse_phrase_repeats()`, and `accent_bench.py` grew
+`--beam` / `--temperature` / `--tag` so a proposed config can be A/B'd against the
+shipped one over the same 300 clips.
+
+**Why partials get no retries at all**, which is stronger than the roadmap's blanket
+cap: faster-whisper re-decodes whenever `avg_logprob` falls under −1.0, and accented
+speech fails that constantly. The Japanese 1 s prefix scores −1.15 and cost 2.40 s
+median (1.48–3.69 s, nondeterministic) against a 1.5 s budget. A partial is replaced
+within seconds, so buying quality with latency is simply the wrong trade there.
+
+**Measured — latency:**
+
+| | before | after |
+|---|---|---|
+| R4 longest clean prefix (base.en) | none | **8 s of speech** |
+| 1 s accented prefix, worst of 6 sources | 1.67 s | **0.79 s** |
+| 5 s noise clip, partial path, worst of 4 | 8.52 s | **1.37 s** |
+| finals on 6 real 10–20 s utterances | 1.12 s median | 1.17 s median, 2.01 s worst |
+
+**Measured — accuracy**, 300-clip accent slice, base.en, shipped (beam 2 + full ladder)
+vs proposed (beam 5 + capped): indian 0.235 → 0.231, japanese 0.412 → **0.281**,
+russian 0.192 → 0.178, spanish 0.187 → 0.187, us-control 0.280 → 0.276. Per clip:
+53 better, 41 worse, 206 unchanged. The uncapped ladder is also *unstable* — Japanese
+scored 0.299, 0.312 and 0.412 on three runs of the same 60 clips, because temperatures
+above zero sample; the capped config scored 0.281, 0.286, 0.289.
+
+**What broke, twice, and how it was caught.** Capping the ladder removes Whisper's own
+escape from repetition loops — the hot samples are what break them. The first A/B
+showed Spanish *worse* (0.214 → 0.263) on model WER, traced to one clip that came back
+"I'm so sorry." thirty times: 87 edits against a four-word reference. Adding
+`collapse_phrase_repeats()` fixed that, and the next run showed Indian at 0.450 — a
+second loop, "I read on the bit of course" twenty-two times, seven words long, which
+the six-word scan window had missed. Widening to twelve words settled it. A third bug
+lived in the collapse itself: scanning longest-phrase-first matches a *multiple* of the
+true period, so thirty copies of a three-word phrase read as fifteen copies of a
+six-word one and collapsing to two left four behind. Shortest-first finds the
+fundamental period. All three are pinned as tests with the measured text.
+
+Note the interaction this de-risks: those 29 Spanish repeat segments are currently also
+being dropped by the per-segment thin rule — the rule the *next* Phase 1 item relaxes.
+With the phrase collapse in place, relaxing it no longer re-admits the loop, because
+`asr.py` normalises the joined text after filtering.
+
+**123 tests green** (116 + 7). `tests/test_asr.py` is new: the decode parameters are
+one-line settings with 2.4× and 7.6× consequences, so they get tests that fail when
+someone tidies them.

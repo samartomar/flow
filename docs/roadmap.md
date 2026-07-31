@@ -60,7 +60,7 @@ faster-whisper 1.2.1), final beam 2 vs library default 5, uncapped temperature f
 | Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% | **< 1%**, every drop logged |
 | Command recognition, accented (P3) | unmeasured | **≥ 95%**; silent misroutes ≈ 0 |
 | Personal-lexicon entity accuracy (P4) | no biasing exists | **≥ 90%** |
-| Partial latency (R4) | base.en 0.78–1.21 s median, **1.87 s worst** on accented speech; small.en 2.60–3.75 s median (see Phase 0 R4 results) | **< 1.5 s, preserved** |
+| Partial latency (R4) | base.en **clean to 8 s of speech** (worst 1.07 s) after the Phase 1 decode fix, breaching only at ≥ 12 s (1.98 s worst); small.en 2.66–3.78 s median at every length | **< 1.5 s, preserved** |
 
 Benchmark composition (all local, redistribution-safe for internal eval):
 **EdAcc** (CC BY-SA — the only open corpus with Spanish/Russian/Japanese/Indian slices
@@ -122,9 +122,24 @@ established:
   ~14 s to commit. It becomes viable only with faster hardware or a quantised/distilled
   variant worth a separate measurement.
 
-**Decision from this data: `small.en` as the default.** Remaining Phase 0 measurement:
-a Svarah slice for dictation-register Indian numbers. (The R4 prefix-latency gate and
-the short-clip false-reject probe are done — results below.)
+**Decision from this data: `small.en` as the default.** The R4 prefix-latency gate and
+the short-clip false-reject probe are done — results below.
+
+**The dictation-register slice is blocked on a human (2026-07-31).** Every open route
+was tried and none works from this machine:
+
+| corpus | status |
+|---|---|
+| Svarah (`ai4bharat/Svarah`) | **401** — gated; needs someone to accept the terms on the dataset page and supply an `HF_TOKEN` |
+| VoxPopuli `en_accented` (CC0) | paged `rows` endpoint returns **500** on every attempt (3 retries, all splits); only `first-rows` works, giving 100 rows whose L1s are European — **5 Spanish clips and none of the other anchor groups** |
+| Common Voice (read speech, L1-labelled) | official repos **401**, community mirror **501** |
+| L2-ARCTIC | distributed by request form, not on the datasets-server |
+
+So the dictation-register question — is the accent gap smaller when people speak in
+dictation register than in EdAcc's conversation? — stays open, and every WER number in
+this document remains a conversational stress test. Unblocking it is one human action:
+accept the Svarah terms and export `HF_TOKEN`, after which
+`fetch_accent_data.py --tag svarah` needs only an auth header to work.
 
 **R4 prefix-latency gate (2026-07-31, dev CPU, int8) — done.**
 `scripts/asr_bench.py --prefix-only` now cuts growing prefixes from the *longest real
@@ -224,8 +239,17 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
   Measured as nearly a no-op on its own (3→3 / 6→5 clips), and deleting the thin test
   outright re-admits the digital-silence 'You' — so the rule needs the whole-utterance
   filler list as its second signal, not just `avg_logprob`.
-- Final beam 5, temperature fallback capped at (0.0, 0.2, 0.4) — measured at 2.4–4.7×
-  partial latency on low-confidence accented audio when left uncapped (Phase 0, R4).
+- ~~Final beam 5, temperature fallback capped at (0.0, 0.2, 0.4)~~ **done 2026-07-31.**
+  Partials pay for *no* retries (`temperature=(0.0,)`); finals get beam 5 and the capped
+  ladder. `flow.asr.decode_options()` is now the single source both the app and the
+  benches decode with. **R4 longest clean prefix: none → 8 s of speech**; the 1 s
+  accented cell 1.67 → 0.79 s worst; a 5 s noise clip 8.52 → 1.37 s worst on the partial
+  path. WER improves or ties on all five groups (Japanese 0.41 → 0.28), and the
+  uncapped ladder's run-to-run instability (Japanese 0.299/0.312/0.412 across three
+  runs) collapses to 0.281/0.286/0.289. Cost: capping removes Whisper's own escape from
+  repetition loops, so `clean.collapse_phrase_repeats()` now breaks them deterministically
+  — without it, one Spanish clip returned "I'm so sorry." ×30 (87 edits on a 4-word
+  reference) and one Indian clip a 7-word phrase ×22 (207 edits).
 - `hotwords` from a user-editable lexicon file — names, repo terms, jargon (P4 seed).
 - Grammar hardening: politeness/hedge prefixes on all patterns, fuzzy verb-snapping
   (edit distance ≤ 1 + suffix stripping), alias table, `re.escape` fix, stale

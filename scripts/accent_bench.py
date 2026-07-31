@@ -39,11 +39,17 @@ attributed to the exact rule that fired (`flow.clean.invented_reason`), and the
 proposed Phase 1 two-signal rule — where thin-ness alone no longer justifies a
 drop — is scored side by side with the shipped rule so the fix has a number.
 
+Decode parameters come from `flow.asr.decode_options(final=True)` — the app's own
+final-decode settings — so a config change is measured as the app will run it.
+`--beam` / `--temperature` override them to A/B a proposed change, and `--tag`
+keeps the two results files apart.
+
 Usage:  uv run python scripts/accent_bench.py [model ...] [--manifest NAME]
+            [--beam N] [--temperature 0.0,0.2,0.4] [--tag SUFFIX]
         default models: base.en small.en small
         default manifest: manifest-edacc.jsonl (the >= 1.5 s WER slice)
         short-clip probe: --manifest manifest-edacc-short.jsonl
-Writes: .bench/accent/results-<model>.json
+Writes: .bench/accent/results-<model><slice><tag>.json
 """
 
 from __future__ import annotations
@@ -58,6 +64,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from flow.asr import decode_options  # noqa: E402
 from flow.clean import invented_reason, normalise  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench" / "accent"
@@ -190,12 +197,20 @@ def load_manifest(pattern: str = "manifest-edacc.jsonl") -> list[dict]:
     return entries
 
 
-def bench_model(name: str, entries: list[dict], slice_tag: str = "") -> dict:
+def bench_model(
+    name: str, entries: list[dict], slice_tag: str = "", overrides: dict | None = None
+) -> dict:
     from faster_whisper import WhisperModel
+
+    # The app's own final-decode parameters, so a config change is measured as the app
+    # will run it. Overrides exist to A/B a proposed change against the shipped one.
+    opts = decode_options(final=True)
+    opts.update(overrides or {})
 
     t0 = time.perf_counter()
     model = WhisperModel(name, device="cpu", compute_type="int8")
-    print(f"\nMODEL={name}  load+fetch={time.perf_counter() - t0:.2f}s")
+    print(f"\nMODEL={name}  load+fetch={time.perf_counter() - t0:.2f}s  "
+          f"beam={opts['beam_size']}  temperature={opts['temperature']}")
 
     groups: dict[str, dict] = {}
     clips = []
@@ -204,10 +219,7 @@ def bench_model(name: str, entries: list[dict], slice_tag: str = "") -> dict:
         t = time.perf_counter()
         segments, _ = model.transcribe(
             audio,
-            language="en",
-            beam_size=2,
-            vad_filter=False,
-            condition_on_previous_text=False,
+            **opts,
             # Disable ONLY the internal skip so rejected segments stay
             # observable; it is re-applied below from the recorded signals.
             no_speech_threshold=2.0,
@@ -304,11 +316,22 @@ def bench_model(name: str, entries: list[dict], slice_tag: str = "") -> dict:
 
 def main() -> None:
     argv = sys.argv[1:]
-    pattern = "manifest-edacc.jsonl"
-    if "--manifest" in argv:
-        i = argv.index("--manifest")
-        pattern = argv[i + 1]
-        del argv[i:i + 2]
+
+    def take(flag: str, default=None):
+        if flag in argv:
+            i = argv.index(flag)
+            value = argv[i + 1]
+            del argv[i:i + 2]
+            return value
+        return default
+
+    pattern = take("--manifest", "manifest-edacc.jsonl")
+    overrides: dict = {}
+    if (beam := take("--beam")) is not None:
+        overrides["beam_size"] = int(beam)
+    if (temps := take("--temperature")) is not None:
+        overrides["temperature"] = tuple(float(t) for t in temps.split(","))
+    tag = take("--tag", "")
     models = argv or ["base.en", "small.en", "small"]
 
     entries = load_manifest(pattern)
@@ -325,7 +348,7 @@ def main() -> None:
           "lib-/cln-=segments dropped by each filter")
 
     for name in models:
-        bench_model(name, entries, slice_tag=stem)
+        bench_model(name, entries, slice_tag=stem + tag, overrides=overrides)
 
 
 if __name__ == "__main__":

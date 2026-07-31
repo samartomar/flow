@@ -76,10 +76,63 @@ def collapse_repeats(text: str, limit: int = 3) -> str:
     return " ".join(out)
 
 
+def collapse_phrase_repeats(text: str, limit: int = 2, max_phrase: int = 12) -> str:
+    """Collapse a *phrase* repeated back to back more than `limit` times.
+
+    Whisper's defence against a repetition loop is its temperature ladder: when a
+    decode comes back too repetitive it retries hotter, and the hot samples break the
+    loop. Flow caps that ladder at three steps because the full six cost 7.6 s on 5 s
+    of room noise (see flow/asr.py), which means Flow has to break the loops itself.
+
+    Measured on the 300-clip accent slice: capping the ladder without this turned one
+    Spanish clip into "I'm so sorry." thirty times — 87 edits against a four-word
+    reference. Deterministic and free, where a hotter re-decode is neither.
+
+    Only phrases of two or more words are considered; single-token runs are
+    `collapse_repeats`'s job, and its limit is deliberately looser because real speech
+    repeats single words ("no no no") far more readily than it repeats phrases.
+
+    `max_phrase` is 12 words because the loops are not short: a 2.6 s Indian clip came
+    back as "I read on the bit of course" — seven words — repeated twenty-two times,
+    and a six-word window missed it entirely. Nobody dictates the same seven-word
+    phrase three times in a row on purpose.
+    """
+    words = text.split()
+    if len(words) < 2 * 2:  # too short to contain a repeated multi-word phrase
+        return text
+    out: list[str] = []
+    i = 0
+    while i < len(words):
+        # Shortest phrase first, because that is the *fundamental* period. Scanning
+        # longest-first matches a multiple of it — thirty copies of "I'm so sorry."
+        # look like fifteen copies of a six-word phrase, and keeping two of those
+        # leaves four copies behind.
+        for k in range(2, min(max_phrase, (len(words) - i) // 2) + 1):
+            phrase = words[i:i + k]
+            j = i + k
+            reps = 1
+            while words[j:j + k] == phrase:
+                reps += 1
+                j += k
+            if reps > limit:
+                out.extend(phrase * limit)
+                i = j
+                break
+        else:
+            out.append(words[i])
+            i += 1
+    return " ".join(out)
+
+
 def normalise(text: str) -> str:
-    """Whitespace and marker tidy-up. Never removes words."""
+    """Whitespace and marker tidy-up, plus the two degenerate-repetition guards.
+
+    Removes words only where they are a decode artefact — a token or a phrase looping
+    beyond what speech does — never ordinary content.
+    """
     text = strip_markers(text)
     text = collapse_repeats(text)
+    text = collapse_phrase_repeats(text)
     return re.sub(r"\s{2,}", " ", text).strip()
 
 

@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.clean import (  # noqa: E402
+    collapse_phrase_repeats,
     collapse_repeats,
     invented_reason,
     is_invented,
@@ -85,6 +86,57 @@ class TestNoProbabilityAvailable(unittest.TestCase):
     def test_real_text_is_kept(self):
         self.assertFalse(is_invented(REAL, None))
         self.assertFalse(is_invented("Send the report.", None))
+
+
+class TestPhraseRepeats(unittest.TestCase):
+    """The repetition loops the capped temperature ladder no longer breaks."""
+
+    def test_the_measured_spanish_loop(self):
+        # One clip of the 300-clip accent slice, capped ladder: 30 copies, 87 edits
+        # against a four-word reference.
+        text = "So what they do? " + "I'm so sorry. " * 30
+        out = collapse_phrase_repeats(text.strip())
+        self.assertEqual(out, "So what they do? I'm so sorry. I'm so sorry.")
+
+    def test_the_measured_japanese_loop(self):
+        text = "We're going to start with " + "the rest of " * 6 + "the rest."
+        out = collapse_phrase_repeats(text)
+        self.assertEqual(
+            out, "We're going to start with the rest of the rest of the rest."
+        )
+
+    def test_the_measured_indian_loop_is_seven_words_long(self):
+        # 2.6 s of speech, one segment, the same seven words twenty-two times: 207
+        # edits against a twelve-word reference. A six-word window missed this.
+        text = "Yeah " + "I read on the bit of course " * 22
+        out = collapse_phrase_repeats(text.strip())
+        self.assertEqual(
+            out, "Yeah I read on the bit of course I read on the bit of course"
+        )
+
+    def test_real_speech_is_untouched(self):
+        for text in (
+            "I need to send an email to the team about the quarterly review meeting.",
+            "change Tuesday to Wednesday please",
+            "it was very very good",
+            "no no no that is not what I said",
+            "bye bye bye bye",  # two reps of a two-word phrase: at the limit, kept
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(collapse_phrase_repeats(text), text)
+
+    def test_short_input_is_returned_unchanged(self):
+        self.assertEqual(collapse_phrase_repeats("hi there"), "hi there")
+        self.assertEqual(collapse_phrase_repeats(""), "")
+
+    def test_repetition_after_real_content_keeps_the_content(self):
+        out = collapse_phrase_repeats("the deploy failed " + "oh no " * 5)
+        self.assertEqual(out, "the deploy failed oh no oh no")
+
+    def test_normalise_applies_it(self):
+        self.assertEqual(
+            normalise("go on " + "and then " * 4 + "stop"), "go on and then and then stop"
+        )
 
 
 class TestInventedReason(unittest.TestCase):
