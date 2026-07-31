@@ -141,6 +141,11 @@ class Pill(tk.Tk):
             label="Converse mode" if self.session.mode == DICTATE else "Dictate mode",
             command=self.session.toggle_mode,
         )
+        if getattr(self.session, "speaker", None) is not None:
+            m.add_command(
+                label="Mute replies" if not self.session.muted else "Speak replies",
+                command=self.session.toggle_speech,
+            )
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
         m.add_command(label="Quit", command=self.quit_app)
@@ -208,7 +213,15 @@ class Pill(tk.Tk):
 
         for ev in self.session.events():
             if ev.kind == "draft":
-                self.bubble.show(ev.text) if ev.text else self.bubble.hide()
+                if ev.text:
+                    self.bubble.show(ev.text)
+                elif self.session.state is not State.ASKING:
+                    self.bubble.hide()
+                else:
+                    # Asking clears the draft, and hiding here left the user staring
+                    # at nothing for the ten seconds the CLI takes. Keep the bubble up
+                    # so "asking..." is somewhere to be seen.
+                    self.bubble.show_reply("")
             elif ev.kind == "partial":
                 self.bubble.show_partial(ev.text)
             elif ev.kind == "error":
@@ -302,8 +315,14 @@ class Bubble(tk.Toplevel):
     # -- content -----------------------------------------------------------
 
     def show_reply(self, text: str) -> None:
-        """P9: the CLI's answer. Clears the draft area — the question was sent."""
-        self._reply, self._text, self._partial = text, "", ""
+        """P9: the CLI's answer. Clears the draft area — the question was sent.
+
+        An empty `text` means "the question has gone, the answer is still coming":
+        keep the bubble up and leave whatever is there, so the wait is visible.
+        """
+        self._text, self._partial = "", ""
+        if text:
+            self._reply = text
         if not self._visible:
             self._visible = True
             self.deiconify()
@@ -311,8 +330,10 @@ class Bubble(tk.Toplevel):
         self._render()
 
     def show(self, text: str) -> None:
-        # A new draft supersedes the last answer: the user has started speaking again.
-        self._text, self._partial, self._reply = text, "", ""
+        # The answer stays up while the next question is dictated. It used to be
+        # cleared the moment the user spoke again, which meant the reply they had just
+        # asked for vanished before they could read it.
+        self._text, self._partial = text, ""
         self._render()
         if not self._visible:
             self._visible = True

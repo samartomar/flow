@@ -2028,3 +2028,34 @@ reported with its evidence, exactly as P2 requires. The user could see what vani
 and why.
 
 **370 tests green** (367 + 3).
+
+### 2026-07-31 — converse mode was unusable by the route people actually take
+
+The UI fixes from the previous entry worked: the ASK badge and the renamed chip both
+showed up. The session still had no voice, and the reason was a design mistake rather
+than a bug.
+
+**Speech was a launch flag; the mode it serves is a runtime toggle.** Someone who finds
+converse mode with ctrl+alt+M mid-session — which is the discoverable route, and the
+one taken — has no way to turn the voice on, because `--speak` was decided before the
+process started. Nothing in the app could change it.
+
+The earlier reasoning was "off by default: a voice that starts talking unbidden in a
+shared office is a worse first impression than no voice at all". That is true of
+dictate mode and wrong about converse mode, where the user has explicitly asked for a
+conversation. **Entering converse mode is the opt-in.** So the speaker is now built
+unless refused (`--no-speak`), and there is a runtime mute in the right-click menu that
+also cuts off whatever is mid-sentence.
+
+**Two more things the screenshots showed.**
+
+The answer vanished the moment the user spoke again — `show()` cleared it — so the
+reply they had just waited ten seconds for disappeared before they could finish reading
+it. It now stays up while the next question is dictated, which is what makes it a
+conversation rather than a sequence of unrelated answers.
+
+And asking clears the draft, which hid the bubble entirely, so the ten seconds the CLI
+takes were spent staring at nothing. The bubble now stays up in the ASKING state and
+the "asking…" note has somewhere to appear.
+
+**375 tests green** (370 + 5).

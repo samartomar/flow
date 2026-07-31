@@ -278,8 +278,11 @@ class Session:
         self._refine_lock = threading.Lock()
         #: P9: dictate (paste into the focused window) or converse (ask the CLI).
         self.mode = DICTATE
-        #: Optional spoken replies. None means silent, which is the default.
+        #: Spoken replies. None means the engine was unavailable or refused.
         self.speaker = speaker
+        #: Runtime mute, separate from `speaker` being absent — one is a capability,
+        #: the other is a preference, and the UI has to be able to change the second.
+        self.muted = False
         #: P8. What Flow has measured and learned about this person, on this machine.
         #: None disables learning entirely — the tests and the benchmarks pass None so
         #: a harness run never writes to the user's real profile.
@@ -768,6 +771,14 @@ class Session:
 
     # -- actions -----------------------------------------------------------
 
+    def toggle_speech(self) -> bool:
+        """Mute or unmute spoken replies mid-session. True when it will now speak."""
+        self.muted = not self.muted
+        if self.muted and self.speaker is not None:
+            self.speaker.stop()
+        self._emit("note", "replies muted" if self.muted else "replies spoken aloud")
+        return not self.muted
+
     def toggle_mode(self) -> str:
         """P9: one action switches dictate <-> converse. Returns the new mode.
 
@@ -838,7 +849,7 @@ class Session:
             # "and what about the other one?" mean anything.
             self.thread.add(f"(reply) {answer}")
             self._emit("reply", answer)
-            if self.speaker is not None:
+            if self.speaker is not None and not self.muted:
                 self.speaker.say(answer)
             self._emit("note", f"answered via {note}")
         self._set_state(State.IDLE)

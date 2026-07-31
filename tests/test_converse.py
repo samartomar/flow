@@ -222,3 +222,52 @@ class TestCorrectionLoopStillApplies(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSpeechIsARuntimeChoice(unittest.TestCase):
+    """Speech used to be a launch flag while the mode it serves is a runtime toggle.
+
+    Anyone who found converse mode with ctrl+alt+M mid-session had no way to turn the
+    voice on, which is exactly what happened the first time someone used it.
+    """
+
+    def _answer(self, s):
+        s.draft.set("how do I widen a column")
+        with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
+            s.send()
+            s.wait_idle(timeout=5.0)
+
+    def test_a_session_starts_unmuted(self):
+        self.assertFalse(session().muted)
+
+    def test_muting_silences_the_next_reply(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.toggle_mode()
+        self.assertFalse(s.toggle_speech())
+        self._answer(s)
+        self.assertEqual(sp.said, [])
+
+    def test_unmuting_restores_it(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.toggle_mode()
+        s.toggle_speech()
+        self.assertTrue(s.toggle_speech())
+        self._answer(s)
+        self.assertEqual(sp.said, ["Use ALTER TABLE."])
+
+    def test_muting_cuts_off_whatever_is_speaking(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.toggle_speech()
+        self.assertEqual(sp.stops, 1)
+
+    def test_a_muted_reply_is_still_shown(self):
+        # Muting silences the voice, it does not discard the answer.
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.toggle_mode()
+        s.toggle_speech()
+        self._answer(s)
+        self.assertEqual(s.reply, "Use ALTER TABLE.")

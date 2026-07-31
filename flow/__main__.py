@@ -74,8 +74,8 @@ def main(argv: list[str] | None = None) -> int:
         help="start in converse mode: Send asks the agent CLI instead of pasting (P9)",
     )
     ap.add_argument(
-        "--speak", action="store_true",
-        help="read converse-mode replies aloud through the Windows speech engine",
+        "--no-speak", action="store_true",
+        help="never read converse-mode replies aloud",
     )
     args = ap.parse_args(argv)
 
@@ -117,8 +117,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         say(f"lexicon: none - create {lexicon.path} to bias names and jargon")
 
+    # Built unless refused, not only when asked for. Speech used to be a launch flag
+    # while the mode it serves is a runtime toggle, so anyone who discovered converse
+    # mode with ctrl+alt+M mid-session had no way to turn the voice on — which is
+    # exactly what happened the first time someone tried it. Entering converse mode is
+    # the opt-in; a conversation you have to read is not the feature.
     speaker = None
-    if args.speak:
+    if not args.no_speak:
         from .speak import Speaker
 
         speaker = Speaker()
@@ -126,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             say("speech: engine unavailable - replies will be silent")
             speaker = None
         else:
-            say("speech: on (converse-mode replies are read aloud)")
+            say("speech: on (converse-mode replies are read aloud; --no-speak to mute)")
 
     session = Session(
         asr=WhisperTranscriber(
