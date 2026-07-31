@@ -79,7 +79,7 @@ class TestApplyFilters(unittest.TestCase):
     def test_clean_speech_survives_both_filters(self):
         f = apply_filters([seg("change Tuesday to Wednesday", 0.01, -0.2)])
         self.assertEqual(f["app_text"], "change Tuesday to Wednesday")
-        self.assertEqual(f["two_signal_text"], "change Tuesday to Wednesday")
+        self.assertEqual(f["legacy_text"], "change Tuesday to Wednesday")
         self.assertEqual((f["lib_skipped"], f["clean_dropped"]), (0, 0))
 
     def test_the_shipped_build_attributes_what_the_library_used_to_eat(self):
@@ -119,37 +119,34 @@ class TestApplyFilters(unittest.TestCase):
                           LIB_NO_SPEECH, LIB_LOG_PROB)
         self.assertEqual(f["lib_skipped"], 0)
 
-    def test_thin_drop_is_recovered_by_the_two_signal_rule(self):
-        # Short, confident, high no-speech: exactly a spoken correction, and exactly
-        # what defect 3 deletes today.
+    def test_the_spoken_correction_the_old_rule_deleted(self):
+        # Short, confident, high no-speech: exactly a spoken correction. The shipped
+        # rule keeps it; the rule it replaced dropped it for being short.
         f = apply_filters([seg("delete that line", 0.9, -0.3)])
-        self.assertEqual(f["app_text"], "")
-        self.assertEqual(f["two_signal_text"], "delete that line")
-        self.assertEqual(f["reasons"], {"thin": 1})
+        self.assertEqual(f["app_text"], "delete that line")
+        self.assertEqual(f["legacy_text"], "")
+        self.assertEqual(f["reasons"], {})
 
-    def test_two_signal_rule_still_drops_the_confident_hallucination(self):
-        # The measured hiss hallucination (clean.py's table): thin AND unconfident,
-        # so it dies under either rule.
+    def test_both_rules_still_drop_the_hiss_hallucination(self):
+        # The measured hiss hallucination from clean.py's table.
         f = apply_filters([seg("You", 0.899, -0.919)])
         self.assertEqual(f["app_text"], "")
-        self.assertEqual(f["two_signal_text"], "")
-        self.assertEqual(f["reasons"], {"thin+unconfident": 1})
+        self.assertEqual(f["legacy_text"], "")
+        self.assertEqual(f["reasons"], {"filler": 1})
 
-    def test_two_signal_rule_re_admits_the_silence_hallucination(self):
-        # The cost of the proposed fix, pinned so it cannot be discovered later: the
-        # digital-silence 'You' (ns 0.691, logprob -0.711) is thin but NOT unconfident
-        # — -0.711 sits above the -0.8 line — so dropping the thin rule lets it back
-        # in. Phase 1 needs a third signal (the whole-utterance filler list) rather
-        # than simply deleting the thin test.
+    def test_the_silence_hallucination_survives_the_rule_change(self):
+        # The trap this change had to avoid: the digital-silence 'You' (ns 0.691,
+        # logprob -0.711) is short but NOT unconfident, so a naive "require two
+        # signals" would have re-admitted the exact thing the filter exists for.
+        # The filler list is what still catches it.
         f = apply_filters([seg("You", 0.6907, -0.7109)])
         self.assertEqual(f["app_text"], "")
-        self.assertEqual(f["reasons"], {"thin": 1})
-        self.assertEqual(f["two_signal_text"], "You")
+        self.assertEqual(f["reasons"], {"filler": 1})
 
     def test_drops_are_annotated_in_place(self):
-        segs = [seg("delete that line", 0.9, -0.3), seg("kept text here", 0.01, -0.2)]
+        segs = [seg("You", 0.9, -0.95), seg("kept text here", 0.01, -0.2)]
         apply_filters(segs)
-        self.assertEqual(segs[0]["drop"], "thin")
+        self.assertEqual(segs[0]["drop"], "filler")
         self.assertNotIn("drop", segs[1])
 
     def test_partial_survival_is_not_a_false_reject(self):

@@ -254,10 +254,21 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
   retry cannot help — one 5 s noise clip went 0.84 s → 3.66 s with it set. Degenerate
   output still retries, through `compression_ratio_threshold`, which is the case where
   a hotter sample actually fixes something.
-- Thin rule requires two signals again; drops become visible events (defect 3 → P2).
-  Measured as nearly a no-op on its own (3→3 / 6→5 clips), and deleting the thin test
-  outright re-admits the digital-silence 'You' — so the rule needs the whole-utterance
-  filler list as its second signal, not just `avg_logprob`.
+- ~~Thin rule requires two signals again; drops become visible events (defect 3 → P2)~~
+  **done 2026-07-31.** Shortness is no longer evidence of anything. A segment is
+  dropped when the model doubts it was speech **and** a second signal agrees: either
+  the whole utterance is in the known-hallucination list, or the token confidence is
+  poor. The filler list is what keeps the digital-silence 'You' (0.691 / −0.711 — short
+  but *confident*) caught, which a naive "require two signals" would have re-admitted.
+
+  **Measured, and the honest reading:** across 1416 decoded segments the two rules
+  disagree on **29**, all `thin → kept`, and all from a single degenerate clip where
+  `"I'm sorry."` looped — text the model was *sure* about (`avg_logprob` −0.11) that the
+  old rule deleted purely for being two words long. Cost: Spanish app WER 0.183 → 0.187,
+  every other group unchanged, false-reject unchanged (3 and 6 clips). The case this
+  rule exists for — a short spoken command — **cannot be measured on EdAcc, which
+  contains none**; it is pinned as a test instead ("delete that line", 0.9 / −0.3,
+  kept). This change is justified by the failure mode, not by a corpus win.
 - ~~Final beam 5, temperature fallback capped at (0.0, 0.2, 0.4)~~ **done 2026-07-31.**
   Partials pay for *no* retries (`temperature=(0.0,)`); finals get beam 5 and the capped
   ladder. `flow.asr.decode_options()` is now the single source both the app and the

@@ -40,8 +40,8 @@ scored for whether Flow would have shown the user *nothing at all*:
 `false_reject` is the number P2 bounds at < 1%, and it is the one that matters:
 the user spoke, the words were recognised, and the app showed silence. Drops are
 attributed to the exact rule that fired (`flow.clean.invented_reason`), and the
-proposed Phase 1 two-signal rule — where thin-ness alone no longer justifies a
-drop — is scored side by side with the shipped rule so the fix has a number.
+rule this one replaced (`legacy_reason`, which dropped on shortness alone) is
+scored from the same signals, so every change keeps a before-and-after.
 
 Decode parameters come from `flow.asr.decode_options(final=True)` — the app's own
 final-decode settings — so a config change is measured as the app will run it.
@@ -73,7 +73,13 @@ from flow.asr import (  # noqa: E402
     NO_SPEECH_THRESHOLD,
     decode_options,
 )
-from flow.clean import invented_reason, normalise  # noqa: E402
+from flow.clean import (  # noqa: E402
+    LOW_CONFIDENCE,
+    NO_SPEECH_MAX,
+    invented_reason,
+    normalise,
+)
+from flow.clean import _FILLER_ONLY as FILLER_ONLY  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench" / "accent"
 SR = 16000
@@ -149,10 +155,29 @@ def load_wav(path: Path) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-#: Segment-drop rules that survive the proposed Phase 1 change. "thin" alone does
-#: not: short-and-confident is what a spoken correction looks like, and the roadmap's
-#: defect 3 is that thin-ness is a property of the text, not evidence of invention.
-TWO_SIGNAL_KEEPS = {"thin"}
+def legacy_reason(text: str, ns: float | None, lp: float | None) -> str | None:
+    """`clean.invented_reason` as it stood before 2026-07-31.
+
+    Kept here, in the bench rather than the app, so the thin-rule change keeps a
+    denominator: every P2 number can be quoted against the build it replaced. It
+    dropped on shortness alone, which is what defect 3 was about.
+    """
+    stripped = normalise(text).strip().strip(".!?,").lower()
+    if not stripped:
+        return "empty"
+    if ns is None:
+        return "filler" if stripped in FILLER_ONLY else None
+    if ns <= NO_SPEECH_MAX:
+        return None
+    thin = len(stripped.split()) <= 3
+    unconfident = lp is not None and lp < LOW_CONFIDENCE
+    if thin and unconfident:
+        return "thin+unconfident"
+    if thin:
+        return "thin"
+    if unconfident:
+        return "unconfident"
+    return None
 
 
 def apply_filters(
@@ -171,9 +196,9 @@ def apply_filters(
     the pre-fix build instead.
 
     Returns the surviving text under the shipped rule (`app_text`) and under the
-    proposed two-signal rule (`two_signal_text`), plus drop counts by rule.
+    rule it replaced (`legacy_text`), plus drop counts by rule.
     """
-    survivors, two_signal, lib_skipped, clean_dropped = [], [], 0, 0
+    survivors, legacy, lib_skipped, clean_dropped = [], [], 0, 0
     reasons: dict[str, int] = {}
     skips = no_speech_threshold is not None and log_prob_threshold is not None
     for s in segs:
@@ -182,10 +207,10 @@ def apply_filters(
             s["drop"] = "lib-skip"
             continue
         reason = invented_reason(s["text"], s["ns"], s["lp"])
-        # The proposed rule keeps everything the shipped rule keeps, plus the
-        # segments dropped for thin-ness alone.
-        if reason is None or reason in TWO_SIGNAL_KEEPS:
-            two_signal.append(s["text"].strip())
+        # Score the rule this one replaced from the same signals, so the change has
+        # a before-and-after rather than just an after.
+        if legacy_reason(s["text"], s["ns"], s["lp"]) is None:
+            legacy.append(s["text"].strip())
         if reason is not None:
             clean_dropped += 1
             reasons[reason] = reasons.get(reason, 0) + 1
@@ -194,7 +219,7 @@ def apply_filters(
         survivors.append(s["text"].strip())
     return {
         "app_text": normalise(" ".join(survivors)),
-        "two_signal_text": normalise(" ".join(two_signal)),
+        "legacy_text": normalise(" ".join(legacy)),
         "lib_skipped": lib_skipped,
         "clean_dropped": clean_dropped,
         "reasons": reasons,
@@ -253,7 +278,7 @@ def bench_model(
             [dict(s) for s in segs], LIB_NO_SPEECH, LIB_LOG_PROB
         )
         f = apply_filters(segs)
-        app_text, two_signal_text = f["app_text"], f["two_signal_text"]
+        app_text, legacy_text = f["app_text"], f["legacy_text"]
         lib_skipped, clean_dropped, reasons = (
             f["lib_skipped"], f["clean_dropped"], f["reasons"]
         )
@@ -266,7 +291,7 @@ def bench_model(
             "n": 0, "ref_words": 0, "model_edits": 0, "app_edits": 0,
             "segments": 0, "lib_skipped": 0, "clean_dropped": 0,
             "model_empty": 0, "app_empty": 0, "false_reject": 0,
-            "false_reject_two_signal": 0, "false_reject_pre_fix": 0,
+            "false_reject_legacy": 0, "false_reject_pre_fix": 0,
             "pre_fix_lib_skipped": 0, "reasons": {},
             "audio_s": 0.0, "decode_s": 0.0,
         })
@@ -280,7 +305,7 @@ def bench_model(
         g["model_empty"] += int(model_empty)
         g["app_empty"] += int(app_empty)
         g["false_reject"] += int(app_empty and not model_empty)
-        g["false_reject_two_signal"] += int(not two_signal_text and not model_empty)
+        g["false_reject_legacy"] += int(not legacy_text and not model_empty)
         g["false_reject_pre_fix"] += int(not pre_fix["app_text"] and not model_empty)
         g["pre_fix_lib_skipped"] += pre_fix["lib_skipped"]
         for reason, count in reasons.items():
@@ -304,8 +329,8 @@ def bench_model(
 
     # P2: what fraction of clips the user would have seen nothing for.
     print(f"\n{'group':<12}{'n':>4}{'mdl-empty':>11}{'pre-fix':>9}{'rate':>8}"
-          f"{'false-rej':>11}{'rate':>8}{'2-signal':>10}{'rate':>8}")
-    tot = {"n": 0, "model_empty": 0, "false_reject": 0, "false_reject_two_signal": 0,
+          f"{'false-rej':>11}{'rate':>8}{'legacy':>10}{'rate':>8}")
+    tot = {"n": 0, "model_empty": 0, "false_reject": 0, "false_reject_legacy": 0,
            "false_reject_pre_fix": 0, "pre_fix_lib_skipped": 0}
     for slug in sorted(groups):
         g = groups[slug]
@@ -314,13 +339,13 @@ def bench_model(
         print(f"{slug:<12}{g['n']:>4}{g['model_empty']:>11}"
               f"{g['false_reject_pre_fix']:>9}{g['false_reject_pre_fix'] / g['n']:>8.1%}"
               f"{g['false_reject']:>11}{g['false_reject'] / g['n']:>8.1%}"
-              f"{g['false_reject_two_signal']:>10}"
-              f"{g['false_reject_two_signal'] / g['n']:>8.1%}")
+              f"{g['false_reject_legacy']:>10}"
+              f"{g['false_reject_legacy'] / g['n']:>8.1%}")
     print(f"{'ALL':<12}{tot['n']:>4}{tot['model_empty']:>11}"
           f"{tot['false_reject_pre_fix']:>9}{tot['false_reject_pre_fix'] / tot['n']:>8.1%}"
           f"{tot['false_reject']:>11}{tot['false_reject'] / tot['n']:>8.1%}"
-          f"{tot['false_reject_two_signal']:>10}"
-          f"{tot['false_reject_two_signal'] / tot['n']:>8.1%}"
+          f"{tot['false_reject_legacy']:>10}"
+          f"{tot['false_reject_legacy'] / tot['n']:>8.1%}"
           f"   (P2 target: < 1%)")
     print(f"segments the library used to eat before Flow saw them: "
           f"{tot['pre_fix_lib_skipped']}")

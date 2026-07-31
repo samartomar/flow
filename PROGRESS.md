@@ -963,3 +963,52 @@ for.
 **139 tests green** (135 + 4). No measurement in this entry required re-decoding: the
 collapse fix was scored by re-running the saved per-segment output through the new
 normaliser, which is the same decode with different post-processing.
+
+### 2026-07-31 — Phase 1: shortness stops being evidence
+
+Defect 3 was that `clean.py` dropped any utterance of three words or fewer whenever
+`no_speech_prob` crossed 0.6 — one signal, and a signal about *length*, not about
+whether the model invented anything. Spoken corrections are short. The rule was
+structurally biased against exactly the utterances Flow exists to handle.
+
+**What changed.** A segment is now dropped only when the model doubts it was speech
+**and** a second, independent signal agrees: the whole utterance is in the
+known-hallucination list (`_FILLER_ONLY`), or the token confidence is poor
+(`avg_logprob < −0.8`). Shortness is gone as a criterion. The filler list carries the
+weight that "thin" used to, which is what keeps the trap from closing: the
+digital-silence 'You' measured in clean.py's own table is short but **confident**
+(0.691 / −0.711), so a naive "require two signals" would have re-admitted the exact
+artefact the filter was built for. `scripts/accent_bench.py` grew `legacy_reason()` —
+the old rule, kept in the bench rather than the app — so the change keeps a
+before-and-after from the same decodes.
+
+**Measured** by re-scoring saved per-segment output (no re-decoding: same audio, same
+decodes, different filter), across the 280-clip short slice for both models and the
+300-clip main slice:
+
+| | legacy rule | shipped rule |
+|---|---|---|
+| segments where the rules disagree | — | **29 of 1416** |
+| false-reject, short slice, base.en / small.en | 3 / 6 | 3 / 6 |
+| app WER, spanish (main slice) | 0.183 | 0.187 |
+| app WER, every other group | unchanged | unchanged |
+
+**All 29 disagreements are the same clip** — the Spanish loop where `"I'm sorry."`
+repeats, `avg_logprob` −0.11, text the model was *sure* about, deleted by the old rule
+purely for being two words long. Those segments now survive the filter and are folded
+back to two copies by `collapse_phrase_repeats` instead, which is the better mechanism:
+content-based and deterministic rather than a length heuristic. The +0.004 on Spanish
+is those four surviving words.
+
+**What this does not show, stated because it is the point.** The case the rule exists
+for — a short spoken command surviving a high `no_speech_prob` — **cannot be measured
+on EdAcc, because EdAcc contains no spoken commands**. The corpus can price the change's
+cost and it cannot price its benefit. So the benefit is pinned as a test instead
+("delete that line" at 0.9 / −0.3, kept; "scratch that" at 0.95 / −0.5, kept), and the
+real number waits on the recorded command set the roadmap has always deferred to human
+speakers. A change justified by a failure mode rather than a corpus win is worth saying
+out loud rather than dressing up.
+
+**139 tests green.** Nine existing tests changed their expectations in this commit —
+each one asserted the old rule, and each now asserts the new one with the measured
+signals attached.

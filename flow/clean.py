@@ -34,7 +34,9 @@ LOW_CONFIDENCE = -0.8
 
 #: Only ever applied to a *whole* utterance. "Thank you" inside real dictation must
 #: survive; "Thank you." as the entire output of a silent stretch is Whisper's training
-#: data leaking through.
+#: data leaking through. Since 2026-07-31 this list carries more weight: it is the
+#: second signal that replaced "the utterance is short", which was deleting real
+#: spoken corrections.
 _FILLER_ONLY = {
     "you", "thank you", "thanks", "thank you.", "thanks for watching",
     "thanks for watching!", "please subscribe", "subscribe", "bye", "bye.",
@@ -167,15 +169,24 @@ def invented_reason(
     if no_speech_prob <= NO_SPEECH_MAX:
         return None
 
-    # Model says "probably not speech". Confirm with a second signal before dropping:
-    # either the content is too thin to lose, or token confidence is also poor.
-    thin = len(stripped.split()) <= 3
-    unconfident = avg_logprob is not None and avg_logprob < LOW_CONFIDENCE
-    if thin and unconfident:
-        return "thin+unconfident"
-    if thin:
-        return "thin"
-    if unconfident:
+    # The model says "probably not speech". That is one signal, and one is not enough
+    # to delete what someone said, so a second must agree:
+    #
+    #   filler       - the whole utterance is a phrase Whisper is known to emit into
+    #                  silence. Evidence about *this text*, independent of length.
+    #   unconfident  - the token probabilities are poor too.
+    #
+    # Shortness is deliberately **not** one of them any more. It used to be, and it is
+    # the roadmap's defect 3: a spoken correction *is* short ("delete that line"), so
+    # dropping on length preferentially deletes commands from the people whose speech
+    # scores worst on `no_speech_prob` — exactly the users Flow is for. Measured on the
+    # short-clip slice, the thin rule alone accounted for the drop of a confident,
+    # correctly transcribed utterance while the filler list catches the actual
+    # hallucinations: the digital-silence 'You' (0.691 / −0.711) is thin *and* filler,
+    # so it still dies here.
+    if stripped in _FILLER_ONLY:
+        return "filler"
+    if avg_logprob is not None and avg_logprob < LOW_CONFIDENCE:
         return "unconfident"
     return None
 

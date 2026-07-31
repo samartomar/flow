@@ -168,9 +168,12 @@ class TestInventedReason(unittest.TestCase):
     def test_empty_after_markers(self):
         self.assertEqual(invented_reason("[BLANK_AUDIO]", 0.1, -0.2), "empty")
 
-    def test_thin_alone_is_named(self):
-        # The one-signal drop the roadmap calls defect 3: short but confident.
-        self.assertEqual(invented_reason("delete that line", 0.9, -0.3), "thin")
+    def test_shortness_alone_no_longer_drops_anything(self):
+        # Defect 3, fixed: a short, confident spoken correction survives even when the
+        # model doubts it was speech at all. This is the case the rule exists for.
+        self.assertIsNone(invented_reason("delete that line", 0.9, -0.3))
+        self.assertIsNone(invented_reason("scratch that", 0.95, -0.5))
+        self.assertIsNone(invented_reason("send it", 0.9, -0.79))
 
     def test_unconfident_alone_is_named(self):
         self.assertEqual(
@@ -178,8 +181,12 @@ class TestInventedReason(unittest.TestCase):
             "unconfident",
         )
 
-    def test_both_signals_are_named_together(self):
-        self.assertEqual(invented_reason("You", 0.9, -0.95), "thin+unconfident")
+    def test_the_filler_list_is_the_second_signal(self):
+        # 'You' is what Whisper emits into silence, so it dies on the filler rule
+        # whatever its length or confidence.
+        self.assertEqual(invented_reason("You", 0.9, -0.95), "filler")
+        self.assertEqual(invented_reason("You", 0.6907, -0.7109), "filler")
+        self.assertEqual(invented_reason("Thank you.", 0.9, -0.2), "filler")
 
     def test_filler_without_probabilities(self):
         self.assertEqual(invented_reason("Thank you.", None), "filler")

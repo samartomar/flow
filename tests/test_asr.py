@@ -127,7 +127,7 @@ class TestDropLog(unittest.TestCase):
         drops = asr.take_drops()
         self.assertEqual(len(drops), 1)
         self.assertEqual(drops[0].text, "You")
-        self.assertEqual(drops[0].reason, "thin+unconfident")
+        self.assertEqual(drops[0].reason, "filler")
         self.assertAlmostEqual(drops[0].no_speech_prob, 0.9)
         self.assertAlmostEqual(drops[0].avg_logprob, -0.95)
         self.assertTrue(drops[0].final)
@@ -143,12 +143,12 @@ class TestDropLog(unittest.TestCase):
             FakeSegment("the real sentence"),
         ])
         self.assertEqual(out, "the real sentence")
-        self.assertEqual([d.reason for d in asr.take_drops()], ["thin+unconfident"])
+        self.assertEqual([d.reason for d in asr.take_drops()], ["filler"])
 
     def test_describe_carries_the_evidence(self):
         _, asr = transcribe_with([FakeSegment("You", 0.9, -0.95)], final=False)
         line = asr.take_drops()[0].describe()
-        for fragment in ("'You'", "thin+unconfident", "ns=0.90", "lp=-0.95", "partial"):
+        for fragment in ("'You'", "filler", "ns=0.90", "lp=-0.95", "partial"):
             self.assertIn(fragment, line)
 
     def test_taking_drops_clears_them(self):
