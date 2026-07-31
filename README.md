@@ -135,6 +135,8 @@ whether the target is actually in your draft. When it guesses wrong, **Refine** 
 --partial-model X    fast model for live partials (default base.en)
 --final-model X      stronger model for the pasted text (default small.en)
 --model X            pin BOTH tiers to one model, for a low-memory machine
+--lexicon PATH       personal terms file (default ~/.flow/lexicon.txt)
+--no-lexicon         ignore that file without deleting it
 --device 3           input device index; list them with scripts/devices.py
 --arm                start listening immediately, no click needed
 --no-paste           print the draft instead of pasting it
@@ -181,6 +183,13 @@ uv run python -m unittest discover -s tests
 - **Accuracy on your own voice is still unmeasured.** The per-accent numbers in
   [docs/roadmap.md](docs/roadmap.md) come from EdAcc recordings of other people, and
   the SAPI numbers below are synthesised. Try `scripts/listen.py`.
+- **A personal lexicon cuts both ways.** `~/.flow/lexicon.txt` (one term per line)
+  biases decoding toward your names and jargon. Measured on EdAcc with `small.en`: it
+  recovers **27-34%** of the rare words the model otherwise missed *when they are
+  actually spoken*, and makes WER **14-38% relatively worse** on speech containing none
+  of the terms - 0.201 to 0.278 with only eight irrelevant terms. The file therefore
+  does not exist until you create it, and creating it is the opt-in. Add terms you say
+  often, not every term you know.
 - **Partials and finals disagree**, because they come from different models — the text
   visibly rewrites itself when an utterance ends. That is the price of the split; see
   the R4 gate in [docs/roadmap.md](docs/roadmap.md) for why one model cannot do both.

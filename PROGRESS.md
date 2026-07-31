@@ -1064,3 +1064,61 @@ resident model is precisely the kind of thing that soak test exists to catch dri
 
 **142 tests green** (139 + 3: partials never load the finals model, finals do, and
 unload releases both).
+
+### 2026-07-31 — Phase 1: the personal lexicon, and what biasing actually costs
+
+`flow/lexicon.py` reads `~/.flow/lexicon.txt` — one term per line, `#` comments,
+re-read whenever mtime or size changes so a name added mid-session lands on the next
+utterance. Terms are deduplicated case-insensitively and capped at 64 *whole* terms,
+because faster-whisper truncates the prompt at 223 tokens silently and mid-term, and
+half of "Kubernetes" biases the decoder toward nothing. `decode_options()` grew a
+`hotwords` parameter; both tiers use it; `--lexicon PATH` and `--no-lexicon` override.
+
+**Then the harness said the feature was the wrong shape.** `scripts/lexicon_bench.py`
+asks three questions on the EdAcc slice with `small.en`:
+
+| condition | WER | recovery |
+|---|---|---|
+| baseline, 100 clips | 0.223 | — |
+| oracle lexicon (the rare words that decode missed) | 0.216 | **29/85 = 34%** |
+| 61 irrelevant terms | **0.265** | — |
+| baseline, 60 clips | 0.221 | — |
+| oracle | 0.215 | 15/55 = 27% |
+| 61 irrelevant terms | **0.252** | — |
+| baseline, 40 clips | 0.201 | — |
+| **8** irrelevant terms | **0.278** | — |
+| 32 irrelevant terms | 0.274 | — |
+
+So biasing recovers about a third of the rare words it is aimed at, worth ~3% relative
+WER — and costs **14–38% relative WER on speech containing none of the terms**, which
+is the common case, because a lexicon is the user's vocabulary rather than this
+utterance's. Three independent runs on different clip subsets agree on the direction.
+The harm did **not** scale with lexicon size: eight irrelevant terms hurt as much as
+sixty-one, which kills the obvious "just keep it short" advice.
+
+The oracle column is an oracle and is labelled as one everywhere it appears — the
+lexicon is built from the answer key, so 34% is the ceiling of the mechanism, not a
+product claim.
+
+**What that changed.** The file does not exist by default and creating it is the
+opt-in, which is now a stated design decision with numbers behind it rather than an
+accident of implementation. The startup line prints the term count, because a lexicon
+someone forgot creating is a very plausible cause of "it suddenly got worse". And the
+real fix is named where it belongs: Phase 3's constrained re-decode, which biases only
+when the first pass produced something phonetically near a term — spending the cost
+where it pays instead of on every utterance.
+
+**Latency, separately measured:** a full 64-term lexicon costs +6% on a `base.en`
+partial (0.69 → 0.73 s, against a 1.5 s budget), +13% on a `base.en` final, and +27%
+on a `small.en` final (2.33 → 2.97 s). Affordable; it is the accuracy that is not.
+
+**What broke.** Two harness bugs, both caught before they produced a number: the first
+draft decoded the distractor condition twice (once discarded for timing), and the
+`--harm` sweep silently did not run because a scripted edit did not match — the sweep
+printed the *standard* table instead, which looked like a perfectly plausible result.
+It reproduced the harm finding on a fresh 60 clips, which is the only reason it was
+obvious something was off. A harness that fails by printing the wrong valid answer is
+the failure mode this project keeps rediscovering.
+
+**161 tests green** (142 + 19: parsing, the cap, hot reload, a deleted file, undecodable
+bytes, the disable path, and that both tiers actually receive the string).

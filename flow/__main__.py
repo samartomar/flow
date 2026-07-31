@@ -10,6 +10,7 @@ import argparse
 import sys
 
 from .asr import FINAL_MODEL, PARTIAL_MODEL
+from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .hotkey import DEFAULT_BINDINGS, Hotkeys
 from .inject import paste
 from .refine import available
@@ -42,6 +43,14 @@ def main(argv: list[str] | None = None) -> int:
         "--model", default=None,
         help="pin BOTH tiers to one model (benchmarking, or a low-memory machine)",
     )
+    ap.add_argument(
+        "--lexicon", default=None,
+        help=f"personal terms to bias decoding toward (default {DEFAULT_PATH})",
+    )
+    ap.add_argument(
+        "--no-lexicon", action="store_true",
+        help="ignore the lexicon file without deleting it",
+    )
     ap.add_argument("--device", type=int, default=None, help="input device index")
     ap.add_argument(
         "--no-hotkeys", action="store_true", help="skip global hotkey registration"
@@ -67,8 +76,22 @@ def main(argv: list[str] | None = None) -> int:
     partial_name = args.model or args.partial_model
     final_name = args.model or args.final_model
     say(f"models: {partial_name} for partials, {final_name} for finals")
+
+    lexicon = Lexicon(NUL_PATH if args.no_lexicon else args.lexicon)
+    n_terms = len(lexicon.terms())
+    if args.no_lexicon:
+        say("lexicon: disabled")
+    elif n_terms:
+        # The count is worth printing: biasing costs accuracy on speech that contains
+        # none of the terms (see flow/lexicon.py), so a lexicon nobody remembers
+        # creating is a plausible cause of "it got worse".
+        say(f"lexicon: {n_terms} terms from {lexicon.path}")
+    else:
+        say(f"lexicon: none - create {lexicon.path} to bias names and jargon")
+
     session = Session(
-        asr=WhisperTranscriber(partial_name, final_name), device=args.device
+        asr=WhisperTranscriber(partial_name, final_name, lexicon=lexicon),
+        device=args.device,
     )
 
     hotkeys = None

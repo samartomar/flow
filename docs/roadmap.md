@@ -280,7 +280,20 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
   repetition loops, so `clean.collapse_phrase_repeats()` now breaks them deterministically
   — without it, one Spanish clip returned "I'm so sorry." ×30 (87 edits on a 4-word
   reference) and one Indian clip a 7-word phrase ×22 (207 edits).
-- `hotwords` from a user-editable lexicon file — names, repo terms, jargon (P4 seed).
+- ~~`hotwords` from a user-editable lexicon file — names, repo terms, jargon (P4 seed)~~
+  **done 2026-07-31, and the measurement changed its shape.** `~/.flow/lexicon.txt`,
+  one term per line, re-read on change, capped at 64 whole terms (the library truncates
+  mid-term at 223 tokens, silently). Both tiers are biased; `--lexicon` / `--no-lexicon`
+  override. `scripts/lexicon_bench.py` is the new harness.
+
+  **Biasing is a trade, not a win** (`small.en`, EdAcc): it recovers **27–34%** of the
+  rare reference words a decode missed *when those words are spoken* (~3% relative WER),
+  and it makes WER **14–38% relatively worse** on speech containing none of the terms —
+  0.223 → 0.265 and 0.221 → 0.252 at 61 terms, 0.201 → 0.278 at **eight**. The harm did
+  not shrink with the lexicon, so there is no safe-small-lexicon advice to give. The
+  file therefore does not exist until the user creates it, and creating it *is* the
+  opt-in. Phase 3's constrained re-decode is the targeted fix: bias only when the first
+  pass produced something phonetically near a term, so the cost is paid where it pays.
 - Grammar hardening: politeness/hedge prefixes on all patterns, fuzzy verb-snapping
   (edit distance ≤ 1 + suffix stripping), alias table, `re.escape` fix, stale
   force-next fix (defect 4, first half → P3).

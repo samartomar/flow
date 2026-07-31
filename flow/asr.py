@@ -15,6 +15,7 @@ from typing import NamedTuple, Protocol
 import numpy as np
 
 from .clean import invented_reason, normalise
+from .lexicon import Lexicon
 
 #: How many recent drops to keep. Bounded because R8 says a long session must cost what
 #: a short one costs; 100 is enough for the UI to explain what just vanished.
@@ -86,12 +87,14 @@ NO_SPEECH_THRESHOLD = None
 LOG_PROB_THRESHOLD = None
 
 
-def decode_options(final: bool) -> dict:
+def decode_options(final: bool, hotwords: str | None = None) -> dict:
     """The decode parameters, in one place.
 
     Exported because the benchmarks in scripts/ decode with them too; a bench that
     quietly drifts from the app measures a build nobody runs.
     """
+    if hotwords:
+        return {**decode_options(final), "hotwords": hotwords}
     return {
         "language": "en",  # R2: never spend compute on language detection
         "beam_size": FINAL_BEAM if final else PARTIAL_BEAM,
@@ -149,8 +152,12 @@ class WhisperTranscriber:
         partial_model: str = PARTIAL_MODEL,
         final_model: str = FINAL_MODEL,
         compute_type: str = "int8",
+        lexicon: Lexicon | None = None,
     ) -> None:
         self._names = {False: partial_model, True: final_model}
+        #: The user's own words, biasing both tiers (P4). Re-read when the file
+        #: changes, so a name added mid-session lands on the next utterance.
+        self.lexicon = lexicon if lexicon is not None else Lexicon()
         self._compute_type = compute_type
         self._models: dict[bool, object | None] = {False: None, True: None}
         # Guards the model dict and the drop log — both touched from the decode
@@ -224,7 +231,9 @@ class WhisperTranscriber:
         self.load(final)
         with self._lock:
             model = self._models[final]
-        segments, _ = model.transcribe(audio, **decode_options(final))
+        segments, _ = model.transcribe(
+            audio, **decode_options(final, self.lexicon.hotwords())
+        )
         kept = []
         for s in segments:
             # Drop segments the model invented rather than heard, and record every one
