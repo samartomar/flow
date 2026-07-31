@@ -61,6 +61,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--arm", action="store_true", help="start listening immediately, no click needed"
     )
+    ap.add_argument(
+        "--converse", action="store_true",
+        help="start in converse mode: Send asks the agent CLI instead of pasting (P9)",
+    )
+    ap.add_argument(
+        "--speak", action="store_true",
+        help="read converse-mode replies aloud through the Windows speech engine",
+    )
     args = ap.parse_args(argv)
 
     from .asr import WhisperTranscriber
@@ -89,10 +97,22 @@ def main(argv: list[str] | None = None) -> int:
     else:
         say(f"lexicon: none - create {lexicon.path} to bias names and jargon")
 
+    speaker = None
+    if args.speak:
+        from .speak import Speaker
+
+        speaker = Speaker()
+        if not speaker.available:
+            say("speech engine unavailable - replies will be silent")
+            speaker = None
+
     session = Session(
         asr=WhisperTranscriber(partial_name, final_name, lexicon=lexicon),
         device=args.device,
+        speaker=speaker,
     )
+    if args.converse:
+        session.toggle_mode()
 
     hotkeys = None
     if not args.no_hotkeys:
@@ -107,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
             hotkeys = None
 
     def on_send(text: str) -> None:
+        # Converse mode returns "" from send(), so this is dictate-mode only by
+        # construction: the question must never be pasted into the focused window.
         if args.no_paste:
             say(f"\n--- draft ---\n{text}\n")
         elif not paste(text):
@@ -119,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
 
     say(
         ("listening | " if args.arm else "click the pill to arm | ")
+        + ("converse: Send asks the CLI | " if args.converse else "")
         + "right-click for the menu | esc quits"
     )
     Pill(session, on_send=on_send, hotkeys=hotkeys, arm=args.arm).mainloop()

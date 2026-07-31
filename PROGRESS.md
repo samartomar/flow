@@ -1855,3 +1855,46 @@ word, not character, because a character diff of Tuesday→Wednesday reports "Tu
 utterances, adversarial unchanged at 5/20.
 
 **322 tests green** (313 + 9), including the quiet room that broke the gate.
+
+### 2026-07-31 — P9, converse mode
+
+Send now has two destinations. In dictate mode it pastes into whatever has focus; in
+converse mode it hands the draft to the agent CLI and the answer renders in Flow. Every
+stage before Send is deliberately identical — same gate, same decode, same correction
+grammar — because the thing being corrected is a prompt either way.
+
+**`refine.ask()` is a sibling of `refine()`, not a flag on it.** `refine` guards hard
+against the model returning anything longer than what it was given, since commentary
+pasted into a draft is a defect. An answer *is* commentary; that guard would reject
+every correct result. So `ask` has its own prompt (three sentences of plain prose, say
+what is missing rather than guess) and its own bound (4000 chars, because the pill has
+to render it).
+
+**There is no persistent CLI process.** Continuity is re-sent from the P6 thread rather
+than held open, which keeps R11 (the CLI is never on the hot path) and R8 (a long
+session costs what a short one costs), and means a crashed or upgraded CLI cannot take
+the conversation with it. The current question is excluded from its own context — it is
+already in the thread by the time the ask starts, and passing it as background asks the
+CLI not to answer the thing it was just asked.
+
+**Measured end to end against codex:** 10.4 s for the first answer, 7.8 s for the
+follow-up. Asked "and what is a typical value for a good system?" with only the thread
+tail for context, it correctly answered about WER without being told the subject again.
+
+**Spoken replies (`--speak`) are one long-lived host, not a subprocess per reply.** The
+obvious implementation shells out per utterance and is wrong twice: PowerShell costs
+~700 ms before the first phoneme, and a process already launched cannot be told to stop
+talking. One host reading commands from stdin makes the reply interruptible — and the
+next utterance interrupts it, because a user talking over the answer is done listening
+and the microphone is picking the speaker up regardless. Text is base64-encoded into
+the command, since an answer can contain quotes, dollar signs, backticks and newlines,
+all of which are PowerShell syntax.
+
+**What broke:** the first implementation reached SAPI through `comtypes`/`win32com`,
+and the docstring claimed it needed nothing. Neither is installed here and both would
+have been new dependencies — R16 violated by a module whose comment said otherwise.
+Rewritten onto `System.Speech` through PowerShell, which `scripts/` already uses for the
+synthetic control voice. Verified working, including interruption mid-sentence.
+
+**339 tests green** (322 + 17), including the one that matters most: converse-mode
+`send()` returns `""`, so a question can never be pasted into the focused window.

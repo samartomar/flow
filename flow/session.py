@@ -24,7 +24,7 @@ from . import MAX_UTTERANCE_SEC, SAMPLE_RATE
 from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
 from .edits import apply_local, command_bias, describe_change, plan
-from .refine import refine
+from .refine import ask, refine
 from .thread import Thread
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
@@ -50,10 +50,22 @@ class State(str, Enum):
     LISTENING = "listening"  # speech in progress
     DRAFT = "draft"  # text held, awaiting refine / continue / send
     REFINING = "refining"  # a CLI rewrite is in flight
+    ASKING = "asking"  # P9: a converse-mode question is with the CLI
+
+
+#: P9. Where a finished draft goes when the user sends it.
+#:
+#: DICTATE pastes into whatever has focus — the original product. CONVERSE hands it to
+#: the agent CLI and renders the reply in Flow, so the same voice loop becomes a
+#: conversation instead of a keyboard. Everything before Send is deliberately identical
+#: in both: the same gate, the same decode, and the same correction grammar shaping the
+#: outgoing words. That is the point — the thing being corrected is a prompt either way.
+DICTATE = "dictate"
+CONVERSE = "converse"
 
 
 class Event(NamedTuple):
-    kind: str  # partial | draft | state | note | error
+    kind: str  # partial | draft | state | note | error | reply | mode
     text: str
 
 
@@ -228,6 +240,7 @@ class Session:
         device: int | None = None,
         refine_cwd: str | None = None,
         mic: Mic | None = None,
+        speaker: object | None = None,
     ) -> None:
         # `mic` and `asr` are injectable so the state machine can be tested without a
         # microphone or a 141 MB model — the routing logic is where the subtle bugs live.
@@ -262,6 +275,15 @@ class Session:
         self._refine_cwd = refine_cwd
         self._refine_result: tuple[str | None, str] | None = None
         self._refine_lock = threading.Lock()
+        #: P9: dictate (paste into the focused window) or converse (ask the CLI).
+        self.mode = DICTATE
+        #: Optional spoken replies. None means silent, which is the default.
+        self.speaker = speaker
+        self._ask_result: tuple[str | None, str] | None = None
+        self._ask_lock = threading.Lock()
+        #: The last answer, kept so the UI can re-render it and so a follow-up has
+        #: something to refer to.
+        self.reply = ""
         #: Explicit override for the next utterance's routing, set by the UI chips.
         #: The heuristic in edits.py is the default; this is the escape hatch for when
         #: it guesses wrong, per the "heuristic + explicit override" design in §4.
@@ -345,6 +367,7 @@ class Session:
         self._pump_decodes()
         self._pump_drops()
         self._pump_refine()
+        self._pump_ask()
         self._pump_health()
 
     def _pump_drops(self) -> None:
@@ -396,6 +419,11 @@ class Session:
                     # The gate could only open once it heard something loud, so the
                     # quiet head of that very word is already behind us. Take it back.
                     self._utter.extend(self.gate.take_preroll())
+                    # P9: the user talking over the answer means they are done with
+                    # it. Speech that keeps going while they speak is also speech the
+                    # microphone is picking up.
+                    if self.speaker is not None:
+                        self.speaker.stop()
                 self._utter.append(block)
                 self._last_activity = time.perf_counter()
                 if self.state is not State.REFINING:
@@ -725,16 +753,76 @@ class Session:
 
     # -- actions -----------------------------------------------------------
 
+    def toggle_mode(self) -> str:
+        """P9: one action switches dictate <-> converse. Returns the new mode.
+
+        Deliberately does not touch the draft. Someone who has dictated three sentences
+        and then decides they want to ask about them rather than paste them should not
+        have to say it again — the words are the same words either way.
+        """
+        self.mode = CONVERSE if self.mode == DICTATE else DICTATE
+        self._emit("mode", self.mode)
+        self._emit("note", "converse mode - Send asks the CLI"
+                   if self.mode == CONVERSE else "dictate mode - Send pastes")
+        return self.mode
+
     def send(self) -> str:
-        """Hand off the draft and reset. Injection is the caller's job (stage 8)."""
+        """Hand off the draft and reset.
+
+        In dictate mode the caller injects the returned text (stage 8). In converse
+        mode the text goes to the CLI instead and the caller gets "" — there is nothing
+        to paste, and returning the text anyway would paste the question into whatever
+        window happened to have focus.
+        """
         text = self.draft.clear()
         self.thread.add(text)
         self.following_up = False
         self.gate.reset()
         self._utter = []
-        self._set_state(State.IDLE)
         self._emit("draft", "")
+        if self.mode == CONVERSE and text.strip():
+            self._start_ask(text)
+            return ""
+        self._set_state(State.IDLE)
         return text
+
+    def _start_ask(self, question: str) -> None:
+        """P9: put the draft to the CLI off the hot path (R11) and wait for the reply."""
+        self._set_state(State.ASKING)
+        self._emit("note", "asking…")
+        # The thread already holds this question (send() added it), so the context is
+        # every *earlier* turn — passing the current one would ask the CLI not to
+        # answer the thing it was just asked.
+        context = self.thread.tail()[:-1]
+
+        def work() -> None:
+            result = ask(question, cwd=self._refine_cwd, context=context)
+            with self._ask_lock:
+                self._ask_result = result
+
+        threading.Thread(target=work, daemon=True, name="ask").start()
+
+    def _pump_ask(self) -> None:
+        with self._ask_lock:
+            result, self._ask_result = self._ask_result, None
+        if result is None:
+            return
+        answer, note = result
+        if answer is None:
+            # Non-destructive by construction: the question is still in the thread, so
+            # "say that again" and a retry both still work.
+            self._emit("error", f"ask failed ({note})")
+            self.reply = ""
+        else:
+            self.reply = answer
+            # Recorded as a turn so the next question inherits it — this is what makes
+            # "and what about the other one?" mean anything.
+            self.thread.add(f"(reply) {answer}")
+            self._emit("reply", answer)
+            if self.speaker is not None:
+                self.speaker.say(answer)
+            self._emit("note", f"answered via {note}")
+        self._set_state(State.IDLE)
 
     def wait_idle(self, timeout: float = 30.0) -> bool:
         """Pump until no decode or refine is outstanding. For tests and harnesses."""
@@ -744,6 +832,7 @@ class Session:
             if (
                 not self.worker.busy
                 and self.state is not State.REFINING
+                and self.state is not State.ASKING
                 and not self._utter
             ):
                 return True

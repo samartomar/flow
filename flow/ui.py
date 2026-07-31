@@ -16,7 +16,7 @@ import tkinter as tk
 import traceback
 from collections import deque
 
-from .session import Session, State
+from .session import DICTATE, Session, State
 
 TRANSPARENT = "#ff00fe"  # keyed out by -transparentcolor; unlikely in real content
 SHELL = "#12161f"
@@ -30,8 +30,14 @@ ACCENT = {
     State.LISTENING: "#22c55e",  # green  - capturing speech
     State.DRAFT: "#f59e0b",  # amber  - text held, awaiting a decision
     State.REFINING: "#3b82f6",  # blue   - CLI rewrite in flight
+    State.ASKING: "#a855f7",  # violet - P9, a question is with the CLI
 }
 ERROR = "#ef4444"
+
+#: P9. The answer, distinct from the user's own words in the same bubble. Nothing else
+#: in the UI is this colour, because mistaking the model's words for your own is the
+#: one confusion converse mode can create that dictate mode cannot.
+REPLY = "#7dd3fc"
 
 PILL_W, PILL_H = 152, 40
 BARS = 18
@@ -131,6 +137,10 @@ class Pill(tk.Tk):
     def _menu(self, e) -> None:
         m = tk.Menu(self, tearoff=0)
         m.add_command(label="Send", command=self._send)
+        m.add_command(
+            label="Converse mode" if self.session.mode == DICTATE else "Dictate mode",
+            command=self.session.toggle_mode,
+        )
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
         m.add_command(label="Quit", command=self.quit_app)
@@ -140,7 +150,10 @@ class Pill(tk.Tk):
         text = self.session.send()
         if text and self.on_send:
             self.on_send(text)
-        self.bubble.hide()
+        # In converse mode send() returns "" and the answer is still coming, so the
+        # bubble has to stay up to render it.
+        if self.session.mode == DICTATE:
+            self.bubble.hide()
 
     def _clear(self) -> None:
         self.session.draft.clear()
@@ -184,6 +197,8 @@ class Pill(tk.Tk):
                     self._send()
                 elif name == "cancel":
                     self._clear()
+                elif name == "mode":
+                    self.session.toggle_mode()
 
         if self.armed:
             self.session.tick()
@@ -201,6 +216,10 @@ class Pill(tk.Tk):
                 self.bubble.note(ev.text)
             elif ev.kind == "note":
                 self.bubble.note(ev.text)
+            elif ev.kind == "reply":
+                self.bubble.show_reply(ev.text)
+            elif ev.kind == "mode":
+                pass  # the accompanying note is what the user reads
             elif ev.kind == "drop":
                 # Shown, not hidden: P2 is that a rejection is never silent. The
                 # recovery affordance itself is Phase 3's rescue chip.
@@ -269,13 +288,24 @@ class Bubble(tk.Toplevel):
         self._text = ""
         self._note = ""
         self._partial = ""
+        self._reply = ""
         self._h = 120
         self.withdraw()
 
     # -- content -----------------------------------------------------------
 
+    def show_reply(self, text: str) -> None:
+        """P9: the CLI's answer. Clears the draft area — the question was sent."""
+        self._reply, self._text, self._partial = text, "", ""
+        if not self._visible:
+            self._visible = True
+            self.deiconify()
+            self._float_up()
+        self._render()
+
     def show(self, text: str) -> None:
-        self._text, self._partial = text, ""
+        # A new draft supersedes the last answer: the user has started speaking again.
+        self._text, self._partial, self._reply = text, "", ""
         self._render()
         if not self._visible:
             self._visible = True
@@ -308,7 +338,7 @@ class Bubble(tk.Toplevel):
 
     def hide(self) -> None:
         self._visible = False
-        self._text = self._partial = self._note = ""
+        self._text = self._partial = self._note = self._reply = ""
         self.withdraw()
 
     # -- geometry ----------------------------------------------------------
@@ -349,7 +379,15 @@ class Bubble(tk.Toplevel):
         )
         x1, y1, x2, y2 = c.bbox(probe)
         text_h = y2 - y1
-        extra = 0
+        reply_h = 0
+        if self._reply:
+            rprobe = c.create_text(
+                PAD, PAD, anchor="nw", text=self._reply, fill=REPLY,
+                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
+            )
+            rx1, ry1, rx2, ry2 = c.bbox(rprobe)
+            reply_h = ry2 - ry1 + 8
+        extra = reply_h
         if self._partial:
             extra += 34
         if self._note:
@@ -361,6 +399,12 @@ class Bubble(tk.Toplevel):
         c.delete("all")
         _round_rect(c, 1, 1, BUBBLE_W - 1, self._h - 1, 14, fill=SHELL, outline=accent)
         y = PAD
+        if self._reply:
+            c.create_text(
+                PAD, y, anchor="nw", text=self._reply, fill=REPLY,
+                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
+            )
+            y += reply_h
         if body:
             c.create_text(
                 PAD, y, anchor="nw", text=body, fill=TEXT,

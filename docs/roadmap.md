@@ -584,10 +584,16 @@ utterance never pays for `small.en` at all.
   the store exceeds its character cap, and it is bounded by the utterance limit above
   it. Recall also refuses to overwrite a draft that is already on screen — it appends,
   because history is not worth losing live text for.
-- **Converse mode (P9):** route Send to the agent CLI instead of the focused window,
-  render the reply above the pill, keep the CLI session alive across turns — ChatGPT
-  Voice mode against `claude`/`codex`. Optional spoken replies via Windows SAPI
-  (ctypes-reachable, R16 intact).
+- ~~**Converse mode (P9)**~~ **done 2026-07-31.** `Session.mode` routes Send to
+  `refine.ask()` instead of the focused window; the reply renders in the bubble in its
+  own colour, is added to the thread so the next question inherits it, and Ctrl+Alt+M
+  switches modes without touching the draft. There is no persistent CLI process —
+  continuity is re-sent from the P6 thread, which keeps R11 and R8 and means a crashed
+  or upgraded CLI cannot take the conversation with it. Measured end to end against
+  codex: 10.4 s first answer, 7.8 s follow-up, and the follow-up resolved "a good
+  system" from context without repeating the first question. Spoken replies via
+  `--speak` are one long-lived PowerShell `System.Speech` host, not a subprocess per
+  reply: that is what makes them interruptible when the user talks over the answer.
 - **Personalisation (P8/P4):** first-run calibration (gate floor + per-user threshold
   profile from a 60 s read); lexicon growth from corrections (every "change X to Y" is
   a labelled confusion pair); local misroute telemetry (undo-after-append signature)

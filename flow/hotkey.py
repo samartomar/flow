@@ -121,6 +121,7 @@ def kernel_thread_id() -> int:
 
 
 VK_BACKSLASH, VK_SEMICOLON = 0xDC, 0xBA
+VK_M = 0x4D  # P9 mode toggle
 
 #: Ordered alternatives per action. ctrl+alt+space is first because it is the most
 #: natural, but it was already taken on the development machine, so toggle in
@@ -139,5 +140,11 @@ DEFAULT_BINDINGS: dict[str, list[tuple[int, int]]] = {
     "cancel": [
         (MOD_CONTROL | MOD_ALT, VK_ESCAPE),
         (MOD_CONTROL | MOD_SHIFT, VK_ESCAPE),
+    ],
+    # P9: dictate <-> converse. "One action" is the acceptance criterion, so it gets a
+    # binding of its own rather than a menu item only.
+    "mode": [
+        (MOD_CONTROL | MOD_ALT, VK_M),
+        (MOD_CONTROL | MOD_SHIFT, VK_M),
     ],
 }

@@ -106,6 +106,29 @@ def available() -> list[Cli]:
     return [c for c in CANDIDATES if shutil.which(c.argv[0])]
 
 
+#: P9. Converse mode sends the draft to the CLI as a *question* rather than as text to
+#: be rewritten, so none of the rewrite discipline applies: the answer is allowed to be
+#: longer than the input, allowed to be prose, and must not be measured against the
+#: draft's length. What it does need is brevity, because the reply is read on a pill
+#: above a floating window and, optionally, spoken aloud — neither survives an essay.
+_ASK_PROMPT = (
+    "Answer the question below for a developer who is speaking to you, not typing.\n"
+    "Reply in at most {sentences} sentences of plain prose. No preamble, no headings, "
+    "no bullet lists, no code fences unless code is the answer.\n"
+    "If you need something you were not told, say what is missing in one sentence "
+    "rather than guessing.\n\n"
+    "QUESTION:\n{text}"
+)
+
+#: How long an answer may be before it is treated as the model ignoring the brief. Far
+#: looser than the rewrite guard — an answer has no input length to be measured against
+#: — but not unbounded, because the pill has to render it.
+ASK_MAX_CHARS = 4000
+
+#: Sentences requested. Three is the shortest that can carry an answer plus its caveat.
+ASK_SENTENCES = 3
+
+
 def _split_tail(text: str) -> tuple[str, str]:
     """Return (head_kept_verbatim, tail_to_refine) respecting MAX_CHARS."""
     if len(text) <= MAX_CHARS:
@@ -203,3 +226,70 @@ def refine(
         return None, f"{chosen.name} returned commentary, not a revision"
 
     return head + revised, chosen.name
+
+
+def ask(
+    question: str,
+    *,
+    cli: Cli | None = None,
+    timeout: float = TIMEOUT_SEC,
+    cwd: str | None = None,
+    context: list[str] | None = None,
+    sentences: int = ASK_SENTENCES,
+) -> tuple[str | None, str]:
+    """P9: put a question to the agent CLI and return its answer.
+
+    The sibling of `refine`, and deliberately not the same function. `refine` rewrites
+    the user's words and guards hard against the model returning anything longer than
+    what it was given, because commentary pasted into a draft is a defect. An answer
+    *is* commentary — that is what was asked for — so that guard would reject every
+    correct result.
+
+    `context` is the same thread tail P6 already keeps. There is no persistent CLI
+    process: continuity is re-sent, not held open. That keeps R11 (the CLI is never on
+    the hot path) and R8 (a long session costs what a short one costs) intact, and it
+    means a crashed or upgraded CLI cannot take the conversation with it.
+
+    Returns `(answer, cli_name)` or `(None, reason)`. Failure is always non-destructive:
+    the caller keeps the draft, so an absent or slow CLI degrades converse mode to
+    dictate mode rather than losing what was said.
+    """
+    chosen = cli or next(iter(available()), None)
+    if chosen is None:
+        return None, "no agent CLI found on PATH"
+
+    _, tail = _split_tail(question)
+    prompt = _ASK_PROMPT.format(text=tail, sentences=sentences)
+    if context:
+        prior = chr(10).join(f"- {turn}" for turn in context)
+        prompt = (
+            "EARLIER IN THIS CONVERSATION (for continuity - do not answer these again):"
+            + chr(10) + prior + chr(10) + chr(10) + prompt
+        )
+
+    try:
+        proc = subprocess.run(
+            [*chosen.argv, prompt],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,  # codex blocks on stdin otherwise
+            cwd=cwd,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"{chosen.name} timed out after {timeout:.0f}s"
+    except OSError as exc:
+        return None, f"{chosen.name} failed to start: {exc}"
+
+    if proc.returncode != 0:
+        first = (proc.stderr or "").strip().splitlines()
+        return None, f"{chosen.name} exited {proc.returncode}: {first[0] if first else ''}"
+
+    answer = _clean(proc.stdout)
+    if not answer:
+        return None, f"{chosen.name} returned nothing"
+    if len(answer) > ASK_MAX_CHARS:
+        answer = answer[: ASK_MAX_CHARS - 1].rstrip() + "…"
+    return answer, chosen.name
