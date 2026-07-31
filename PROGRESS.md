@@ -2059,3 +2059,44 @@ takes were spent staring at nothing. The bubble now stays up in the ASKING state
 the "asking…" note has somewhere to appear.
 
 **375 tests green** (370 + 5).
+
+### 2026-07-31 — the window was never DPI-aware, and every coordinate was wrong
+
+Reported as "it keeps switching between multiple windows, stops, does not work", with
+a screenshot of the pill sitting on the system tray and the bubble hanging off the
+right edge of the display with its buttons unreachable.
+
+**The tell was in the pixels.** "Refine", "Continue" and "Ask" are visibly soft in that
+screenshot while the system text beside them is sharp — the signature of Windows
+bitmap-stretching a process that never declared itself DPI-aware. That is not only a
+cosmetic problem: `winfo_screenwidth()` then reports **logical** pixels while
+`geometry()` places the window in **physical** ones, so the pill computes a position
+for a 1280-wide screen and lands in the corner of a 1920-wide one, dragging the bubble
+off the edge with it.
+
+`SetProcessDpiAwarenessContext(-4)` (per-monitor v2), falling back through
+`SetProcessDpiAwareness(2)` and `SetProcessDPIAware()`, called before the first Tk
+window exists. All `ctypes`, so R16 holds.
+
+**Three more placement bugs the same screenshot exposed.**
+
+The pill was positioned against `winfo_screenheight()` minus a guessed **90 px** of
+taskbar. The taskbar is a different height on every machine and can be on any edge;
+here it is 48 px, which is why the pill sat on the tray. It now asks Windows for the
+work area (`SPI_GETWORKAREA`) — measured on this machine as (0, 0, 1280, 672).
+
+The bubble clamped one edge: `max(8, x)` pins the left and lets the right run off the
+display. Both edges are bounded now, against the work area rather than the raw screen,
+and dragging the pill can no longer strand it off-screen either.
+
+And `_float_up` was unguarded. Each run schedules eight `after` callbacks that each
+move the window, so two overlapping runs fight over the position and the bubble jitters
+between two places — which is exactly what a fast show/hide/show cycle produces, and a
+fair description of "keeps switching". Generation-guarded: an older animation stops the
+moment a newer one starts.
+
+Verified: pill at (1100, 608) with its right edge at 1252 and bottom at 648, bubble at
+380×96+872+520 — both wholly inside the 1280×672 work area, the bubble right-aligned
+above the pill as designed.
+
+**375 tests green.**

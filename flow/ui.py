@@ -12,11 +12,69 @@ was written: overrideredirect, -topmost, -alpha, -transparentcolor, -toolwindow.
 
 from __future__ import annotations
 
+import ctypes
 import tkinter as tk
 import traceback
 from collections import deque
 
 from .session import DICTATE, Session, State
+
+
+class _RECT(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+
+#: SystemParametersInfo(SPI_GETWORKAREA)
+_SPI_GETWORKAREA = 0x0030
+
+
+def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:
+    """The desktop minus the taskbar, in the same pixels `geometry` uses.
+
+    The pill used to be placed against `winfo_screenheight()` less a guessed 90 px of
+    taskbar. Guessing is why it ended up sitting on top of the tray: the taskbar is a
+    different height on every machine, and can be on any edge.
+    """
+    rect = _RECT()
+    try:
+        ok = ctypes.windll.user32.SystemParametersInfoW(
+            _SPI_GETWORKAREA, 0, ctypes.byref(rect), 0
+        )
+    except (AttributeError, OSError):
+        ok = 0
+    if not ok or rect.right <= rect.left or rect.bottom <= rect.top:
+        return 0, 0, sw, sh
+    return rect.left, rect.top, rect.right, rect.bottom
+
+
+def _dpi_aware() -> float:
+    """Tell Windows this process draws its own pixels, and return the scale factor.
+
+    Without this the pill is bitmap-stretched by the compositor — visibly soft next to
+    native text — and, worse, every coordinate goes wrong: `winfo_screenwidth` reports
+    *logical* pixels while the window is placed in *physical* ones, so on a 150%
+    display the pill computes a position for a 1280-wide screen and lands somewhere in
+    the corner of a 1920-wide one, dragging the bubble off the edge with it.
+
+    Must run before the first Tk window exists. `ctypes` is stdlib, so R16 holds.
+    """
+    try:
+        # Per-monitor v2 where it exists: the scale can differ per display, and a
+        # window dragged between them has to be told.
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except (AttributeError, OSError):
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except (AttributeError, OSError):
+                return 1.0
+    try:
+        return ctypes.windll.user32.GetDpiForSystem() / 96.0
+    except (AttributeError, OSError):
+        return 1.0
 
 TRANSPARENT = "#ff00fe"  # keyed out by -transparentcolor; unlikely in real content
 SHELL = "#12161f"
@@ -61,7 +119,9 @@ class Pill(tk.Tk):
     """The always-visible control. Click to arm/disarm, drag to move."""
 
     def __init__(self, session: Session, on_send=None, hotkeys=None, arm=False) -> None:
+        scale = _dpi_aware()  # before the first Tk window exists, or it has no effect
         super().__init__()
+        self.scale = scale
         self.session = session
         self.on_send = on_send
         self.hotkeys = hotkeys
@@ -77,9 +137,10 @@ class Pill(tk.Tk):
         self.attributes("-toolwindow", True)
         self.configure(bg=TRANSPARENT)
 
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        self.x, self.y = sw - PILL_W - 28, sh - PILL_H - 90
+        self.work = _work_area(self.winfo_screenwidth(), self.winfo_screenheight())
+        left, top, right, bottom = self.work
+        self.x = right - PILL_W - 28
+        self.y = bottom - PILL_H - 24
         self.geometry(f"{PILL_W}x{PILL_H}+{self.x}+{self.y}")
 
         self.canvas = tk.Canvas(
@@ -109,8 +170,9 @@ class Pill(tk.Tk):
             self._drag = (e.x_root - self.x, e.y_root - self.y)
 
         def drag(e):
-            self.x = e.x_root - self._drag[0]
-            self.y = e.y_root - self._drag[1]
+            left, top, right, bottom = self.work
+            self.x = max(left, min(e.x_root - self._drag[0], right - PILL_W))
+            self.y = max(top, min(e.y_root - self._drag[1], bottom - PILL_H))
             self.geometry(f"{PILL_W}x{PILL_H}+{self.x}+{self.y}")
             self.bubble.reposition()
 
@@ -309,6 +371,8 @@ class Bubble(tk.Toplevel):
         self._note = ""
         self._partial = ""
         self._reply = ""
+        #: Which float-up animation is current; older ones stop when this moves.
+        self._anim = 0
         self._h = 120
         self.withdraw()
 
@@ -372,16 +436,34 @@ class Bubble(tk.Toplevel):
     # -- geometry ----------------------------------------------------------
 
     def reposition(self, lift: int = 0) -> None:
+        """Anchor above the pill, clamped inside the work area.
+
+        The clamp used to be `max(8, x)` alone, which pins the left edge and lets the
+        right edge run off the display — so on a screen whose coordinates the app had
+        got wrong, the bubble hung half outside it with its buttons unreachable. Both
+        edges are bounded now, and against the work area rather than the raw screen.
+        """
+        left, top, right, bottom = self.pill.work
         x = self.pill.x + PILL_W - BUBBLE_W
         y = self.pill.y - self._h - 10 + lift
-        self.geometry(f"{BUBBLE_W}x{self._h}+{max(8, x)}+{max(8, y)}")
+        x = max(left + 8, min(x, right - BUBBLE_W - 8))
+        y = max(top + 8, min(y, bottom - self._h - 8))
+        self.geometry(f"{BUBBLE_W}x{self._h}+{x}+{y}")
 
     def _float_up(self) -> None:
-        """R14: rise into place rather than appearing, so the eye follows it."""
+        """R14: rise into place rather than appearing, so the eye follows it.
+
+        Generation-guarded. Each run schedules eight `after` callbacks that each move
+        the window, so two overlapping runs fight over the position and the bubble
+        visibly jitters between two places — which is what a fast show/hide/show cycle
+        produces.
+        """
         steps = 8
+        self._anim += 1
+        mine = self._anim
 
         def step(i: int) -> None:
-            if not self._visible:
+            if not self._visible or mine != self._anim:
                 return
             t = i / steps
             ease = 1 - (1 - t) ** 3
