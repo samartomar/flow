@@ -2151,3 +2151,40 @@ of its three replacements — `_run_isolated` was defined and never called, and 
 passed on the strength of the other two. The isolation looked done for a whole run.
 
 **381 tests green** (378 + 3), 29/29 self-drive checks.
+
+### 2026-07-31 — the soak said +248 MB and the soak was wrong
+
+Re-ran the long-session test before handing anything over. It reported **+248 MB drift
+over 9.5 min (+26 MB/min)** against a historical record of −3.0 and −14.3 MB. On a
+project whose R8 is "a long session costs what a short one costs", that is either a
+serious regression or a broken measurement, and it is not something to hand over as a
+guess.
+
+**It was the measurement.** The raw samples say it plainly:
+
+| min | RSS |
+|---|---|
+| 0.0 | 42.9 MB |
+| 0.5 | **513.4 MB** |
+| 3.0 | 585.2 MB |
+| 6.0 | 499.3 MB |
+| 9.5 | 556.6 MB |
+
+A **+470 MB one-off step** as both tiers load, then flat and noisy between 478 and
+597 MB with no trend at all. `soak.py` computed drift from the mean of the *first two
+samples* — one of which is the process before it has loaded a model — so every run
+since the switch to two resident tiers has been booking model loading as leakage. The
+historical −3.0 and −14.3 MB figures predate that switch, which is why nobody noticed.
+
+Measured from a warm baseline instead: **−3.6 MB over 6.5 min (−0.55 MB/min)**, with
+decode latency flat at **+3 ms (+0.3%)**. R8 holds, and the earlier numbers were
+comparable after all.
+
+`soak.py` now reports the two separately — a "cold → warm step" line for model loading,
+which is expected and happens once, and a drift line measured from `WARMUP_SEC` onward,
+which is the question R8 actually asks. Verified on a fresh run: the step and the drift
+come out as distinct lines and the drift is negative.
+
+Worth stating: a 6-minute run leaves only 2.5 minutes of warm window, and the warm
+samples span 119 MB, so the *rate* from a short run is noise. The 10-minute figure is
+the one to quote.

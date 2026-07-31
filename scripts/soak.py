@@ -27,6 +27,14 @@ from flow.asr import WhisperTranscriber  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
 from flow.session import Session  # noqa: E402
 
+#: How long the process is allowed to settle before drift is measured against it.
+#:
+#: Both tiers load lazily and the finals model only arrives once a final is wanted, so
+#: a cold-start baseline books several hundred MB of one-off model loading as leakage.
+#: Three minutes is comfortably past that on this machine and still leaves most of a
+#: ten-minute run inside the measurement.
+WARMUP_SEC = 180.0
+
 
 class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
     _fields_ = [
@@ -173,13 +181,31 @@ def main() -> None:
 
     print("\n--- result ---")
     if len(samples) >= 4:
+        # Warm-up is reported separately from drift, because they are different
+        # questions and conflating them makes the answer meaningless. Loading the
+        # second tier is a one-off cost of a few hundred MB that arrives minutes in —
+        # measuring from the cold first sample books all of it as "drift" and reports
+        # a leak that is not there. R8 asks whether a *long* session grows, so drift is
+        # measured from a warm baseline.
         head = sum(m for _t, m in samples[:2]) / 2
         tail = sum(m for _t, m in samples[-2:]) / 2
         span = (samples[-1][0] - samples[0][0]) / 60
+        warm = [(t, m) for t, m in samples if t >= WARMUP_SEC]
         print(f"RSS first samples : {head:.1f} MB")
         print(f"RSS last samples  : {tail:.1f} MB")
-        print(f"drift             : {tail - head:+.1f} MB over {span:.1f} min "
-              f"({(tail - head) / max(span, 0.1):+.2f} MB/min)")
+        print(f"cold -> warm step : {tail - head:+.1f} MB "
+              f"(model loading, expected once)")
+        if len(warm) >= 4:
+            n = max(1, len(warm) // 4)
+            wh = sum(m for _t, m in warm[:n]) / n
+            wt = sum(m for _t, m in warm[-n:]) / n
+            wspan = (warm[-1][0] - warm[0][0]) / 60
+            print(f"warm baseline     : {wh:.1f} MB at {warm[0][0] / 60:.1f} min")
+            print(f"drift (warm only) : {wt - wh:+.1f} MB over {wspan:.1f} min "
+                  f"({(wt - wh) / max(wspan, 0.1):+.2f} MB/min)")
+        else:
+            print(f"drift             : {tail - head:+.1f} MB over {span:.1f} min "
+                  f"(run longer than {WARMUP_SEC / 60:.0f} min for a warm figure)")
 
     if len(lat_windows) >= 4:
         q = max(1, len(lat_windows) // 4)
