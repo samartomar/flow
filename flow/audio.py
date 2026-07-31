@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import queue
 import threading
+from collections import deque
 
 import numpy as np
 import sounddevice as sd
@@ -30,6 +31,15 @@ BLOCK = 1024  # 64 ms at 16 kHz — fine enough for a responsive level meter (R1
 FLOOR_MIN_DB = -70.0
 FLOOR_MAX_DB = -25.0
 DIGITAL_SILENCE_DB = -80.0
+
+#: How much audio to keep from *before* the gate opened, in blocks of 64 ms.
+#:
+#: Defect 5: a gate can only open after it has heard something loud enough, so the
+#: quiet head of the word that opened it is already gone. That head is not silence —
+#: it is the unaspirated stop, the soft fricative, the approximant that carries the
+#: consonant. Deleting it turns "delete" into "leet". The cost of keeping it is
+#: bounded and tiny: four blocks of float32 at 16 kHz is 16 kB.
+PREROLL_BLOCKS = 4
 
 
 def rms_db(block: np.ndarray) -> float:
@@ -138,12 +148,16 @@ class SpeechGate:
         margin_db: float = 10.0,
         hang_ms: float = 800.0,
         floor_db: float = -55.0,
+        preroll_blocks: int = PREROLL_BLOCKS,
     ) -> None:
         self.margin_db = margin_db
         self.hang_blocks = max(1, int(hang_ms / block_ms))
         self.floor_db = floor_db
         self.speaking = False
         self._quiet_blocks = 0
+        #: The last few blocks heard while quiet, so the onset that opened the gate is
+        #: not the first thing the model gets to hear.
+        self._preroll: deque[np.ndarray] = deque(maxlen=max(0, preroll_blocks))
 
     def push(self, block: np.ndarray) -> tuple[bool, bool]:
         """Feed one block. Returns (started, stopped) edge flags."""
@@ -151,6 +165,12 @@ class SpeechGate:
         loud = level > self.floor_db + self.margin_db
 
         if not self.speaking:
+            if loud:
+                # The pre-roll now holds the blocks just before this one; the caller
+                # takes them with `take_preroll()`.
+                self.speaking = True
+                self._quiet_blocks = 0
+                return True, False
             # Track the room only while nobody is talking, otherwise speech would
             # drag the floor up and the gate would slowly go deaf.
             #
@@ -158,13 +178,10 @@ class SpeechGate:
             # floor ran away to -142 dB and the gate turned hypersensitive:
             #   - digital silence is not room noise, so it must not train the floor
             #   - the floor is bounded, so no input can make the gate deaf or paranoid
-            if not loud and level > DIGITAL_SILENCE_DB:
+            if level > DIGITAL_SILENCE_DB:
                 self.floor_db += 0.05 * (level - self.floor_db)
                 self.floor_db = min(FLOOR_MAX_DB, max(FLOOR_MIN_DB, self.floor_db))
-            if loud:
-                self.speaking = True
-                self._quiet_blocks = 0
-                return True, False
+            self._preroll.append(block)
             return False, False
 
         if loud:
@@ -177,6 +194,17 @@ class SpeechGate:
                 return False, True
         return False, False
 
+    def take_preroll(self) -> list[np.ndarray]:
+        """The quiet blocks captured just before the gate opened, oldest first.
+
+        Drained rather than read, so a second utterance cannot begin with the head of
+        the first one.
+        """
+        out = list(self._preroll)
+        self._preroll.clear()
+        return out
+
     def reset(self) -> None:
         self.speaking = False
         self._quiet_blocks = 0
+        self._preroll.clear()

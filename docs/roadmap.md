@@ -383,8 +383,28 @@ utterance never pays for `small.en` at all.
   defect caused is gone on the measured set.
 - Constrained re-decode of suspected commands, biased with the trigger lexicon + draft
   tokens via `hotwords` (~1 s, replaces the 7 s CLI escalation).
-- Post-hoc "that was a command" rescue chip; pre-roll ring buffer + gate retune
-  (defect 5 → P2).
+- Post-hoc "that was a command" rescue chip.
+- ~~Pre-roll ring buffer in the gate~~ **done 2026-07-31** (defect 5 → P2). The gate
+  keeps the last 4 blocks (256 ms) it heard while quiet and hands them back when it
+  opens, so the head of the word that opened it is not already gone. Measured with the
+  new `scripts/gate_bench.py`, which runs the production gate over 80 real clips,
+  reassembles what the session *would have captured*, and decodes that (deterministic
+  single-temperature decode, because the finals ladder's sampling noise is the same
+  size as the effect):
+
+  | condition | WER | audio kept |
+  |---|---|---|
+  | ungated (whole clip) | 0.284 | 100% |
+  | gated, no pre-roll | 0.291 | 97.4% |
+  | gated, 128 ms | 0.278 | 98.0% |
+  | gated, 256 ms | 0.282 | 98.2% |
+  | gated, 512 ms | 0.281 | 98.4% |
+
+  Gating without pre-roll deletes **2.6% of the audio** and costs ~2.5% relative WER;
+  any pre-roll from 128 ms up returns WER to the ungated level. The three settings are
+  indistinguishable at this denominator (spread 0.004 ≈ 6 edits in ~1400 reference
+  words), so 256 ms is the middle of a measured-equivalent range rather than a tuned
+  optimum. Gate retune (noise floor, hangover) remains open.
 - **Prompt polish (P5):** "make it a proper prompt" as a first-class semantic verb with
   a purpose-built CLI instruction (structure: context → constraint → ask).
 - **Terminal-safe send (P7):** bracketed paste / newline suppression per target class.

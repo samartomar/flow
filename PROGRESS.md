@@ -1251,3 +1251,57 @@ worked.
 pairs that must not, empty and vowel-only input, span selection including the
 last-occurrence rule, non-overlap in `find_spans`, and six end-to-end corrections that
 now land locally.
+
+### 2026-07-31 — Phase 3: keeping the head of the word that opened the gate
+
+Defect 5, first half. A gate can only open once it has heard something loud enough,
+which means the quiet head of the word that opened it is already behind you. That head
+is not silence — it is the unaspirated stop, the soft fricative, the approximant
+carrying the consonant — and it is exactly the part an accented utterance can least
+afford to lose.
+
+**What changed.** `SpeechGate` keeps a bounded ring of the last four blocks (256 ms)
+heard while quiet, and hands them over when it opens. `Session._pump_audio` prepends
+them to the utterance. The ring is drained on take and cleared on reset, so a second
+utterance cannot begin with the head of the first. Four blocks of float32 at 16 kHz is
+16 kB, which is the entire cost.
+
+**Measured** with the new `scripts/gate_bench.py`. It does not test the gate in
+isolation: it runs the production `SpeechGate` over 80 real clips, reassembles exactly
+what the session would have captured, and decodes *that*.
+
+| condition | WER | audio kept |
+|---|---|---|
+| ungated (whole clip) | 0.284 | 100% |
+| gated, no pre-roll | 0.291 | 97.4% |
+| gated, 128 ms | 0.278 | 98.0% |
+| gated, 256 ms | 0.282 | 98.2% |
+| gated, 512 ms | 0.281 | 98.4% |
+
+Gating without pre-roll deletes **2.6% of the audio** and costs about 2.5% relative
+WER. Any pre-roll from 128 ms up puts WER back at the ungated level — and the three
+settings cannot be told apart at this denominator: the spread is 0.004, roughly six
+edits in 1,400 reference words. So 256 ms is the middle of a range the data says is
+flat, not a tuned optimum, and it is written down that way.
+
+**A methodology note worth keeping.** The first run used the app's real finals config,
+whose temperature ladder samples — and the run-to-run noise from that is the same size
+as the effect being measured. Re-running with the decode pinned to a single temperature
+changed the ungated number by 0.002 and left the conclusion intact, but the first table
+was not evidence of anything. When the variable under test is the audio, everything
+else has to be deterministic.
+
+**The denominator, as usual.** EdAcc clips are pre-trimmed to utterance boundaries, so
+most of what this measures is the gate re-opening after a mid-utterance pause rather
+than a cold start on a soft onset. And these are energetic conversational speakers; the
+quiet speaker in a noisy room, which is where the audit expects pre-roll to matter
+most, is not in this corpus at all.
+
+**What broke.** Two tests asserted absolute captured-audio lengths, which failed
+because the capture also contains the hangover blocks — a real fact about the gate that
+the assertions were not about. They asserts the *difference* between pre-roll settings
+now, which is the thing under test and is immune to hangover changes. Also added a
+regression test for the digital-silence floor clamp, since implementing the pre-roll
+meant reordering the branch that clamp lives in.
+
+**210 tests green** (200 + 10).

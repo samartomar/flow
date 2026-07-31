@@ -344,8 +344,12 @@ class Session:
 
     def _pump_audio(self) -> None:
         for block in self.mic.drain():
-            _started, stopped = self.gate.push(block)
+            started, stopped = self.gate.push(block)
             if self.gate.speaking:
+                if started:
+                    # The gate could only open once it heard something loud, so the
+                    # quiet head of that very word is already behind us. Take it back.
+                    self._utter.extend(self.gate.take_preroll())
                 self._utter.append(block)
                 self._last_activity = time.perf_counter()
                 if self.state is not State.REFINING:
