@@ -393,7 +393,10 @@ def main() -> None:
     entries = load_manifest(pattern)
     # Distinct results files per slice, so the short-clip probe cannot quietly
     # overwrite the WER benchmark it is not comparable to.
-    stem = pattern.removeprefix("manifest-edacc").removesuffix(".jsonl")
+    # "manifest-aesrc.jsonl" -> "-aesrc". Stripping the literal "manifest-edacc"
+    # worked only while EdAcc was the only corpus, and quietly produced a results file
+    # called `results-base.enmanifest-aesrc-read.json` the first time it was not.
+    stem = "-" + pattern.removeprefix("manifest-").removesuffix(".jsonl")
     n_groups = len({e["group"] for e in entries})
     durations = sorted(e["duration"] for e in entries)
     print(f"{len(entries)} clips ({pattern}), {n_groups} groups, "

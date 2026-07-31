@@ -47,22 +47,76 @@ import time
 import urllib.parse
 import urllib.request
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 API = "https://datasets-server.huggingface.co"
-DATASET = "edinburghcstr/edacc"
-SPLIT = "validation"
 SR = 16000
 
-GROUPS = {
-    "Spanish": "spanish",
-    "Russian": "russian",
-    "Japanese": "japanese",
-    "Indian English": "indian",
-    "Mainstream US English": "us-control",
-}
+
+@dataclass(frozen=True)
+class Corpus:
+    """One accented-English source, described rather than hard-coded.
+
+    Two corpora answer two different questions and the harness should not have to
+    care which it is reading: EdAcc is *conversational* (the stress test), AESRC is
+    *read* (dictation register, which is how anyone actually dictates a prompt). The
+    gap between the same model's WER on the two is the number the roadmap has been
+    missing since Svarah turned out to be gated.
+    """
+
+    name: str
+    dataset: str
+    config: str
+    split: str
+    text_field: str
+    group_field: str
+    speaker_field: str
+    groups: dict[str, str]  # the corpus's own label -> our group slug
+
+
+EDACC = Corpus(
+    name="edacc",
+    dataset="edinburghcstr/edacc",
+    config="default",
+    split="validation",
+    text_field="text",
+    group_field="l1",
+    speaker_field="speaker",
+    groups={
+        "Spanish": "spanish",
+        "Russian": "russian",
+        "Japanese": "japanese",
+        "Indian English": "indian",
+        "Mainstream US English": "us-control",
+    },
+)
+
+#: AESRC2020, via a community re-upload. Read speech with transcripts, which is what
+#: makes it the dictation-register comparison. Two limitations worth stating at the
+#: point of use rather than in a footnote: it has **no Spanish** (Portuguese is the
+#: nearest Romance L1 and is not a substitute), and the re-upload declares **no
+#: licence**, so this is local internal eval only — the same posture the roadmap takes
+#: toward L2-ARCTIC, but less clean.
+AESRC = Corpus(
+    name="aesrc",
+    dataset="pengyizhou/accented_english",
+    config="default",
+    split="valid",  # the multi-accent split; train is ordered and mostly American
+    text_field="transcription",
+    group_field="accent",
+    speaker_field="speaker",
+    groups={
+        "INDIAN": "indian",
+        "RUSSIAN": "russian",
+        "JAPANESE": "japanese",
+        "AMERICAN": "us-control",
+    },
+)
+
+CORPORA = {c.name: c for c in (EDACC, AESRC)}
 
 #: Rows that are scoring directives or annotation noise, not speech references.
 _BAD_TEXT = ("IGNORE_TIME_SEGMENT_IN_SCORING",)
@@ -94,9 +148,9 @@ def _get(url: str, *, binary: bool = False, tries: int = 6):
     raise RuntimeError(f"GET failed after {tries} tries: {url[:120]}... ({last})")
 
 
-def _rows_page(offset: int, length: int = 100) -> dict:
+def _rows_page(corpus: Corpus, offset: int, length: int = 100) -> dict:
     q = urllib.parse.urlencode(
-        {"dataset": DATASET, "config": "default", "split": SPLIT,
+        {"dataset": corpus.dataset, "config": corpus.config, "split": corpus.split,
          "offset": offset, "length": length}
     )
     return _get(f"{API}/rows?{q}")
@@ -140,29 +194,32 @@ def _write_wav(path: Path, audio: np.ndarray) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", default="edacc", choices=sorted(CORPORA),
+                    help="edacc = conversational stress test, aesrc = read speech")
     ap.add_argument("--per-group", type=int, default=60)
     ap.add_argument("--min-sec", type=float, default=1.5)
     ap.add_argument("--max-sec", type=float, default=20.0)
     ap.add_argument("--min-words", type=int, default=2)
     ap.add_argument("--tag", default="",
-                    help="write a separate slice: edacc-<tag>/ + manifest-edacc-<tag>")
+                    help="write a separate slice: <corpus>-<tag>/ + manifest-<corpus>-<tag>")
     args = ap.parse_args()
 
+    corpus = CORPORA[args.corpus]
     suffix = f"-{args.tag}" if args.tag else ""
-    audio_dir = f"edacc{suffix}"
+    audio_dir = f"{corpus.name}{suffix}"
 
-    first = _rows_page(0, 1)
+    first = _rows_page(corpus, 0, 1)
     total = first["num_rows_total"]
-    print(f"{DATASET} {SPLIT}: {total} rows; "
+    print(f"{corpus.dataset} {corpus.split}: {total} rows; "
           f"selecting up to {args.per_group}/group, {args.min_sec}-{args.max_sec}s, "
           f"ref >= {args.min_words} words -> {audio_dir}/")
 
-    manifest = BENCH / f"manifest-edacc{suffix}.jsonl"
+    manifest = BENCH / f"manifest-{corpus.name}{suffix}.jsonl"
     BENCH.mkdir(parents=True, exist_ok=True)
 
     # Resumable: prior manifest lines and already-downloaded WAVs are reused, so
     # a rate-limit crash mid-run costs nothing but the re-paging time.
-    counts = {slug: 0 for slug in GROUPS.values()}
+    counts = {slug: 0 for slug in corpus.groups.values()}
     have: set[int] = set()
     if manifest.exists():
         with manifest.open(encoding="utf-8") as f:
@@ -179,14 +236,15 @@ def main() -> None:
     for offset in range(0, total, 100):
         if all(n >= args.per_group for n in counts.values()):
             break
-        page = _rows_page(offset)
+        page = _rows_page(corpus, offset)
         time.sleep(1.0)  # pace the metadata pages; bursts trip the rate limit
         for item in page["rows"]:
             row = item["row"]
-            slug = GROUPS.get(row.get("l1", ""))
+            slug = corpus.groups.get(str(row.get(corpus.group_field, "")).strip())
             if slug is None or counts[slug] >= args.per_group:
                 continue
-            if item["row_idx"] in have or not _usable(row.get("text", ""), args.min_words):
+            ref = row.get(corpus.text_field, "") or ""
+            if item["row_idx"] in have or not _usable(ref, args.min_words):
                 continue
             audio_refs = row.get("audio") or []
             if not audio_refs or "src" not in audio_refs[0]:
@@ -211,14 +269,14 @@ def main() -> None:
             if audio is not None:
                 _write_wav(wav, audio)
             mf.write(json.dumps({
-                "wav": str(wav.relative_to(BENCH)).replace("\\", "/"),
-                "ref": row["text"],
+                "wav": str(wav.relative_to(BENCH)).replace(chr(92), "/"),
+                "ref": ref,
                 "group": slug,
-                "dataset": "edacc",
-                "speaker": row.get("speaker", ""),
+                "dataset": corpus.name,
+                "speaker": row.get(corpus.speaker_field, ""),
                 "row_idx": item["row_idx"],
                 "duration": round(dur, 2),
-            }) + "\n")
+            }) + chr(10))
             mf.flush()
             counts[slug] += 1
             written += 1
@@ -226,7 +284,8 @@ def main() -> None:
         print(f"  rows 0-{min(offset + 100, total)}: {done}")
 
     mf.close()
-    print(f"\nmanifest has {written} clips -> {manifest}")
+    print()
+    print(f"manifest has {written} clips -> {manifest}")
     print(f"rejected: {rejected_dur} duration, {rejected_dl} download/decode")
     for slug, n in counts.items():
         if n < args.per_group:

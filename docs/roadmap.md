@@ -56,7 +56,7 @@ faster-whisper 1.2.1), final beam 2 vs library default 5, uncapped temperature f
 
 | Metric | Today | Target |
 |---|---|---|
-| Per-accent WER, every anchor group (P1) | 18.7–30.6% on EdAcc (conversational; see Phase 0 results) | **≤ 12% floor** (not average) |
+| Per-accent WER, every anchor group (P1) | **read register: 5.2–6.3% (small.en), 5.8–8.5% (base.en)** — target met, Spanish unmeasured. Conversational EdAcc: 15.1–23.4% (small.en) | **≤ 12% floor** (not average) |
 | Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% — and **every drop is now logged with its signals** | **< 1%**, every drop logged |
 | Command recognition, accented (P3) | unmeasured | **≥ 95%**; silent misroutes ≈ 0 |
 | Personal-lexicon entity accuracy (P4) | no biasing exists | **≥ 90%** |
@@ -180,6 +180,46 @@ control, decodes each with production partial parameters (`beam_size=1`,
   stage-2b "R4 gate passed: 0.75–0.91 s" number precisely. That old gate did not fail
   because it was run wrong; it failed because it was run on synthesised US English.
   Check the denominator.
+
+**Dictation-register slice (2026-07-31) — done, and it reframes the premise.**
+Svarah stayed gated, but AESRC2020 (`pengyizhou/accented_english`, a community
+re-upload) is reachable, carries transcripts and speaker IDs, and covers Indian,
+Japanese and Russian plus an American control. `fetch_accent_data.py --corpus aesrc`
+pulled 60 clips per group, 17.3 min of **read** speech. Same harness, same shipped
+decode config as the EdAcc numbers above:
+
+| group | EdAcc (conversation) | AESRC (read) | ratio |
+|---|---|---|---|
+| indian | 0.231 / 0.219 | **0.085 / 0.055** | 2.7× / 4.0× |
+| japanese | 0.281 / 0.234 | **0.059 / 0.052** | 4.8× / 4.5× |
+| russian | 0.178 / 0.151 | **0.077 / 0.063** | 2.3× / 2.4× |
+| us-control | 0.276 / 0.221 | **0.058 / 0.052** | 4.8× / 4.2× |
+
+*(base.en / small.en)*
+
+**Read register is 2.3–4.8× easier than conversation, and the accent gap nearly
+disappears in it.** Against the US control on small.en: Japanese **+0.000**, Indian
+**+0.003**, Russian **+0.011**. On base.en the gap is larger but still small — Indian
++0.027, Russian +0.019, Japanese +0.001.
+
+**P1's ≤ 12% floor is already met in the register the product actually operates in**:
+worst group 8.5% on base.en, 6.3% on small.en. The 18–31% figures that motivated the
+whole accuracy track are conversational EdAcc — a stress test, and *not* how anyone
+dictates a prompt. That does not make the Phase 1 work wasted (latency, silent
+deletion, and the command grammar were real defects on their own evidence), but it does
+mean the headline accuracy problem was largely a property of the benchmark.
+
+Four things keep this honest rather than triumphant:
+- **Spanish is absent from AESRC.** One of the four anchor groups is unmeasured in this
+  register, and it is the one EdAcc rated hardest after Japanese.
+- **AESRC is prompted studio-ish read speech**, so it is an optimistic bound just as
+  EdAcc is a pessimistic one. Real use sits between them.
+- **The re-upload declares no licence.** Local internal eval only.
+- **One real-voice sample lands at 0.203 / 0.171** (base.en / small.en) — the project
+  owner's own voice, phone, real room, 187 reference words, reading a known text. That
+  is 2.4× worse than AESRC read speech in the same register, which says the corpus
+  numbers flatter real conditions. It is a single speaker who also ad-libbed against the
+  reference, so it over-counts errors — an upper bound against an optimistic bound.
 
 **Short-clip false-reject probe (2026-07-31) — done.** The ≥ 1.5 s run showed zero
 filter drops in 900 decodes, which proved nothing about the regime the audit actually

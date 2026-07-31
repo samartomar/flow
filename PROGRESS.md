@@ -1550,3 +1550,63 @@ around them, so the user's text would arrive with visible escape sequences in it
 feature that reads as more thorough would have been the broken one.
 
 **282 tests green** (263 + 19). Phase 1, Phase 3 and P5/P6/P7 are now complete.
+
+### 2026-07-31 — The register was the problem
+
+Svarah stayed gated, so the dictation-register question sat open behind a human. It
+turned out not to need one: AESRC2020 is on the Hugging Face datasets-server as a
+community re-upload, carries transcripts and speaker IDs, and covers Indian, Japanese
+and Russian plus an American control. `fetch_accent_data.py` now describes corpora
+instead of hard-coding EdAcc — a `Corpus` dataclass carrying the dataset, split and the
+field names that differ — so `--corpus aesrc` reads it with no other change. 240 clips,
+17.3 min, nothing rejected. Japanese, which I had flagged as unverified, is present.
+
+**Same harness, same shipped decode config, read speech instead of conversation:**
+
+| group | EdAcc (conversation) | AESRC (read) | ratio |
+|---|---|---|---|
+| indian | 0.231 / 0.219 | **0.085 / 0.055** | 2.7× / 4.0× |
+| japanese | 0.281 / 0.234 | **0.059 / 0.052** | 4.8× / 4.5× |
+| russian | 0.178 / 0.151 | **0.077 / 0.063** | 2.3× / 2.4× |
+| us-control | 0.276 / 0.221 | **0.058 / 0.052** | 4.8× / 4.2× |
+
+*(base.en / small.en)*
+
+**The accent gap nearly vanishes in read register.** Against the US control on small.en:
+Japanese +0.000, Indian +0.003, Russian +0.011. **P1's ≤ 12% floor is already met** —
+worst group 8.5% on base.en, 6.3% on small.en.
+
+**What that means, stated plainly.** The 18–31% WER that motivated this entire accuracy
+track is a property of *conversational EdAcc*, not of accented speech and not of this
+product. Nobody dictates a prompt in overlapping cross-talk. The roadmap's own warning —
+"EdAcc is the stress test, model-vs-model deltas are the signal, not group-vs-group
+absolutes" — was correct and I still under-weighted it: every summary since has led with
+the absolutes.
+
+This does not retire the Phase 1 work. The R4 latency breach, the silent deletions and
+the shattering command grammar were defects on their own evidence, measured in their own
+harnesses, and none of them came from the WER number. But the headline framing —
+*accented speech is being served badly* — was substantially an artefact of the benchmark,
+and it should have been checked against a second register far earlier than iteration
+fifteen.
+
+**Four things that keep this honest:**
+
+- **Spanish is not in AESRC.** One of the four anchor groups is unmeasured in this
+  register, and EdAcc rated it second-hardest.
+- **AESRC is prompted, near-studio read speech** — an optimistic bound exactly as EdAcc
+  is a pessimistic one. Real use sits between them, and neither endpoint is the product.
+- **The re-upload declares no licence.** Local internal eval only, flagged in the code
+  at the point of use rather than in a footnote.
+- **A real voice lands 2.4× worse than the corpus.** The project owner's own recording —
+  phone, real room, 187 reference words against a known text — scores **0.203 base.en /
+  0.171 small.en**, against AESRC's 0.058–0.085 in the same read register. One speaker,
+  and they ad-libbed against the reference so it over-counts; but an upper bound sitting
+  that far above an optimistic bound is the most useful single number here.
+
+**What broke.** `accent_bench.py` derived its results filename by stripping the literal
+string `manifest-edacc`, which worked while EdAcc was the only corpus and silently
+produced `results-base.enmanifest-aesrc-read.json` the first time it was not. Fixed to
+strip `manifest-` generally.
+
+**286 tests green.**
