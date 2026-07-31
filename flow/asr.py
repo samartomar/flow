@@ -160,7 +160,11 @@ class WhisperTranscriber:
         final_model: str = FINAL_MODEL,
         compute_type: str = "int8",
         lexicon: Lexicon | None = None,
+        baseline: float | None = None,
     ) -> None:
+        #: P8: this speaker's own clean-speech `avg_logprob`, from calibration. None
+        #: keeps the shipped absolute bar. See clean.confidence_floor.
+        self.baseline = baseline
         self._names = {False: partial_model, True: final_model}
         #: The user's own words, biasing both tiers (P4). Re-read when the file
         #: changes, so a name added mid-session lands on the next utterance.
@@ -271,7 +275,7 @@ class WhisperTranscriber:
             # behind the thresholds.
             ns = getattr(s, "no_speech_prob", None)
             lp = getattr(s, "avg_logprob", None)
-            reason = invented_reason(s.text, ns, lp)
+            reason = invented_reason(s.text, ns, lp, self.baseline)
             if reason is not None:
                 with self._lock:
                     self._drops.append(Drop(s.text, reason, ns, lp, final))

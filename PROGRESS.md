@@ -1950,3 +1950,49 @@ never dictation". The audit entry is the deliverable and a human decides.
 anything anywhere (R9). The file is plain JSON the user can read and delete.
 
 **361 tests green** (339 + 22).
+
+### 2026-07-31 — the calibration measured a number nothing was reading
+
+The first real calibration run, on the machine whose microphone broke the gate:
+
+```
+room -96.5 dB, voice -39.9 dB (gap 56.6 dB), confidence -0.193
+```
+
+**The room figure is a cross-check, not just a reading.** `live_check.py` measured
+−96.7 dB from the median of quiet blocks; `calibrate.py` measured −96.5 dB from the
+widest gap in the sorted level distribution. Two independent estimators, written for
+different purposes, agreeing to 0.2 dB. That is the first time any number in this
+project has been confirmed by a second method.
+
+**And it exposed that P8 was half-done.** The confidence figure was being measured,
+stored and read by nothing at all. `clean.LOW_CONFIDENCE` was still one absolute
+constant for every speaker — which is precisely the bias the guardrail measurement had
+already documented and which the calibration exists to remove.
+
+The drop filter's second signal is now relative to the speaker:
+`min(LOW_CONFIDENCE, baseline + CONFIDENCE_MARGIN)`, with the margin at −0.5 — the
+distance between the US control's −0.29 median and the shipped −0.8, so a typical
+calibrated speaker keeps exactly the behaviour they had. Using each group's own median
+as its baseline:
+
+| group | baseline | bar | second signal agrees |
+|---|---|---|---|
+| indian | −0.27 | −0.80 | 0.0% → 0.0% |
+| japanese | −0.32 | −0.82 | 0.0% → 0.0% |
+| russian | −0.31 | −0.81 | 0.0% → 0.0% |
+| **spanish** | **−0.62** | **−1.12** | **25.0% → 2.5%** |
+| us-control | −0.29 | −0.80 | 0.0% → 0.0% |
+
+**Read that column precisely.** It is not a drop rate. The confidence rule is only
+reachable once `no_speech_prob > 0.6` has already fired, so this is how often the
+*second* signal would agree with the first — the share of ordinary Spanish-accented
+speech that, having been flagged once, had nothing standing between it and deletion but
+a threshold tuned on somebody else's voice. Ten times fewer, and nobody else moves.
+
+**`min`, deliberately: calibration can only relax the bar.** This machine's baseline is
+−0.193, which would give it −0.693 and start losing words it never used to lose. A
+feature built to remove an accent penalty must not add a new one to whoever measures
+themselves. Measuring yourself can buy leniency; it cannot cost you.
+
+**367 tests green** (361 + 6).

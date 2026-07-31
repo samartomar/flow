@@ -32,6 +32,32 @@ NO_SPEECH_MAX = 0.6
 #: A second, independent signal: poor average token confidence.
 LOW_CONFIDENCE = -0.8
 
+#: How far below a speaker's *own* clean-speech confidence counts as unconfident (P8).
+#:
+#: `avg_logprob` is not comparable between speakers, which makes a single absolute bar
+#: mean different things to different people. Measured on 200 accent clips: Spanish
+#: -0.62 median against -0.27…-0.32 for indian, japanese, russian and the US control.
+#: So -0.8 sits 0.5 below a typical speaker's baseline and only 0.18 below a
+#: Spanish-accented one — the same rule, applied far more aggressively to one accent.
+#: -0.5 is that typical distance, taken from the US control's -0.29 against the shipped
+#: -0.8, so a calibrated typical speaker keeps exactly the behaviour they had.
+CONFIDENCE_MARGIN = -0.5
+
+
+def confidence_floor(baseline: float | None) -> float:
+    """The unconfident bar for this speaker.
+
+    Deliberately `min`, so calibration can only ever *relax* the filter. A speaker
+    whose clean speech reads -0.19 would otherwise get a bar of -0.69 and start losing
+    words they never used to lose — P2 says a drop is a deletion of something the user
+    said, and a feature meant to remove an accent penalty must not add a new one to
+    whoever calibrates. Measuring yourself can buy you leniency; it cannot cost you.
+    """
+    if baseline is None:
+        return LOW_CONFIDENCE
+    return min(LOW_CONFIDENCE, baseline + CONFIDENCE_MARGIN)
+
+
 #: Only ever applied to a *whole* utterance. "Thank you" inside real dictation must
 #: survive; "Thank you." as the entire output of a silent stretch is Whisper's training
 #: data leaking through. Since 2026-07-31 this list carries more weight: it is the
@@ -149,6 +175,7 @@ def invented_reason(
     text: str,
     no_speech_prob: float | None = None,
     avg_logprob: float | None = None,
+    baseline: float | None = None,
 ) -> str | None:
     """Which rule rejects this segment, or None to keep it.
 
@@ -186,7 +213,7 @@ def invented_reason(
     # so it still dies here.
     if stripped in _FILLER_ONLY:
         return "filler"
-    if avg_logprob is not None and avg_logprob < LOW_CONFIDENCE:
+    if avg_logprob is not None and avg_logprob < confidence_floor(baseline):
         return "unconfident"
     return None
 
@@ -195,10 +222,11 @@ def is_invented(
     text: str,
     no_speech_prob: float | None = None,
     avg_logprob: float | None = None,
+    baseline: float | None = None,
 ) -> bool:
     """True if this segment looks like the model talking to itself.
 
     Requires two signals to agree, so an unusual-but-real utterance is not discarded on
     one borderline number.
     """
-    return invented_reason(text, no_speech_prob, avg_logprob) is not None
+    return invented_reason(text, no_speech_prob, avg_logprob, baseline) is not None

@@ -127,7 +127,10 @@ def main(argv: list[str] | None = None) -> int:
             speaker = None
 
     session = Session(
-        asr=WhisperTranscriber(partial_name, final_name, lexicon=lexicon),
+        asr=WhisperTranscriber(
+            partial_name, final_name, lexicon=lexicon,
+            baseline=profile.confidence if profile is not None else None,
+        ),
         device=args.device,
         speaker=speaker,
         profile=profile,

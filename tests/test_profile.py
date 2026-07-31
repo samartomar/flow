@@ -17,6 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flow import SAMPLE_RATE  # noqa: E402
 from flow.audio import BLOCK, SpeechGate  # noqa: E402
 from flow.calibrate import apply, measure  # noqa: E402
+from flow.clean import (  # noqa: E402
+    LOW_CONFIDENCE,
+    confidence_floor,
+    invented_reason,
+)
 from flow.lexicon import NUL_PATH, Lexicon  # noqa: E402
 from flow.profile import Profile  # noqa: E402
 
@@ -218,3 +223,44 @@ class TestConfidenceReading(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPerSpeakerConfidence(unittest.TestCase):
+    """P8: the drop filter's second signal, made relative to the speaker.
+
+    `avg_logprob` is not comparable between speakers, so one absolute bar means
+    different things to different people — measured, -0.8 sits 0.5 below a typical
+    speaker's baseline and only 0.18 below a Spanish-accented one.
+    """
+
+    def test_no_calibration_keeps_the_shipped_bar(self):
+        self.assertEqual(confidence_floor(None), LOW_CONFIDENCE)
+
+    def test_a_lower_baseline_relaxes_the_bar(self):
+        # The whole point: the accent that scored worst stops being filtered hardest.
+        self.assertLess(confidence_floor(-0.62), LOW_CONFIDENCE)
+
+    def test_calibration_can_never_tighten_the_bar(self):
+        # A speaker whose clean speech reads -0.19 would otherwise get -0.69 and start
+        # losing words they never used to lose. Measuring yourself buys leniency; it
+        # cannot cost you.
+        for baseline in (-0.193, -0.05, 0.0, -0.29):
+            self.assertEqual(confidence_floor(baseline), LOW_CONFIDENCE, baseline)
+
+    def test_the_filter_uses_it(self):
+        # Only reachable once no_speech_prob has already fired: one signal never drops.
+        self.assertEqual(
+            invented_reason("some real words", 0.9, -0.95), "unconfident"
+        )
+        self.assertIsNone(
+            invented_reason("some real words", 0.9, -0.95, baseline=-0.62)
+        )
+
+    def test_confident_speech_is_never_dropped_either_way(self):
+        self.assertIsNone(invented_reason("some real words", 0.2, -0.95))
+
+    def test_the_transcriber_carries_the_baseline(self):
+        from flow.asr import WhisperTranscriber
+
+        self.assertEqual(WhisperTranscriber(baseline=-0.62).baseline, -0.62)
+        self.assertIsNone(WhisperTranscriber().baseline)
