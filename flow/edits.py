@@ -32,35 +32,56 @@ _NUMS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 
-# Leading hesitation that precedes a correction: "no, change X to Y".
-_HEDGE = r"(?:no,?\s+|actually,?\s+|wait,?\s+|sorry,?\s+|i meant\s+)?"
+#: What people actually say before a correction, and it is more than hesitation.
+#: Politeness is the half that was missing: a non-native speaker asking a tool to do
+#: something reaches for "can you", "could you please" far more readily than a native
+#: speaker barking "delete that" — so the polite forms were being routed as dictation
+#: and appended into the draft verbatim. Repeatable (`*`), because "no, sorry, can you"
+#: is one utterance, not three.
+_LEAD = (
+    r"(?:(?:no|actually|wait|sorry|hang on|hold on|erm|um|uh|okay|ok|right|so|"
+    r"i mean|i meant)[,]?\s+|(?:can|could|would|will) you\s+|please\s+|"
+    r"let's\s+|lets\s+|just\s+)*"
+)
+
+#: Kept as the old name so the patterns read the same; it is now the full lead-in.
+_HEDGE = _LEAD
 
 _UNDO = re.compile(
-    r"^(?:scratch that|undo(?: that)?|never mind|nevermind|forget that|"
-    r"strike that)\b",
+    "^" + _LEAD + r"(?:scratch that|undo(?: that)?|never mind|nevermind|"
+    r"forget that|strike that)\b",
     re.I,
 )
 _REPLACE = re.compile(
-    _HEDGE + r"(?:change|replace|swap)\s+(.+?)\s+(?:to|with|for|into)\s+(.+)$", re.I
+    "^" + _LEAD + r"(?:change|replace|swap)\s+(.+?)\s+(?:to|with|for|into)\s+(.+)$",
+    re.I,
 )
 _DELETE_LAST = re.compile(
-    r"^(?:delete|remove|drop|cut)\s+(?:the\s+)?last\s+"
+    "^" + _LEAD + r"(?:delete|remove|drop|cut)\s+(?:the\s+)?last\s+"
     r"(?:(\w+)\s+)?(word|words|sentence|sentences|line|lines)$",
     re.I,
 )
-_DELETE = re.compile(_HEDGE + r"(?:delete|remove|drop|take out|cut)\s+(.+)$", re.I)
+_DELETE = re.compile(
+    "^" + _LEAD + r"(?:delete|remove|drop|take out|cut)\s+(.+)$", re.I
+)
 #: "capitalize" and "uppercase" are separated deliberately: each word means what it
 #: means. "capitalize john" -> "John", "all caps nasa" -> "NASA". Collapsing both onto
 #: upper-case turned "capitalize john" into "JOHN", which is the more jarring mistake.
-_CAPS = re.compile(r"^capitali[sz]e\s+(.+)$", re.I)
-_UPPER = re.compile(r"^(?:uppercase|all\s+caps|caps)\s+(.+)$", re.I)
-_LOWER = re.compile(r"^(?:lowercase\s+(.+)|make\s+(.+?)\s+lowercase)$", re.I)
-_BREAK = re.compile(r"^new\s+(paragraph|line)$", re.I)
-_INSERT = re.compile(r"^(?:insert|add)\s+(.+?)\s+(before|after)\s+(.+)$", re.I)
-_REPLACE_ALL = re.compile(
-    r"^replace\s+all\s+(.+?)\s+(?:with|by)\s+(.+)$", re.I
+_CAPS = re.compile("^" + _LEAD + r"capitali[sz]e\s+(.+)$", re.I)
+_UPPER = re.compile("^" + _LEAD + r"(?:uppercase|all\s+caps|caps)\s+(.+)$", re.I)
+_LOWER = re.compile(
+    "^" + _LEAD + r"(?:lowercase\s+(.+)|make\s+(.+?)\s+lowercase)$", re.I
 )
-_DELETE_RANGE = re.compile(r"^(?:delete|remove|cut)\s+from\s+(.+?)\s+to\s+(.+)$", re.I)
+_BREAK = re.compile("^" + _LEAD + r"new\s+(paragraph|line)$", re.I)
+_INSERT = re.compile(
+    "^" + _LEAD + r"(?:insert|add)\s+(.+?)\s+(before|after)\s+(.+)$", re.I
+)
+_REPLACE_ALL = re.compile(
+    "^" + _LEAD + r"replace\s+all\s+(.+?)\s+(?:with|by)\s+(.+)$", re.I
+)
+_DELETE_RANGE = re.compile(
+    "^" + _LEAD + r"(?:delete|remove|cut)\s+from\s+(.+?)\s+to\s+(.+)$", re.I
+)
 
 #: Pronouns that are not usable edit targets — "make it lowercase" is a request about
 #: the whole draft, not about the word "it", so it belongs to the CLI.
@@ -99,6 +120,160 @@ def _strip(s: str) -> str:
     return s.strip().strip(" .!?,").strip()
 
 
+#: The verbs a command can start with. Snapping only ever produces one of these.
+_COMMAND_VERBS = (
+    "change", "replace", "swap", "delete", "remove", "drop", "cut", "insert",
+    "add", "capitalize", "capitalise", "uppercase", "lowercase", "scratch",
+    "undo", "forget", "strike",
+)
+
+#: Mis-hearings too far from the intended word for edit distance to reach — the audit's
+#: own examples. "the lead" is three edits from "delete" and would never snap, but it
+#: is exactly what an accented "delete" comes back as.
+#:
+#: Every one of these is a *word people also say normally* ("stop", "at", "ad"), which
+#: is why an alias never decides anything by itself: `plan()` only accepts a snapped
+#: reading when it produces a local edit whose target is really in the draft. A wrong
+#: guess costs nothing because it is discarded, not applied.
+_ALIASES = {
+    "the lead": "delete",
+    "de lead": "delete",
+    "delete the": "delete",
+    "believe": "delete",
+    "leplace": "replace",
+    "re place": "replace",
+    "displace": "replace",
+    "stop": "swap",
+    "swab": "swap",
+    "shop": "swap",
+    "chains": "change",
+    "chain": "change",
+    "cheng": "change",
+    "in start": "insert",
+    "in sert": "insert",
+    "at": "add",
+    "ad": "add",
+    "scratched": "scratch",
+    "scratch hat": "scratch that",
+    "under that": "undo that",
+    "and do that": "undo that",
+    "cap it all eyes": "capitalize",
+    "capital eyes": "capitalize",
+    "low case": "lowercase",
+    "up a case": "uppercase",
+}
+
+#: Suffixes a model adds to a verb it half-heard: "deletes", "deleting", "deleted".
+_VERB_SUFFIXES = ("ing", "ed", "es", "s")
+
+
+def _within_one_edit(a: str, b: str) -> bool:
+    """True if `a` and `b` differ by at most one insert, delete or substitution.
+
+    Bounded on purpose rather than a general Levenshtein: the question is only ever
+    "is this the same word slightly mis-heard", and anything further away is a
+    different word that the alias table should be deciding about explicitly.
+    """
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diffs = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+        if len(diffs) <= 1:
+            return True
+        # One transposition of adjacent letters — "deleet" for "delete". Two
+        # substitutions by the strict definition, but a single slip of the ear, and
+        # common enough in ASR output to be worth its own case.
+        if len(diffs) == 2 and diffs[1] == diffs[0] + 1:
+            i, j = diffs
+            return a[i] == b[j] and a[j] == b[i]
+        return False
+    # One insertion: walk both, allowing a single skip in the longer string.
+    short, long = (a, b) if la < lb else (b, a)
+    i = j = 0
+    skipped = False
+    while i < len(short) and j < len(long):
+        if short[i] == long[j]:
+            i += 1
+            j += 1
+        elif skipped:
+            return False
+        else:
+            skipped = True
+            j += 1
+    return True
+
+
+def _snap_verb(word: str) -> str | None:
+    """The command verb this word was probably meant to be, or None.
+
+    Short words are matched exactly: at three characters or fewer, one edit reaches
+    too many unrelated words ("cut" would swallow "but", "cat", "cup").
+    """
+    low = word.lower()
+    if low in _COMMAND_VERBS:
+        return low
+    if len(low) <= 3:
+        return None
+    # Stem first, then match: "deleting" strips to "delet", which is not a verb but is
+    # one edit from one. Both halves of the mis-hearing have to be undone at once.
+    stems = [low] + [
+        low[: -len(s)] for s in _VERB_SUFFIXES if low.endswith(s) and len(low) > len(s)
+    ]
+    for stem in stems:
+        if stem in _COMMAND_VERBS:
+            return stem
+    for stem in stems:
+        if len(stem) <= 3:
+            continue
+        hit = next((v for v in _COMMAND_VERBS if _within_one_edit(stem, v)), None)
+        if hit:
+            return hit
+    return None
+
+
+#: Snapping only applies to utterances this short, counted after any lead-in.
+#:
+#: Measured: without this, suffix-stripping turned two sentence-opening gerunds into
+#: commands — "Deleting a branch does not delete the history" became a delete, and
+#: "Changing Tuesday to Wednesday broke the booking" became a replace. Both are
+#: ordinary dictation, and both are long. Spoken commands are short: every entry in
+#: the inventory is five words or fewer, so a guess about a long utterance is a guess
+#: about a sentence, and it is not worth making.
+SNAP_MAX_WORDS = 6
+
+_LEAD_ONLY = re.compile("^" + _LEAD, re.I)
+
+
+def snap(utterance: str) -> str:
+    """Rewrite a mis-heard leading verb into the verb it was meant to be.
+
+    Only the front of the utterance is touched — the target words are the user's own
+    text and must not be "corrected" into something else. Aliases are tried longest
+    first so "scratch hat" beats "scratch".
+    """
+    u = _strip(utterance)
+    # The lead-in is split off first, not just skipped for counting: "could you please
+    # deleting Tuesday" hides the verb behind three words of politeness, and snapping
+    # the *first* token would only ever look at "could".
+    m = _LEAD_ONLY.match(u)
+    lead, body = (u[: m.end()], u[m.end():]) if m else ("", u)
+    if len(body.split()) > SNAP_MAX_WORDS:
+        return u
+
+    low = body.lower()
+    for phrase in sorted(_ALIASES, key=len, reverse=True):
+        if low == phrase or low.startswith(phrase + " "):
+            return (lead + _ALIASES[phrase] + body[len(phrase):]).strip()
+    head, _, rest = body.partition(" ")
+    snapped = _snap_verb(head)
+    if snapped and snapped != head.lower():
+        return f"{lead}{snapped} {rest}".strip()
+    return u
+
+
 def plan(utterance: str, draft: str = "") -> Plan:
     """Decide what a spoken utterance means while a draft is held.
 
@@ -107,7 +282,36 @@ def plan(utterance: str, draft: str = "") -> Plan:
     the utterance distinguishes them. What distinguishes them is whether the target
     text actually exists in the draft. Requiring that is what makes a weak verb like
     "delete" safe to act on.
+
+    Two passes. The utterance is read as spoken first; only if that produces no local
+    edit is it re-read with a snapped verb (`snap()`), and that reading is accepted
+    **only when it yields a local edit whose target is really in the draft**. So a
+    guess can promote a mis-heard command to the thing the user meant, and can never
+    demote ordinary dictation into an edit — "stop" only becomes "swap" when the words
+    after it are genuinely in the draft, which is the same evidence the exact grammar
+    already demands.
     """
+    exact = _plan_exact(utterance, draft)
+    if exact.kind == "local":
+        return exact
+    snapped = snap(utterance)
+    if snapped.lower() != _strip(utterance).lower():
+        fuzzy = _plan_exact(snapped, draft)
+        if fuzzy.kind == "local":
+            return fuzzy
+        # Undo has no target to verify, so it is promoted only from the alias table,
+        # never from an edit-distance guess: a spurious undo throws away real work.
+        if fuzzy.kind == "undo" and exact.kind != "undo" and _is_alias(utterance):
+            return fuzzy
+    return exact
+
+
+def _is_alias(utterance: str) -> bool:
+    low = _strip(utterance).lower()
+    return any(low == p or low.startswith(p + " ") for p in _ALIASES)
+
+
+def _plan_exact(utterance: str, draft: str = "") -> Plan:
     u = _strip(utterance)
     if not u:
         return Plan("append")
@@ -211,7 +415,12 @@ def apply_local(text: str, p: Plan) -> tuple[str, bool]:
         return joined.strip(), True
 
     if p.op == "replace_all":
-        out = re.sub(re.escape(p.target), p.payload, text, flags=re.I)
+        # The replacement is a *function*, not a template: as a string, `re.sub`
+        # reads backslashes in it as group references, so dictating a Windows path
+        # or a regex ("replace all foo with \1") either raises or silently splices
+        # in a captured group. The target was already escaped; the payload is the
+        # user's literal words and must stay literal.
+        out = re.sub(re.escape(p.target), lambda _m: p.payload, text, flags=re.I)
         return _tidy(out), out != text
 
     if p.op == "delete_range":

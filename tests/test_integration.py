@@ -15,7 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
-from flow.session import Session, State  # noqa: E402
+from flow.session import FORCE_NEXT_TTL_SEC, Session, State  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 QUIET = np.zeros(BLOCK, dtype=np.float32)
@@ -156,6 +156,61 @@ class TestRouterAndUndoTogether(unittest.TestCase):
         mic.utterance()
         s.wait_idle(timeout=5.0)
         self.assertEqual(s.draft.text, "Meeting on.")
+        s.close()
+
+
+class TestForceNextIsNotSticky(unittest.TestCase):
+    """The chip means "the next thing I say", and it used to mean "some later thing"."""
+
+    def test_a_chip_pressed_with_no_draft_does_not_survive(self):
+        # Press Refine, then speak while no draft is held. That utterance starts a
+        # fresh draft — and the override used to sit there, unconsumed, until it
+        # silently sent an ordinary later sentence to the CLI.
+        mic = ScriptedMic()
+        s = Session(asr=ScriptedAsr(["first thought", "second thought"]), mic=mic)
+        s.start()
+        s.force_next = "edit"
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+        self.assertEqual(s.draft.text, "first thought")
+        self.assertIsNone(s.force_next, "the override outlived its utterance")
+
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+        self.assertEqual(s.state, State.DRAFT)
+        self.assertEqual(s.draft.text, "first thought second thought")
+        s.close()
+
+    def test_a_stale_chip_expires_rather_than_firing_late(self):
+        mic = ScriptedMic()
+        s = Session(asr=ScriptedAsr(["hello there", "an ordinary sentence"]), mic=mic)
+        s.start()
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+
+        s.force_next = "edit"
+        s._force_next_at -= FORCE_NEXT_TTL_SEC + 1  # pressed a minute ago
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+
+        self.assertEqual(s.draft.text, "hello there an ordinary sentence")
+        self.assertTrue(
+            any("expired" in e.text for e in s.events() if e.kind == "note"),
+            "an expiring override should say so rather than vanish",
+        )
+        s.close()
+
+    def test_a_fresh_chip_still_works(self):
+        mic = ScriptedMic()
+        s = Session(asr=ScriptedAsr(["hello there", "delete hello"]), mic=mic)
+        s.start()
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+        s.force_next = "append"
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+        # Forced append, so the edit-shaped utterance is dictation.
+        self.assertEqual(s.draft.text, "hello there delete hello")
         s.close()
 
 

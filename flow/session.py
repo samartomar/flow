@@ -39,6 +39,10 @@ IDLE_UNLOAD_SEC = 300.0
 #: How often to check that the input device is still alive.
 MIC_CHECK_SEC = 5.0
 
+#: How long a Refine/Continue chip stays armed. The chip means "the next thing I say",
+#: and after this long the next thing someone says is a different thought.
+FORCE_NEXT_TTL_SEC = 30.0
+
 
 class State(str, Enum):
     IDLE = "idle"  # not capturing
@@ -215,7 +219,8 @@ class Session:
         #: Explicit override for the next utterance's routing, set by the UI chips.
         #: The heuristic in edits.py is the default; this is the escape hatch for when
         #: it guesses wrong, per the "heuristic + explicit override" design in §4.
-        self.force_next: str | None = None  # "append" | "edit" | None
+        self._force_next: str | None = None  # "append" | "edit" | None
+        self._force_next_at = 0.0
         self._last_activity = time.perf_counter()
         self._last_mic_check = time.perf_counter()
         self._mic_started = False
@@ -391,12 +396,18 @@ class Session:
 
     def _route(self, utterance: str) -> None:
         """Decide what a completed utterance means, given whether a draft is held."""
+        # Consumed here, before any early return, and expired by age. The chip is
+        # pressed *for the utterance the user is about to say*; leaving it set when
+        # that utterance takes another path meant it silently applied to a later,
+        # unrelated one — the user pressed Refine, said something that started a fresh
+        # draft, and then a minute later had an ordinary sentence routed to the CLI.
+        forced = self._take_force_next()
+
         if not self.draft.text:
             self.draft.append(utterance)
             self._after_draft_change()
             return
 
-        forced, self.force_next = self.force_next, None
         if forced == "append":
             self.draft.append(utterance)
             self._after_draft_change()
@@ -428,6 +439,29 @@ class Session:
             return
 
         self._after_draft_change()
+
+    @property
+    def force_next(self) -> str | None:
+        """Explicit routing override for the next utterance ("append" | "edit").
+
+        A property so that *assigning* it stamps the time — the UI, the tests and the
+        probes all set it directly, and a TTL that depended on each caller remembering
+        to record a timestamp would be a TTL that quietly did not apply.
+        """
+        return self._force_next
+
+    @force_next.setter
+    def force_next(self, mode: str | None) -> None:
+        self._force_next = mode
+        self._force_next_at = time.perf_counter()
+
+    def _take_force_next(self) -> str | None:
+        """Consume the override, or drop it if it has gone stale."""
+        forced, self._force_next = self._force_next, None
+        if forced and time.perf_counter() - self._force_next_at > FORCE_NEXT_TTL_SEC:
+            self._emit("note", f"{forced} expired - treating this as normal speech")
+            return None
+        return forced
 
     def _after_draft_change(self) -> None:
         self._set_state(State.DRAFT if self.draft.text else State.IDLE)

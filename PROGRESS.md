@@ -1122,3 +1122,77 @@ the failure mode this project keeps rediscovering.
 
 **161 tests green** (142 + 19: parsing, the cap, hot reload, a deleted file, undecodable
 bytes, the disable path, and that both tiers actually receive the string).
+
+### 2026-07-31 — Phase 1: the command grammar stops shattering (defect 4, first half)
+
+Five fixes in one item, because they are one failure: a command that is heard slightly
+wrong is silently appended into the user's text as dictation.
+
+**Politeness on every pattern.** The lead-in was hesitation only ("no", "actually") and
+only on two patterns. It is now a repeatable prefix on all of them and includes the
+half that was missing — "can you", "could you please", "would you", "just". A speaker
+who asks a tool politely was having their request typed into the draft verbatim, and
+politeness is exactly what a non-native speaker reaches for.
+
+**Verb snapping**, three mechanisms because one is not enough: edit distance ≤ 1,
+adjacent transposition ("deleet" → "delete", two substitutions by the strict definition
+but a single slip of the ear), suffix stripping *then* fuzzy matching ("deleting" →
+"delet" → "delete"), and an explicit alias table for the mis-hearings too far away for
+any distance metric — "the lead" is three edits from "delete".
+
+**The safety property that makes aliases acceptable**: a snapped reading is accepted
+**only when it produces a local edit whose target is really in the draft**. So snapping
+can promote a mis-heard command to what the user meant, and can never demote dictation
+into an edit. "stop" only becomes "swap" when the words after it are in the draft.
+
+**`re.escape` on the replacement.** `replace_all` passed the payload to `re.sub` as a
+template, so a dictated `\1` or a Windows path was read as a group reference — either
+an exception or a silent splice of captured text. It substitutes through a function now.
+
+**Stale force-next.** The Refine/Continue chip was consumed only when a draft was held.
+Press Refine, say something that starts a fresh draft, and the override sat there until
+it silently routed an unrelated later sentence to the CLI. It is now consumed on every
+routed utterance and expires after 30 s, announced when it does. `force_next` became a
+property so that *assigning* it stamps the time — the UI, the tests and the probes all
+set it directly, and a TTL depending on each caller to remember a timestamp is a TTL
+that does not apply.
+
+**Measured** with the new `scripts/command_bench.py`:
+
+| corruption (synthetic) | n | patterns only | + snapping |
+|---|---|---|---|
+| clean | 14 | 100% | 100% |
+| politeness lead-in | 112 | 100% | 100% |
+| verb suffix | 14 | 0% | **100%** |
+| one substituted letter | 14 | 14% | **100%** |
+| adjacent transposition | 14 | 14% | **100%** |
+| known mis-hearing | 12 | 0% | **100%** |
+
+The corruptions are synthetic and labelled as such throughout — they are the failure
+classes the audit named, not recordings of accented speakers, which is still deferred.
+The politeness row reads 100% in both columns because the lead-in now lives in the
+patterns themselves; its gain is against the *previous* grammar, not against the column
+beside it.
+
+**And what it costs, which is the number that matters:** nothing. On 20 adversarial
+sentences that start like commands, with drafts deliberately full of their own words,
+snapping adds **no** misroutes — 4 of 20 either way, all four being the exact grammar's
+own shape heuristic, which is undoable by design. On 580 real EdAcc utterances: 0
+misroutes both ways.
+
+**Check the denominator on that last one.** `snap()` alters exactly **one** of those 580
+real utterances, so the corpus mostly cannot fail this test. That is why the adversarial
+set exists, and it is the set that found the actual defect below.
+
+**What broke.** The first version of snapping cost precision: suffix stripping turned
+two sentence-opening gerunds into commands — "Deleting a branch does not delete the
+history" became a delete, "Changing Tuesday to Wednesday broke the booking" became a
+replace. Both are dictation; both are long. Every command in the inventory is five words
+or fewer, so snapping now applies only to utterances of six words or fewer, counted
+*after* the lead-in. That guard then exposed a second bug: `snap()` was reading the
+first token of the whole utterance, so "could you please deleting Tuesday" only ever saw
+"could". The lead-in is split off and re-attached now. Both are pinned as tests, and the
+harness reports 4/20 either way again.
+
+**180 tests green** (178 + 2). Two of the three bugs in this entry were found by the
+harness rather than by the tests, which is the argument for building the harness first.

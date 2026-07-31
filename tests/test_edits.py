@@ -164,5 +164,126 @@ class TestApply(unittest.TestCase):
         self.assertEqual(out, "First part.\n\n")
 
 
+HARD = "Meeting on Tuesday with Sameer about the release."
+
+
+class TestPoliteAndHedgedCommands(unittest.TestCase):
+    """The lead-in a non-native speaker actually uses, on every pattern.
+
+    Politeness was the missing half: "can you delete Tuesday" was routed as dictation
+    and appended into the draft verbatim.
+    """
+
+    def test_politeness_on_each_pattern(self):
+        cases = [
+            ("can you change Tuesday to Wednesday", "replace"),
+            ("could you please delete Tuesday", "delete"),
+            ("please capitalize sameer", "capitalize"),
+            ("would you replace all Tuesday with Friday", "replace_all"),
+            ("can you insert urgent before release", "insert_before"),
+            ("please delete the last word", "delete_last"),
+            ("could you lowercase Sameer", "lower"),
+        ]
+        for utterance, op in cases:
+            with self.subTest(utterance=utterance):
+                p = plan(utterance, HARD)
+                self.assertEqual(p.kind, "local", f"{utterance!r} -> {p.kind}")
+                self.assertEqual(p.op, op)
+
+    def test_stacked_hedges(self):
+        # "no, sorry, can you ..." is one utterance, not three.
+        p = plan("no, sorry, can you delete Tuesday", HARD)
+        self.assertEqual((p.kind, p.op), ("local", "delete"))
+
+    def test_polite_undo(self):
+        self.assertEqual(plan("okay, scratch that", HARD).kind, "undo")
+
+    def test_politeness_does_not_invent_commands(self):
+        # No verb, so it is still ordinary dictation.
+        self.assertEqual(plan("can you believe the release date", HARD).kind, "append")
+
+
+class TestVerbSnapping(unittest.TestCase):
+    """Mis-heard trigger verbs, which is defect 4's first half."""
+
+    def test_fuzzy_verb_within_one_edit(self):
+        for utterance in ("delet Tuesday", "deleet Tuesday", "remov Tuesday"):
+            with self.subTest(utterance=utterance):
+                p = plan(utterance, HARD)
+                self.assertEqual((p.kind, p.op), ("local", "delete"))
+
+    def test_verb_suffixes_are_stripped(self):
+        p = plan("deleting Tuesday", HARD)
+        self.assertEqual((p.kind, p.op), ("local", "delete"))
+
+    def test_alias_table_reaches_what_distance_cannot(self):
+        # "the lead" is three edits from "delete" and would never snap by distance.
+        p = plan("the lead Tuesday", HARD)
+        self.assertEqual((p.kind, p.op), ("local", "delete"))
+        p = plan("stop Tuesday with Friday", HARD)
+        self.assertEqual((p.kind, p.op), ("local", "replace"))
+
+    def test_snapping_only_promotes_when_the_target_is_real(self):
+        # The safety property. "stop" is an ordinary word; it may only become "swap"
+        # when the words after it are genuinely in the draft.
+        self.assertEqual(plan("stop the build and go home", HARD).kind, "append")
+        self.assertEqual(plan("the lead is buried", HARD).kind, "append")
+        self.assertEqual(plan("at the conference", HARD).kind, "append")
+
+    def test_snapping_never_overrides_a_good_exact_reading(self):
+        # "add urgent before release" parses exactly; snapping must not touch it.
+        p = plan("add urgent before release", HARD)
+        self.assertEqual((p.kind, p.op), ("local", "insert_before"))
+
+    def test_undo_is_promoted_only_from_the_alias_table(self):
+        # A spurious undo throws away real work, so edit distance is not enough.
+        self.assertEqual(plan("scratch hat", HARD).kind, "undo")
+        self.assertEqual(plan("scratch mat", HARD).kind, "append")
+
+    def test_long_utterances_are_never_snapped(self):
+        # Found by scripts/command_bench.py: without a length guard, suffix stripping
+        # turned two sentence-opening gerunds into commands. Both are dictation, and
+        # both are long — every command in the inventory is five words or fewer.
+        text = "deleting a branch does not delete the history"
+        self.assertEqual(plan("Deleting a branch does not delete the history.", text).kind,
+                         "append")
+        text2 = "changing Tuesday to Wednesday broke the booking"
+        self.assertEqual(plan("Changing Tuesday to Wednesday broke the booking.", text2).kind,
+                         "append")
+
+    def test_the_guard_measures_length_after_the_lead_in(self):
+        # "could you please" is politeness, not content, so it must not push a real
+        # command over the limit.
+        p = plan("could you please deleting Tuesday", HARD)
+        self.assertEqual((p.kind, p.op), ("local", "delete"))
+
+    def test_short_words_are_matched_exactly(self):
+        # At three characters one edit reaches too far: "but" must not become "cut".
+        self.assertEqual(plan("but Tuesday", HARD).kind, "append")
+        self.assertEqual(plan("cup Tuesday", HARD).kind, "append")
+
+
+class TestReplaceAllPayloadIsLiteral(unittest.TestCase):
+    """The payload is the user's words, not a regex template."""
+
+    def test_backreference_in_the_payload_is_not_expanded(self):
+        text = "the foo and the foo again"
+        out, ok = apply_local(text, plan(r"replace all foo with \1", text))
+        self.assertTrue(ok)
+        self.assertEqual(out, r"the \1 and the \1 again")
+
+    def test_windows_path_payload_survives(self):
+        text = "save it to the temp folder"
+        out, ok = apply_local(text, plan(r"replace all temp with C:\news\temp", text))
+        self.assertTrue(ok)
+        self.assertIn(r"C:\news\temp", out)
+
+    def test_target_with_regex_characters_is_matched_literally(self):
+        text = "the rate is 5.5 percent"
+        out, ok = apply_local(text, plan("replace all 5.5 with 6.0", text))
+        self.assertTrue(ok)
+        self.assertEqual(out, "the rate is 6.0 percent")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -294,9 +294,34 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
   file therefore does not exist until the user creates it, and creating it *is* the
   opt-in. Phase 3's constrained re-decode is the targeted fix: bias only when the first
   pass produced something phonetically near a term, so the cost is paid where it pays.
-- Grammar hardening: politeness/hedge prefixes on all patterns, fuzzy verb-snapping
-  (edit distance ≤ 1 + suffix stripping), alias table, `re.escape` fix, stale
-  force-next fix (defect 4, first half → P3).
+- ~~Grammar hardening: politeness/hedge prefixes on all patterns, fuzzy verb-snapping,
+  alias table, `re.escape` fix, stale force-next fix~~ **done 2026-07-31.** Every
+  pattern takes a repeatable lead-in (politeness was the missing half — "can you delete
+  Tuesday" was being appended as dictation). A mis-heard verb is snapped by edit
+  distance, adjacent transposition, suffix stripping, or an explicit alias table; the
+  snapped reading is accepted **only if it produces a local edit whose target is really
+  in the draft**, so a guess can promote a mis-heard command and can never demote
+  dictation. `replace_all` substitutes through a function, so a dictated `` or a
+  Windows path stays literal. The Refine/Continue override is consumed on every routed
+  utterance and expires after 30 s.
+
+  Measured with the new `scripts/command_bench.py`:
+
+  | corruption (synthetic) | n | patterns only | + snapping |
+  |---|---|---|---|
+  | clean | 14 | 100% | 100% |
+  | politeness lead-in | 112 | 100% | 100% |
+  | verb suffix ("deleting") | 14 | 0% | **100%** |
+  | one substituted letter | 14 | 14% | **100%** |
+  | adjacent transposition | 14 | 14% | **100%** |
+  | known mis-hearing ("the lead") | 12 | 0% | **100%** |
+
+  and the precision it costs: **zero**. On 20 adversarial sentences that *start* like
+  commands with drafts full of their own words, snapping adds no misroutes (4 of 20
+  either way — all four are the exact grammar's own shape heuristic, undoable by
+  design). On 580 real EdAcc utterances, 0 misroutes both ways — though `snap()` alters
+  only one of those 580, so that column bounds the risk on conversational dictation
+  rather than proving much.
 - Code-switch guardrail: low-confidence utterances cannot trigger destructive edits.
 
 ### Phase 2 — Model decision (accuracy track, from Phase 0 data) — **shipped 2026-07-31**
