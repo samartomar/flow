@@ -205,6 +205,10 @@ microphone.
 
 ## Design notes
 
+[docs/product.md](docs/product.md) defines what Flow is for — the target user
+(developers speaking accented English), the P1-P9 product requirements, and the
+non-goals. [docs/roadmap.md](docs/roadmap.md) maps the gap between that definition
+and this build, with the accent benchmark that measures it.
 [docs/analysis.md](docs/analysis.md) has the requirements breakdown, the four
 architectures considered, and the ranked risks with measurements.
 [PROGRESS.md](PROGRESS.md) is the build log, including the things that broke.
