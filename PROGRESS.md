@@ -1,0 +1,724 @@
+# Flow — build progress & budget
+
+Loop state file. Each `/loop` iteration reads this first, does one stage, then
+appends its own log entry. Spec lives in [docs/analysis.md](docs/analysis.md).
+
+## Budget (R17 — hard cap 5 hr)
+
+| | |
+|---|---|
+| Started | 2026-07-30 00:05 local |
+| **Hard stop** | **2026-07-30 05:05 local** |
+| Cadence | every 30 min (cron `7,37 * * * *`, job `2b8f8e45`) |
+| Working iterations | 10 |
+
+At the 05:05 mark the loop stops regardless of state, `CronDelete 2b8f8e45` runs,
+and a final honest report lands here — including whatever is unfinished.
+
+## Decisions locked in iteration 1
+
+- **Stack**: Python 3.12 via `uv` + `faster-whisper` (`base.en`, int8, CPU) + `tkinter`.
+  GUI, hotkeys and text injection all come from **stdlib** — that is where min-deps is won.
+- **Interpreter is pinned**: bare `python` on this machine is 3.5. Never invoke it.
+- **Refine routing**: local heuristic (correction-verb prefix) decides edit-vs-append.
+  No CLI call on the append path.
+- **CLI**: `codex exec` preferred, `claude -p` fallback, behind one adapter. Stateless,
+  capped input, hard timeout. Never sees audio.
+- **ASR engine sits behind a ~30-line interface** so whisper.cpp (Option B) can be
+  swapped in if faster-whisper proves heavy.
+
+## Stages
+
+| # | Stage | Status | Gate to pass |
+|---|---|---|---|
+| 1 | Analysis, architecture decision, scaffold | **done** | Requirements table + option trade-off written |
+| 2a | Measure CLI refine latency | **done** | Numbers in hand: ~7 s both CLIs |
+| 2b | Measure ASR latency + footprint | **done** | R4 gate passed: 0.75–0.91 s decode |
+| 3 | Audio capture + gate + utterance cut + re-decode partials (headless) | **done** | R4 shown live; draft holds on stop |
+| 4 | State machine + threaded decode + draft buffer + router | **done** | Held draft, append/correct/undo/send all tested (R5, R7) |
+| 5a | **Local edit ops** — the fast path for literal corrections | **done** | Corrections apply in microseconds, no CLI (R6, R11) |
+| 5b | CLI adapter for semantic rewrites only + guards | **done** | Verified live: 5.7 s via codex, no key, non-destructive |
+| 6 | Pill window + waveform + state colours | **done** | Screenshotted and inspected (R12, R13) |
+| 7 | Draft bubble + float-up + Refine/Continue/Send chips | **done** | Screenshotted and inspected (R14, R15) |
+| 8 | Global hotkeys + clipboard/`SendInput` injection | **done** | Clipboard round-trips; 3 hotkeys registered |
+| 9 | Long-run hardening: caps, device recovery, idle model unload | **done** | 11 min: RSS −14 MB, p50 decode flat (R8) |
+| 10 | README, entry point, final report | **done** | Real entry point launched and captured |
+
+Stages 6–10 are deliberately behind the stage-2..5 gates — the idea says "once
+proven", and the six proof criteria are in §7 of the analysis.
+
+## Log
+
+### Iteration 1 — 2026-07-30 00:05
+Probed the machine: `codex` and `claude` both installed and authenticated
+(so R9 "no api key" is satisfiable with zero key handling on our side); `uv 0.12`
+and Python 3.12.10 present; `cargo` present; **no** `ffmpeg`, `ollama`, or `dotnet`
+— which kills ffmpeg-based capture and any local-LLM refine path. Found bare
+`python` resolves to **3.5**, a live trap for every later stage.
+
+Wrote the requirements decomposition (R1–R17 + non-goals), compared four
+architectures, and chose Python+`uv`+faster-whisper+tkinter on the grounds that
+stdlib covers GUI/hotkey/injection, so the dep tree stays at three declared packages.
+
+Named the one design problem the idea doesn't resolve: in the draft state, speech is
+ambiguous between "append more" (R7) and "correct this" (R6). Chose a local
+correction-verb heuristic over an LLM classifier specifically to keep the CLI out of
+the hot path per R11.
+
+Flagged **Risk 1 as concept-invalidating**: if `codex exec` cold start is 1–3 s, the
+talk-to-refine loop does not feel like a refine loop. Then measured it rather than
+deferring, because it changes the architecture rather than just an implementation detail.
+
+**Measured (stage 2a) — Risk 1 is CONFIRMED and worse than estimated:**
+
+| CLI | Wall clock | Exit | Notes |
+|---|---|---|---|
+| `codex exec --skip-git-repo-check` | **7.26 s** | 0 | Correct edit. Prints a banner, echoes the prompt, then emits the answer **twice** before `tokens used`. **19,670 tokens** consumed for a 10-word typo fix |
+| `claude -p` | **6.72 s** | 0 | Correct edit, cleaner stdout, but the model volunteered an extra sentence of commentary; also warns the workspace is untrusted |
+
+Three consequences, all design-level:
+
+1. **~7 s is the floor, not the cold-start penalty.** It is process boot + auth +
+   a full agent system prompt. No prompt tuning on our side removes it. So the CLI
+   cannot sit on the correction path at all — a spoken "fix that typo" that takes
+   7 s is worse than fixing it by hand, which defeats the product.
+2. **19.7 k tokens for a typo fix is precisely the "heavy lifting" R11 warns against**,
+   and it is inherent to agent CLIs rather than something our prompt caused.
+3. Both CLIs polluted their output — a banner and a duplicated answer from `codex`,
+   unrequested commentary from `claude`. Output sanitising is mandatory, not defensive
+   politeness.
+
+**Plan revised in response.** Stage 5 splits: literal corrections
+("change X to Y", "replace X with Y", "delete X", "capitalise X") become **local
+string operations** — instant, zero deps, and they cover the large majority of real
+dictation corrections. The CLI is reserved for genuinely semantic rewrites
+("make it more formal", "shorten this", "turn it into bullets"), where a 7 s wait is
+acceptable because the user asked for a rewrite rather than a fix, and where the
+pill's blue "refining" state makes the wait legible instead of feeling like a hang.
+
+This is a better fit for R11 than the original design, and it came from measuring
+first. Next iteration: stage 2b, the ASR half of the spike — the remaining
+unmeasured concept risk.
+
+### Iteration 2 — 2026-07-30 00:11 — stage 2b, ASR spike
+
+`uv sync` installed in **6.3 s**; 3 declared deps resolve to **28 packages**.
+Benchmark script: [scripts/asr_bench.py](scripts/asr_bench.py), driven by SAPI-synthesised
+WAVs so latency is repeatable without a person at a microphone.
+
+**R4 gate — PASSED, with a finding that simplifies stage 3 substantially:**
+
+| Audio prefix | Decode | RTF |
+|---|---|---|
+| 1 s | 0.75 s | 0.75 |
+| 2 s | 0.79 s | 0.39 |
+| 3 s | 0.81 s | 0.27 |
+| 5 s | 0.86 s | 0.17 |
+| 8 s | 0.91 s | 0.11 |
+
+**Decode time is nearly flat in audio length** — 1 s of audio costs 0.75 s, 8 s costs
+0.91 s. Whisper pads every input to a fixed 30 s mel window, so the cost is dominated
+by fixed overhead, not by how much has been said. Three consequences:
+
+1. **No incremental-decoder state machine is needed.** Re-decoding the entire growing
+   utterance on every refresh costs about the same as decoding one second of it. Stage 3
+   collapses to "keep appending to a buffer, re-decode it, replace the partial" — which
+   is far less code than the streaming design originally sketched.
+2. **There is a hard ~0.8 s floor per decode**, so partials refresh at roughly 1.2 Hz.
+   Text will appear in ~1 s bursts, not word-by-word as Wispr Flow appears to do. This
+   satisfies R4 as written but is an honest gap against the reference product.
+3. **The flat behaviour ends at 30 s.** Past one mel window the cost climbs, so R8
+   requires cutting utterances before ~25 s and committing them to the immutable prefix.
+   That is now a measured constraint rather than a guess.
+
+**Accuracy: WER 0.000 on all three clips — but this number is not trustworthy yet.**
+SAPI speech is clean, evenly paced and close to Whisper's training distribution. It
+proves the pipeline is wired correctly and that `base.en` handles this vocabulary; it
+says little about real microphone conditions. Real-speech WER remains **unmeasured**
+and needs the user at a mic. `base.en` stays the default; `small.en` is a one-line change.
+
+**Footprint (R3, R16):**
+
+| | |
+|---|---|
+| Cold start | **~1.4 s** (0.40 s import + 0.98 s model load, warm cache) |
+| `.venv` | 243.4 MB |
+| Model (`base.en` int8) | 141.0 MB |
+| **Total** | **~384 MB** |
+
+384 MB is defensible for local ASR but is not "super light" in the strictest reading of
+R16. The single biggest waste is `av` (26 MB wheel), a hard dependency of
+faster-whisper used only for decoding audio *files* — our path feeds numpy arrays
+straight from sounddevice, so `av` is imported and then does nothing. It cannot be
+dropped without leaving faster-whisper, which is exactly what Option B (whisper.cpp)
+would buy: roughly 100 MB back, at the cost of sourcing and verifying a Windows binary.
+**Not taking that trade** — 384 MB works today and the 5 hr cap is better spent proving
+the refine loop. Recorded as the known lever if footprint later matters more.
+
+### Iteration 2 (cont.) — 2026-07-30 00:16 — stage 3, capture + live partials
+
+Continued instead of idling to the next fire, since the 5 hr cap is wall-clock and idle
+time is spent budget.
+
+Confirmed a usable mic (OBSBOT Tiny 3 Lite, default index 1, natively 44.1 kHz stereo —
+`sounddevice` is asked for 16 kHz mono directly so the driver resamples and we ship no
+resampler). Wrote [flow/audio.py](flow/audio.py) (`Mic`, `SpeechGate`),
+[flow/asr.py](flow/asr.py) (`WhisperTranscriber` behind a two-method interface) and
+[scripts/listen.py](scripts/listen.py), which runs the identical code path from either the
+mic or a WAV.
+
+**Chose an RMS gate over Silero VAD.** Silero means carrying `onnxruntime` to answer a
+question this only needs answered coarsely — "has the talking stopped?" — where being
+200 ms late is invisible because the draft is held rather than sent (R5). Twenty lines
+of stdlib maths instead of a 13 MB dependency.
+
+**R4 demonstrated live** (real-time-paced replay). Partials build as speech continues:
+
+```
+…I need to send an email.                                          (0.74s)
+…I need to send an email to the team about the quarterly review.   (0.84s)
+…scheduled for next Tuesday afternoon, and please remind everyone  (0.97s)
+[draft] I need to send an email to the team about the quarterly review meeting
+        scheduled for next Tuesday afternoon, and please remind everyone to
+        bring their updated figures.
+```
+
+Final draft was word-perfect and, per R5, was held rather than sent.
+
+**Three defects, all found by running it rather than by reading it:**
+
+1. **Noise floor ran away to −142 dB.** The padded silence is exact zeros, so
+   `rms_db` returns ≈ −180 dB and the floor tracker chased it; the gate's threshold
+   then sat below any conceivable signal and everything read as speech. Fixed by
+   bounding the floor to [−70, −25] dB and refusing to train it on digital silence
+   (that is a dead stream, not room noise). Floor now settles at a sane −54.7 dB.
+2. **The first run did zero partial decodes and I nearly recorded a pass on it.**
+   Replaying the WAV as fast as the disk allowed compressed 10 s of audio into under a
+   second, so the 0.9 s partial timer never elapsed — the entire live-partial path was
+   untested while the output looked correct. Replay is now paced to real time.
+3. **Decode blocks the capture loop** — the actual architectural finding. 42 decodes
+   ran for 11.4 s of audio, and the tail shows the same completed sentence re-decoded
+   ~15 times. Because decode is synchronous, wall time becomes
+   `audio + Σ decode`, so in a live session partial latency would drift further and
+   further behind speech. **Stage 4 must move decode onto a worker thread that always
+   decodes the newest snapshot and discards stale requests.** Not patched here — it is
+   the state machine's job, and the harness proved the point.
+
+Cosmetic, worth knowing: partials sometimes contain hallucinated fragments
+(`bring // // //`) on mid-word boundaries. Harmless since partials get replaced, but the
+UI should render them dimmed so "not final yet" is visible.
+
+Still unmeasured: **real-microphone accuracy** (risk 2). Every WER number so far comes
+from synthesised speech and is optimistic. To settle it, run:
+
+    uv run python scripts/listen.py
+
+### Iteration 3 — 2026-07-30 00:40 — stages 4, 5a, 5b
+
+Wrote [flow/session.py](flow/session.py) (state machine, `DecodeWorker`, `Draft`),
+[flow/edits.py](flow/edits.py) (router + local ops), [flow/refine.py](flow/refine.py)
+(CLI adapter), and 23 tests across [tests/](tests). Whole suite runs in 0.7 s with no
+microphone, no model and no subprocess.
+
+**Defect 3 fixed.** `DecodeWorker` is one thread where partials are *latest-wins* — a
+new snapshot replaces the pending one — while finals go through a FIFO that is never
+dropped, because losing a final would lose the user's words. `Session` additionally
+only requests a partial when the worker is idle, so speech outrunning the decoder skips
+intermediate states instead of building a backlog.
+
+**A correction to iteration 2's finding on CLI output.** I reported that both CLIs
+pollute their output and would need a parser. That was wrong, and it was my measurement
+that was at fault: I had merged the streams with `2>&1`. Captured properly, `codex`
+writes **only the answer to stdout** and puts the banner, prompt echo and token count on
+stderr. No parser is needed — `refine.py` just strips whitespace, with a light guard for
+stray code fences. One real find survived from that measurement: `codex` blocks reading
+stdin, so `stdin=DEVNULL` is required or the call can hang to the timeout.
+
+**The router needed the draft, not just the utterance.** The first test run caught
+`"Delete key handling is broken."` being routed as an edit — ordinary dictation about a
+keyboard, silently eaten as an instruction. Nothing in the utterance distinguishes it
+from `"delete key handling"`; what distinguishes them is whether the target text exists
+in the draft. So weak verbs (`delete`, `capitalize`) now only fire when their target is
+really present, while a strong shape (`change X to Y`, which is hard to say by accident)
+escalates to the CLI when the target is missing rather than being appended as speech.
+
+**Second time I nearly recorded a false pass.** The first defect-3 regression test drove
+partials through `FakeMic`, whose `drain()` returns every block at once — so exactly one
+partial was ever submitted and the test would have passed against the old synchronous
+code too. Replaced with a direct `DecodeWorker` test: 40 partials submitted during a
+slow decode result in fewer than 10 decodes, and the newest snapshot is provably not the
+one dropped. That pattern — a green test that does not exercise the thing it names — has
+now appeared twice, so it is worth distrusting any test here that passed on the first try.
+
+**CLI refine verified live** via [scripts/refine_check.py](scripts/refine_check.py):
+
+| Instruction | Time | Result |
+|---|---|---|
+| "make it more formal" | 5.69 s | "Hello, I wanted to confirm whether we are still scheduled for Tuesday and whether you received the figures I sent." |
+| "turn it into bullet points" | 5.78 s | two clean bullets |
+
+No API key anywhere in the path (R9), `codex` preferred with `claude` as fallback (R10),
+input capped and tail-spliced, hard timeout, and every failure mode leaves the draft
+untouched (R11).
+
+**Proof criteria from analysis §7:** 1, 2, 3, 4 and 6 now hold. 5 (10-minute session,
+flat RAM) is stage 9. The remaining gap is still real-mic accuracy — no synthetic test
+can close it.
+
+### Iteration 4 — 2026-07-30 01:10 — stages 6, 7, 8
+
+**Risk 3 retired first**, since it gated the whole UI. [scripts/tk_probe.py](scripts/tk_probe.py)
+confirmed all five attributes the pill needs work on this Win 11 / Tk 8.6 build:
+`overrideredirect`, `-topmost`, `-alpha`, `-transparentcolor` (true rounded corners) and
+`-toolwindow` (stays out of the taskbar and alt-tab). Values read back rather than being
+silently ignored.
+
+Wrote [flow/ui.py](flow/ui.py) (pill + bubble), [flow/inject.py](flow/inject.py)
+(clipboard + `SendInput`), [flow/hotkey.py](flow/hotkey.py) (`RegisterHotKey` on its own
+message-loop thread) and [flow/\_\_main\_\_.py](flow/__main__.py). Still three declared
+dependencies — tkinter and ctypes are stdlib, so R16 held through the entire UI stage.
+
+**The UI was verified by looking at it, not by assuming.** That took three attempts, and
+the first two failures were both in the capture method rather than the app:
+
+1. `Start-Process -WindowStyle Hidden` suppressed the Tk window, so the screenshot
+   captured whatever was behind it.
+2. With the window visible, the crop was still uniform dark. Enumerating top-level
+   windows proved both windows existed exactly where intended — pill at `1100,590
+   152x40`, bubble at `872,437 380x143`. The real cause: `CopyFromScreen` uses BitBlt,
+   which does not capture **layered** windows, and `-alpha`/`-transparentcolor` make
+   these layered. Under RDP it returns the desktop underneath instead.
+3. `PrintWindow` with `PW_RENDERFULLCONTENT` against the window handles worked, and is
+   the right tool for layered windows.
+
+Both surfaces render correctly: the pill shows the drawn mic glyph and 18 mirrored level
+bars in the state accent (amber for DRAFT), and the bubble shows wrapped draft text, the
+muted note line, and the three chips with **Send** filled in the accent colour.
+
+**A segfault, found by running the smoke check.** `scripts/inject_check.py` exited
+`0xC0000005` with no output at all. Cause: ctypes defaults an undeclared `restype` to C
+`int` — 32 bits — so `GlobalLock` returned a **truncated pointer** on x64 and
+dereferencing it killed the interpreter. Every Win32 signature in `inject.py` and
+`hotkey.py` is now declared explicitly, and `set_clipboard_text` frees the handle on the
+failure path instead of leaking it. This class of bug is invisible to reading and fatal
+at runtime, which is a good argument for smoke-checking every ctypes surface.
+
+Post-fix the clipboard round-trips and — importantly — **the user's clipboard is
+restored** afterwards rather than being clobbered.
+
+**A hotkey was silently dead and the code caught it.** `ctrl+alt+space` is already owned
+by another process on this machine. `RegisterHotKey` just returns false, so this would
+have shipped as "the shortcut does nothing, no idea why". Each action now has an ordered
+list of alternatives and reports which one won:
+
+| Action | Registered |
+|---|---|
+| toggle | `ctrl+shift+space` (first choice was taken) |
+| send | `ctrl+alt+enter` |
+| cancel | `ctrl+alt+esc` |
+
+`paste()` deliberately writes the clipboard **before** attempting the keystroke, so that
+the documented UIPI limitation (elevated windows reject synthetic input) degrades to
+"press Ctrl-V yourself" rather than losing the text.
+
+23 tests still pass. Test count did not grow this iteration — the UI, clipboard and
+hotkey layers were verified by inspection and smoke checks instead, which is the honest
+description of their coverage.
+
+### Iteration 5 — 2026-07-30 01:37 — stages 9 and 10
+
+**R8 hardening.** Four things a long session needs that a short one hides:
+
+- **Idle unload.** After 5 minutes with no speech and no held draft, the 141 MB model is
+  dropped; the next utterance pays ~1 s to reload it. This deliberately **narrows**
+  what analysis §4 proposed: that said "release the mic and unload the model", but
+  releasing the mic would leave the app unable to hear its own wake-up. The mic is cheap
+  and stays open; only the model goes.
+- **Device recovery.** A PortAudio stream can die mid-session (unplugged, driver reset)
+  without raising anywhere the session can see, so `Mic.active` is polled every 5 s and
+  capture is reopened. `Session.pause()` exists so a *deliberate* pause is
+  distinguishable from a dead device — otherwise the health check would helpfully
+  reopen a mic the user just switched off.
+- **Bounded undo.** `Draft` history was capped at 30 snapshots, which for a very long
+  draft is megabytes of copies. Now bounded by total characters as well.
+- **Utterance cut** at 24 s was already in place from stage 3 (risk 7).
+
+**Test coverage went from 23 to 41**, and the additions target the code least likely to
+be exercised by hand:
+
+- [tests/test_longrun.py](tests/test_longrun.py) — history bounds, idle unload,
+  model *kept* while a draft is held, dead-device recovery, and paused-mic-not-reopened.
+- [tests/test_refine.py](tests/test_refine.py) — the R11 guards, which had none. Lossless
+  tail splitting, commentary refusal, timeout, non-zero exit, empty output, fence
+  stripping, missing CLI, and an explicit assertion that `stdin=DEVNULL` is passed
+  (the thing that stops `codex` hanging).
+
+**Stage 10.** [README.md](README.md) written for someone who has never seen the project,
+including a **Known limitations** section that states the unflattering things plainly:
+~1 s partial bursts rather than per-word, nonsense in partials at word boundaries, UIPI
+blocking paste into elevated windows, ~6 s semantic rewrites, ~384 MB installed, and that
+accuracy on the user's own voice is still unmeasured.
+
+**Soak result — memory half of proof criterion 5 passes.** 11 minutes, 58 utterances
+decoded, [scripts/soak.py](scripts/soak.py) driving a real model with looped speech in real time:
+
+| | |
+|---|---|
+| Baseline RSS | 175.5 MB |
+| Range over the run | 194 – 277 MB |
+| First samples → last samples | 214.7 → 211.7 MB |
+| **Drift** | **−3.0 MB over 10.5 min (−0.28 MB/min)** |
+
+Memory oscillates and ends slightly *below* where it started, so nothing accumulates.
+A second signal worth noting: the draft-length progression was byte-identical on every
+cycle (335 → 839 → 1343 → 1679 → 2183 → 2687 → 3023 → 3527 → send → 0) at minute 9.5 as
+at minute 0.5, which means the pipeline behaved the same at the end as at the beginning.
+
+**But I had only measured half of criterion 5.** It reads "flat RAM *and unchanged
+latency*", and the soak recorded no latency at all — the byte-identical draft progression
+is suggestive but it is not a latency measurement. Rather than claim the criterion,
+added `DecodeWorker.timings` (a bounded deque, safe to leave on) and per-window p50
+decode sampling to the soak, then re-ran it. Sampling has to be windowed, not
+cumulative: a whole-run average would hide exactly the drift being looked for.
+
+**And the instrumented re-run was itself broken — third time in this build.** It printed
+a clean-looking verdict:
+
+```
+p50 decode first quartile: 0.860s
+p50 decode last  quartile: 0.858s
+latency change           : -2 ms (-0.2%)
+```
+
+That number is not wrong so much as *not about the last quartile*. The `n` column gives
+it away: every window from minute 5.0 onward reported `n=0`. `timings` is a
+`deque(maxlen=300)`, so once it saturated its length stopped growing and the
+"everything since last time" slice `all_t[seen_timings:]` was empty forever. The
+reported "last quartile" came from around minute 4–5 of an 11-minute run.
+
+Fixed by draining instead of indexing — `DecodeWorker.take_timings()` returns and clears
+under the lock — with a regression test that overfills the deque and asserts new work is
+still reported afterwards.
+
+**The pattern is now worth stating as a rule for this project.** Three times a green
+result did not measure what it claimed:
+
+1. Stage 3 — WAV replayed faster than real time, so the partial path never ran while the
+   output looked correct.
+2. Stage 4 — the defect-3 regression test drove partials through a `FakeMic` that
+   returned every block at once, so it would have passed against the buggy code.
+3. Stage 9 — latency windows silently went empty once a bounded deque saturated.
+
+All three were *measurement* bugs, not product bugs, and all three produced plausible
+output. The rule: **check the denominator before believing the ratio** — how many samples
+did this number actually come from, and does that count make sense for the interval it
+claims to describe. The `n` column existed only because of lesson 2; it is what caught
+lesson 3.
+
+**Real capture path verified** via [scripts/mic_check.py](scripts/mic_check.py). Until now
+every audio test came from a WAV or a fake, so PortAudio had never actually run:
+
+| | |
+|---|---|
+| Blocks in 3 s | 46 (expected ~46) |
+| Dropped | 0 |
+| Level range | −97.1 to −63.4 dB (quiet room) |
+| Noise floor settled | −59.9 dB |
+| **False speech onsets** | **0** |
+
+Zero false onsets matters: the gate does not trip on room noise. The −97 dB blocks were
+correctly refused as floor-training input by the digital-silence clamp added in stage 3,
+which is that fix doing its job on real hardware rather than on padded zeros.
+
+**Proof criterion 5 now passes on a valid measurement.** Third soak run, windowing fixed,
+`n` between 31 and 33 in every single window through minute 10.5:
+
+| | |
+|---|---|
+| Utterances decoded | 58 |
+| RSS first → last samples | 223.2 → 208.9 MB |
+| **Memory drift** | **−14.3 MB over 10.5 min** |
+| p50 decode, first quartile | 0.848 s |
+| p50 decode, last quartile | 0.868 s |
+| **Latency change** | **+21 ms (+2.4%)** |
+
+Per-window p50 oscillated between 0.83 s and 0.88 s across the whole run with **no
+monotonic trend**, so +21 ms sits inside a ~50 ms jitter band rather than indicating
+drift. Stated precisely: latency is unchanged within measurement noise, and memory ends
+lower than it started. Both halves of the criterion hold.
+
+**Real entry point launched.** Every component had been verified individually but
+`python -m flow` itself had never been run. It starts clean: exactly one visible window
+(the bubble is correctly withdrawn until a draft exists), pill at `1100,590 152x40`,
+slate accent and flat bars for the disarmed state, nothing on stderr, and the process
+tree exits cleanly.
+
+Two real fixes came out of that launch:
+
+1. **Startup diagnostics were invisible when redirected.** Python block-buffers stdout
+   when it is not a tty, so the lines reporting which CLI was found and which hotkeys
+   registered — precisely the output someone needs when it is not working — were lost.
+   Now flushed.
+2. **Non-ASCII in console output was a latent crash.** The messages used `·` and `—`.
+   Redirected stdout uses the locale encoding, and a legacy console code page
+   (cp437/cp850) cannot encode either, which turns a startup message into a
+   `UnicodeEncodeError` before the UI ever appears. Console strings are now ASCII.
+
+Verified output:
+
+```
+refine CLI: codex
+  (fallbacks: claude)
+hotkey  toggle   ctrl+shift+space
+hotkey  send     ctrl+alt+enter
+hotkey  cancel   ctrl+alt+esc
+click the pill to arm | right-click for the menu | esc quits
+```
+
+**All ten stages are complete at 02:25, 2 h 40 m inside the 5 h cap.** 42 tests.
+Requirements R1–R17 are all addressed; the one thing no amount of further building can
+settle is **real-microphone accuracy (risk 2)**, which needs the user's own voice.
+
+### Iteration 6 — 2026-07-30 02:27 — quality work that does not depend on the open question
+
+With all ten stages done and the only blocker being something a user has to answer, the
+remaining budget went to two improvements that are correct either way.
+
+**1. Whisper invents text on silence, and it was reaching the draft.**
+[scripts/hallucination_probe.py](scripts/hallucination_probe.py) measured what the model
+emits when there is nothing to hear:
+
+| Input | `no_speech_prob` | Emitted |
+|---|---|---|
+| digital silence 3 s | 0.691 | `'You'` |
+| quiet noise 3 s | — | nothing |
+| room-ish noise 3 s | — | nothing |
+| louder hiss 2 s | 0.899 | `'You'` |
+| genuine 0.4 s fragment | 0.099 | `'I need...'` |
+| real speech | 0.00017 | correct |
+
+For a tool that pastes into someone's document, an invented word is a defect. The gap
+between a real fragment (0.099) and a hallucination (0.691) is wide, so
+[flow/clean.py](flow/clean.py) filters on `no_speech_prob` rather than on a blocklist of
+phrases.
+
+The design bias is stated in the module and enforced in the tests: **dropping a real word
+is worse than admitting a rare invented one**, because a user can delete text they can
+see but cannot recover text never shown. So nothing is discarded on one signal —
+`no_speech_prob > 0.6` must be confirmed by either thin content (≤3 words) or poor
+`avg_logprob`. A long, confident utterance survives even at `no_speech_prob` 0.95.
+
+Verified end to end through `WhisperTranscriber`: all four silence/noise cases now return
+nothing, while the genuine 0.4 s fragment and full speech pass through untouched. Also
+collapses the degenerate `bring // // // //` repetition seen in stage 3 partials, while
+leaving real repetition ("very very good") alone.
+
+**2. More corrections handled locally**, which is the direct way to serve R11 — every
+correction handled locally is one that does not pay the ~6 s CLI. Added `replace all X
+with Y`, `delete from X to Y`, `insert X before/after Y`, `lowercase X` / `make X
+lowercase`, and split case handling: `capitalize john` → `John` (title case) while
+`all caps nasa` / `uppercase nasa` → `NASA`. Previously `capitalize` mapped onto
+upper-case, which turned `capitalize john` into `JOHN` — the more jarring of the two
+possible mistakes.
+
+**Two bugs the new tests caught immediately:**
+
+- `replace all Bob with Alice` never reached the new op. The generic `change|replace|swap
+  X to|with Y` pattern matched first with target `"all Bob"`, which is never in the
+  draft, so it silently escalated to the CLI — the exact opposite of the intent. Pattern
+  order fixed.
+- Deleting a range framed by commas left `,,` behind. Worse, my first test expectation
+  was written as `"Keep this,, keep the end.".replace(",,", ",")` — papering over the bug
+  inside the assertion instead of failing on it. `_tidy` now collapses adjacent
+  punctuation, and the test asserts the actual desired string.
+
+Also guarded pronoun targets: "make it lowercase" is a request about the whole draft, not
+about the word "it", so it routes to the CLI rather than mangling a random occurrence.
+
+**63 tests.** Deliberately did *not* download `small.en` to benchmark it: it would put
+~466 MB on the user's disk unasked, and without real speech its accuracy cannot be
+compared anyway — only its (predictable) compute cost. It stays a documented one-flag
+option.
+
+### Iteration 7 — 2026-07-30 02:37 — failure paths
+
+Went after one class of bug specifically: **failures that leave the pill on screen but
+dead**. For an always-on widget that is worse than a crash, because nothing tells the user
+anything is wrong.
+
+**1. A raise inside the frame pump killed the app silently.** `Pill._tick` ended with
+`self.after(30, self._tick)`, so any exception — a device error, a decode failure — broke
+the chain and left a pill that still painted but no longer did anything, with the
+traceback in a stderr nobody watches. The re-schedule now lives in `finally`, and errors
+become a red flash plus a visible note.
+
+**2. `Session.start()` awaited the model load, freezing the UI on first click.** On a
+first run that includes a ~141 MB download, so the very first click would hang the whole
+interface for as long as the network took, with no indication of why. The load is now a
+background pre-warm; the decode worker loads lazily on its own thread regardless, so only
+`mic.start()` has to succeed synchronously. A load failure arrives as an `error` event
+instead of vanishing into a thread.
+
+**3. Two threads could race to load the model.** The new pre-warm and the decode worker
+can both call `load()`, and the unguarded `if self._model is None` check meant both could
+build a 141 MB model with one silently discarded. Now lock-guarded, with a test that runs
+eight concurrent loads and asserts exactly one construction.
+
+**4. A failing mic used to flip the pill green anyway.** `_toggle` set `armed` before
+calling `start()`, so an unopenable device produced a green "listening" pill that captured
+nothing — the app lying about its own state. It now stays disarmed and reports why.
+
+Added `--arm` (start listening without a click), which is useful in its own right and made
+the failure path testable end to end.
+
+**Verified in the real app, not just in unit tests.** Launched with `--device 999 --arm`:
+
+| | |
+|---|---|
+| Process still alive after the failure | yes |
+| Visible windows | 2 — pill + error bubble |
+| Bubble text | `could not start capture: Error querying device 999` |
+| Bubble accent | red |
+| Pill | slate, disarmed — did **not** claim to be listening |
+| stderr | empty |
+
+**69 tests.** The three UI-resilience tests skip automatically where there is no display.
+
+### Iteration 8 — 2026-07-30 03:10 — R16, the requirement most compromised on
+
+"Super light, dependencies at min" was stated as a hard constraint and 384 MB was the
+weakest answer in this build. Earlier iterations asserted `av` was dead weight but never
+tested whether it could actually go. Measured it properly.
+
+Per-package sizes in the venv, and where each is imported:
+
+| Package | Installed | Import site |
+|---|---|---|
+| `av` + `av.libs` | 65.9 MB | `audio.py:15` — **module level** |
+| `ctranslate2` | 59.8 MB | genuinely needed |
+| `onnxruntime` | 38.6 MB | `vad.py:298` — **inside a function** |
+| numpy + numpy.libs | 41.6 MB | genuinely needed |
+
+Both large ones are unreachable from this app, for different reasons: `onnxruntime` exists
+only for Silero VAD and `asr.py` always passes `vad_filter=False`; `av` exists only to
+decode audio *files* and every use of it sits inside `decode_audio()`, which never runs
+because audio arrives as numpy arrays.
+
+Tested in a throwaway venv rather than by reasoning:
+
+| Step | Size | Decode |
+|---|---|---|
+| baseline | 236.8 MB | ok |
+| −`onnxruntime` −`protobuf` | 203.1 MB | ok |
+| −`av` | 137.1 MB | **`ModuleNotFoundError`** — confirming the module-level import |
+| `av` replaced by a stub | 137.1 MB | ok |
+
+Then ran the **full 69-test suite using the slimmed interpreter** — all passing. Wrapped it
+in [scripts/slim.py](scripts/slim.py), which dry-runs by default and has `--undo`;
+exercising the script end to end gave **243.5 MB → 137.3 MB, saving 106.2 MB**. With the
+model that is 384 MB → ~278 MB, a 28% reduction.
+
+**Left opt-in rather than default.** It knowingly breaks a dependency contract: a future
+faster-whisper could touch `av` at import time or enable VAD by default. Since it is
+one command each way and `uv sync` restores everything, the user gets to make that call.
+Also added two guard tests asserting the couplings the trim depends on — `vad_filter` is
+never True, and audio is always passed as an ndarray rather than a path — so a later
+change cannot silently break slimmed installs with a baffling ImportError.
+
+**A test-suite bug I introduced and nearly reported a pass on.** After adding those two
+tests the suite aborted with `Tcl_AsyncDelete: async handler deleted by the wrong thread`
+and printed **no summary line at all** — 62 dots and then nothing. Cause: these tests
+create `Tk` roots while others start background threads, and if a Tk object is finalised
+on a thread other than the one that created it, Tcl kills the process. Fixed by tearing
+down child-first, dropping the reference and calling `gc.collect()` on the main thread, so
+finalisation is deterministic. Confirmed with **four consecutive clean runs** rather than
+one, because an intermittent abort that passes once is not fixed.
+
+That makes four times in this build that a green-looking result was not what it claimed.
+The absent summary line here is the same lesson as the absent `n` column in stage 9:
+**check that the run actually completed, not just that nothing said FAILED.**
+
+**71 tests.**
+
+### Iteration 9 — 2026-07-30 03:40 — the seams between iterations
+
+Every module had unit tests, but the pieces were added across eight iterations and the
+*seams* between them had none. Wrote [tests/test_integration.py](tests/test_integration.py)
+to cover where the hallucination filter meets the state machine, and where the new local
+edit ops meet undo and send. Two real bugs came out of tracing the filtered-utterance path:
+
+1. **A fully filtered utterance left the pill stuck green.** When `clean.py` rejects
+   everything — silence, noise, a hallucination — the transcriber returns `""`.
+   `_pump_decodes` skipped empty finals entirely, so `_after_draft_change()` never ran and
+   the state machine stayed on `LISTENING`. The pill would sit there green with nothing in
+   flight, which is the app misreporting its own state. Now an empty final still resolves
+   the state to DRAFT or IDLE.
+2. **An empty partial popped a blank bubble open.** Partials were emitted unconditionally,
+   so a partial the filter reduced to nothing still made the bubble deiconify with no
+   content in it. Only non-empty partials are emitted now.
+
+**A third test-scripting flaw, same shape as the other four.** The forced-append test
+queued both utterances before starting, and `ScriptedMic.drain()` hands over every block in
+one call — so both were routed before `force_next` could be set, and the test "found a bug"
+that was purely its own scripting. Audio is now fed one utterance at a time, and a
+counterpart test asserts the *unforced* path produces the different result, so the override
+test can no longer pass for the wrong reason.
+
+Also fixed stale Tk `after` callbacks leaking between tests (`invalid command name
+..._tick`). `_tick` reschedules itself, so a queued callback outlived its widget and Tcl
+complained later while another root pumped events. Teardown now cancels pending `after`
+ids before destroying, and `pill.update()` was dropped from teardown since flushing was
+what fired them.
+
+**79 tests, four consecutive clean runs, zero Tcl noise**, and the real entry point still
+launches.
+
+### Iteration 10 — 2026-07-30 04:07 — doc/code alignment, and stopping
+
+Nine iterations of measurement changed several decisions recorded in
+[docs/analysis.md](docs/analysis.md), and a design doc that contradicts the code is worse
+than none. Audited it against the implementation and corrected every divergence found:
+
+| Claimed in §3–§5 | Actually built |
+|---|---|
+| "~6 transitive deps" | **28 packages, 243 MB** — the estimate was simply wrong |
+| faster-whisper's built-in Silero VAD | own ~20-line RMS gate, so `onnxruntime` is unreachable |
+| CLI hard timeout ~6 s | **20 s** — a normal call measures 5.7–7.3 s, so 6 s would have killed healthy calls |
+| CLI invoked "on an edit" | only on a **semantic** rewrite; literal corrections never reach it |
+| output "stripped of preamble" | **no parser needed** — stdout is clean, stderr carries the banner |
+| committed-prefix / editable-tail split | **not built** — the 2000-char tail cut in `refine.py` bounds cost with less machinery |
+| "ASR worker health-checked and restartable" | the **input device** is; the worker swallows per-decode errors and cannot die |
+| idle → release mic and unload model | **model only** — releasing the mic would leave the app deaf to its own wake-up |
+| pill ~140×36, ~24 bars, amber = transcribing | **152×40, 18 bars, amber = draft held** (the state that needs attention) |
+| bubble "keyboard-editable" | **not built** — never requested, and the product is voice-driven |
+| solid-background fallback for transparency | unnecessary; all five window attributes probed working |
+
+Also recorded the outcome of the six proof criteria from §7 — all six pass, with the
+numbers — and restated plainly that **accuracy on a real microphone remains unproven**,
+because every WER figure in the document comes from synthesised speech.
+
+**Stopping here at 04:13, ~50 minutes inside the cap.** The cap was a limit, not a quota:
+all ten stages are done, all 17 requirements are addressed, 79 tests pass, and the one
+question that would direct further work — whether `base.en` is good enough on the user's
+own voice — cannot be answered without them. Continuing would mean inventing scope that
+was never asked for. Cron job `2b8f8e45` deleted.
+
+## Final state
+
+| | |
+|---|---|
+| Time used | 4 h 08 m of a 5 h cap |
+| Tests | 79, running in ~1.4 s with no mic, model or subprocess |
+| Declared dependencies | 3 (`faster-whisper`, `sounddevice`, `numpy`) |
+| Product code | ~1660 lines across 10 modules |
+| Footprint | ~384 MB, or ~278 MB after `scripts/slim.py --apply` |
+| Cold start | ~1.4 s |
+| Open question | real-microphone accuracy (risk 2) |
+
+**The lesson worth carrying out of this build**, recorded because it recurred five times:
+a green result is not evidence until you check it could have been red. Twice a passing
+test hid a real bug (a WAV replayed faster than real time; a fake mic that returned every
+block at once), once a metric silently stopped sampling after a bounded deque saturated,
+once a suite aborted without printing a summary line, and once a test invented a bug that
+was purely its own scripting. Every one of them produced plausible output. **Check the
+denominator, and check the run finished.**

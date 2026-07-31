@@ -1,0 +1,15 @@
+[project]
+name = "flow"
+version = "0.1.0"
+description = "Local English dictation with a talk-to-it refine loop"
+requires-python = ">=3.12"
+# R16: keep this list at three. GUI, global hotkeys and text injection all come
+# from the stdlib (tkinter, ctypes) precisely so this table does not grow.
+dependencies = [
+    "faster-whisper>=1.1",
+    "sounddevice>=0.4.7",
+    "numpy>=2",
+]
+
+[tool.uv]
+package = false
