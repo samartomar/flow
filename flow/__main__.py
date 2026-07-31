@@ -12,7 +12,7 @@ import sys
 from .asr import FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .hotkey import DEFAULT_BINDINGS, Hotkeys
-from .inject import paste
+from .inject import paste, take_warnings
 from .refine import available
 from .session import Session
 from .ui import Pill

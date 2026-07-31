@@ -41,3 +41,51 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# -- P7: how the paste classifier reads the windows actually open ----------
+
+def survey_targets() -> None:
+    """Classify every visible top-level window on this machine.
+
+    A classifier is only worth what it does on real windows, so this enumerates them
+    rather than asserting against a table of names someone imagined.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from flow.inject import Target, _process_name, prepare, user32
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+
+    found: list[Target] = []
+
+    def visit(hwnd, _lparam):
+        if user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, buf, 256)
+            found.append(Target(buf.value, _process_name(hwnd)))
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(visit), 0)
+
+    terminals = [t for t in found if t.is_terminal]
+    bracketed = [t for t in terminals if t.brackets_paste]
+    print(f"\nvisible top-level windows: {len(found)}")
+    print(f"  classified as a terminal: {len(terminals)}")
+    print(f"  ...of which bracket paste: {len(bracketed)}")
+    for t in terminals:
+        payload, warning = prepare("one\ntwo\n", t)
+        print(f"    {t.process:<24} {t.window_class:<34} "
+              f"{'bracketed' if t.brackets_paste else 'WARNS'}"
+              f"{'' if payload.endswith('two') else ' (newline kept?!)'}")
+    others = sorted({t.process for t in found if not t.is_terminal})
+    print(f"  non-terminals ({len(others)}): {', '.join(others[:12])}"
+          + (" ..." if len(others) > 12 else ""))

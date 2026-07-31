@@ -1504,3 +1504,49 @@ which is what actually exercises the context path. The feature was right; the te
 collapsed two steps into one.
 
 **263 tests green** (242 + 21).
+
+### 2026-07-31 — Phase 4: knowing what you are pasting into (P7)
+
+The loudest failure Flow can cause is not a wrong word. It is a draft ending in a
+newline pasted into a shell, because that does not paste — it runs.
+
+**What changed.** `inject.py` classifies the focused window before touching the
+clipboard: window class *or* process name, through ctypes, so R16's three dependencies
+still hold. `prepare(text, target)` is a pure function deciding what to send, and
+`paste()` sends its output rather than the raw draft.
+
+**The guarantee.** A trailing newline never reaches a terminal. Always stripped, for
+every console; the user presses Enter when they mean to.
+
+**What is not a guarantee, said out loud.** Interior newlines belong to the terminal,
+not to Flow. A terminal with bracketed paste hands the block to the shell as literal
+text; one without runs each line as it arrives. Flow cannot change that from outside —
+the terminal adds the bracket markers itself on Ctrl-V, so writing them onto the
+clipboard would put a second, literal pair into the user's text. The honest options
+were to reflow the text (silently rewriting what someone dictated) or to say so. It
+says so: pasting multiple lines into `cmd.exe` prints a warning naming the process, and
+the text goes through untouched.
+
+**Measured** against the windows actually open, rather than a table of names someone
+imagined — `scripts/inject_check.py` grew a `survey_targets()` that enumerates every
+visible top-level window and classifies it:
+
+| | |
+|---|---|
+| visible top-level windows | **16** |
+| classified as terminals | **2** (both Windows Terminal, both bracketed) |
+| false positives among the other 14 | **0** |
+
+The non-terminals include Notepad, Obsidian, Chrome, Edge, VS Code, explorer and
+Settings — every one correctly ordinary. Two terminals is a thin denominator for the
+positive class, and worth saying: `cmd.exe`, `mintty` and the rest are covered by table
+and by unit test, not by having been seen here.
+
+**What broke.** Nothing this time — but one design temptation is worth recording as a
+thing deliberately *not* done. Wrapping the clipboard payload in `ESC[200~` / `ESC[201~`
+looks like "implementing bracketed paste" and would have been wrong: those markers are
+the terminal's to add, and a terminal in bracketed-paste mode would have added its own
+around them, so the user's text would arrive with visible escape sequences in it. The
+feature that reads as more thorough would have been the broken one.
+
+**282 tests green** (263 + 19). Phase 1, Phase 3 and P5/P6/P7 are now complete.

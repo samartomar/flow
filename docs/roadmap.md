@@ -476,7 +476,29 @@ utterance never pays for `small.en` at all.
   lock"* → *"The database is PostgreSQL 15. / The migration must be online and use no
   table lock. / Write a migration that adds a nullable column called last_seen_at to
   the users table."*
-- **Terminal-safe send (P7):** bracketed paste / newline suppression per target class.
+- ~~**Terminal-safe send (P7):** bracketed paste / newline suppression per target
+  class~~ **done 2026-07-31.** `inject.py` classifies the focused window before it
+  touches the clipboard — window class *or* process name, via ctypes, R16 intact — and
+  `prepare()` decides what is safe to send.
+
+  **The guarantee:** a draft ending in a newline never reaches a shell with that
+  newline attached. That is the failure worth preventing, because it does not paste,
+  it *runs*. The user presses Enter when they mean to.
+
+  **What is honestly not a guarantee:** interior newlines. A terminal with bracketed
+  paste hands the whole block to the shell as literal text; one without runs each line
+  as it arrives — and Flow cannot change that from outside, because the terminal adds
+  the bracket markers itself on Ctrl-V. Writing them onto the clipboard would produce a
+  second, literal pair in the user's text. So Flow reports it instead of pretending:
+  pasting multiple lines into `cmd.exe` prints a warning naming the process. Interior
+  newlines are never rewritten — silently reflowing someone's text to make it safe is
+  worse than telling them.
+
+  **Measured** against the windows actually open on this machine (`scripts/inject_check.py
+  survey_targets`): **16 visible top-level windows, 2 classified as terminals** (both
+  Windows Terminal, both bracket-paste capable), **0 false positives among the other
+  14** — Notepad, Obsidian, Chrome, Edge, explorer, VS Code, Settings and the rest all
+  correctly ordinary.
 
 ### Phase 4 — The product grows a memory and a voice (product track)
 
