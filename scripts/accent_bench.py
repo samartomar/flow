@@ -4,21 +4,25 @@ Answers, with numbers, the questions the SAPI bench in asr_bench.py cannot:
 
   1. What is the real WER per accent group, per model?  (P1: the floor matters)
   2. How much text does Flow's filter stack silently delete from real accented
-     speech?  Two filters run in production: faster-whisper's internal segment
-     skip (no_speech_prob > 0.6 AND avg_logprob < -1.0 — library defaults that
-     flow/asr.py does not override) and clean.is_invented().  (P2)
+     speech?  (P2)
 
-So every clip is decoded ONCE with the internal skip disabled, then both filters
-are *simulated* from the recorded per-segment signals:
+Flow used to run *two* filters: faster-whisper's internal segment skip
+(no_speech_prob > 0.6 AND avg_logprob < -1.0) plus clean.is_invented(). The
+first one deleted segments before Flow could see or log them, and it accounted
+for 5 of the 9 silent deletions measured on the short-clip slice — so
+flow/asr.py now passes `no_speech_threshold=None` and there is one filter,
+Flow's own, which records what it drops and why.
+
+Every clip is decoded ONCE with the internal skip disabled, then the filters
+are *simulated* from the recorded per-segment signals, which lets the shipped
+build and the pre-fix build be scored from the same decode:
 
     model WER   - every decoded segment kept: what the model heard
-    app WER     - after internal-skip + clean.is_invented(): what Flow would show
+    app WER     - after the shipped filter: what Flow would show today
+    pre-fix     - what the library's hidden skip would additionally have eaten
 
-The gap between the two columns is pure filter damage on known-real speech.
-
-Decode parameters mirror flow/asr.py finals (language=en, beam_size=2,
-vad_filter=False, condition_on_previous_text=False); only no_speech_threshold
-is raised to keep rejected segments observable.
+Decode parameters come from flow/asr.py; only no_speech_threshold is raised
+during decoding, to keep rejected segments observable in the recorded signals.
 
 Scoring note: references are conversational EdAcc transcripts (uppercase, no
 punctuation, spelled-out numbers, hesitation tokens). Normalisation here is
@@ -64,14 +68,20 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from flow.asr import decode_options  # noqa: E402
+from flow.asr import (  # noqa: E402
+    LOG_PROB_THRESHOLD,
+    NO_SPEECH_THRESHOLD,
+    decode_options,
+)
 from flow.clean import invented_reason, normalise  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench" / "accent"
 SR = 16000
 
-# The production defaults flow/asr.py inherits from faster-whisper — simulated
-# here so the bench reports what the library silently does in the real app.
+# faster-whisper's own defaults, which flow/asr.py used to inherit. Kept as named
+# constants because they are the counterfactual every P2 number is compared against:
+# pass them to apply_filters() to measure the build as it was before the library's
+# invisible second filter was turned off.
 LIB_NO_SPEECH = 0.6
 LIB_LOG_PROB = -1.0
 
@@ -145,20 +155,29 @@ def load_wav(path: Path) -> np.ndarray:
 TWO_SIGNAL_KEEPS = {"thin"}
 
 
-def apply_filters(segs: list[dict]) -> dict:
-    """Run both production filters over recorded per-segment signals.
+def apply_filters(
+    segs: list[dict],
+    no_speech_threshold: float | None = NO_SPEECH_THRESHOLD,
+    log_prob_threshold: float | None = LOG_PROB_THRESHOLD,
+) -> dict:
+    """Run the production filters over recorded per-segment signals.
 
     Pure, so the accounting that produces the P2 number can be tested without a
     model. `segs` are dicts of {text, ns, lp}; each dropped segment is annotated
     in place with the rule that dropped it, which is what the results JSON carries.
+
+    The thresholds default to the app's own (`flow.asr`), where `None` means the
+    library's invisible skip is off. Pass `LIB_NO_SPEECH` / `LIB_LOG_PROB` to measure
+    the pre-fix build instead.
 
     Returns the surviving text under the shipped rule (`app_text`) and under the
     proposed two-signal rule (`two_signal_text`), plus drop counts by rule.
     """
     survivors, two_signal, lib_skipped, clean_dropped = [], [], 0, 0
     reasons: dict[str, int] = {}
+    skips = no_speech_threshold is not None and log_prob_threshold is not None
     for s in segs:
-        if s["ns"] > LIB_NO_SPEECH and s["lp"] < LIB_LOG_PROB:
+        if skips and s["ns"] > no_speech_threshold and s["lp"] < log_prob_threshold:
             lib_skipped += 1
             s["drop"] = "lib-skip"
             continue
@@ -206,6 +225,9 @@ def bench_model(
     # will run it. Overrides exist to A/B a proposed change against the shipped one.
     opts = decode_options(final=True)
     opts.update(overrides or {})
+    # Decoding always keeps rejected segments observable, whatever the app ships:
+    # the filters are re-applied below from the recorded per-segment signals.
+    decode_opts = {**opts, "no_speech_threshold": 2.0}
 
     t0 = time.perf_counter()
     model = WhisperModel(name, device="cpu", compute_type="int8")
@@ -217,13 +239,7 @@ def bench_model(
     for i, e in enumerate(entries):
         audio = load_wav(BENCH / e["wav"])
         t = time.perf_counter()
-        segments, _ = model.transcribe(
-            audio,
-            **opts,
-            # Disable ONLY the internal skip so rejected segments stay
-            # observable; it is re-applied below from the recorded signals.
-            no_speech_threshold=2.0,
-        )
+        segments, _ = model.transcribe(audio, **decode_opts)
         segs = [
             {"text": s.text, "ns": float(s.no_speech_prob), "lp": float(s.avg_logprob)}
             for s in segments
@@ -231,6 +247,11 @@ def bench_model(
         decode = time.perf_counter() - t
 
         model_text = normalise(" ".join(s["text"].strip() for s in segs))
+        # The pre-fix build, scored from the same decode: a copy, because
+        # apply_filters annotates each segment with the rule that dropped it.
+        pre_fix = apply_filters(
+            [dict(s) for s in segs], LIB_NO_SPEECH, LIB_LOG_PROB
+        )
         f = apply_filters(segs)
         app_text, two_signal_text = f["app_text"], f["two_signal_text"]
         lib_skipped, clean_dropped, reasons = (
@@ -245,7 +266,8 @@ def bench_model(
             "n": 0, "ref_words": 0, "model_edits": 0, "app_edits": 0,
             "segments": 0, "lib_skipped": 0, "clean_dropped": 0,
             "model_empty": 0, "app_empty": 0, "false_reject": 0,
-            "false_reject_two_signal": 0, "reasons": {},
+            "false_reject_two_signal": 0, "false_reject_pre_fix": 0,
+            "pre_fix_lib_skipped": 0, "reasons": {},
             "audio_s": 0.0, "decode_s": 0.0,
         })
         g["n"] += 1
@@ -259,6 +281,8 @@ def bench_model(
         g["app_empty"] += int(app_empty)
         g["false_reject"] += int(app_empty and not model_empty)
         g["false_reject_two_signal"] += int(not two_signal_text and not model_empty)
+        g["false_reject_pre_fix"] += int(not pre_fix["app_text"] and not model_empty)
+        g["pre_fix_lib_skipped"] += pre_fix["lib_skipped"]
         for reason, count in reasons.items():
             g["reasons"][reason] = g["reasons"].get(reason, 0) + count
         g["audio_s"] += e["duration"]
@@ -279,22 +303,27 @@ def bench_model(
               f"{g['decode_s'] / g['audio_s']:>6.2f}")
 
     # P2: what fraction of clips the user would have seen nothing for.
-    print(f"\n{'group':<12}{'n':>4}{'mdl-empty':>11}{'false-rej':>11}"
-          f"{'rate':>8}{'2-signal':>10}{'rate':>8}")
-    tot = {"n": 0, "model_empty": 0, "false_reject": 0, "false_reject_two_signal": 0}
+    print(f"\n{'group':<12}{'n':>4}{'mdl-empty':>11}{'pre-fix':>9}{'rate':>8}"
+          f"{'false-rej':>11}{'rate':>8}{'2-signal':>10}{'rate':>8}")
+    tot = {"n": 0, "model_empty": 0, "false_reject": 0, "false_reject_two_signal": 0,
+           "false_reject_pre_fix": 0, "pre_fix_lib_skipped": 0}
     for slug in sorted(groups):
         g = groups[slug]
         for k in tot:
             tot[k] += g[k]
-        print(f"{slug:<12}{g['n']:>4}{g['model_empty']:>11}{g['false_reject']:>11}"
-              f"{g['false_reject'] / g['n']:>8.1%}"
+        print(f"{slug:<12}{g['n']:>4}{g['model_empty']:>11}"
+              f"{g['false_reject_pre_fix']:>9}{g['false_reject_pre_fix'] / g['n']:>8.1%}"
+              f"{g['false_reject']:>11}{g['false_reject'] / g['n']:>8.1%}"
               f"{g['false_reject_two_signal']:>10}"
               f"{g['false_reject_two_signal'] / g['n']:>8.1%}")
-    print(f"{'ALL':<12}{tot['n']:>4}{tot['model_empty']:>11}{tot['false_reject']:>11}"
-          f"{tot['false_reject'] / tot['n']:>8.1%}"
+    print(f"{'ALL':<12}{tot['n']:>4}{tot['model_empty']:>11}"
+          f"{tot['false_reject_pre_fix']:>9}{tot['false_reject_pre_fix'] / tot['n']:>8.1%}"
+          f"{tot['false_reject']:>11}{tot['false_reject'] / tot['n']:>8.1%}"
           f"{tot['false_reject_two_signal']:>10}"
           f"{tot['false_reject_two_signal'] / tot['n']:>8.1%}"
           f"   (P2 target: < 1%)")
+    print(f"segments the library used to eat before Flow saw them: "
+          f"{tot['pre_fix_lib_skipped']}")
 
     all_reasons: dict[str, int] = {}
     for g in groups.values():
@@ -331,6 +360,8 @@ def main() -> None:
         overrides["beam_size"] = int(beam)
     if (temps := take("--temperature")) is not None:
         overrides["temperature"] = tuple(float(t) for t in temps.split(","))
+    if (lp := take("--log-prob")) is not None:
+        overrides["log_prob_threshold"] = float(lp)
     tag = take("--tag", "")
     models = argv or ["base.en", "small.en", "small"]
 

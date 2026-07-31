@@ -88,6 +88,26 @@ class TestNoProbabilityAvailable(unittest.TestCase):
         self.assertFalse(is_invented("Send the report.", None))
 
 
+class TestSingleTokenLoops(unittest.TestCase):
+    """The gap between the two collapse rules, found on the short-clip slice."""
+
+    def test_the_measured_okay_loop(self):
+        # 0.55 s of audio, reference "UM", decoded as 29 segments of "Okay." — one
+        # word, so the phrase rule (>= 2 words) never saw it, and five characters, so
+        # the old two-character rule never saw it either.
+        self.assertEqual(normalise("Okay. " * 29), "Okay. Okay. Okay.")
+
+    def test_a_long_word_can_still_repeat_like_speech_does(self):
+        text = "it was very very very good and really really nice"
+        self.assertEqual(normalise(text), text)
+
+    def test_punctuation_runs_still_collapse(self):
+        self.assertEqual(
+            normalise("bring // // // // // // their updated figures"),
+            "bring // // // their updated figures",
+        )
+
+
 class TestPhraseRepeats(unittest.TestCase):
     """The repetition loops the capped temperature ladder no longer breaks."""
 

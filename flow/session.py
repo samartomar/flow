@@ -292,8 +292,23 @@ class Session:
     def tick(self) -> None:
         self._pump_audio()
         self._pump_decodes()
+        self._pump_drops()
         self._pump_refine()
         self._pump_health()
+
+    def _pump_drops(self) -> None:
+        """Surface what the filter rejected (P2).
+
+        Emitted as its own event kind rather than folded into `note`, because a drop is
+        the one event a UI may want to make *recoverable* rather than merely readable —
+        the text is still in the record. `getattr` because the Transcriber protocol is
+        deliberately one method wide, and fakes in the tests do not carry a drop log.
+        """
+        take = getattr(self.asr, "take_drops", None)
+        if take is None:
+            return
+        for drop in take():
+            self._emit("drop", drop.describe())
 
     def _pump_health(self) -> None:
         """Long-session upkeep (R8): device liveness and idle model unload."""

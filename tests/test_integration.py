@@ -159,5 +159,52 @@ class TestRouterAndUndoTogether(unittest.TestCase):
         s.close()
 
 
+class TestDropsReachTheUser(unittest.TestCase):
+    """P2 end to end: a filter rejection becomes an event, not silence."""
+
+    class DroppingAsr(ScriptedAsr):
+        """A transcriber that filtered something out and says so."""
+
+        def __init__(self, finals, drops):
+            super().__init__(finals)
+            self._drops = list(drops)
+
+        def take_drops(self):
+            out, self._drops = self._drops, []
+            return out
+
+    def test_a_drop_is_emitted_as_its_own_event(self):
+        from flow.asr import Drop
+
+        mic = ScriptedMic()
+        asr = self.DroppingAsr(
+            ["the part that survived"],
+            [Drop("You", "thin+unconfident", 0.9, -0.95, True)],
+        )
+        s = Session(asr=asr, mic=mic)
+        s.start()
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+        events = s.events()
+        drops = [e for e in events if e.kind == "drop"]
+        self.assertEqual(len(drops), 1, f"events were {events}")
+        self.assertIn("'You'", drops[0].text)
+        self.assertIn("thin+unconfident", drops[0].text)
+        # The surviving text still lands in the draft — a drop is not a failure.
+        self.assertEqual(s.draft.text, "the part that survived")
+        s.close()
+
+    def test_a_transcriber_without_a_drop_log_is_fine(self):
+        # The Transcriber protocol is one method wide on purpose; anything richer is
+        # optional, and a plain fake must not break the pump.
+        mic = ScriptedMic()
+        s = Session(asr=ScriptedAsr(["hello there"]), mic=mic)
+        s.start()
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+        self.assertEqual([e for e in s.events() if e.kind == "drop"], [])
+        s.close()
+
+
 if __name__ == "__main__":
     unittest.main()

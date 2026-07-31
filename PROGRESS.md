@@ -910,3 +910,56 @@ With the phrase collapse in place, relaxing it no longer re-admits the loop, bec
 **123 tests green** (116 + 7). `tests/test_asr.py` is new: the decode parameters are
 one-line settings with 2.4× and 7.6× consequences, so they get tests that fail when
 someone tidies them.
+
+### 2026-07-31 — Phase 1: one filter, and every rejection on the record
+
+Defect 2 was "a hidden second filter silently deletes accented speech". `flow/asr.py`
+now passes `no_speech_threshold=None`, so faster-whisper's internal skip is off and
+every rejection is Flow's own: a `Drop` record (text, the rule that fired, both
+signals, partial-or-final) in a bounded log, drained by `Session` into its own `drop`
+event kind and shown by the pill. The text is kept, which is what makes Phase 3's
+rescue chip possible — a user cannot recover words they were never shown.
+
+**A correction to the audit, and to the previous entry.** That entry said "the
+library's skip is the dominant drop path — 5 of 9". That was an artefact of running the
+library's rule first in the simulation. The library skips on `no_speech_prob > 0.6 AND
+avg_logprob < −1.0`, and `< −1.0` implies `< −0.8`, so **every segment it ate was
+already failing Flow's own rule**. Checked across all 681 segments of the short slice:
+5 library-skips, 5 of them also dropped by clean.py. The measured false-reject rate is
+therefore unchanged by this fix — 1.1% (base.en) and 2.1% (small.en), pre-fix column
+identical to shipped column in the new bench output. Defect 2 is an **observability**
+defect, not extra deletion. It still had to be fixed: once P8 calibrates thresholds per
+user, Flow's rule can become looser than the library's fixed 0.6/−1.0, and the hidden
+filter would start eating speech Flow meant to keep.
+
+**`log_prob_threshold` is now `None`, decided by measurement.** Turning off the skip
+also turns off the library's suppression of temperature fallback on probable silence,
+which cost one 5 s noise clip 0.84 s → 3.66 s. The question was whether the
+low-confidence retry earns that. It does not: on the 300-clip slice base.en scores
+0.233 / 0.283 / 0.173 / 0.189 / 0.276 without it against 0.231 / 0.281 / 0.178 /
+0.187 / 0.276 with it — inside the sampling's own run-to-run noise. So Flow retries a
+final only when the output is *degenerate* (`compression_ratio_threshold`, the library
+default), never merely when it was unsure. Noise finals land at 0.83–0.93 s again.
+
+**What the short-clip re-run then exposed.** With beam 5, sub-1.5 s clips produce
+repetition loops *spread across segments* — a 0.55 s clip whose reference is "UM" came
+back as **29 segments of "Okay."**, and a 1.15 s clip as 29 of "It's like...".
+`collapse_phrase_repeats` never saw them, because it requires two words; the old
+`collapse_repeats` never saw them either, because it only touched tokens of at most two
+characters. A single long token looping fell exactly between the two rules. Removing
+the length condition (the limit of 3 stays, so "very very very good" is untouched)
+closes it. Re-scoring the same decodes: short-slice base.en indian 0.748 → 0.741,
+japanese 0.786 → 0.745, russian 0.536 → 0.503, us-control 0.882 → 0.850; small.en and
+the 300-clip slice byte-identical, so the fix is targeted rather than broad.
+
+**The trade this leaves, stated plainly.** On sub-1.5 s clips base.en is now much
+better for the target population and worse for the control: japanese 1.592 → 0.745,
+indian 0.966 → 0.741, russian 0.771 → 0.503, spanish 0.544 → 0.550, **us-control
+0.733 → 0.850**. Beam 5 gives accented speech more room and gives a clean US voice more
+room to ramble. On a slice that is 31% backchannel with 147–187 reference words per
+group, that is a real but noisy signal — and the direction favours the people Flow is
+for.
+
+**139 tests green** (135 + 4). No measurement in this entry required re-decoding: the
+collapse fix was scored by re-running the saved per-segment output through the new
+normaliser, which is the same decode with different post-processing.

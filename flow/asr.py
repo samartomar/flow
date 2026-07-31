@@ -9,11 +9,16 @@ than build time.
 from __future__ import annotations
 
 import threading
-from typing import Protocol
+from collections import deque
+from typing import NamedTuple, Protocol
 
 import numpy as np
 
-from .clean import is_invented, normalise
+from .clean import invented_reason, normalise
+
+#: How many recent drops to keep. Bounded because R8 says a long session must cost what
+#: a short one costs; 100 is enough for the UI to explain what just vanished.
+DROP_HISTORY = 100
 
 
 #: Partials pay for no retries at all. faster-whisper re-decodes a segment at rising
@@ -37,6 +42,32 @@ PARTIAL_BEAM = 1
 FINAL_BEAM = 5
 
 
+#: P2, defect 2: faster-whisper drops a segment *inside the library*, before Flow ever
+#: sees it, when `no_speech_prob > 0.6` and `avg_logprob < -1.0` — and accented speech
+#: scores worse on exactly those two signals. Measured on 280 short clips: 5 of 9
+#: silent deletions happened there, unlogged and unattributable. `None` turns that
+#: second, invisible filter off. Flow then has exactly one filter — its own, in
+#: clean.py, which records what it drops and why.
+#:
+#: The cost is real and bounded: `no_speech_threshold` also suppresses the temperature
+#: fallback on probable silence, so a *final* decoded from noise may now retry up to
+#: its three capped steps. The speech gate means that is a rare path.
+NO_SPEECH_THRESHOLD = None
+
+#: `None` means: never retry a decode merely because the model was unsure. It still
+#: retries when the output is *degenerate* — `compression_ratio_threshold` stays at the
+#: library default and is what catches repetition loops, which is the case where a
+#: hotter sample genuinely helps.
+#:
+#: Measured, and this is the whole argument: on the 300-clip accent slice the retry
+#: buys nothing — base.en scores 0.233 / 0.283 / 0.173 / 0.189 / 0.276 across the five
+#: groups without it versus 0.231 / 0.281 / 0.178 / 0.187 / 0.276 with it, differences
+#: smaller than the run-to-run noise of the sampling itself. It costs, though: leaving
+#: it at −1.0 turned one 5 s noise clip from 0.84 s into 3.66 s, because low confidence
+#: on near-silence is exactly what a retry cannot fix.
+LOG_PROB_THRESHOLD = None
+
+
 def decode_options(final: bool) -> dict:
     """The decode parameters, in one place.
 
@@ -51,7 +82,30 @@ def decode_options(final: bool) -> dict:
         # Critical for R8: with context carry-over, a long session can fall into
         # repetition loops where the model echoes earlier text forever.
         "condition_on_previous_text": False,
+        "no_speech_threshold": NO_SPEECH_THRESHOLD,
+        "log_prob_threshold": LOG_PROB_THRESHOLD,
     }
+
+
+class Drop(NamedTuple):
+    """One segment the filter rejected, with the evidence it used.
+
+    P2 is "never loses words silently": a rejection is allowed, an *unexplained* one is
+    not. Keeping the text is what makes a later rescue possible — the user cannot
+    recover words they were never shown, but they can recover these.
+    """
+
+    text: str
+    reason: str
+    no_speech_prob: float | None
+    avg_logprob: float | None
+    final: bool
+
+    def describe(self) -> str:
+        ns = "?" if self.no_speech_prob is None else f"{self.no_speech_prob:.2f}"
+        lp = "?" if self.avg_logprob is None else f"{self.avg_logprob:.2f}"
+        kind = "final" if self.final else "partial"
+        return f"dropped {self.text.strip()!r} ({self.reason}, ns={ns} lp={lp}, {kind})"
 
 
 class Transcriber(Protocol):
@@ -75,6 +129,21 @@ class WhisperTranscriber:
         # Session.start() and the decode worker calling text() lazily. Without this
         # lock both build a 141 MB model and one is thrown away.
         self._lock = threading.Lock()
+        #: Recent rejections, newest last. Written on the decode thread and drained on
+        #: the UI thread, so it is a deque with a maxlen rather than a growing list.
+        self._drops: deque[Drop] = deque(maxlen=DROP_HISTORY)
+
+    def take_drops(self) -> list[Drop]:
+        """Return and clear the recorded rejections.
+
+        Draining rather than indexing, for the reason PROGRESS.md records about the
+        soak test: a bounded deque stops growing once saturated, so "everything since
+        last time" computed from a length silently returns nothing forever.
+        """
+        with self._lock:
+            out = list(self._drops)
+            self._drops.clear()
+            return out
 
     def load(self) -> None:
         with self._lock:
@@ -101,13 +170,15 @@ class WhisperTranscriber:
         segments, _ = self._model.transcribe(audio, **decode_options(final))
         kept = []
         for s in segments:
-            # Drop segments the model invented rather than heard. See flow/clean.py for
-            # the measurements behind the thresholds.
-            if is_invented(
-                s.text,
-                getattr(s, "no_speech_prob", None),
-                getattr(s, "avg_logprob", None),
-            ):
+            # Drop segments the model invented rather than heard, and record every one
+            # with the evidence used (P2). See flow/clean.py for the measurements
+            # behind the thresholds.
+            ns = getattr(s, "no_speech_prob", None)
+            lp = getattr(s, "avg_logprob", None)
+            reason = invented_reason(s.text, ns, lp)
+            if reason is not None:
+                with self._lock:
+                    self._drops.append(Drop(s.text, reason, ns, lp, final))
                 continue
             kept.append(s.text.strip())
         return normalise(" ".join(kept))

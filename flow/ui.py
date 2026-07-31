@@ -201,6 +201,10 @@ class Pill(tk.Tk):
                 self.bubble.note(ev.text)
             elif ev.kind == "note":
                 self.bubble.note(ev.text)
+            elif ev.kind == "drop":
+                # Shown, not hidden: P2 is that a rejection is never silent. The
+                # recovery affordance itself is Phase 3's rescue chip.
+                self.bubble.note(ev.text)
 
         if self._flash:
             self._flash -= 1

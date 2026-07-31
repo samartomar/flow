@@ -55,11 +55,19 @@ def strip_markers(text: str) -> str:
 
 
 def collapse_repeats(text: str, limit: int = 3) -> str:
-    """Collapse degenerate repetition of short, low-content tokens.
+    """Collapse a token repeated back to back more than `limit` times.
 
-    Guards against the `bring // // // //` output observed in stage 3 partials. Only
-    tokens that are punctuation or at most two characters are collapsed — real speech
-    genuinely repeats words ("very very good"), and that must not be touched.
+    Guards against the `bring // // // //` output observed in stage 3 partials, and
+    against the loops the capped temperature ladder no longer breaks: a 0.55 s clip
+    came back as 29 segments of "Okay.".
+
+    `limit` is 3 rather than 1 because real speech does repeat a word — "very very
+    very good" survives untouched. It does not repeat one twenty-nine times.
+
+    This used to apply only to tokens of at most two characters, on the theory that
+    longer words are always real. The measurement above is what disproved that: the
+    two-character rule and `collapse_phrase_repeats`'s two-word minimum left a gap
+    exactly wide enough for a single long token to loop through.
     """
     out: list[str] = []
     run_token: str | None = None
@@ -69,8 +77,7 @@ def collapse_repeats(text: str, limit: int = 3) -> str:
             run_len += 1
         else:
             run_token, run_len = tok, 1
-        collapsible = len(tok) <= 2 or not any(c.isalnum() for c in tok)
-        if collapsible and run_len > limit:
+        if run_len > limit:
             continue
         out.append(tok)
     return " ".join(out)

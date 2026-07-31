@@ -16,8 +16,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.asr import (  # noqa: E402
+    DROP_HISTORY,
     FINAL_BEAM,
     FINAL_TEMPERATURES,
+    LOG_PROB_THRESHOLD,
+    NO_SPEECH_THRESHOLD,
     PARTIAL_BEAM,
     PARTIAL_TEMPERATURES,
     WhisperTranscriber,
@@ -25,6 +28,23 @@ from flow.asr import (  # noqa: E402
 )
 
 AUDIO = np.zeros(1600, dtype=np.float32)
+
+
+class FakeSegment:
+    def __init__(self, text, no_speech_prob=0.01, avg_logprob=-0.2):
+        self.text = text
+        self.no_speech_prob = no_speech_prob
+        self.avg_logprob = avg_logprob
+
+
+def transcribe_with(segments, final=True):
+    """Run text() over canned segments and return (text, transcriber)."""
+    fake = mock.Mock()
+    fake.transcribe.return_value = (iter(segments), None)
+    with mock.patch("faster_whisper.WhisperModel", return_value=fake):
+        asr = WhisperTranscriber("base.en")
+        out = asr.text(AUDIO, final=final)
+    return out, asr
 
 
 def call_kwargs(final: bool) -> dict:
@@ -73,12 +93,75 @@ class TestOptionsReachTheModel(unittest.TestCase):
         self.assertEqual(kw["temperature"], FINAL_TEMPERATURES)
         self.assertEqual(kw["beam_size"], FINAL_BEAM)
 
+    def test_the_library_filter_is_turned_off_explicitly(self):
+        # Defect 2: with a threshold set, faster-whisper deletes segments before Flow
+        # sees them. 5 of 9 measured silent deletions happened there.
+        for final in (False, True):
+            self.assertIsNone(decode_options(final)["no_speech_threshold"])
+        self.assertIsNone(NO_SPEECH_THRESHOLD)
+        self.assertIsNone(call_kwargs(final=True)["no_speech_threshold"])
+
+    def test_low_confidence_alone_never_triggers_a_retry(self):
+        # Retrying because the model was unsure is what cost 3.66s on a 5s noise clip
+        # while buying no measurable accuracy. Degenerate output still retries, via
+        # the library's compression_ratio_threshold, which stays at its default.
+        for final in (False, True):
+            self.assertIsNone(decode_options(final)["log_prob_threshold"])
+        self.assertIsNone(LOG_PROB_THRESHOLD)
+        self.assertNotIn("compression_ratio_threshold", decode_options(True))
+
     def test_empty_audio_never_reaches_the_model(self):
         fake = mock.Mock()
         with mock.patch("faster_whisper.WhisperModel", return_value=fake):
             asr = WhisperTranscriber("base.en")
             self.assertEqual(asr.text(np.zeros(0, dtype=np.float32)), "")
         fake.transcribe.assert_not_called()
+
+
+class TestDropLog(unittest.TestCase):
+    """P2: a rejection is allowed; an unexplained one is not."""
+
+    def test_a_dropped_segment_is_recorded_with_its_signals(self):
+        out, asr = transcribe_with([FakeSegment("You", 0.9, -0.95)])
+        self.assertEqual(out, "")
+        drops = asr.take_drops()
+        self.assertEqual(len(drops), 1)
+        self.assertEqual(drops[0].text, "You")
+        self.assertEqual(drops[0].reason, "thin+unconfident")
+        self.assertAlmostEqual(drops[0].no_speech_prob, 0.9)
+        self.assertAlmostEqual(drops[0].avg_logprob, -0.95)
+        self.assertTrue(drops[0].final)
+
+    def test_kept_segments_are_not_recorded(self):
+        out, asr = transcribe_with([FakeSegment("send the report to the team")])
+        self.assertEqual(out, "send the report to the team")
+        self.assertEqual(asr.take_drops(), [])
+
+    def test_partial_survivors_and_drops_coexist(self):
+        out, asr = transcribe_with([
+            FakeSegment("You", 0.9, -0.95),
+            FakeSegment("the real sentence"),
+        ])
+        self.assertEqual(out, "the real sentence")
+        self.assertEqual([d.reason for d in asr.take_drops()], ["thin+unconfident"])
+
+    def test_describe_carries_the_evidence(self):
+        _, asr = transcribe_with([FakeSegment("You", 0.9, -0.95)], final=False)
+        line = asr.take_drops()[0].describe()
+        for fragment in ("'You'", "thin+unconfident", "ns=0.90", "lp=-0.95", "partial"):
+            self.assertIn(fragment, line)
+
+    def test_taking_drops_clears_them(self):
+        _, asr = transcribe_with([FakeSegment("You", 0.9, -0.95)])
+        self.assertEqual(len(asr.take_drops()), 1)
+        self.assertEqual(asr.take_drops(), [])
+
+    def test_the_log_is_bounded(self):
+        # R8: a long session costs what a short one costs, even one that drops a lot.
+        _, asr = transcribe_with(
+            [FakeSegment("You", 0.9, -0.95) for _ in range(DROP_HISTORY + 50)]
+        )
+        self.assertEqual(len(asr.take_drops()), DROP_HISTORY)
 
 
 if __name__ == "__main__":

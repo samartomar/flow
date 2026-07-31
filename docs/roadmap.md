@@ -57,7 +57,7 @@ faster-whisper 1.2.1), final beam 2 vs library default 5, uncapped temperature f
 | Metric | Today | Target |
 |---|---|---|
 | Per-accent WER, every anchor group (P1) | 18.7–30.6% on EdAcc (conversational; see Phase 0 results) | **≤ 12% floor** (not average) |
-| Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% | **< 1%**, every drop logged |
+| Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% — and **every drop is now logged with its signals** | **< 1%**, every drop logged |
 | Command recognition, accented (P3) | unmeasured | **≥ 95%**; silent misroutes ≈ 0 |
 | Personal-lexicon entity accuracy (P4) | no biasing exists | **≥ 90%** |
 | Partial latency (R4) | base.en **clean to 8 s of speech** (worst 1.07 s) after the Phase 1 decode fix, breaching only at ≥ 12 s (1.98 s worst); small.en 2.66–3.78 s median at every length | **< 1.5 s, preserved** |
@@ -232,9 +232,28 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
 
 ### Phase 1 — Stop the bleeding (accuracy track, small diffs)
 
-- Pass explicit `no_speech_threshold` / `log_prob_threshold`; log every dropped segment
-  (defect 2 → P2). **Measured as the dominant drop path: 5 of 9 short-clip drops happen
-  inside the library, invisible to Flow.** Do this one first.
+- ~~Pass explicit `no_speech_threshold` / `log_prob_threshold`; log every dropped
+  segment (defect 2 → P2)~~ **done 2026-07-31.** `no_speech_threshold=None` turns the
+  library's invisible filter off; every rejection is now Flow's own, recorded as a
+  `Drop` (text, rule, both signals, partial-or-final) in a bounded log and emitted as
+  its own event kind.
+
+  **Correction to the audit, and to this file's earlier claim.** "5 of 9 short-clip
+  drops happen inside the library" was an artefact of running the library's rule first.
+  The library skips on `no_speech_prob > 0.6 AND avg_logprob < −1.0`, and `< −1.0`
+  implies `< −0.8`, so **every segment it ate was already failing Flow's own rule** —
+  verified across all 681 segments of the short slice: 5 library-skips, 5 also dropped
+  by clean.py. Defect 2 is real as an *observability* defect, not as extra deletion.
+  It also has to be fixed before P8 can mean anything: once thresholds are calibrated
+  per user, Flow's rule can be looser than the library's, and then the hidden filter
+  would start eating speech Flow intended to keep.
+
+  `log_prob_threshold` is `None` for the same measured reason: retrying a decode
+  because the model was *unsure* buys nothing (five accent groups within run-to-run
+  noise, 300 clips) and costs a lot on near-silence, where confidence is low and a
+  retry cannot help — one 5 s noise clip went 0.84 s → 3.66 s with it set. Degenerate
+  output still retries, through `compression_ratio_threshold`, which is the case where
+  a hotter sample actually fixes something.
 - Thin rule requires two signals again; drops become visible events (defect 3 → P2).
   Measured as nearly a no-op on its own (3→3 / 6→5 clips), and deleting the thin test
   outright re-admits the digital-silence 'You' — so the rule needs the whole-utterance

@@ -13,7 +13,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from accent_bench import apply_filters, norm_words, wer_counts  # noqa: E402
+from accent_bench import (  # noqa: E402
+    LIB_LOG_PROB,
+    LIB_NO_SPEECH,
+    apply_filters,
+    norm_words,
+    wer_counts,
+)
 from asr_bench import median, summarise_gate, wer  # noqa: E402
 
 
@@ -76,13 +82,42 @@ class TestApplyFilters(unittest.TestCase):
         self.assertEqual(f["two_signal_text"], "change Tuesday to Wednesday")
         self.assertEqual((f["lib_skipped"], f["clean_dropped"]), (0, 0))
 
-    def test_library_skip_needs_both_of_its_signals(self):
-        # ns above 0.6 but logprob above -1.0: the library keeps it, clean.py judges it.
-        f = apply_filters([seg("some ordinary words here", 0.7, -0.5)])
-        self.assertEqual(f["lib_skipped"], 0)
+    def test_the_shipped_build_attributes_what_the_library_used_to_eat(self):
+        # flow/asr.py passes no_speech_threshold=None, so this segment now reaches
+        # Flow's filter. Flow still drops it — but as a *named* rule with its signals
+        # recorded, rather than vanishing inside the library.
         f = apply_filters([seg("some ordinary words here", 0.7, -1.2)])
+        self.assertEqual(f["lib_skipped"], 0)
+        self.assertEqual(f["app_text"], "")
+        self.assertEqual(f["reasons"], {"unconfident": 1})
+
+    def test_the_library_skip_was_always_redundant(self):
+        # Worth pinning because it corrects the audit: the library skips on
+        # ns > 0.6 AND lp < -1.0, and lp < -1.0 implies lp < -0.8, so every segment it
+        # ate was already failing Flow's own rule. Turning it off changes attribution,
+        # not which words survive — verified on all 681 segments of the short slice.
+        for ns, lp in ((0.61, -1.01), (0.9, -1.5), (0.7, -2.0)):
+            with self.subTest(ns=ns, lp=lp):
+                text = "a longer stretch of ordinary words"
+                old = apply_filters([seg(text, ns, lp)], LIB_NO_SPEECH, LIB_LOG_PROB)
+                new = apply_filters([seg(text, ns, lp)])
+                self.assertEqual(old["lib_skipped"], 1)
+                self.assertEqual(new["lib_skipped"], 0)
+                self.assertEqual(old["app_text"], new["app_text"])
+
+    def test_the_pre_fix_build_can_still_be_scored(self):
+        # Passing the library's own defaults reproduces the build measured before the
+        # fix, which is the counterfactual every P2 number is quoted against.
+        f = apply_filters([seg("some ordinary words here", 0.7, -1.2)],
+                          LIB_NO_SPEECH, LIB_LOG_PROB)
         self.assertEqual(f["lib_skipped"], 1)
         self.assertEqual(f["app_text"], "")
+
+    def test_library_skip_needed_both_of_its_signals(self):
+        # ns above 0.6 but logprob above -1.0: even the old build kept it.
+        f = apply_filters([seg("some ordinary words here", 0.7, -0.5)],
+                          LIB_NO_SPEECH, LIB_LOG_PROB)
+        self.assertEqual(f["lib_skipped"], 0)
 
     def test_thin_drop_is_recovered_by_the_two_signal_rule(self):
         # Short, confident, high no-speech: exactly a spoken correction, and exactly
