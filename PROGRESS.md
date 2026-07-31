@@ -1610,3 +1610,58 @@ produced `results-base.enmanifest-aesrc-read.json` the first time it was not. Fi
 strip `manifest-` generally.
 
 **286 tests green.**
+
+### 2026-07-31 — The first real volunteer recording, and what it broke
+
+Two recordings arrived before this one and neither produced a usable command. Both were
+people reading the screen aloud — the first read the instruction sheet, the second read
+the guided page's situation text verbatim ("His name is spelled wrong. It should be
+Samir."). Zero command utterances across 230 seconds of speech.
+
+The rule that produced: **whatever is a complete sentence on screen gets read aloud.**
+Two redesigns had tried to stop that by asking people to improvise instead — and
+improvising into a recorder is hard for anyone, hardest for someone doing it in a second
+language. So the principle was inverted rather than reinforced: **make the readable
+thing a valid command.** Each screen now shows the change as a bare transformation
+(`Tuesday → Wednesday`), never a sentence, plus two or three example commands in the
+open. Worst case someone reads "change Tuesday to Wednesday", which is real data. The
+previous worst case produced nothing at all.
+
+**The third recording worked.** Eleven numbered commands, all of them commands:
+
+| | routed | |
+|---|---|---|
+| Change Tuesday to Wednesday | replace | ok |
+| Change Samir to S-A-M-I-R | replace | ok |
+| Capitalize Samir | capitalize | ok |
+| Lowercase release notes | lower | ok |
+| **Delete the bit about the stand up** | **append** | **MISS** |
+| Delete the last sentence | delete_last | ok |
+| Insert the draft before release notes | insert_before | ok |
+| undo that | undo | ok |
+| Make it a proper prompt | polish | ok |
+| Follow up and mention the rollback plan | followup | ok |
+| That was a command | rescue | ok |
+
+**10/11 — the first P3 number this project has ever had on real speech.** One speaker,
+eleven utterances: a denominator far too small to quote against the ≥95% target, and
+recorded on a phone rather than through the app.
+
+**The miss is a defect class nothing synthetic would have found.** People name a target
+by *pointing* at it — "the bit about the standup" — not by quoting it. Nothing was wrong
+with the matching: the phonetic layer resolves "stand up" to "standup" at 0.97
+similarity. The target simply had four extra words on the front. Every prompt in
+`command_bench.py` quotes its target, because I wrote them, and I quote targets.
+
+`edits.py` now strips a referential head ("the bit/part/line/sentence about X") when —
+and only when — doing so is what makes the target findable, so a wrong guess costs
+nothing and falls through to dictation exactly as before. That took the recording to
+11/11.
+
+**Fixing the routing then exposed the extent.** Deleting only the thing pointed at left
+`"I attached the summary from."` — a dangling fragment, worse than doing nothing.
+"The bit about X" names the *sentence* X sits in, so a referential delete now widens to
+sentence boundaries. That can take more than intended when a sentence has two clauses;
+it is the deliberate trade, and it is undoable.
+
+**291 tests green** (286 + 5), including the exact utterance that failed.

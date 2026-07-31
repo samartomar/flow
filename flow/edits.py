@@ -156,6 +156,12 @@ class Plan:
     payload: str = ""
     op: str = ""
     count: int = 1
+    #: True when the target was named referentially ("the bit about X") rather than
+    #: quoted. It changes what "delete" means: the user named a *region* by pointing at
+    #: something inside it, so deleting only the thing they pointed at leaves the
+    #: sentence around it dangling — "I attached the summary from." was the measured
+    #: output before this existed.
+    referential: bool = False
     #: True when this became SEMANTIC only because the target could not be found —
     #: "change X to Y" where no X is in the draft. That is a *suspected mis-hearing*,
     #: not a request for judgement, and it is worth one cheap re-decode before paying
@@ -329,6 +335,24 @@ def snap(utterance: str) -> str:
     return u
 
 
+#: People name a target by pointing at it, not by quoting it: "delete the bit about the
+#: standup", not "delete the summary from the standup". The referential head is not part
+#: of the text being named, so it has to come off before the draft is searched.
+#:
+#: Found in the first real recording from a volunteer, on the one command of eleven that
+#: misrouted. The phonetic matcher already resolves "stand up" to "standup" at 0.97 -
+#: nothing was wrong with the matching, the target simply had four extra words on the
+#: front. No synthetic prompt set would have produced that phrasing.
+_REFERENTIAL = re.compile(
+    r"^(?:the|that|this|any|those)?\s*"
+    r"(?:bit|bits|part|parts|piece|section|sentence|line|paragraph|phrase|thing|"
+    r"stuff|reference|mention|word|words)\s+"
+    r"(?:about|regarding|concerning|mentioning|referring to|on|with|that says|"
+    r"where (?:you|it) (?:say|says|mention|mentions))\s+(.+)$",
+    re.I,
+)
+
+
 def plan(utterance: str, draft: str = "") -> Plan:
     """Decide what a spoken utterance means while a draft is held.
 
@@ -371,10 +395,28 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
     if not u:
         return Plan("append")
 
+    referential: set[bool] = set()
+
+    def resolve(target: str) -> str:
+        """The target as it should be searched for.
+
+        Strips a referential head ("the bit about X" -> "X") only when doing so is what
+        makes it findable, so a wrong guess costs nothing: the original is returned and
+        the caller escalates exactly as before.
+        """
+        target = (target or "").strip()
+        if not target or find_span(draft, target) is not None:
+            return target
+        m = _REFERENTIAL.match(target)
+        if m and find_span(draft, m[1].strip()) is not None:
+            referential.add(True)
+            return m[1].strip()
+        return target
+
     def in_draft(target: str) -> bool:
         # Phonetic, not literal: the draft was transcribed from the same voice moments
         # earlier, so the word the user is naming may be spelled differently there.
-        return bool(target) and find_span(draft, target) is not None
+        return bool(target) and find_span(draft, resolve(target)) is not None
 
     # Before undo: "no, that was a command" starts like a hedge and must not be read
     # as one.
@@ -406,7 +448,7 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
     if m := _REPLACE_ALL.match(u):
         target, payload = _strip(m[1]), _strip(m[2])
         if in_draft(target):
-            return Plan("local", op="replace_all", target=target, payload=payload)
+            return Plan("local", op="replace_all", target=resolve(target), payload=payload)
         return Plan("semantic", payload=u, target=target, escalated=True)
 
     # "change X to Y" is a strong instruction shape — the connective makes it hard to
@@ -415,19 +457,19 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
     if m := _REPLACE.match(u):
         target, payload = _strip(m[1]), _strip(m[2])
         if in_draft(target):
-            return Plan("local", op="replace", target=target, payload=payload)
+            return Plan("local", op="replace", target=resolve(target), payload=payload)
         return Plan("semantic", payload=u, target=target, escalated=True)
 
     if m := _DELETE_RANGE.match(u):
         start, end = _strip(m[1]), _strip(m[2])
         if in_draft(start) and in_draft(end):
-            return Plan("local", op="delete_range", target=start, payload=end)
+            return Plan("local", op="delete_range", target=resolve(start), payload=resolve(end))
         return Plan("semantic", payload=u, target=start, escalated=True)
 
     if m := _INSERT.match(u):
         text, where, anchor = _strip(m[1]), m[2].lower(), _strip(m[3])
         if in_draft(anchor):
-            return Plan("local", op=f"insert_{where}", target=anchor, payload=text)
+            return Plan("local", op=f"insert_{where}", target=resolve(anchor), payload=text)
         return Plan("semantic", payload=u, target=anchor, escalated=True)
 
     # Case operations. Weak shapes that collide with normal speech, so like `delete`
@@ -438,7 +480,7 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
             if target.lower() in _PRONOUNS:
                 return Plan("semantic", payload=u)
             if in_draft(target):
-                return Plan("local", op=op, target=target)
+                return Plan("local", op=op, target=resolve(target))
             return Plan("append")
 
     # Ordered after the structural forms: "delete the last two words" must not be
@@ -446,7 +488,8 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
     if m := _DELETE.match(u):
         target = _strip(m[1])
         if in_draft(target):
-            return Plan("local", op="delete", target=target)
+                return Plan("local", op="delete", target=resolve(target),
+                        referential=bool(referential))
         return Plan("append")
 
     if _POLISH.match(u):
@@ -510,6 +553,24 @@ def apply_local(text: str, p: Plan) -> tuple[str, bool]:
         if tail is None:
             return text, False
         return _tidy(text[:start] + text[first[1] + tail[1]:]), True
+
+    if p.op == "delete" and p.referential:
+        # "the bit about X" names the sentence X sits in. Deleting only X leaves the
+        # rest of that sentence stranded, which is worse than doing nothing. Widening
+        # can take more than the user meant when the sentence has two clauses — that is
+        # the deliberate trade, and it is undoable.
+        span = find_span(text, p.target)
+        if span is None:
+            return text, False
+        ENDS = (".", "!", "?", chr(10))
+        start = max((text.rfind(c, 0, span[0]) for c in ENDS), default=-1)
+        end = min(
+            (i for i in (text.find(c, span[1]) for c in ENDS) if i >= 0),
+            default=-1,
+        )
+        start = 0 if start < 0 else start + 1
+        end = len(text) if end < 0 else end + 1
+        return _tidy(text[:start] + text[end:]), True
 
     if p.op in (
         "replace", "delete", "capitalize", "upper", "lower",

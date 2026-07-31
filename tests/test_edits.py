@@ -287,3 +287,55 @@ class TestReplaceAllPayloadIsLiteral(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+REAL = ("hi priya, the deploy is scheduled for Tuesday afternoon. sameer is writing "
+        "the RELEASE NOTES and running the migration. I attached the summary from the "
+        "standup. tell me if Tuesday still works.")
+
+
+class TestReferentialTargets(unittest.TestCase):
+    """Naming a target by pointing at it, not by quoting it.
+
+    From the first volunteer recording: ten of eleven commands routed correctly and
+    this was the one that did not. The phonetic matcher already resolved "stand up" to
+    "standup" at 0.97 — the target simply had "the bit about" on the front of it.
+    """
+
+    def test_the_utterance_that_was_actually_said(self):
+        p = plan("Delete the bit about the stand up", REAL)
+        self.assertEqual((p.kind, p.op), ("local", "delete"))
+        self.assertTrue(p.referential)
+
+    def test_the_other_ways_people_point_at_things(self):
+        for utterance in (
+            "delete the part about the migration",
+            "remove the sentence about the standup",
+            "cut the line about the migration",
+            "delete the bit mentioning the standup",
+        ):
+            with self.subTest(utterance=utterance):
+                self.assertEqual(plan(utterance, REAL).kind, "local")
+
+    def test_a_referential_delete_takes_the_whole_sentence(self):
+        # Deleting only the thing pointed at left "I attached the summary from."
+        out, ok = apply_local(REAL, plan("delete the bit about the stand up", REAL))
+        self.assertTrue(ok)
+        self.assertNotIn("I attached", out)
+        self.assertIn("tell me if Tuesday still works", out)
+        self.assertIn("sameer is writing", out)
+
+    def test_a_quoted_target_is_still_surgical(self):
+        # Without the referential head, delete means exactly what it says.
+        p = plan("delete the standup", REAL)
+        self.assertFalse(p.referential)
+        out, ok = apply_local(REAL, p)
+        self.assertTrue(ok)
+        self.assertIn("I attached the summary", out)
+
+    def test_pointing_at_something_absent_is_still_dictation(self):
+        # The safety property: stripping the head only happens when it makes the
+        # target findable, so a wrong guess costs nothing.
+        self.assertEqual(plan("delete the bit about the weather", REAL).kind, "append")
+        self.assertEqual(plan("the part about the budget was unclear", REAL).kind,
+                         "append")
