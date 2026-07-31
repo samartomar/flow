@@ -1305,3 +1305,56 @@ regression test for the digital-silence floor clamp, since implementing the pre-
 meant reordering the branch that clamp lives in.
 
 **210 tests green** (200 + 10).
+
+### 2026-07-31 — Phase 3: one cheap re-listen before paying for the CLI
+
+When a correction's target is nowhere in the draft, the router escalates to the agent
+CLI — ~7 s, to edit text that does not contain the word it was asked about. That is
+almost always the wrong diagnosis: the shape was a correction, so the user *was*
+correcting something; the model just mis-heard which word.
+
+**What changed.** `Plan` now records why it is semantic. `escalated=True` marks the
+four sites where a correction shape failed only on target lookup; a genuine rewrite
+verb never sets it. On an escalated plan the session re-decodes the same audio —
+already kept for exactly this — biased by `edits.command_bias()`: every trigger verb
+plus the draft's own words longer than three letters, longest first, capped at 48
+terms. The cap and the ordering come from the lexicon measurement, which was emphatic
+that a long prompt full of words that are not being said costs accuracy.
+
+The decode worker grew a third queue for these. Rescues are queued like finals rather
+than latest-wins, because dropping one means paying the CLI call this exists to avoid,
+and `hotwords` is passed to the transcriber only when non-empty, so every existing
+fake Transcriber in the tests still satisfies the protocol.
+
+**Measured** with the new `scripts/rescue_bench.py` — the command inventory
+synthesised through two SAPI voices, buried in white noise at falling SNR, decoded
+with the production finals config (`small.en`):
+
+| SNR | first read | after the biased re-read | re-read cost |
+|---|---|---|---|
+| clean | 23/24 | **24/24** | 2.06 s |
+| 15 dB | 23/24 | **24/24** | 2.01 s |
+| 10 dB | 21/24 | **24/24** | 2.01 s |
+| 5 dB | 20/24 | **24/24** | 2.04 s |
+| 0 dB | 15/24 | **21/24** | 2.05 s |
+
+Every first-read failure recovers down to 5 dB SNR, and six of nine at 0 dB, for about
+**2.0 s against the ~7 s** the CLI costs — and what comes back is a correct local edit
+instead of a rewrite of the wrong text.
+
+**What this is not.** SAPI is a US-English synthesiser and white noise is a stand-in
+for "the decoder is unsure". This measures the mechanism — can biasing recover a
+command the model got wrong — and says nothing about how often accented speech needs
+it. That benchmark still needs recorded speakers.
+
+**What broke, and what it revealed.** The first version of the rescue test used
+"change Toosday to Friday" as the mis-hearing, and the rescue never fired: the phonetic
+matcher from the previous iteration already resolves "Toosday" to "Tuesday", so the
+plan was local before any re-decode. Good news dressed as a failing test — the two
+layers cover different distances, and the test now uses a target no phonetic search can
+reach. Chasing it also surfaced a real defect in the phonetic path: word windows are
+whitespace-delimited, so matching the last word of a sentence included its full stop,
+and replacing that span deleted the punctuation — "Meeting on Tuesday." became "Meeting
+on Friday". Spans are now trimmed to alphanumeric boundaries.
+
+**222 tests green** (210 + 12).

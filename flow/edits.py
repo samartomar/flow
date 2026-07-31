@@ -108,6 +108,11 @@ class Plan:
     payload: str = ""
     op: str = ""
     count: int = 1
+    #: True when this became SEMANTIC only because the target could not be found —
+    #: "change X to Y" where no X is in the draft. That is a *suspected mis-hearing*,
+    #: not a request for judgement, and it is worth one cheap re-decode before paying
+    #: ~7 s for a CLI that will be asked to edit text not containing the word.
+    escalated: bool = False
 
     def describe(self) -> str:
         if self.kind == "local":
@@ -343,7 +348,7 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
         target, payload = _strip(m[1]), _strip(m[2])
         if in_draft(target):
             return Plan("local", op="replace_all", target=target, payload=payload)
-        return Plan("semantic", payload=u)
+        return Plan("semantic", payload=u, target=target, escalated=True)
 
     # "change X to Y" is a strong instruction shape — the connective makes it hard to
     # produce by accident. So if the target is missing we still treat it as an
@@ -352,19 +357,19 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
         target, payload = _strip(m[1]), _strip(m[2])
         if in_draft(target):
             return Plan("local", op="replace", target=target, payload=payload)
-        return Plan("semantic", payload=u)
+        return Plan("semantic", payload=u, target=target, escalated=True)
 
     if m := _DELETE_RANGE.match(u):
         start, end = _strip(m[1]), _strip(m[2])
         if in_draft(start) and in_draft(end):
             return Plan("local", op="delete_range", target=start, payload=end)
-        return Plan("semantic", payload=u)
+        return Plan("semantic", payload=u, target=start, escalated=True)
 
     if m := _INSERT.match(u):
         text, where, anchor = _strip(m[1]), m[2].lower(), _strip(m[3])
         if in_draft(anchor):
             return Plan("local", op=f"insert_{where}", target=anchor, payload=text)
-        return Plan("semantic", payload=u)
+        return Plan("semantic", payload=u, target=anchor, escalated=True)
 
     # Case operations. Weak shapes that collide with normal speech, so like `delete`
     # they only count as instructions when the target is really in the draft.
@@ -485,3 +490,28 @@ def _tidy(s: str) -> str:
     s = re.sub(r"([,;:])(?:\s*[,;:])+", r"\1", s)  # ",," -> ","
     s = re.sub(r",\s*\.", ".", s)  # ",." -> "."
     return s.strip()
+
+
+def command_bias(draft: str, limit: int = 48) -> str:
+    """The vocabulary a suspected command should be re-decoded against.
+
+    Every trigger verb, plus the words already in the draft — because the target of a
+    correction is, by definition, something already on screen. Biasing toward exactly
+    those two sets is what makes a second pass worth running: it is not a better model,
+    it is the same model told what the answer is likely to be drawn from.
+
+    Bounded, longest words first: the draft can be arbitrarily long, and the lexicon
+    measurement in PROGRESS.md is emphatic that a large irrelevant prompt costs
+    accuracy. Long words carry more information and are likelier to be the ones a
+    decoder gets wrong.
+    """
+    seen: set[str] = set()
+    words: list[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z'-]+", draft):
+        key = token.lower()
+        if key not in seen and len(token) > 3:
+            seen.add(key)
+            words.append(token)
+    words.sort(key=len, reverse=True)
+    room = max(0, limit - len(_COMMAND_VERBS))
+    return " ".join((*_COMMAND_VERBS, *words[:room]))

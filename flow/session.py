@@ -23,7 +23,7 @@ import numpy as np
 from . import MAX_UTTERANCE_SEC, SAMPLE_RATE
 from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
-from .edits import apply_local, plan
+from .edits import apply_local, command_bias, plan
 from .refine import refine
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
@@ -69,6 +69,10 @@ class DecodeWorker:
         self._cv = threading.Condition()
         self._partial: np.ndarray | None = None
         self._finals: deque[np.ndarray] = deque()
+        #: (audio, hotwords) re-decodes of an utterance the router suspects was a
+        #: mis-heard command. Queued like finals, because losing one means paying the
+        #: CLI call this exists to avoid.
+        self._rescues: deque[tuple[np.ndarray, str]] = deque()
         self._out: deque[tuple[str, str]] = deque()
         #: Recent decode durations as (kind, seconds). Bounded, so this is safe to keep
         #: on in a long session; the soak test reads it to check latency does not drift.
@@ -81,7 +85,12 @@ class DecodeWorker:
     @property
     def busy(self) -> bool:
         with self._cv:
-            return self._busy or self._partial is not None or bool(self._finals)
+            return (
+                self._busy
+                or self._partial is not None
+                or bool(self._finals)
+                or bool(self._rescues)
+            )
 
     def submit_partial(self, audio: np.ndarray) -> None:
         with self._cv:
@@ -92,6 +101,12 @@ class DecodeWorker:
         with self._cv:
             self._finals.append(audio)
             self._partial = None  # a final supersedes a pending partial of the same audio
+            self._cv.notify()
+
+    def submit_rescue(self, audio: np.ndarray, hotwords: str) -> None:
+        """Re-decode this audio biased toward `hotwords`. Result kind: "rescue"."""
+        with self._cv:
+            self._rescues.append((audio, hotwords))
             self._cv.notify()
 
     def results(self) -> list[tuple[str, str]]:
@@ -122,19 +137,30 @@ class DecodeWorker:
     def _run(self) -> None:
         while True:
             with self._cv:
-                while self._alive and self._partial is None and not self._finals:
+                while (
+                    self._alive
+                    and self._partial is None
+                    and not self._finals
+                    and not self._rescues
+                ):
                     self._cv.wait()
                 if not self._alive:
                     return
+                hotwords = ""
                 if self._finals:
                     audio, kind = self._finals.popleft(), "final"
+                elif self._rescues:
+                    (audio, hotwords), kind = self._rescues.popleft(), "rescue"
                 else:
                     audio, kind = self._partial, "partial"
                     self._partial = None
                 self._busy = True
             started = time.perf_counter()
             try:
-                text = self._asr.text(audio, final=(kind == "final"))
+                # `hotwords` is passed only when there is a bias to apply, so a
+                # Transcriber that predates this (every fake in the tests) still works.
+                extra = {"hotwords": hotwords} if hotwords else {}
+                text = self._asr.text(audio, final=(kind != "partial"), **extra)
             except Exception as exc:  # a decode failure must not kill the thread
                 text, kind = f"{type(exc).__name__}: {exc}", "error"
             elapsed = time.perf_counter() - started
@@ -211,6 +237,12 @@ class Session:
         self.draft = Draft()
         self.state = State.IDLE
         self._utter: list[np.ndarray] = []
+        #: The audio of the utterance being decoded, kept until routing is done so a
+        #: suspected mis-heard command can be re-decoded without asking the user to
+        #: say it again.
+        self._last_audio: np.ndarray | None = None
+        #: What the router was about to send to the CLI when it asked for a rescue.
+        self._pending_rescue: str | None = None
         self._decoded_sec = 0.0
         self._events: deque[Event] = deque()
         self._refine_cwd = refine_cwd
@@ -375,7 +407,9 @@ class Session:
     def _finalise(self) -> None:
         if not self._utter:
             return
-        self.worker.submit_final(np.concatenate(self._utter))
+        audio = np.concatenate(self._utter)
+        self._last_audio = audio
+        self.worker.submit_final(audio)
         self._utter = []
         self._decoded_sec = 0.0
 
@@ -388,6 +422,8 @@ class Session:
                 # otherwise pop an empty bubble open on screen.
                 if text:
                     self._emit("partial", text)
+            elif kind == "rescue":
+                self._finish_rescue(text)
             elif text:
                 self._route(text)
             else:
@@ -439,10 +475,45 @@ class Session:
                 self._start_refine(utterance)
                 return
         else:
-            self._start_refine(p.payload)
+            self._escalate(p)
             return
 
         self._after_draft_change()
+
+    def _escalate(self, p) -> None:
+        """A semantic plan. Try one cheap re-decode first, if it might be a mis-hearing.
+
+        `escalated` means the shape was a correction but the target was nowhere in the
+        draft — which is far likelier to be a mis-heard word than a request for
+        judgement. A second decode biased toward the trigger verbs and the draft's own
+        words costs about a second; the CLI costs seven and will be asked to edit text
+        that does not contain the word.
+        """
+        if p.escalated and self._last_audio is not None and self._pending_rescue is None:
+            self._pending_rescue = p.payload
+            self._emit("note", f"re-listening for {p.target!r}")
+            self.worker.submit_rescue(
+                self._last_audio, command_bias(self.draft.text)
+            )
+            return
+        self._start_refine(p.payload)
+
+    def _finish_rescue(self, text: str) -> None:
+        """The biased re-decode came back. Accept it only if it beats the first read."""
+        instruction, self._pending_rescue = self._pending_rescue, None
+        if instruction is None:
+            return  # a rescue nobody is waiting for; ignore rather than act on it
+        p = plan(text, self.draft.text) if text else None
+        if p is not None and p.kind == "local":
+            new, applied = apply_local(self.draft.text, p)
+            if applied:
+                self.draft.set(new)
+                self._emit("note", f"re-heard as {p.describe()}")
+                self._after_draft_change()
+                return
+        # The second read did not find a command either. The CLI was always the
+        # fallback; it just costs a second more than it used to.
+        self._start_refine(instruction)
 
     @property
     def force_next(self) -> str | None:

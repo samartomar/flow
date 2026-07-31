@@ -266,6 +266,20 @@ def _word_spans(text: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
 
 
+def _tighten(text: str, begin: int, end: int) -> tuple[int, int]:
+    """Trim punctuation off a matched window.
+
+    Windows are whitespace-delimited, so a match on the last word of a sentence
+    includes its full stop — and replacing that span deletes the punctuation with it.
+    "Meeting on Tuesday." became "Meeting on Friday" rather than "Meeting on Friday.".
+    """
+    while begin < end and not text[begin].isalnum():
+        begin += 1
+    while end > begin and not text[end - 1].isalnum():
+        end -= 1
+    return begin, end
+
+
 def find_span(
     text: str, target: str, threshold: float = MATCH_THRESHOLD
 ) -> tuple[int, int] | None:
@@ -300,7 +314,7 @@ def find_span(
             # `>=` so that a tie resolves to the later span, matching the exact path.
             if score >= threshold and (best is None or score >= best[0]):
                 best = (score, begin, end)
-    return (best[1], best[2]) if best else None
+    return _tighten(text, best[1], best[2]) if best else None
 
 
 def find_spans(
@@ -337,5 +351,5 @@ def find_spans(
     # of text cannot be replaced twice.
     for _score, begin, end in sorted(scored, key=lambda r: -r[0]):
         if all(end <= b or begin >= e for b, e in out):
-            out.append((begin, end))
+            out.append(_tighten(text, begin, end))
     return sorted(out)

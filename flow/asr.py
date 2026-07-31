@@ -130,8 +130,15 @@ class Drop(NamedTuple):
 
 
 class Transcriber(Protocol):
-    def text(self, audio: np.ndarray, *, final: bool = False) -> str:
-        """Transcribe mono float32 audio at SAMPLE_RATE. Returns plain text."""
+    def text(
+        self, audio: np.ndarray, *, final: bool = False, hotwords: str = ""
+    ) -> str:
+        """Transcribe mono float32 audio at SAMPLE_RATE. Returns plain text.
+
+        `hotwords` biases this one decode — used by the constrained re-decode of a
+        suspected mis-heard command. It is passed only when non-empty, so a simpler
+        Transcriber that does not accept it still satisfies the caller.
+        """
         ...
 
 
@@ -224,16 +231,20 @@ class WhisperTranscriber:
         """(partial, final) model names, for startup diagnostics."""
         return self._names[False], self._names[True]
 
-    def text(self, audio: np.ndarray, *, final: bool = False) -> str:
+    def text(
+        self, audio: np.ndarray, *, final: bool = False, hotwords: str = ""
+    ) -> str:
         if audio.size == 0:
             return ""
         # Only the tier being used: a partial must never wait on the finals model.
         self.load(final)
         with self._lock:
             model = self._models[final]
-        segments, _ = model.transcribe(
-            audio, **decode_options(final, self.lexicon.hotwords())
-        )
+        # A caller-supplied bias wins over the standing lexicon rather than joining
+        # it: a rescue decode is aimed at one utterance, and the lexicon measurement
+        # says a longer prompt full of terms that are not being said costs accuracy.
+        bias = hotwords or self.lexicon.hotwords()
+        segments, _ = model.transcribe(audio, **decode_options(final, bias))
         kept = []
         for s in segments:
             # Drop segments the model invented rather than heard, and record every one

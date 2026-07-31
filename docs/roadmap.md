@@ -381,8 +381,31 @@ utterance never pays for `small.en` at all.
   recall for one span. **All 10 corrections whose target the draft spells differently
   now stay local (no ~7 s CLI call) and edit the right span** — the escalation this
   defect caused is gone on the measured set.
-- Constrained re-decode of suspected commands, biased with the trigger lexicon + draft
-  tokens via `hotwords` (~1 s, replaces the 7 s CLI escalation).
+- ~~Constrained re-decode of suspected commands, biased with the trigger lexicon +
+  draft tokens via `hotwords`~~ **done 2026-07-31.** A semantic plan now records
+  *why* it is semantic: `escalated=True` means the shape was a correction but the
+  target was nowhere in the draft, which is likelier a mis-hearing than a request for
+  judgement. Those get one re-decode of the same audio, biased by
+  `edits.command_bias()` — every trigger verb plus the draft's own long words, capped
+  at 48 terms — before any CLI call. A genuine "make it more formal" is not marked and
+  goes straight to the CLI as before.
+
+  Measured with `scripts/rescue_bench.py`: the command inventory synthesised through
+  two SAPI voices, buried in white noise at falling SNR, `small.en`.
+
+  | SNR | first read routes correctly | after the biased re-read | re-read cost |
+  |---|---|---|---|
+  | clean | 23/24 | **24/24** | 2.06 s |
+  | 15 dB | 23/24 | **24/24** | 2.01 s |
+  | 10 dB | 21/24 | **24/24** | 2.01 s |
+  | 5 dB | 20/24 | **24/24** | 2.04 s |
+  | 0 dB | 15/24 | **21/24** | 2.05 s |
+
+  Every first-read failure is recovered down to 5 dB, and two thirds of them at 0 dB,
+  for **~2.0 s against the ~7 s CLI call** it replaces — and the result is a correct
+  local edit rather than a CLI asked to edit text not containing the word. SAPI is a
+  US-English synthesiser, so this measures the *mechanism*, not the population;
+  accented command recordings remain the missing benchmark.
 - Post-hoc "that was a command" rescue chip.
 - ~~Pre-roll ring buffer in the gate~~ **done 2026-07-31** (defect 5 → P2). The gate
   keeps the last 4 blocks (256 ms) it heard while quiet and hands them back when it
