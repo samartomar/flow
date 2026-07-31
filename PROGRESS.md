@@ -791,3 +791,62 @@ above, sixth instance: **check the denominator.**
 
 **91 tests green** (79 + 12 new in `tests/test_bench.py` covering `summarise_gate`,
 `median` and `wer`). No product code changed this iteration — this was measurement.
+
+### 2026-07-31 — Phase 0: the short-clip false-reject probe
+
+The ≥ 1.5 s accent run reported zero filter drops in 900 decodes. That number proved
+nothing about the case the audit actually predicts — short, quiet, borderline speech —
+so it needed its own slice and its own metric. Both now exist.
+
+**What changed.** `fetch_accent_data.py` grew `--tag`, `--min-words` and honest
+duration bounds, so a differently-filtered slice lands in its own directory and its own
+manifest instead of contaminating the WER benchmark's denominator; 280 clips of
+0.31–1.48 s (median 0.70 s) came down that way. `accent_bench.py` grew `--manifest`
+selection, per-slice results files, and per-clip false-reject accounting: `model_empty`
+(the model produced nothing — an ASR failure) is separated from `false_reject` (the
+model produced text and the filters deleted all of it), and every drop is attributed to
+the exact rule that fired. The filter simulation is now the pure `apply_filters()`, and
+`flow/clean.py` gained `invented_reason()` — same decision as `is_invented`, but naming
+the rule, which is what the Phase 1 log line will need anyway. No behaviour changed:
+a test asserts the two never disagree.
+
+**Measured**, 280 clips, both models:
+
+| | base.en | small.en |
+|---|---|---|
+| user sees nothing (model had text, filters ate it) | 3/280 = **1.1%** | 6/280 = **2.1%** |
+| …where the deleted text was actually correct | **0** | **1** (0.36%) |
+| under the proposed two-signal thin rule | 3 (1.1%) | 5 (1.8%) |
+| drop paths | lib-skip 2, thin+unconfident 2 | lib-skip 3, thin+unconfident 2, thin 1 |
+| model WER on this slice | 0.54–1.59 | 0.39–0.62 |
+
+**What the drops actually were.** Eight of nine discarded a *mis-hearing* of a
+backchannel: "UH" heard as "Mm.", "OKAY" as "Gay.", "NICE MM HMM" as "You". One lost
+real content — `small.en` transcribed a 0.31 s Russian "YEAH" correctly and the
+library skipped it (`no_speech` 0.674, `avg_logprob` −1.05). So the filter stack is not
+eating accented speech at the rate the audit feared; it is mostly refusing to paste
+garbage. Content loss sits inside P2's 1% bound. User-visible silence does not.
+
+**Three findings that change the plan:**
+
+1. **The library's skip is the dominant path** — 5 of 9 drops, unlogged, unattributable,
+   inside faster-whisper. Defect 2 moves to the front of Phase 1.
+2. **The thin-rule fix is nearly a no-op, and it has a cost.** It recovers one clip in
+   280. Worse, the digital-silence hallucination in clean.py's own measurement table
+   ('You', `no_speech` 0.691, `avg_logprob` −0.711) is thin but *not* unconfident, so
+   deleting the thin test re-admits exactly the thing the filter was built to catch.
+   The unit test found that, not the run. Phase 1 needs a third signal — the
+   whole-utterance filler list — instead of just requiring two.
+3. **`small.en` is much stronger on short clips** (Japanese 1.59 → 0.62, Indian
+   0.97 → 0.57). Short utterances are where `base.en` collapses hardest, which is more
+   support for the split-tier decision. RTF 4–5 on sub-1.5 s clips: a 0.7 s utterance
+   still costs `small.en` ~3.5 s, the flat 30 s window again.
+
+**The denominator, stated because it limits the claim: 31% of this slice (87/280) is
+pure backchannel.** That is what sub-1.5 s conversational speech mostly is. EdAcc has
+no short spoken *commands*, so this probe bounds the filter on short speech in general,
+not on "delete that line" — which still needs recorded speakers, as the roadmap already
+says.
+
+**109 tests green** (91 + 18: `invented_reason` attribution and the reason/boolean
+agreement property in `test_clean.py`, `apply_filters` accounting in `test_bench.py`).

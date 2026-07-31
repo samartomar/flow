@@ -27,6 +27,13 @@ Output layout (consumed by scripts/accent_bench.py):
 EdAcc is *conversational* speech — expect WER well above dictation register.
 That is fine: it is the stress test, and model-vs-model deltas are the signal.
 
+`--tag` writes a *separate* slice (`edacc-<tag>/` + `manifest-edacc-<tag>.jsonl`)
+so a differently-filtered set does not contaminate the main WER benchmark. The
+short-clip false-reject probe uses it:
+
+    uv run python scripts/fetch_accent_data.py \
+        --tag short --min-sec 0.3 --max-sec 1.5 --min-words 1
+
 Usage:  uv run python scripts/fetch_accent_data.py [--per-group 60]
 """
 
@@ -95,11 +102,11 @@ def _rows_page(offset: int, length: int = 100) -> dict:
     return _get(f"{API}/rows?{q}")
 
 
-def _usable(text: str) -> bool:
+def _usable(text: str, min_words: int = 2) -> bool:
     if any(marker in text for marker in _BAD_TEXT):
         return False
     words = [w for w in text.split() if w.isalpha() or w.replace("'", "").isalpha()]
-    return len(words) >= 2
+    return len(words) >= min_words
 
 
 def _to_16k_mono(data: bytes) -> tuple[np.ndarray, float]:
@@ -136,14 +143,21 @@ def main() -> None:
     ap.add_argument("--per-group", type=int, default=60)
     ap.add_argument("--min-sec", type=float, default=1.5)
     ap.add_argument("--max-sec", type=float, default=20.0)
+    ap.add_argument("--min-words", type=int, default=2)
+    ap.add_argument("--tag", default="",
+                    help="write a separate slice: edacc-<tag>/ + manifest-edacc-<tag>")
     args = ap.parse_args()
+
+    suffix = f"-{args.tag}" if args.tag else ""
+    audio_dir = f"edacc{suffix}"
 
     first = _rows_page(0, 1)
     total = first["num_rows_total"]
     print(f"{DATASET} {SPLIT}: {total} rows; "
-          f"selecting up to {args.per_group}/group, {args.min_sec}-{args.max_sec}s")
+          f"selecting up to {args.per_group}/group, {args.min_sec}-{args.max_sec}s, "
+          f"ref >= {args.min_words} words -> {audio_dir}/")
 
-    manifest = BENCH / "manifest-edacc.jsonl"
+    manifest = BENCH / f"manifest-edacc{suffix}.jsonl"
     BENCH.mkdir(parents=True, exist_ok=True)
 
     # Resumable: prior manifest lines and already-downloaded WAVs are reused, so
@@ -172,12 +186,12 @@ def main() -> None:
             slug = GROUPS.get(row.get("l1", ""))
             if slug is None or counts[slug] >= args.per_group:
                 continue
-            if item["row_idx"] in have or not _usable(row.get("text", "")):
+            if item["row_idx"] in have or not _usable(row.get("text", ""), args.min_words):
                 continue
             audio_refs = row.get("audio") or []
             if not audio_refs or "src" not in audio_refs[0]:
                 continue
-            wav = BENCH / "edacc" / slug / f"{item['row_idx']:05d}.wav"
+            wav = BENCH / audio_dir / slug / f"{item['row_idx']:05d}.wav"
             try:
                 if wav.exists():  # downloaded by a crashed run; trust and reuse
                     audio = None

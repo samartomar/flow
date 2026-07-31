@@ -27,8 +27,22 @@ digits->words, drop filler tokens from both sides. Absolute WER therefore runs
 high; the *deltas* — model vs model, model WER vs app WER, group vs us-control —
 are the signal. Check the denominator: n and ref-words are printed per cell.
 
-Usage:  uv run python scripts/accent_bench.py [model ...]
+**False-reject accounting (P2).** Beyond per-segment drop counts, every clip is
+scored for whether Flow would have shown the user *nothing at all*:
+
+    model_empty   - the model itself produced no text: an ASR failure, not a filter
+    false_reject  - the model produced text and the filters deleted all of it
+
+`false_reject` is the number P2 bounds at < 1%, and it is the one that matters:
+the user spoke, the words were recognised, and the app showed silence. Drops are
+attributed to the exact rule that fired (`flow.clean.invented_reason`), and the
+proposed Phase 1 two-signal rule — where thin-ness alone no longer justifies a
+drop — is scored side by side with the shipped rule so the fix has a number.
+
+Usage:  uv run python scripts/accent_bench.py [model ...] [--manifest NAME]
         default models: base.en small.en small
+        default manifest: manifest-edacc.jsonl (the >= 1.5 s WER slice)
+        short-clip probe: --manifest manifest-edacc-short.jsonl
 Writes: .bench/accent/results-<model>.json
 """
 
@@ -44,7 +58,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from flow.clean import is_invented, normalise  # noqa: E402
+from flow.clean import invented_reason, normalise  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench" / "accent"
 SR = 16000
@@ -118,19 +132,65 @@ def load_wav(path: Path) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def load_manifest() -> list[dict]:
+#: Segment-drop rules that survive the proposed Phase 1 change. "thin" alone does
+#: not: short-and-confident is what a spoken correction looks like, and the roadmap's
+#: defect 3 is that thin-ness is a property of the text, not evidence of invention.
+TWO_SIGNAL_KEEPS = {"thin"}
+
+
+def apply_filters(segs: list[dict]) -> dict:
+    """Run both production filters over recorded per-segment signals.
+
+    Pure, so the accounting that produces the P2 number can be tested without a
+    model. `segs` are dicts of {text, ns, lp}; each dropped segment is annotated
+    in place with the rule that dropped it, which is what the results JSON carries.
+
+    Returns the surviving text under the shipped rule (`app_text`) and under the
+    proposed two-signal rule (`two_signal_text`), plus drop counts by rule.
+    """
+    survivors, two_signal, lib_skipped, clean_dropped = [], [], 0, 0
+    reasons: dict[str, int] = {}
+    for s in segs:
+        if s["ns"] > LIB_NO_SPEECH and s["lp"] < LIB_LOG_PROB:
+            lib_skipped += 1
+            s["drop"] = "lib-skip"
+            continue
+        reason = invented_reason(s["text"], s["ns"], s["lp"])
+        # The proposed rule keeps everything the shipped rule keeps, plus the
+        # segments dropped for thin-ness alone.
+        if reason is None or reason in TWO_SIGNAL_KEEPS:
+            two_signal.append(s["text"].strip())
+        if reason is not None:
+            clean_dropped += 1
+            reasons[reason] = reasons.get(reason, 0) + 1
+            s["drop"] = reason
+            continue
+        survivors.append(s["text"].strip())
+    return {
+        "app_text": normalise(" ".join(survivors)),
+        "two_signal_text": normalise(" ".join(two_signal)),
+        "lib_skipped": lib_skipped,
+        "clean_dropped": clean_dropped,
+        "reasons": reasons,
+    }
+
+
+def load_manifest(pattern: str = "manifest-edacc.jsonl") -> list[dict]:
+    """Load one slice. Slices are separate files on purpose — the short-clip probe
+    must not contaminate the WER benchmark's denominator, and vice versa."""
     entries = []
-    for mf in sorted(BENCH.glob("manifest-*.jsonl")):
+    for mf in sorted(BENCH.glob(pattern)):
         with mf.open(encoding="utf-8") as f:
             entries.extend(json.loads(line) for line in f if line.strip())
     if not entries:
         raise SystemExit(
-            f"no manifest under {BENCH} — run scripts/fetch_accent_data.py first"
+            f"no manifest matching {pattern!r} under {BENCH} — "
+            "run scripts/fetch_accent_data.py first"
         )
     return entries
 
 
-def bench_model(name: str, entries: list[dict]) -> dict:
+def bench_model(name: str, entries: list[dict], slice_tag: str = "") -> dict:
     from faster_whisper import WhisperModel
 
     t0 = time.perf_counter()
@@ -159,22 +219,21 @@ def bench_model(name: str, entries: list[dict]) -> dict:
         decode = time.perf_counter() - t
 
         model_text = normalise(" ".join(s["text"].strip() for s in segs))
-        survivors, lib_skipped, clean_dropped = [], 0, 0
-        for s in segs:
-            if s["ns"] > LIB_NO_SPEECH and s["lp"] < LIB_LOG_PROB:
-                lib_skipped += 1
-                continue
-            if is_invented(s["text"], s["ns"], s["lp"]):
-                clean_dropped += 1
-                continue
-            survivors.append(s["text"].strip())
-        app_text = normalise(" ".join(survivors))
+        f = apply_filters(segs)
+        app_text, two_signal_text = f["app_text"], f["two_signal_text"]
+        lib_skipped, clean_dropped, reasons = (
+            f["lib_skipped"], f["clean_dropped"], f["reasons"]
+        )
 
         em, nr = wer_counts(e["ref"], model_text)
         ea, _ = wer_counts(e["ref"], app_text)
+        model_empty = not model_text
+        app_empty = not app_text
         g = groups.setdefault(e["group"], {
             "n": 0, "ref_words": 0, "model_edits": 0, "app_edits": 0,
             "segments": 0, "lib_skipped": 0, "clean_dropped": 0,
+            "model_empty": 0, "app_empty": 0, "false_reject": 0,
+            "false_reject_two_signal": 0, "reasons": {},
             "audio_s": 0.0, "decode_s": 0.0,
         })
         g["n"] += 1
@@ -184,6 +243,12 @@ def bench_model(name: str, entries: list[dict]) -> dict:
         g["segments"] += len(segs)
         g["lib_skipped"] += lib_skipped
         g["clean_dropped"] += clean_dropped
+        g["model_empty"] += int(model_empty)
+        g["app_empty"] += int(app_empty)
+        g["false_reject"] += int(app_empty and not model_empty)
+        g["false_reject_two_signal"] += int(not two_signal_text and not model_empty)
+        for reason, count in reasons.items():
+            g["reasons"][reason] = g["reasons"].get(reason, 0) + count
         g["audio_s"] += e["duration"]
         g["decode_s"] += decode
         clips.append({**e, "model_text": model_text, "app_text": app_text,
@@ -201,7 +266,34 @@ def bench_model(name: str, entries: list[dict]) -> dict:
               f"{g['segments']:>6}{g['lib_skipped']:>6}{g['clean_dropped']:>6}"
               f"{g['decode_s'] / g['audio_s']:>6.2f}")
 
-    out = BENCH / f"results-{name.replace('/', '_')}.json"
+    # P2: what fraction of clips the user would have seen nothing for.
+    print(f"\n{'group':<12}{'n':>4}{'mdl-empty':>11}{'false-rej':>11}"
+          f"{'rate':>8}{'2-signal':>10}{'rate':>8}")
+    tot = {"n": 0, "model_empty": 0, "false_reject": 0, "false_reject_two_signal": 0}
+    for slug in sorted(groups):
+        g = groups[slug]
+        for k in tot:
+            tot[k] += g[k]
+        print(f"{slug:<12}{g['n']:>4}{g['model_empty']:>11}{g['false_reject']:>11}"
+              f"{g['false_reject'] / g['n']:>8.1%}"
+              f"{g['false_reject_two_signal']:>10}"
+              f"{g['false_reject_two_signal'] / g['n']:>8.1%}")
+    print(f"{'ALL':<12}{tot['n']:>4}{tot['model_empty']:>11}{tot['false_reject']:>11}"
+          f"{tot['false_reject'] / tot['n']:>8.1%}"
+          f"{tot['false_reject_two_signal']:>10}"
+          f"{tot['false_reject_two_signal'] / tot['n']:>8.1%}"
+          f"   (P2 target: < 1%)")
+
+    all_reasons: dict[str, int] = {}
+    for g in groups.values():
+        for reason, count in g["reasons"].items():
+            all_reasons[reason] = all_reasons.get(reason, 0) + count
+    total_segs = sum(g["segments"] for g in groups.values())
+    lib = sum(g["lib_skipped"] for g in groups.values())
+    detail = ", ".join(f"{r}={c}" for r, c in sorted(all_reasons.items())) or "none"
+    print(f"\nsegment drops over {total_segs} segments: lib-skip={lib}, {detail}")
+
+    out = BENCH / f"results-{name.replace('/', '_')}{slice_tag}.json"
     out.write_text(
         json.dumps({"model": name, "groups": groups, "clips": clips}, indent=1),
         encoding="utf-8",
@@ -211,16 +303,29 @@ def bench_model(name: str, entries: list[dict]) -> dict:
 
 
 def main() -> None:
-    models = sys.argv[1:] or ["base.en", "small.en", "small"]
-    entries = load_manifest()
+    argv = sys.argv[1:]
+    pattern = "manifest-edacc.jsonl"
+    if "--manifest" in argv:
+        i = argv.index("--manifest")
+        pattern = argv[i + 1]
+        del argv[i:i + 2]
+    models = argv or ["base.en", "small.en", "small"]
+
+    entries = load_manifest(pattern)
+    # Distinct results files per slice, so the short-clip probe cannot quietly
+    # overwrite the WER benchmark it is not comparable to.
+    stem = pattern.removeprefix("manifest-edacc").removesuffix(".jsonl")
     n_groups = len({e["group"] for e in entries})
-    print(f"{len(entries)} clips, {n_groups} groups, "
-          f"{sum(e['duration'] for e in entries) / 60:.1f} min audio")
+    durations = sorted(e["duration"] for e in entries)
+    print(f"{len(entries)} clips ({pattern}), {n_groups} groups, "
+          f"{sum(durations) / 60:.1f} min audio, "
+          f"duration {durations[0]:.2f}-{durations[-1]:.2f}s "
+          f"(median {durations[len(durations) // 2]:.2f}s)")
     print("columns: model=model WER  app=after Flow's two filters  "
           "lib-/cln-=segments dropped by each filter")
 
     for name in models:
-        bench_model(name, entries)
+        bench_model(name, entries, slice_tag=stem)
 
 
 if __name__ == "__main__":

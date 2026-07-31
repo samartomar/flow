@@ -57,7 +57,7 @@ faster-whisper 1.2.1), final beam 2 vs library default 5, uncapped temperature f
 | Metric | Today | Target |
 |---|---|---|
 | Per-accent WER, every anchor group (P1) | 18.7–30.6% on EdAcc (conversational; see Phase 0 results) | **≤ 12% floor** (not average) |
-| Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; short-utterance regime untested | **< 1%**, every drop logged |
+| Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% | **< 1%**, every drop logged |
 | Command recognition, accented (P3) | unmeasured | **≥ 95%**; silent misroutes ≈ 0 |
 | Personal-lexicon entity accuracy (P4) | no biasing exists | **≥ 90%** |
 | Partial latency (R4) | base.en 0.78–1.21 s median, **1.87 s worst** on accented speech; small.en 2.60–3.75 s median (see Phase 0 R4 results) | **< 1.5 s, preserved** |
@@ -122,9 +122,9 @@ established:
   ~14 s to commit. It becomes viable only with faster hardware or a quantised/distilled
   variant worth a separate measurement.
 
-**Decision from this data: `small.en` as the default.** Remaining Phase 0 measurements:
-a Svarah slice for dictation-register Indian numbers, and the short-clip (< 1.5 s)
-false-reject probe. (The R4 prefix-latency gate is done — results below.)
+**Decision from this data: `small.en` as the default.** Remaining Phase 0 measurement:
+a Svarah slice for dictation-register Indian numbers. (The R4 prefix-latency gate and
+the short-clip false-reject probe are done — results below.)
 
 **R4 prefix-latency gate (2026-07-31, dev CPU, int8) — done.**
 `scripts/asr_bench.py --prefix-only` now cuts growing prefixes from the *longest real
@@ -166,6 +166,49 @@ control, decodes each with production partial parameters (`beam_size=1`,
   because it was run wrong; it failed because it was run on synthesised US English.
   Check the denominator.
 
+**Short-clip false-reject probe (2026-07-31) — done.** The ≥ 1.5 s run showed zero
+filter drops in 900 decodes, which proved nothing about the regime the audit actually
+predicts: short, quiet, borderline utterances. `fetch_accent_data.py --tag short
+--min-sec 0.3 --max-sec 1.5 --min-words 1` pulled a **separate** 280-clip slice
+(0.31–1.48 s, median 0.70 s; spanish/russian/indian/us-control 60 each, japanese 40 —
+EdAcc has no more), and `accent_bench.py --manifest manifest-edacc-short.jsonl` now
+scores per clip whether Flow would have shown the user *nothing at all*.
+
+| | base.en | small.en |
+|---|---|---|
+| utterances where the user sees nothing (model produced text, filters ate it) | 3/280 = **1.1%** | 6/280 = **2.1%** |
+| …of which the deleted text was actually **correct** | **0** | **1** (0.36%) |
+| same, under the proposed two-signal thin rule | 3 (1.1%) | 5 (1.8%) |
+| segment drops by path | lib-skip 2, thin+unconfident 2 | lib-skip 3, thin+unconfident 2, thin 1 |
+| model WER on this slice | 0.54–1.59 | 0.39–0.62 |
+
+- **The silent-deletion risk is real but small, and it is mostly the filter working.**
+  Of the nine drops across both models, eight discarded a *mis-hearing* of a
+  backchannel — "UH" heard as "Mm.", "OKAY" as "Gay.", "NICE MM HMM" as "You". Exactly
+  one lost correct content: `small.en` transcribed a 0.31 s Russian "YEAH" correctly
+  and the library skipped it. Content loss is therefore 0% (base.en) and 0.36%
+  (small.en) — inside P2's 1% bound; the *user-visible silence* rate is not.
+- **The dominant drop path is the library's, not Flow's** — 5 of 9 drops happen inside
+  faster-whisper's internal skip, unlogged and unattributable today. That is defect 2,
+  and it is now the Phase 1 item with measured impact.
+- **The proposed thin-rule change is nearly a no-op here** (3→3 and 6→5 clips) *and*
+  it has a cost: the digital-silence hallucination measured in
+  [clean.py](../flow/clean.py) ('You', `no_speech` 0.691, `avg_logprob` −0.711) is thin
+  but **not** unconfident, so deleting the thin test re-admits it. Phase 1 must add a
+  third signal — the whole-utterance filler list, currently reachable only when no
+  probabilities exist — rather than simply requiring two. Pinned in
+  `tests/test_bench.py`.
+- **Denominator caveat, stated plainly: 31% of this slice (87/280) is pure
+  backchannel** ("MM HMM", "YEAH", "UH"), because that is what sub-1.5 s conversational
+  speech mostly *is*. EdAcc contains no short spoken *commands*, which is the case the
+  audit really worries about. The command-phrase benchmark still needs recorded
+  speakers; this probe bounds the filter's behaviour on short speech in general, not on
+  "delete that line".
+- **`small.en` is far better on short clips** (Japanese 1.59 → 0.62 WER, Indian
+  0.97 → 0.57): short utterances are where `base.en` collapses hardest, which
+  strengthens the split-tier decision below. RTF 4–5 on sub-1.5 s clips confirms the
+  flat 30 s window — a 0.7 s utterance still costs `small.en` ~3.5 s.
+
 **Finals cost (same sources, full 10–20 s utterances, median/worst of 6):**
 base.en beam 2 **1.12 / 1.53 s**, beam 5 **1.37 / 2.52 s**; small.en beam 2
 **4.07 / 4.90 s**, beam 5 **4.87 / 6.12 s** (at a typical 5 s utterance, small.en beam 2
@@ -175,8 +218,12 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
 ### Phase 1 — Stop the bleeding (accuracy track, small diffs)
 
 - Pass explicit `no_speech_threshold` / `log_prob_threshold`; log every dropped segment
-  (defect 2 → P2).
+  (defect 2 → P2). **Measured as the dominant drop path: 5 of 9 short-clip drops happen
+  inside the library, invisible to Flow.** Do this one first.
 - Thin rule requires two signals again; drops become visible events (defect 3 → P2).
+  Measured as nearly a no-op on its own (3→3 / 6→5 clips), and deleting the thin test
+  outright re-admits the digital-silence 'You' — so the rule needs the whole-utterance
+  filler list as its second signal, not just `avg_logprob`.
 - Final beam 5, temperature fallback capped at (0.0, 0.2, 0.4) — measured at 2.4–4.7×
   partial latency on low-confidence accented audio when left uncapped (Phase 0, R4).
 - `hotwords` from a user-editable lexicon file — names, repo terms, jargon (P4 seed).

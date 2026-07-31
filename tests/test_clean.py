@@ -12,7 +12,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flow.clean import collapse_repeats, is_invented, normalise, strip_markers  # noqa: E402
+from flow.clean import (  # noqa: E402
+    collapse_repeats,
+    invented_reason,
+    is_invented,
+    normalise,
+    strip_markers,
+)
 
 REAL = "I need to send an email to the team about the quarterly review meeting."
 
@@ -79,6 +85,45 @@ class TestNoProbabilityAvailable(unittest.TestCase):
     def test_real_text_is_kept(self):
         self.assertFalse(is_invented(REAL, None))
         self.assertFalse(is_invented("Send the report.", None))
+
+
+class TestInventedReason(unittest.TestCase):
+    """Every drop has to say which rule ate the speech, not just that one did."""
+
+    def test_kept_text_has_no_reason(self):
+        self.assertIsNone(invented_reason(REAL, 0.01, -0.2))
+
+    def test_empty_after_markers(self):
+        self.assertEqual(invented_reason("[BLANK_AUDIO]", 0.1, -0.2), "empty")
+
+    def test_thin_alone_is_named(self):
+        # The one-signal drop the roadmap calls defect 3: short but confident.
+        self.assertEqual(invented_reason("delete that line", 0.9, -0.3), "thin")
+
+    def test_unconfident_alone_is_named(self):
+        self.assertEqual(
+            invented_reason("this is a longer stretch of speech", 0.9, -0.95),
+            "unconfident",
+        )
+
+    def test_both_signals_are_named_together(self):
+        self.assertEqual(invented_reason("You", 0.9, -0.95), "thin+unconfident")
+
+    def test_filler_without_probabilities(self):
+        self.assertEqual(invented_reason("Thank you.", None), "filler")
+        self.assertIsNone(invented_reason(REAL, None))
+
+    def test_reason_and_boolean_never_disagree(self):
+        cases = [
+            (REAL, 0.01, -0.2), ("You", 0.69, -0.71), ("okay", 0.9, None),
+            ("[BLANK_AUDIO]", 0.1, -0.2), ("Thank you.", None, None),
+            ("delete that line", 0.9, -0.3), ("a much longer utterance here", 0.7, -0.9),
+        ]
+        for text, ns, lp in cases:
+            with self.subTest(text=text):
+                self.assertEqual(
+                    is_invented(text, ns, lp), invented_reason(text, ns, lp) is not None
+                )
 
 
 if __name__ == "__main__":

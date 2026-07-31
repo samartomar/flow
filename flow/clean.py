@@ -83,6 +83,43 @@ def normalise(text: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
+def invented_reason(
+    text: str,
+    no_speech_prob: float | None = None,
+    avg_logprob: float | None = None,
+) -> str | None:
+    """Which rule rejects this segment, or None to keep it.
+
+    The decision is identical to `is_invented`; this form names the rule that fired.
+    A drop is a deletion of something the user said, so it has to be attributable —
+    both for the log line the runtime will emit (P2) and for a benchmark that needs to
+    say *which* filter ate the speech rather than that some filter did.
+    """
+    stripped = normalise(text).strip().strip(".!?,").lower()
+    if not stripped:
+        return "empty"
+
+    if no_speech_prob is None:
+        # No probability available (a non-Whisper engine, say): fall back to the
+        # narrow whole-utterance filler check only.
+        return "filler" if stripped in _FILLER_ONLY else None
+
+    if no_speech_prob <= NO_SPEECH_MAX:
+        return None
+
+    # Model says "probably not speech". Confirm with a second signal before dropping:
+    # either the content is too thin to lose, or token confidence is also poor.
+    thin = len(stripped.split()) <= 3
+    unconfident = avg_logprob is not None and avg_logprob < LOW_CONFIDENCE
+    if thin and unconfident:
+        return "thin+unconfident"
+    if thin:
+        return "thin"
+    if unconfident:
+        return "unconfident"
+    return None
+
+
 def is_invented(
     text: str,
     no_speech_prob: float | None = None,
@@ -93,20 +130,4 @@ def is_invented(
     Requires two signals to agree, so an unusual-but-real utterance is not discarded on
     one borderline number.
     """
-    stripped = normalise(text).strip().strip(".!?,").lower()
-    if not stripped:
-        return True
-
-    if no_speech_prob is None:
-        # No probability available (a non-Whisper engine, say): fall back to the
-        # narrow whole-utterance filler check only.
-        return stripped in _FILLER_ONLY
-
-    if no_speech_prob <= NO_SPEECH_MAX:
-        return False
-
-    # Model says "probably not speech". Confirm with a second signal before dropping:
-    # either the content is too thin to lose, or token confidence is also poor.
-    thin = len(stripped.split()) <= 3
-    unconfident = avg_logprob is not None and avg_logprob < LOW_CONFIDENCE
-    return thin or unconfident
+    return invented_reason(text, no_speech_prob, avg_logprob) is not None
