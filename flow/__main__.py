@@ -62,6 +62,14 @@ def main(argv: list[str] | None = None) -> int:
         "--arm", action="store_true", help="start listening immediately, no click needed"
     )
     ap.add_argument(
+        "--calibrate", action="store_true",
+        help="measure this room and this voice, store the profile, and exit (P8)",
+    )
+    ap.add_argument(
+        "--no-profile", action="store_true",
+        help="ignore the stored profile and learn nothing this session",
+    )
+    ap.add_argument(
         "--converse", action="store_true",
         help="start in converse mode: Send asks the agent CLI instead of pasting (P9)",
     )
@@ -85,7 +93,19 @@ def main(argv: list[str] | None = None) -> int:
     final_name = args.model or args.final_model
     say(f"models: {partial_name} for partials, {final_name} for finals")
 
-    lexicon = Lexicon(NUL_PATH if args.no_lexicon else args.lexicon)
+    from .profile import Profile
+
+    profile = None if args.no_profile else Profile()
+    learned = profile.learned_terms if profile is not None else None
+    if profile is not None and profile.calibrated:
+        say(f"profile: room {profile.floor_db:.1f} dB, "
+            f"margin {profile.margin_db():.1f} dB, {len(profile.pairs)} learned pairs")
+    elif profile is not None:
+        say("profile: not calibrated - run `flow --calibrate` once for this room")
+
+    lexicon = Lexicon(
+        NUL_PATH if args.no_lexicon else args.lexicon, learned=learned
+    )
     n_terms = len(lexicon.terms())
     if args.no_lexicon:
         say("lexicon: disabled")
@@ -110,7 +130,31 @@ def main(argv: list[str] | None = None) -> int:
         asr=WhisperTranscriber(partial_name, final_name, lexicon=lexicon),
         device=args.device,
         speaker=speaker,
+        profile=profile,
     )
+
+    if args.calibrate:
+        from .calibrate import run as calibrate_run
+
+        if profile is None:
+            say("--calibrate needs a profile; drop --no-profile")
+            return 2
+        session.mic.start()
+        try:
+            ok = calibrate_run(session.mic, profile, asr=session.asr, log=say)
+        finally:
+            session.mic.stop()
+        return 0 if ok else 1
+
+    # A stored calibration replaces the shipped constants, which were tuned on one
+    # machine and one voice and have already been measured wrong for both a quiet room
+    # and an accent.
+    if profile is not None:
+        from .calibrate import apply as apply_profile
+
+        if apply_profile(profile, session.gate):
+            say(f"gate: floor {session.gate.floor_db:.1f} dB, "
+                f"margin {session.gate.margin_db:.1f} dB (calibrated)")
     if args.converse:
         session.toggle_mode()
 

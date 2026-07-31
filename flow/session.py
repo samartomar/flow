@@ -241,6 +241,7 @@ class Session:
         refine_cwd: str | None = None,
         mic: Mic | None = None,
         speaker: object | None = None,
+        profile: object | None = None,
     ) -> None:
         # `mic` and `asr` are injectable so the state machine can be tested without a
         # microphone or a 141 MB model — the routing logic is where the subtle bugs live.
@@ -279,6 +280,10 @@ class Session:
         self.mode = DICTATE
         #: Optional spoken replies. None means silent, which is the default.
         self.speaker = speaker
+        #: P8. What Flow has measured and learned about this person, on this machine.
+        #: None disables learning entirely — the tests and the benchmarks pass None so
+        #: a harness run never writes to the user's real profile.
+        self.profile = profile
         self._ask_result: tuple[str | None, str] | None = None
         self._ask_lock = threading.Lock()
         #: The last answer, kept so the UI can re-render it and so a follow-up has
@@ -520,6 +525,11 @@ class Session:
             self.draft.append(utterance)
             self._remember_append(utterance)
         elif p.kind == "undo":
+            # P8: an undo that lands straight on top of an append is the signature of
+            # a command the router read as dictation. Recorded before the undo, since
+            # undoing is what clears the evidence.
+            if self.profile is not None and self._last_append is not None:
+                self.profile.note_misroute(self._last_append[0])
             if not self.draft.undo():
                 self._emit("note", "nothing to undo")
         elif p.kind == "local":
@@ -527,6 +537,11 @@ class Session:
             new, applied = apply_local(before, p)
             if applied:
                 self.draft.set(new)
+                # P8: "change X to Y" is a confusion pair the user labelled themselves
+                # — the model wrote X, they wanted Y. Exactly the supervision hotwords
+                # need, and free to collect.
+                if self.profile is not None and p.op in ("replace", "replace_all"):
+                    self.profile.learn_pair(p.target, p.payload)
                 self._emit("note", f"local: {describe_change(p, before, new)}")
             else:
                 # Asked for something we could not do locally — escalate rather than
@@ -776,6 +791,10 @@ class Session:
         """
         text = self.draft.clear()
         self.thread.add(text)
+        # P8: send is the natural commit point — rare, user-initiated, and the moment
+        # a session's corrections have proved themselves by surviving to a handoff.
+        if self.profile is not None:
+            self.profile.save()
         self.following_up = False
         self.gate.reset()
         self._utter = []

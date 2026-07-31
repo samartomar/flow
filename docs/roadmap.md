@@ -594,10 +594,19 @@ utterance never pays for `small.en` at all.
   system" from context without repeating the first question. Spoken replies via
   `--speak` are one long-lived PowerShell `System.Speech` host, not a subprocess per
   reply: that is what makes them interruptible when the user talks over the answer.
-- **Personalisation (P8/P4):** first-run calibration (gate floor + per-user threshold
-  profile from a 60 s read); lexicon growth from corrections (every "change X to Y" is
-  a labelled confusion pair); local misroute telemetry (undo-after-append signature)
-  growing the alias table. No egress, ever (R9).
+- ~~**Personalisation (P8/P4)**~~ **done 2026-07-31.** `flow --calibrate` listens for
+  60 s of a read passage and stores the room, the voice and this speaker's own
+  `avg_logprob` in `~/.flow/profile.json`; the gate's floor and margin come from that
+  file instead of from constants tuned on one machine. The room/voice split is by the
+  widest gap in the sorted levels, not a percentile — a fluent reader is silent for
+  about a sixth of the minute, and "the quietest fifth is the room" calibrates their
+  floor to −45 dB. Every "change X to Y" is recorded as a confusion pair and, once it
+  recurs, its target joins the decode bias (P4); only the target, since the wrong
+  reading is what the model already produces unaided. Undo-straight-after-append is
+  recorded as a misroute signature and **reported**, not applied: adding to `_ALIASES`
+  changes what a word means for every future utterance, and "this was a command twice"
+  cannot establish "this is never dictation". No egress — there is no code in
+  `profile.py` that could send anything anywhere (R9).
 
 ## What this explicitly defers
 

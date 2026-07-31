@@ -1898,3 +1898,55 @@ synthetic control voice. Verified working, including interruption mid-sentence.
 
 **339 tests green** (322 + 17), including the one that matters most: converse-mode
 `send()` returns `""`, so a question can never be pasted into the focused window.
+
+### 2026-07-31 — P8, personalisation: measure the person instead of guessing
+
+Three constants in this codebase were tuned on one machine and one voice, and all three
+have now been caught being wrong for someone else. P8 replaces them with a measurement.
+
+**`flow --calibrate`** listens for 60 s of a read passage and writes the room, the
+voice and this speaker's own confidence to `~/.flow/profile.json`. The gate's floor and
+margin then come from that file rather than from a constant. This is the direct answer
+to the live-mic failure: a −96.7 dB room could not be reached by a floor clamped at
+−70 dB, and the fix committed earlier widens the bound — but the better answer is not
+to guess a room at all.
+
+**The room/voice split is by the widest gap, not by a percentile,** and the first
+version got this wrong. "The quietest fifth is the room" assumes how much of the minute
+is silence, and that assumption fails on the person it matters most for: a fluent
+reader pauses for about a sixth of the time, so the 20th percentile lands inside their
+voice and calibrates the floor to **−45 dB** — worse than the constant it replaced. The
+gap-based split makes no assumption about the ratio. Verified across speaking ratios:
+
+| silence | floor | voice |
+|---|---|---|
+| 60% (hesitant) | −99.4 dB | −47.7 dB |
+| 15% (fluent) | −101.4 dB | −48.5 dB |
+| 5% (barely pauses) | −93.3 dB | −47.3 dB |
+
+The margin is derived, not stored: half the measured gap, bounded to 6–18 dB. A speaker
+40 dB above their room gets a margin that ignores keyboard noise; one 12 dB above gets
+a margin that still opens.
+
+**Corrections become decode bias.** Every "change X to Y" is a confusion pair the user
+labelled themselves — the model wrote X, they wanted Y — and once the pair recurs, Y
+joins the hotwords (P4). Only Y: the wrong reading is what the model already produces
+unaided, so feeding it back would bias toward the mistake. Once, deliberately, is not
+enough — a single correction is as likely to be a change of mind as a mishearing.
+Learned terms merge *after* the file's, so the `MAX_TERMS` cut falls on what Flow
+inferred rather than on what the user typed, and a learner that throws cannot break
+decoding.
+
+**Misroutes are reported, not applied.** Undo landing straight on an append is the
+signature of a command read as dictation, and it is recorded — as the opening three
+words, because storing whole utterances would make this a transcript of everything the
+user regretted saying. It does **not** grow `_ALIASES` automatically. The roadmap line
+said it would; that is wrong, and the reason is the same one that killed the confidence
+guardrail: adding to the alias table changes what a word means for every future
+utterance, and the evidence that "this was a command twice" cannot establish "this is
+never dictation". The audit entry is the deliverable and a human decides.
+
+**No egress, and not as a policy.** There is no code in `profile.py` that could send
+anything anywhere (R9). The file is plain JSON the user can read and delete.
+
+**361 tests green** (339 + 22).

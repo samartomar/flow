@@ -103,21 +103,48 @@ class Lexicon:
     the next utterance pick it up.
     """
 
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(
+        self, path: Path | str | None = None, learned=None
+    ) -> None:
         self.path = Path(path) if path is not None else DEFAULT_PATH
         self._terms: list[str] = []
         self._stamp: tuple[float, int] | None = None
         self._lock = threading.Lock()
+        #: P8: a callable returning terms Flow learned from the user's own corrections,
+        #: merged with the file at read time rather than written into it. The file
+        #: stays something the user typed and owns; what Flow inferred is kept
+        #: separately, so deleting the profile forgets the inferences and nothing else.
+        self._learned = learned
+
+    def _merged(self) -> list[str]:
+        """File terms first, learned terms after, deduplicated case-insensitively.
+
+        File first because a term the user typed is a stated preference, and the
+        `MAX_TERMS` cut has to fall on the inferred tail rather than on it.
+        """
+        terms = list(self._terms)
+        if self._learned is None:
+            return terms
+        try:
+            extra = self._learned() or []
+        except Exception:
+            return terms  # learning must never be able to break decoding
+        seen = {t.lower() for t in terms}
+        for term in extra:
+            if term.lower() not in seen and len(term) <= MAX_TERM_CHARS:
+                terms.append(term)
+                seen.add(term.lower())
+        return terms[:MAX_TERMS]
 
     def terms(self) -> list[str]:
         with self._lock:
             self._refresh()
-            return list(self._terms)
+            return self._merged()
 
     def hotwords(self) -> str | None:
         with self._lock:
             self._refresh()
-            return as_hotwords(self._terms)
+            return as_hotwords(self._merged())
 
     def _refresh(self) -> None:
         try:
