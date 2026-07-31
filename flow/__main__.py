@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .asr import FINAL_MODEL, PARTIAL_MODEL
 from .hotkey import DEFAULT_BINDINGS, Hotkeys
 from .inject import paste
 from .refine import available
@@ -29,7 +30,18 @@ def say(msg: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="flow", description=__doc__)
-    ap.add_argument("--model", default="base.en", help="faster-whisper model")
+    ap.add_argument(
+        "--partial-model", default=PARTIAL_MODEL,
+        help="fast model for live partials (latency-bound, R4)",
+    )
+    ap.add_argument(
+        "--final-model", default=FINAL_MODEL,
+        help="stronger model for the text that gets pasted (accuracy-bound)",
+    )
+    ap.add_argument(
+        "--model", default=None,
+        help="pin BOTH tiers to one model (benchmarking, or a low-memory machine)",
+    )
     ap.add_argument("--device", type=int, default=None, help="input device index")
     ap.add_argument(
         "--no-hotkeys", action="store_true", help="skip global hotkey registration"
@@ -52,7 +64,12 @@ def main(argv: list[str] | None = None) -> int:
     if clis:
         say(f"  (fallbacks: {', '.join(clis[1:]) or 'none'})")
 
-    session = Session(asr=WhisperTranscriber(args.model), device=args.device)
+    partial_name = args.model or args.partial_model
+    final_name = args.model or args.final_model
+    say(f"models: {partial_name} for partials, {final_name} for finals")
+    session = Session(
+        asr=WhisperTranscriber(partial_name, final_name), device=args.device
+    )
 
     hotkeys = None
     if not args.no_hotkeys:

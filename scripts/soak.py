@@ -122,7 +122,9 @@ def main() -> None:
     wav = Path(__file__).resolve().parent.parent / ".bench" / "long.wav"
 
     mic = LoopingMic(wav)
-    session = Session(asr=WhisperTranscriber("base.en"), mic=mic)
+    # The shipped two-tier default on purpose: the drift this script looks for is
+    # exactly what a second resident model could introduce.
+    session = Session(asr=WhisperTranscriber(), mic=mic)
     session.start()
 
     t0 = time.perf_counter()

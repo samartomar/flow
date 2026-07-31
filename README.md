@@ -43,7 +43,8 @@ shell out to a CLI you have already authenticated.
 uv sync
 ```
 
-Downloads ~243 MB of packages; the `base.en` model (~141 MB) is fetched on first run.
+Downloads ~243 MB of packages; the two models are fetched on first run — `base.en`
+(141 MB) for live partials and `small.en` (464 MB) for the text that gets pasted.
 
 ### Slimming it down (optional, ~106 MB)
 
@@ -131,7 +132,9 @@ whether the target is actually in your draft. When it guesses wrong, **Refine** 
 ### Options
 
 ```
---model small.en     more accurate, ~3x the compute (default base.en)
+--partial-model X    fast model for live partials (default base.en)
+--final-model X      stronger model for the pasted text (default small.en)
+--model X            pin BOTH tiers to one model, for a low-memory machine
 --device 3           input device index; list them with scripts/devices.py
 --arm                start listening immediately, no click needed
 --no-paste           print the draft instead of pasting it
@@ -175,11 +178,16 @@ uv run python -m unittest discover -s tests
   clipboard first, so `Ctrl+V` by hand still works.
 - **Semantic rewrites take ~6 s** — the cost of starting an agent CLI. This is why only
   genuine rewrites use one.
-- **Accuracy on your voice is unmeasured.** Every published number here comes from
-  synthesised speech, which is optimistic. Try `scripts/listen.py` and switch to
-  `--model small.en` if `base.en` disappoints.
-- **~384 MB installed**, or ~278 MB after `scripts/slim.py --apply`. The floor is
-  `ctranslate2` (60 MB), numpy (42 MB) and the model (141 MB).
+- **Accuracy on your own voice is still unmeasured.** The per-accent numbers in
+  [docs/roadmap.md](docs/roadmap.md) come from EdAcc recordings of other people, and
+  the SAPI numbers below are synthesised. Try `scripts/listen.py`.
+- **Partials and finals disagree**, because they come from different models — the text
+  visibly rewrites itself when an utterance ends. That is the price of the split; see
+  the R4 gate in [docs/roadmap.md](docs/roadmap.md) for why one model cannot do both.
+- **~450 MB resident with both models loaded** (181 MB with only the partial tier).
+  An idle session releases both. `--model base.en` pins one tier if memory is tight.
+- **~848 MB installed**, or ~742 MB after `scripts/slim.py --apply`. The floor is
+  `ctranslate2` (60 MB), numpy (42 MB) and the two models (141 + 464 MB, measured).
 - **Speaking for more than 24 s without a pause can split a word.** Whisper decodes
   inside a single 30 s window, so an utterance is cut and committed before that boundary
   to keep latency flat. The cut lands on an audio block, not on a word, so continuous
@@ -188,7 +196,8 @@ uv run python -m unittest discover -s tests
 
 ## Measured on the development machine
 
-Windows 11, CPU-only, `base.en` int8, 1280x720 RDP session.
+Windows 11, CPU-only, int8, 1280x720 RDP session. Latency figures are `base.en`
+(the partial tier); accuracy figures are in [docs/roadmap.md](docs/roadmap.md).
 
 | | |
 |---|---|
@@ -197,7 +206,10 @@ Windows 11, CPU-only, `base.en` int8, 1280x720 RDP session.
 | Decode, 8 s of audio | 0.91 s — nearly flat, because Whisper pads to one 30 s window |
 | Semantic rewrite via `codex` | ~5.7 s, ~19.7 k tokens |
 | 11-minute session | RSS drift −3 to −6 MB; p50 decode unchanged |
-| Installed size | 243 MB packages + 141 MB model (137 MB packages slimmed) |
+| Partial decode, worst of 6 accents, 1-8 s of speech | 0.79-1.07 s (R4 budget 1.5 s) |
+| Final decode, `small.en`, full 10-20 s utterance | 3.65 s median, 4.87 s worst |
+| Resident memory | 181 MB one tier, 450 MB both, 100 MB after idle unload |
+| Installed size | 243 MB packages + 605 MB models (137 MB packages slimmed) |
 
 Accuracy numbers are deliberately absent: the only ones measured come from synthesised
 speech, where WER was 0.000, and that says more about the test audio than about a real

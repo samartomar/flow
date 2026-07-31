@@ -239,22 +239,51 @@ class TestModelLoad(unittest.TestCase):
         self.assertTrue(errors, "load failure produced no error event")
         self.assertIn("could not reach", errors[0].text)
 
-    def test_concurrent_loads_build_exactly_one_model(self):
-        """The preload thread and the decode worker can both call load()."""
+    def test_concurrent_loads_build_exactly_one_model_per_tier(self):
+        """The preload thread and the decode worker can both call load().
+
+        Two tiers now, so two builds — and not one more, however many threads race.
+        """
         def slow_ctor(*_a, **_kw):
             time.sleep(0.05)
             return object()
 
         with mock.patch("faster_whisper.WhisperModel", side_effect=slow_ctor) as ctor:
-            asr = WhisperTranscriber("base.en")
+            asr = WhisperTranscriber("base.en", "small.en")
             threads = [threading.Thread(target=asr.load) for _ in range(8)]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join(5.0)
 
-        self.assertEqual(ctor.call_count, 1, "model built more than once")
+        self.assertEqual(ctor.call_count, 2, "a model was built more than once")
+        self.assertEqual(
+            sorted(c.args[0] for c in ctor.call_args_list), ["base.en", "small.en"]
+        )
         self.assertTrue(asr.loaded)
+
+    def test_a_partial_never_loads_the_finals_model(self):
+        """The whole point of the split: partials must not wait on the big model."""
+        with mock.patch("faster_whisper.WhisperModel") as ctor:
+            asr = WhisperTranscriber("base.en", "small.en")
+            ctor.return_value.transcribe.return_value = ([], None)
+            asr.text(np.zeros(1600, dtype=np.float32), final=False)
+        self.assertEqual([c.args[0] for c in ctor.call_args_list], ["base.en"])
+
+    def test_a_final_loads_the_finals_model(self):
+        with mock.patch("faster_whisper.WhisperModel") as ctor:
+            asr = WhisperTranscriber("base.en", "small.en")
+            ctor.return_value.transcribe.return_value = ([], None)
+            asr.text(np.zeros(1600, dtype=np.float32), final=True)
+        self.assertEqual([c.args[0] for c in ctor.call_args_list], ["small.en"])
+
+    def test_unload_releases_both_tiers(self):
+        with mock.patch("faster_whisper.WhisperModel"):
+            asr = WhisperTranscriber("base.en", "small.en")
+            asr.load()
+            self.assertTrue(asr.loaded)
+            asr.unload()
+        self.assertFalse(asr.loaded)
 
 
 if __name__ == "__main__":

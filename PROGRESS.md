@@ -1012,3 +1012,55 @@ out loud rather than dressing up.
 **139 tests green.** Nine existing tests changed their expectations in this commit —
 each one asserted the old rule, and each now asserts the new one with the measured
 signals attached.
+
+### 2026-07-31 — Phase 2: the split ships
+
+The R4 gate decided this two iterations ago; this is the wiring. `WhisperTranscriber`
+now holds two tiers — `base.en` for partials, `small.en` for the final that actually
+gets pasted — each loading lazily and independently, each with its own lock.
+
+**Why not one model, restated with the numbers that forced it.** `small.en` is 5–20%
+relative better on every accent group, but the R4 gate measured it at 2.66–3.78 s per
+partial *at every prefix length from 1 s up*, against a 1.5 s budget. Whisper pads
+every input to one 30 s mel window, so there is no short-utterance regime where the
+tier is fast. Finals are not bound that way — the draft is held on screen while they
+run (R5) — so the accuracy goes where the pasted text is decided.
+
+**Measured under the shipped decode config** (beam 5, capped ladder, one filter),
+300 clips, model WER:
+
+| group | base.en | small.en | relative |
+|---|---|---|---|
+| indian | 0.231 | 0.219 | −5% |
+| japanese | 0.281 | **0.234** | −17% |
+| russian | 0.178 | 0.151 | −15% |
+| spanish | 0.187 | 0.166 | −11% |
+| us-control | 0.276 | 0.221 | −20% |
+
+`small.en` finals run at RTF 0.36–0.51, so a full 10–20 s utterance commits in 3.65 s
+median (4.87 s worst) behind a held draft.
+
+**What it costs, measured rather than estimated.** Resident memory: 38 MB baseline,
+**181 MB with the partial tier alone, 450 MB with both**, 100 MB after the idle unload
+releases them. On disk the second model is 464 MB against `base.en`'s 141 MB (`du`, not
+the model card). So the split roughly doubles peak RSS. `--model base.en` pins both
+tiers to one model for a machine where that matters, and a session that never finalises
+an utterance never loads `small.en` at all.
+
+**What broke.** Making `load()` load both tiers turned the existing
+"concurrent loads build exactly one model" test red — correctly, because it now builds
+two. But fixing that surfaced a real regression I had written myself: to avoid holding
+a lock across a multi-second model download I had moved the build *outside* the lock,
+which reinstated exactly the duplicate-build bug the lock existed to prevent — eight
+racing threads could build eight models and discard seven. The fix is one lock per
+tier, held across the build: per tier so preloading `small.en` never blocks a partial,
+held across the build so a tier is only ever constructed once. Now asserted directly —
+eight racing threads produce exactly two builds, one named `base.en` and one `small.en`.
+
+The README's footprint section was wrong the moment this landed (it still described a
+single 141 MB model and a 384 MB install), so it now carries the measured two-model
+numbers, and `scripts/soak.py` was switched to the shipped two-tier default — a second
+resident model is precisely the kind of thing that soak test exists to catch drifting.
+
+**142 tests green** (139 + 3: partials never load the finals model, finals do, and
+unload releases both).

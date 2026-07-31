@@ -20,6 +20,24 @@ from .clean import invented_reason, normalise
 #: a short one costs; 100 is enough for the UI to explain what just vanished.
 DROP_HISTORY = 100
 
+#: The two tiers, split because one model cannot serve both paths on this CPU.
+#:
+#: `small.en` is 16–23% relative better than `base.en` on four of five accent groups
+#: (largest on Japanese, the worst-served: 0.306 → 0.234) — but the R4 gate measured it
+#: at 2.66–3.78 s per partial *at every prefix length from 1 s up*, against a 1.5 s
+#: budget, because Whisper pads every input to one 30 s mel window and there is no
+#: short-utterance regime where the tier is fast. It cannot drive partials here.
+#:
+#: Finals are not bound that way — the draft is held on screen while they run (R5) — so
+#: the accuracy goes where the text that actually gets pasted is decided: 3.65 s median
+#: (4.87 s worst) for a full 10–20 s utterance.
+#:
+#: The cost is a visible partial→final rewrite, since the tiers disagree on roughly one
+#: word in five of accented speech. That is the trade the numbers force, and it is the
+#: same one Wispr makes.
+PARTIAL_MODEL = "base.en"
+FINAL_MODEL = "small.en"
+
 
 #: Partials pay for no retries at all. faster-whisper re-decodes a segment at rising
 #: temperatures whenever `avg_logprob` falls under its −1.0 threshold, and accented
@@ -115,20 +133,33 @@ class Transcriber(Protocol):
 
 
 class WhisperTranscriber:
-    """faster-whisper on CPU, int8.
+    """faster-whisper on CPU, int8, in two tiers.
 
-    Loading is lazy so that importing this module (and therefore starting the UI)
-    does not pay the ~1 s model load until speech actually arrives.
+    A fast model for partials and a stronger one for finals — see PARTIAL_MODEL and
+    FINAL_MODEL for the measurements that forced the split. Pin both to one name
+    (`WhisperTranscriber("base.en", "base.en")`) to benchmark a single tier.
+
+    Loading is lazy *per tier*, so importing this module (and therefore starting the
+    UI) pays nothing, and a session that only ever shows partials never loads the
+    finals model at all.
     """
 
-    def __init__(self, model: str = "base.en", compute_type: str = "int8") -> None:
-        self._name = model
+    def __init__(
+        self,
+        partial_model: str = PARTIAL_MODEL,
+        final_model: str = FINAL_MODEL,
+        compute_type: str = "int8",
+    ) -> None:
+        self._names = {False: partial_model, True: final_model}
         self._compute_type = compute_type
-        self._model = None
-        # Two threads can race to load: the background preload started by
-        # Session.start() and the decode worker calling text() lazily. Without this
-        # lock both build a 141 MB model and one is thrown away.
+        self._models: dict[bool, object | None] = {False: None, True: None}
+        # Guards the model dict and the drop log — both touched from the decode
+        # thread and the UI thread. Never held across a model build.
         self._lock = threading.Lock()
+        # Two threads can race to load: the background preload started by
+        # Session.start() and the decode worker calling text() lazily. Without a lock
+        # both build a model and one is thrown away, so each tier gets its own.
+        self._locks = {False: threading.Lock(), True: threading.Lock()}
         #: Recent rejections, newest last. Written on the decode thread and drained on
         #: the UI thread, so it is a deque with a maxlen rather than a growing list.
         self._drops: deque[Drop] = deque(maxlen=DROP_HISTORY)
@@ -145,29 +176,55 @@ class WhisperTranscriber:
             self._drops.clear()
             return out
 
-    def load(self) -> None:
-        with self._lock:
-            if self._model is None:
+    def load(self, final: bool | None = None) -> None:
+        """Load one tier, or both when called with no argument.
+
+        `Session.start()` preloads both on a background thread. The order matters:
+        partials are what the user waits on, and the finals model is the bigger
+        download, so the fast tier is ready first even on a cold first run.
+        """
+        tiers = (False, True) if final is None else (final,)
+        for tier in tiers:
+            # One lock *per tier*, held across the build. Per tier, so that preloading
+            # the finals model does not block a partial that only needs the fast one;
+            # held across the build, because without that the preload thread and the
+            # decode worker each construct a model and one is thrown away.
+            with self._locks[tier]:
+                if self._models[tier] is not None:
+                    continue
                 from faster_whisper import WhisperModel
 
-                self._model = WhisperModel(
-                    self._name, device="cpu", compute_type=self._compute_type
+                model = WhisperModel(
+                    self._names[tier], device="cpu", compute_type=self._compute_type
                 )
+                with self._lock:
+                    self._models[tier] = model
 
     def unload(self) -> None:
-        """Release the model after a long idle period (R8)."""
+        """Release both models after a long idle period (R8)."""
         with self._lock:
-            self._model = None
+            self._models = {False: None, True: None}
 
     @property
     def loaded(self) -> bool:
-        return self._model is not None
+        """True once *any* tier is resident — this is what the idle-unload check reads,
+        and it must fire while either model is still holding memory."""
+        with self._lock:
+            return any(m is not None for m in self._models.values())
+
+    @property
+    def names(self) -> tuple[str, str]:
+        """(partial, final) model names, for startup diagnostics."""
+        return self._names[False], self._names[True]
 
     def text(self, audio: np.ndarray, *, final: bool = False) -> str:
         if audio.size == 0:
             return ""
-        self.load()
-        segments, _ = self._model.transcribe(audio, **decode_options(final))
+        # Only the tier being used: a partial must never wait on the finals model.
+        self.load(final)
+        with self._lock:
+            model = self._models[final]
+        segments, _ = model.transcribe(audio, **decode_options(final))
         kept = []
         for s in segments:
             # Drop segments the model invented rather than heard, and record every one

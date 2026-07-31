@@ -286,7 +286,7 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
   force-next fix (defect 4, first half → P3).
 - Code-switch guardrail: low-confidence utterances cannot trigger destructive edits.
 
-### Phase 2 — Model decision (accuracy track, from Phase 0 data) — **decided**
+### Phase 2 — Model decision (accuracy track, from Phase 0 data) — **shipped 2026-07-31**
 
 The R4 gate settled it: **split tiers.** `base.en` stays on partials (0.78–0.93 s
 median, the only tier that fits the budget at all) and `small.en` becomes the model for
@@ -299,6 +299,23 @@ RTF 1.44.
 The cost of the split is a visible partial→final rewrite on screen, since the two tiers
 disagree on ~1 word in 5 for accented speech. That is the trade the numbers force, and
 it is the same trade Wispr makes.
+
+**Implemented and measured under the shipped decode config** (beam 5, capped ladder,
+one filter), 300 clips, model WER `base.en` → `small.en`:
+
+| group | base.en | small.en | relative |
+|---|---|---|---|
+| indian | 0.231 | **0.219** | −5% |
+| japanese | 0.281 | **0.234** | −17% |
+| russian | 0.178 | **0.151** | −15% |
+| spanish | 0.187 | **0.166** | −11% |
+| us-control | 0.276 | **0.221** | −20% |
+
+`small.en` finals run at RTF 0.36–0.51. The second resident model costs **+268 MB**
+(181 MB with the partial tier alone, 450 MB with both, 100 MB after the idle unload),
+and 464 MB more on disk. `--model base.en` pins both tiers to one model where that
+matters. Each tier loads lazily and independently, so a session that never finalises an
+utterance never pays for `small.en` at all.
 
 ### Phase 3 — Correction loop that survives accents (both tracks)
 
