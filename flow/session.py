@@ -561,6 +561,11 @@ class Session:
         words costs about a second; the CLI costs seven and will be asked to edit text
         that does not contain the word.
         """
+        if p.op == "polish":
+            # A named request for a specific transformation, not an instruction to be
+            # interpreted — and never a mis-hearing to re-listen for.
+            self._start_refine(p.payload, polish=True)
+            return
         if p.escalated and self._last_audio is not None and self._pending_rescue is None:
             self._pending_rescue = p.payload
             self._emit("note", f"re-listening for {p.target!r}")
@@ -629,13 +634,17 @@ class Session:
 
     # -- semantic refine (off-thread: ~7 s measured) ------------------------
 
-    def _start_refine(self, instruction: str) -> None:
+    def _start_refine(self, instruction: str, *, polish: bool = False) -> None:
         self._set_state(State.REFINING)
-        self._emit("note", f"refining via CLI: {instruction!r}")
+        self._emit(
+            "note",
+            "shaping that into a prompt" if polish
+            else f"refining via CLI: {instruction!r}",
+        )
         before = self.draft.text
 
         def work() -> None:
-            result = refine(before, instruction, cwd=self._refine_cwd)
+            result = refine(before, instruction, cwd=self._refine_cwd, polish=polish)
             with self._refine_lock:
                 self._refine_result = result
 

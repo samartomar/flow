@@ -100,6 +100,24 @@ _DELETE_RANGE = re.compile(
 #: the whole draft, not about the word "it", so it belongs to the CLI.
 _PRONOUNS = {"it", "this", "that", "everything", "all of it", "the whole thing"}
 
+#: P5. "Make it a proper prompt" is a *specific* rewrite, not a generic one, and it is
+#: the request this product exists to serve well — so it gets its own verb rather than
+#: being handed to the CLI as free text to interpret. Checked before `_SEMANTIC`,
+#: which would otherwise swallow it on "make it".
+_POLISH = re.compile(
+    "^" + _LEAD + r"(?:"
+    r"make (?:it|this|that) (?:a |an )?(?:proper|good|better|real|decent|clean|"
+    r"clear|nice)? ?prompt|"
+    r"make (?:it|this|that) into (?:a |an )?prompt|"
+    r"turn (?:it|this|that) into (?:a |an )?(?:proper|good|better|real)? ?prompt|"
+    r"(?:polish|tidy|clean up|structure|shape) (?:it|this|that|the prompt|"
+    r"this prompt|my prompt)(?: up)?(?: as a prompt)?|"
+    r"prompt(?:ify|ise|ize) (?:it|this|that)|"
+    r"make (?:it|this|that) prompt[- ]?ready"
+    r")(?:\W|$)",
+    re.I,
+)
+
 # Verbs that ask for judgement rather than a substitution — these are the only
 # utterances allowed to reach a CLI.
 _SEMANTIC = re.compile(
@@ -405,6 +423,11 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
         if in_draft(target):
             return Plan("local", op="delete", target=target)
         return Plan("append")
+
+    if _POLISH.match(u):
+        # `payload` is the draft-shaping request itself; refine.py substitutes its own
+        # instruction, so nothing here has to describe *how* to write a prompt.
+        return Plan("semantic", payload=u, op="polish")
 
     if _SEMANTIC.match(u):
         return Plan("semantic", payload=u)

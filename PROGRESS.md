@@ -1406,3 +1406,53 @@ order that means anything. And "please, that was a command" did not trigger, bec
 the politeness branch of the lead-in did not allow a trailing comma. It does now.
 
 **231 tests green** (222 + 9). Phase 3 is complete.
+
+### 2026-07-31 — Phase 4: "make it a proper prompt" (P5)
+
+The first product item. Dictating a prompt and writing one are different acts: spoken
+thought arrives as context, correction and afterthought in whatever order it occurred
+to the speaker. Asking a CLI to "make it a proper prompt" as free text makes it guess
+what that means; naming the transformation does not.
+
+**What changed.** A dedicated verb in `edits.py` — checked *before* the generic
+`make it …` rewrite pattern, which would otherwise swallow it — producing a semantic
+plan with `op="polish"`. `refine.py` gained its own instruction for that op: order as
+context, then constraints, then the ask; keep every concrete detail verbatim; invent
+nothing; no preamble. The spoken phrase is deliberately not included in what the CLI
+sees, because the user named a transformation rather than writing an instruction.
+
+The commentary guard had to be split. A revision that quadruples its input is the model
+explaining itself, but a *polish* legitimately grows — structure costs words that
+rambling does not spend — so polish allows 8× + 600 where a revision allows 4× + 200.
+A runaway 20 kB response is still refused.
+
+**Measured** with the new `scripts/polish_check.py` — five rambling technical
+dictations through `codex`, each carrying tokens a reader actually needs:
+
+| | |
+|---|---|
+| detail retention (versions, paths, names, error codes) | **15/15** |
+| latency | median **5.3 s**, max 8.3 s |
+| growth | median **×1.1** |
+| preamble despite being forbidden | **0/5** |
+
+Latency sits inside the existing ~7 s CLI budget at the median and above it at the
+tail, which is the same shape stage 2a measured for a plain rewrite (5.7–7.3 s).
+
+**What broke, and what it says about the measurement.** The first run scored 14/15,
+having "lost" the token `fifteen`. It had not: *"postgres fifteen"* came back as
+*"PostgreSQL 15"*, which is the correct rendering of a spoken number in written text.
+The checker was wrong, not the feature. Counting a numeral as satisfying its spoken
+form takes retention to 15/15 — and the lesson is the familiar one, that a metric which
+looks like a defect is worth reading before it is worth believing.
+
+Also: two scripted edits again wrote a literal backspace (0x08) where `\b` was intended
+— the same failure as the last iteration, this time caught in one step because the
+symptom was recognised. In this environment, regex escapes do not survive a heredoc; the
+editor tools or `chr(92)` do.
+
+**Whether the output is better is still a human's call.** P5's acceptance test says "a
+reviewer judges it stronger", and nothing here measures that. The before/after pairs
+are written to `.bench/polish.json` for exactly that reading.
+
+**242 tests green** (231 + 11).

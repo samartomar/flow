@@ -31,6 +31,32 @@ _PROMPT = (
     "TEXT:\n{text}"
 )
 
+#: P5. Dictating a prompt and writing one are different acts: spoken thought arrives as
+#: context, correction and afterthought, in the order it occurred to the speaker. This
+#: asks for the one transformation that reliably makes it a better prompt — reordering
+#: into context, then constraints, then the ask — while forbidding the two things that
+#: would make it worse: losing the specifics, or inventing new ones.
+#:
+#: Detail is called sacred explicitly because that is the failure mode worth guarding.
+#: A model asked to "clean up" a rambling technical prompt will happily drop the version
+#: number and the exact error string, which are the parts a reader actually needs.
+_POLISH_PROMPT = (
+    "Rewrite the dictated text below as a clear prompt for an AI coding assistant.\n"
+    "Order it as: context first, then constraints, then the specific ask.\n"
+    "Keep EVERY concrete detail the speaker gave - names, numbers, versions, file "
+    "paths, error text, identifiers - verbatim. Invent nothing that was not said.\n"
+    "Remove filler, false starts, repetition and thinking-aloud.\n"
+    "Output ONLY the prompt: no preamble, no explanation, no code fences, no "
+    "surrounding quotes, no headings unless the speaker asked for them.\n\n"
+    "DICTATED TEXT:\n{text}"
+)
+
+#: A polish legitimately grows the text — structure costs words that rambling does not
+#: spend — so the commentary guard is looser here than for a revision, or it would
+#: reject the successful case. Still bounded: past this it is prose *about* the prompt.
+_POLISH_GROWTH = 8
+_POLISH_SLACK = 600
+
 
 @dataclass(frozen=True)
 class Cli:
@@ -79,8 +105,12 @@ def refine(
     cli: Cli | None = None,
     timeout: float = TIMEOUT_SEC,
     cwd: str | None = None,
+    polish: bool = False,
 ) -> tuple[str | None, str]:
     """Apply a semantic instruction to `text`.
+
+    `polish=True` ignores the instruction and runs the P5 prompt-shaping pass instead:
+    the user asked for a *kind* of rewrite, not for their words to be interpreted.
 
     Returns `(revised_text, note)`, or `(None, reason)` on any failure. Failure must
     always be non-destructive: the caller keeps the pre-edit draft, so a CLI that is
@@ -91,7 +121,11 @@ def refine(
         return None, "no agent CLI found on PATH"
 
     head, tail = _split_tail(text)
-    prompt = _PROMPT.format(instruction=instruction, text=tail)
+    prompt = (
+        _POLISH_PROMPT.format(text=tail)
+        if polish
+        else _PROMPT.format(instruction=instruction, text=tail)
+    )
 
     try:
         proc = subprocess.run(
@@ -121,7 +155,8 @@ def refine(
 
     # A rewrite that balloons is almost always the model explaining itself rather than
     # revising. Refuse it rather than pasting commentary into the user's text.
-    if len(revised) > 4 * len(tail) + 200:
+    growth, slack = (_POLISH_GROWTH, _POLISH_SLACK) if polish else (4, 200)
+    if len(revised) > growth * len(tail) + slack:
         return None, f"{chosen.name} returned commentary, not a revision"
 
     return head + revised, chosen.name

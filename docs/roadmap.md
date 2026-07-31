@@ -450,8 +450,32 @@ utterance never pays for `small.en` at all.
   indistinguishable at this denominator (spread 0.004 ≈ 6 edits in ~1400 reference
   words), so 256 ms is the middle of a measured-equivalent range rather than a tuned
   optimum. Gate retune (noise floor, hangover) remains open.
-- **Prompt polish (P5):** "make it a proper prompt" as a first-class semantic verb with
-  a purpose-built CLI instruction (structure: context → constraint → ask).
+- ~~**Prompt polish (P5):** "make it a proper prompt" as a first-class semantic verb~~
+  **done 2026-07-31.** Its own verb in the grammar (checked before the generic
+  `make it …` rewrite pattern, which would otherwise swallow it) carrying `op="polish"`,
+  and its own CLI instruction in refine.py: order as context, then constraints, then the
+  ask; keep every concrete detail verbatim; invent nothing; no preamble. The spoken
+  phrase is *not* passed to the CLI — the user named a transformation, they did not
+  write an instruction to be interpreted. The commentary guard is looser for a polish
+  (8× + 600 rather than 4× + 200) because structure legitimately costs words.
+
+  **Measured** with the new `scripts/polish_check.py`, five rambling technical
+  dictations through `codex`:
+
+  | | |
+  |---|---|
+  | detail retention (versions, paths, names, error codes) | **15/15 tokens** |
+  | latency | median **5.3 s**, max 8.3 s |
+  | growth | median **×1.1** — restructured, not padded |
+  | preamble despite being forbidden | **0/5** |
+
+  Whether the result is *better* is the judgement P5 leaves to a reviewer, so the raw
+  before/after pairs go to `.bench/polish.json` for a human rather than being scored.
+  One unedited example: *"write a migration that adds a nullable column called
+  last_seen_at to the users table, postgres fifteen, and it has to be online, no table
+  lock"* → *"The database is PostgreSQL 15. / The migration must be online and use no
+  table lock. / Write a migration that adds a nullable column called last_seen_at to
+  the users table."*
 - **Terminal-safe send (P7):** bracketed paste / newline suppression per target class.
 
 ### Phase 4 — The product grows a memory and a voice (product track)
