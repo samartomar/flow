@@ -34,15 +34,18 @@ _PROMPT = (
 #: P5. Dictating a prompt and writing one are different acts: spoken thought arrives as
 #: context, correction and afterthought, in the order it occurred to the speaker. This
 #: asks for the one transformation that reliably makes it a better prompt — reordering
-#: into context, then constraints, then the ask — while forbidding the two things that
-#: would make it worse: losing the specifics, or inventing new ones.
+#: into context, then constraints, then the request — while forbidding the two things
+#: that would make it worse: losing the specifics, or inventing new ones.
+#:
+#: "Request" rather than "ask", deliberately: Ask is a product surface (P9 converse
+#: mode), and a prompt instruction that says "the ask" invites confusion with it.
 #:
 #: Detail is called sacred explicitly because that is the failure mode worth guarding.
 #: A model asked to "clean up" a rambling technical prompt will happily drop the version
 #: number and the exact error string, which are the parts a reader actually needs.
 _POLISH_PROMPT = (
     "Rewrite the dictated text below as a clear prompt for an AI coding assistant.\n"
-    "Order it as: context first, then constraints, then the specific ask.\n"
+    "Order it as: context first, then constraints, then the specific request.\n"
     "Keep EVERY concrete detail the speaker gave - names, numbers, versions, file "
     "paths, error text, identifiers - verbatim. Invent nothing that was not said.\n"
     "Remove filler, false starts, repetition and thinking-aloud.\n"

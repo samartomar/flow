@@ -57,9 +57,16 @@ class TestVerb(unittest.TestCase):
 
 
 class TestPrompt(unittest.TestCase):
+    def test_it_says_request_not_ask(self):
+        # "Ask" is a product surface (P9 converse mode); the Refine instruction must
+        # not borrow the word for the third part of its structure.
+        self.assertNotIn(" ask.", _POLISH_PROMPT.lower())
+        self.assertIn("specific request", _POLISH_PROMPT.lower())
+
     def test_the_instruction_names_the_structure_and_forbids_invention(self):
         low = _POLISH_PROMPT.lower()
-        for required in ("context", "constraint", "ask", "invent nothing", "verbatim"):
+        for required in ("context", "constraint", "request", "invent nothing",
+                         "verbatim"):
             self.assertIn(required, low, required)
 
     def test_it_forbids_preamble(self):
