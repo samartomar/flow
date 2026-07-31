@@ -243,6 +243,12 @@ class Session:
         self._last_audio: np.ndarray | None = None
         #: What the router was about to send to the CLI when it asked for a rescue.
         self._pending_rescue: str | None = None
+        #: The last utterance that was appended as dictation, with its audio, so
+        #: "that was a command" can re-read it instead of asking the user to repeat.
+        self._last_append: tuple[str, object] | None = None
+        #: Set while a post-hoc rescue is in flight, so its re-decode is routed back
+        #: here rather than to the escalation path.
+        self._post_hoc: str | None = None
         self._decoded_sec = 0.0
         self._events: deque[Event] = deque()
         self._refine_cwd = refine_cwd
@@ -445,11 +451,13 @@ class Session:
 
         if not self.draft.text:
             self.draft.append(utterance)
+            self._remember_append(utterance)
             self._after_draft_change()
             return
 
         if forced == "append":
             self.draft.append(utterance)
+            self._remember_append(utterance)
             self._after_draft_change()
             return
 
@@ -459,8 +467,12 @@ class Session:
             # the heuristic and let the CLI interpret whatever they asked for.
             p = type(p)("semantic", payload=utterance)
 
+        if p.kind == "rescue":
+            self.rescue_last_append()
+            return
         if p.kind == "append":
             self.draft.append(utterance)
+            self._remember_append(utterance)
         elif p.kind == "undo":
             if not self.draft.undo():
                 self._emit("note", "nothing to undo")
@@ -478,6 +490,66 @@ class Session:
             self._escalate(p)
             return
 
+        self._after_draft_change()
+
+    def _remember_append(self, utterance: str) -> None:
+        """Keep the last dictation, with its audio, for a post-hoc reinterpretation."""
+        self._last_append = (utterance, self._last_audio)
+
+    @property
+    def can_rescue(self) -> bool:
+        """True when there is a just-appended utterance to reinterpret."""
+        return self._last_append is not None and bool(self.draft.text)
+
+    def rescue_last_append(self) -> bool:
+        """"That was a command." Take back the last dictation and re-read it.
+
+        A misroute currently costs the user two utterances — undo, then say it again —
+        and the second one is no likelier to be heard correctly than the first. This
+        costs one short phrase and re-reads audio already captured.
+
+        The append is withdrawn *first*, so the re-plan sees the draft as it was when
+        the command was spoken; the target of a correction is in that text, not in the
+        text with the correction appended to it. Nothing is lost if the re-read fails:
+        the words go back exactly where they were.
+        """
+        if self._last_append is None:
+            self._emit("note", "nothing to re-read")
+            return False
+        utterance, audio = self._last_append
+        self._last_append = None
+
+        restored = self.draft.undo()
+        if not restored:
+            self._emit("note", "nothing to re-read")
+            return False
+
+        p = plan(utterance, self.draft.text)
+        if p.kind == "local":
+            new, applied = apply_local(self.draft.text, p)
+            if applied:
+                self.draft.set(new)
+                self._emit("note", f"re-read as {p.describe()}")
+                self._after_draft_change()
+                return True
+
+        if audio is not None and self._post_hoc is None:
+            # The words as transcribed are not a command either, so ask the decoder
+            # again with the command vocabulary in hand.
+            self._post_hoc = utterance
+            self._emit("note", "re-listening to that as a command")
+            self.worker.submit_rescue(audio, command_bias(self.draft.text))
+            return True
+
+        self._give_back(utterance, "could not re-read that as a command")
+        return False
+
+    def _give_back(self, utterance: str, note: str) -> None:
+        """Put a withdrawn utterance back. The user's words are never the price of a
+        failed guess."""
+        self.draft.append(utterance)
+        self._last_append = (utterance, self._last_audio)
+        self._emit("note", note)
         self._after_draft_change()
 
     def _escalate(self, p) -> None:
@@ -500,6 +572,19 @@ class Session:
 
     def _finish_rescue(self, text: str) -> None:
         """The biased re-decode came back. Accept it only if it beats the first read."""
+        if self._post_hoc is not None:
+            original, self._post_hoc = self._post_hoc, None
+            p = plan(text, self.draft.text) if text else None
+            if p is not None and p.kind == "local":
+                new, applied = apply_local(self.draft.text, p)
+                if applied:
+                    self.draft.set(new)
+                    self._emit("note", f"re-read as {p.describe()}")
+                    self._after_draft_change()
+                    return
+            self._give_back(original, "could not re-read that as a command")
+            return
+
         instruction, self._pending_rescue = self._pending_rescue, None
         if instruction is None:
             return  # a rescue nobody is waiting for; ignore rather than act on it

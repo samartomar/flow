@@ -406,7 +406,29 @@ utterance never pays for `small.en` at all.
   local edit rather than a CLI asked to edit text not containing the word. SAPI is a
   US-English synthesiser, so this measures the *mechanism*, not the population;
   accented command recordings remain the missing benchmark.
-- Post-hoc "that was a command" rescue chip.
+- ~~Post-hoc "that was a command" rescue chip~~ **done 2026-07-31.** A spoken trigger
+  ("that was a command / an instruction / an edit", with the usual lead-ins) and a
+  chip that appears only when there is something to re-read. It withdraws the last
+  append *first* — so the re-plan sees the draft as it was when the command was
+  spoken — then re-plans those words, and if they are still not a command re-decodes
+  the stored audio with the command bias. If nothing works the words go back exactly
+  where they were: dictation is never the price of a failed guess.
+
+  **Measured, and it reframes the previous item.** Splitting the misroutes in
+  `scripts/rescue_bench.py` by how they present:
+
+  | SNR | first read | silent appends | escalations | after the re-read |
+  |---|---|---|---|---|
+  | clean | 23/24 | 1 | 0 | 24/24 |
+  | 15 dB | 23/24 | 1 | 0 | 24/24 |
+  | 10 dB | 21/24 | 3 | 0 | 24/24 |
+  | 5 dB | 20/24 | 3 | 1 | 24/24 |
+  | 0 dB | 15/24 | 8 | 1 | 21/24 |
+
+  Of 17 misroutes across all levels, **16 arrived as silent appends and one as an
+  escalation**. So the automatic constrained re-decode — which only fires on
+  escalations — covers about 6% of the failures, and this chip covers the rest. The
+  two mechanisms share a re-read; they differ entirely in how often they get to run.
 - ~~Pre-roll ring buffer in the gate~~ **done 2026-07-31** (defect 5 → P2). The gate
   keeps the last 4 blocks (256 ms) it heard while quiet and hands them back when it
   opens, so the head of the word that opened it is not already gone. Measured with the

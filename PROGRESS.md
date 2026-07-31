@@ -1358,3 +1358,51 @@ and replacing that span deleted the punctuation — "Meeting on Tuesday." became
 on Friday". Spans are now trimmed to alphanumeric boundaries.
 
 **222 tests green** (210 + 12).
+
+### 2026-07-31 — Phase 3: "that was a command", and what it revealed
+
+The last Phase 3 item. When Flow mishears the *kind* of an utterance and types a
+command into the draft, recovering costs two utterances — undo, then say it again —
+and the second attempt is no likelier to be heard correctly than the first.
+
+**What changed.** A spoken trigger ("that was a command / an instruction / an edit",
+plus "i meant that as…" and the usual lead-ins) and a chip that appears only when
+there is something to re-read. `Session.rescue_last_append()` withdraws the append
+*first*, so the re-plan sees the draft as it was when the command was spoken — the
+target of a correction lives in that text, not in the text with the correction stuck
+on the end. If the words still are not a command, the stored audio is re-decoded with
+the command bias. If that fails too, `_give_back()` restores the words exactly where
+they were. Dictation is never the price of a failed guess.
+
+**Measured — and it changes how to read the previous entry.** Splitting misroutes by
+how they present:
+
+| SNR | first read | silent appends | escalations | after the re-read |
+|---|---|---|---|---|
+| clean | 23/24 | 1 | 0 | 24/24 |
+| 15 dB | 23/24 | 1 | 0 | 24/24 |
+| 10 dB | 21/24 | 3 | 0 | 24/24 |
+| 5 dB | 20/24 | 3 | 1 | 24/24 |
+| 0 dB | 15/24 | 8 | 1 | 21/24 |
+
+Of 17 misroutes across all noise levels, **16 arrived as silent appends and exactly one
+as an escalation**. The automatic constrained re-decode built last iteration only fires
+on escalations, so it covers about 6% of the failures; this chip covers the other 94%.
+Both end in the same biased re-read at ~2.0 s. That is worth saying plainly: the
+automatic path is the smaller half by an order of magnitude, and the entry before this
+one would read as if it were the main event.
+
+**What broke.** Three things, and one of them is a lesson about tooling rather than
+code. A scripted edit wrote a literal **backspace character** (0x08) into the regex
+where `\b` was intended — invisible in the file, invisible in a diff, and it made the
+pattern match nothing. It also made the Read view and the file disagree, so two
+follow-up edits failed to apply against text that looked correct on screen. Fixed by
+matching `chr(8)` explicitly.
+
+The other two were mine in the tests: three cases set `force_next = "append"` *after*
+the utterance had already been routed, so the misroute they meant to stage never
+happened — the helper now presses Continue before the utterance, which is the only
+order that means anything. And "please, that was a command" did not trigger, because
+the politeness branch of the lead-in did not allow a trailing comma. It does now.
+
+**231 tests green** (222 + 9). Phase 3 is complete.

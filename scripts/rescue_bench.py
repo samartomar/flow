@@ -114,10 +114,11 @@ def main() -> None:
         text = normalise(" ".join(s.text.strip() for s in segments))
         return text, time.perf_counter() - t
 
-    print(f"{'SNR':>6}{'first read':>12}{'after rescue':>14}{'rescue s':>10}")
+    print(f"{'SNR':>6}{'first read':>12}{'appended':>10}{'escalated':>11}"
+          f"{'after re-read':>15}{'re-read s':>11}")
     rows = {}
     for snr in snrs:
-        first_ok = rescued_ok = 0
+        first_ok = rescued_ok = appended = escalated = 0
         rescue_times = []
         for i, (path, _text, op) in enumerate(clips):
             audio = add_noise(to_16k(*load_wav(path)), snr, seed=i)
@@ -127,16 +128,24 @@ def main() -> None:
                 first_ok += 1
                 rescued_ok += 1
                 continue
-            # Exactly what the session does: one re-decode, biased.
+            # How the misroute presents matters: an escalated plan gets the automatic
+            # re-decode, while an append is silent and needs the user to say "that was
+            # a command". Both end in the same biased re-read.
+            if p.kind == "append":
+                appended += 1
+            elif p.escalated:
+                escalated += 1
             heard2, dt = decode(audio, bias)
             rescue_times.append(dt)
             p2 = plan(heard2, DRAFT)
             rescued_ok += int(p2.kind == "local" and p2.op == op)
         n = len(clips)
         label = "clean" if snr is None else f"{snr:.0f} dB"
-        print(f"{label:>6}{f'{first_ok}/{n}':>12}{f'{rescued_ok}/{n}':>14}"
-              f"{median(rescue_times) if rescue_times else 0:>10.2f}")
+        print(f"{label:>6}{f'{first_ok}/{n}':>12}{appended:>10}{escalated:>11}"
+              f"{f'{rescued_ok}/{n}':>15}"
+              f"{median(rescue_times) if rescue_times else 0:>11.2f}")
         rows[label] = {"n": n, "first": first_ok, "rescued": rescued_ok,
+                       "appended": appended, "escalated": escalated,
                        "rescue_s": median(rescue_times) if rescue_times else None}
 
     out = BENCH / f"rescue-{name}.json"

@@ -26,7 +26,7 @@ from typing import Literal
 
 from .phonetic import find_span, find_spans
 
-Kind = Literal["append", "local", "semantic", "undo"]
+Kind = Literal["append", "local", "semantic", "undo", "rescue"]
 
 # Spoken numbers, for "delete the last two words".
 _NUMS = {
@@ -42,12 +42,23 @@ _NUMS = {
 #: is one utterance, not three.
 _LEAD = (
     r"(?:(?:no|actually|wait|sorry|hang on|hold on|erm|um|uh|okay|ok|right|so|"
-    r"i mean|i meant)[,]?\s+|(?:can|could|would|will) you\s+|please\s+|"
-    r"let's\s+|lets\s+|just\s+)*"
+    r"i mean|i meant)[,]?\s+|(?:can|could|would|will) you,?\s+|please,?\s+|"
+    r"let's,?\s+|lets,?\s+|just,?\s+)*"
 )
 
 #: Kept as the old name so the patterns read the same; it is now the full lead-in.
 _HEDGE = _LEAD
+
+#: "That was a command" — the user telling Flow it misheard the *kind* of the last
+#: utterance, not its words. Undo plus re-speaking costs two utterances and the user's
+#: patience; this costs one short phrase and re-reads what they already said.
+_RESCUE = re.compile(
+    "^" + _LEAD + r"(?:that was (?:a|an) (?:command|instruction|edit)|"
+    r"i meant that as (?:a|an) (?:command|instruction|edit)|"
+    r"that was meant as (?:a|an) (?:command|instruction|edit)|"
+    r"no,? that was (?:a|an) (?:command|instruction|edit))(?:\W|$)",
+    re.I,
+)
 
 _UNDO = re.compile(
     "^" + _LEAD + r"(?:scratch that|undo(?: that)?|never mind|nevermind|"
@@ -327,6 +338,11 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
         # Phonetic, not literal: the draft was transcribed from the same voice moments
         # earlier, so the word the user is naming may be spelled differently there.
         return bool(target) and find_span(draft, target) is not None
+
+    # Before undo: "no, that was a command" starts like a hedge and must not be read
+    # as one.
+    if _RESCUE.match(u):
+        return Plan("rescue")
 
     if _UNDO.match(u):
         return Plan("undo")

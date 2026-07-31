@@ -386,8 +386,15 @@ class Bubble(tk.Toplevel):
         specs = [
             ("Refine", self._refine, "force the next utterance to be an instruction"),
             ("Continue", self._continue, "force the next utterance to be dictation"),
-            ("Send", self.pill._send, "hand the draft off"),
         ]
+        # Only offered when there is something to re-read. A chip that is always
+        # present but usually does nothing teaches people to ignore it.
+        if getattr(self.pill.session, "can_rescue", False):
+            specs.append(
+                ("Was a command", self._was_a_command,
+                 "re-read the last dictation as an instruction"),
+            )
+        specs.append(("Send", self.pill._send, "hand the draft off"))
         x = PAD
         y2 = self._h - PAD
         y1 = y2 - 26
@@ -403,6 +410,9 @@ class Bubble(tk.Toplevel):
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
             x += w + 8
+
+    def _was_a_command(self) -> None:
+        self.pill.session.rescue_last_append()
 
     def _refine(self) -> None:
         self.pill.session.force_next = "edit"
