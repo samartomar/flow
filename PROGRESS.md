@@ -1456,3 +1456,51 @@ reviewer judges it stronger", and nothing here measures that. The before/after p
 are written to `.bench/polish.json` for exactly that reading.
 
 **242 tests green** (231 + 11).
+
+### 2026-07-31 — Phase 4: Send stops erasing (P6)
+
+Send used to clear the draft and forget it. That is right for a typewriter and wrong
+for what people actually do with one: a prompt is rarely finished on the first send,
+and the next utterance is usually a follow-up rather than a fresh thought.
+
+**What changed.** `flow/thread.py` holds the sent prompts, bounded twice over — by turn
+count and by total characters — because R8 says a long session must cost what a short
+one costs. `Session.send()` appends there instead of dropping the text. Two verbs join
+the grammar, and they are deliberately the *only* commands that mean anything when the
+draft is empty, which is precisely the state Send leaves behind: "bring back my last
+prompt" restores it, and "follow up" (optionally carrying its own words — "follow up:
+and add a rollback") opens the new draft as a continuation.
+
+`refine()` takes a `context` list, rendered as labelled background with an explicit
+instruction not to repeat or rewrite it. It is attached **only** when the draft was
+opened as a follow-up: a follow-up like "and do the same for the other endpoint" is
+meaningless without the thread, and an ordinary "make it more formal" should not pay
+1.6 kB of prompt for context it does not need.
+
+**Measured:**
+
+| | |
+|---|---|
+| 5,000 sends of a realistic prompt | **20 turns, 1,640 chars** (caps 20 / 20,000) |
+| tail handed to the CLI | 18 turns, **1,476 chars** (cap 1,500) |
+| CLI prompt with context attached | 220 → 1,823 chars (**+1.6 kB**) |
+| one 200,000-char send | kept whole, as a single turn |
+
+That last row is a deliberate exception to the character cap: an oversized prompt is
+never dropped, because "bring back my last prompt" has to work for a long one too. It
+is bounded by the utterance limit above it rather than by this store.
+
+The +729% relative growth of the CLI prompt reads worse than it is — the absolute
+number is 1.6 kB against a call already measured at ~19.7 k tokens, and it is only
+attached on follow-ups. Quoting the percentage without the absolute would be the
+misleading half.
+
+**What broke.** One test asserted that a follow-up carrying an instruction ("follow up:
+make it more formal") would reach the CLI with thread context. It does not, and should
+not: the words after "follow up:" are *dictation*, the thing being followed up with,
+not an instruction about a draft that is empty at that moment. The test now runs the
+realistic sequence — send, open a follow-up, dictate into it, then ask for the rewrite —
+which is what actually exercises the context path. The feature was right; the test had
+collapsed two steps into one.
+
+**263 tests green** (242 + 21).

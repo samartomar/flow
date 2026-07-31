@@ -480,8 +480,29 @@ utterance never pays for `small.en` at all.
 
 ### Phase 4 — The product grows a memory and a voice (product track)
 
-- **Thread continuity (P6):** Send appends to a session thread instead of erasing;
-  "follow up" / "bring back my last prompt"; CLI rewrites see the bounded thread tail.
+- ~~**Thread continuity (P6):** Send appends to a session thread instead of erasing~~
+  **done 2026-07-31.** `flow/thread.py` keeps the sent prompts; Send appends rather
+  than erasing. Two spoken verbs, and they are the only commands that mean anything
+  with an empty draft — which is exactly the state Send leaves behind: *"bring back my
+  last prompt"* restores it, *"follow up"* (optionally carrying its own words: *"follow
+  up: and add a rollback"*) marks the new draft as a continuation. A CLI rewrite sees
+  the thread tail **only** on a follow-up, labelled as background and explicitly
+  excluded from the output, so an ordinary correction never pays for the context.
+
+  **Measured** — the two properties this feature has to bound:
+
+  | | |
+  |---|---|
+  | 5,000 sends of a realistic prompt | **20 turns, 1,640 chars** (caps: 20 / 20,000) |
+  | tail handed to the CLI | 18 turns, **1,476 chars** (cap 1,500) |
+  | CLI prompt with context attached | 220 → 1,823 chars (**+1.6 kB**, follow-ups only) |
+  | one 200,000-char send | kept whole, as 1 turn |
+
+  The last row is deliberate: a single oversized prompt is never dropped, because
+  "bring back my last prompt" has to work for a long one too. It is the one case where
+  the store exceeds its character cap, and it is bounded by the utterance limit above
+  it. Recall also refuses to overwrite a draft that is already on screen — it appends,
+  because history is not worth losing live text for.
 - **Converse mode (P9):** route Send to the agent CLI instead of the focused window,
   render the reply above the pill, keep the CLI session alive across turns — ChatGPT
   Voice mode against `claude`/`codex`. Optional spoken replies via Windows SAPI

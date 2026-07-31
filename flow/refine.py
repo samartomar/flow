@@ -106,11 +106,17 @@ def refine(
     timeout: float = TIMEOUT_SEC,
     cwd: str | None = None,
     polish: bool = False,
+    context: list[str] | None = None,
 ) -> tuple[str | None, str]:
     """Apply a semantic instruction to `text`.
 
     `polish=True` ignores the instruction and runs the P5 prompt-shaping pass instead:
     the user asked for a *kind* of rewrite, not for their words to be interpreted.
+
+    `context` is the thread tail (P6) — prompts already sent in this session. It is
+    labelled as background and explicitly excluded from the output, because a follow-up
+    like "and do the same for the other endpoint" is meaningless without it and
+    disastrous if the model decides to rewrite it too.
 
     Returns `(revised_text, note)`, or `(None, reason)` on any failure. Failure must
     always be non-destructive: the caller keeps the pre-edit draft, so a CLI that is
@@ -126,6 +132,12 @@ def refine(
         if polish
         else _PROMPT.format(instruction=instruction, text=tail)
     )
+    if context:
+        prior = chr(10).join(f"- {turn}" for turn in context)
+        prompt = (
+            "EARLIER IN THIS THREAD (background only - do not repeat or rewrite it):"
+            + chr(10) + prior + chr(10) + chr(10) + prompt
+        )
 
     try:
         proc = subprocess.run(

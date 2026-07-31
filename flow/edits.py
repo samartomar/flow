@@ -26,7 +26,8 @@ from typing import Literal
 
 from .phonetic import find_span, find_spans
 
-Kind = Literal["append", "local", "semantic", "undo", "rescue"]
+Kind = Literal["append", "local", "semantic", "undo", "rescue",
+              "recall", "followup"]
 
 # Spoken numbers, for "delete the last two words".
 _NUMS = {
@@ -99,6 +100,24 @@ _DELETE_RANGE = re.compile(
 #: Pronouns that are not usable edit targets — "make it lowercase" is a request about
 #: the whole draft, not about the word "it", so it belongs to the CLI.
 _PRONOUNS = {"it", "this", "that", "everything", "all of it", "the whole thing"}
+
+#: P6. Two thread verbs, and the only ones that mean anything when the draft is empty
+#: — which is exactly the state Send leaves behind, and therefore the state a user is
+#: in when they realise the prompt was not finished.
+_RECALL = re.compile(
+    "^" + _LEAD + r"(?:bring back|restore|get back|recall|bring up)"
+    r"(?: my| the| that)?(?: last| previous| final)?"
+    r"(?: prompt| message| draft| text| one)(?:\W|$)",
+    re.I,
+)
+
+#: The trailing group is the rest of the utterance, so "follow up, and add the logs"
+#: is one turn rather than two: the user should not have to pause after the verb.
+_FOLLOWUP = re.compile(
+    "^" + _LEAD + r"(?:follow[- ]?up|following up|also|and also|one more thing|"
+    r"add to that|on top of that)(?:[,:]| -)?(?:\s+(.*))?$",
+    re.I,
+)
 
 #: P5. "Make it a proper prompt" is a *specific* rewrite, not a generic one, and it is
 #: the request this product exists to serve well — so it gets its own verb rather than
@@ -361,6 +380,12 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
     # as one.
     if _RESCUE.match(u):
         return Plan("rescue")
+
+    if _RECALL.match(u):
+        return Plan("recall")
+
+    if m := _FOLLOWUP.match(u):
+        return Plan("followup", payload=_strip(m[1] or ""))
 
     if _UNDO.match(u):
         return Plan("undo")

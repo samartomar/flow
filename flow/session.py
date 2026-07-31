@@ -25,6 +25,7 @@ from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
 from .edits import apply_local, command_bias, plan
 from .refine import refine
+from .thread import Thread
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
 #: worker-idle check below, this is what bounds partial latency.
@@ -235,6 +236,13 @@ class Session:
         self.gate = SpeechGate()
         self.worker = DecodeWorker(self.asr)
         self.draft = Draft()
+        #: P6: what has already been sent. Send appends here instead of erasing, so a
+        #: follow-up has something to follow.
+        self.thread = Thread()
+        #: True when the current draft was opened as a follow-up, which is what lets a
+        #: CLI rewrite see the thread tail without every ordinary correction paying for
+        #: the extra context.
+        self.following_up = False
         self.state = State.IDLE
         self._utter: list[np.ndarray] = []
         #: The audio of the utterance being decoded, kept until routing is done so a
@@ -449,6 +457,16 @@ class Session:
         # draft, and then a minute later had an ordinary sentence routed to the CLI.
         forced = self._take_force_next()
 
+        # The two thread verbs are the only commands that mean anything with an empty
+        # draft — which is precisely the state Send leaves behind.
+        thread_plan = plan(utterance, self.draft.text)
+        if thread_plan.kind == "recall":
+            self._recall()
+            return
+        if thread_plan.kind == "followup":
+            self._start_followup(thread_plan.payload)
+            return
+
         if not self.draft.text:
             self.draft.append(utterance)
             self._remember_append(utterance)
@@ -490,6 +508,38 @@ class Session:
             self._escalate(p)
             return
 
+        self._after_draft_change()
+
+    def _recall(self) -> None:
+        """P6: put the last sent prompt back in the draft."""
+        last = self.thread.last
+        if not last:
+            self._emit("note", "nothing sent yet")
+            return
+        if self.draft.text:
+            # Never silently discard what is on screen to make room for history.
+            self.draft.append(last)
+        else:
+            self.draft.set(last)
+        self.following_up = True
+        self._emit("note", "brought back the last prompt")
+        self._after_draft_change()
+
+    def _start_followup(self, rest: str) -> None:
+        """P6: the next thing said continues the thread rather than starting over."""
+        if not self.thread.last:
+            # Nothing to follow, so this is just dictation with an odd opening.
+            if rest:
+                self.draft.append(rest)
+                self._remember_append(rest)
+            self._emit("note", "nothing sent yet - treating that as dictation")
+            self._after_draft_change()
+            return
+        self.following_up = True
+        if rest:
+            self.draft.append(rest)
+            self._remember_append(rest)
+        self._emit("note", f"following up on {len(self.thread)} sent")
         self._after_draft_change()
 
     def _remember_append(self, utterance: str) -> None:
@@ -643,8 +693,13 @@ class Session:
         )
         before = self.draft.text
 
+        context = self.thread.tail() if self.following_up else []
+
         def work() -> None:
-            result = refine(before, instruction, cwd=self._refine_cwd, polish=polish)
+            result = refine(
+                before, instruction, cwd=self._refine_cwd, polish=polish,
+                context=context,
+            )
             with self._refine_lock:
                 self._refine_result = result
 
@@ -668,6 +723,8 @@ class Session:
     def send(self) -> str:
         """Hand off the draft and reset. Injection is the caller's job (stage 8)."""
         text = self.draft.clear()
+        self.thread.add(text)
+        self.following_up = False
         self.gate.reset()
         self._utter = []
         self._set_state(State.IDLE)
