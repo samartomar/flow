@@ -23,7 +23,13 @@ import numpy as np
 from . import MAX_UTTERANCE_SEC, SAMPLE_RATE
 from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
-from .edits import apply_local, command_bias, describe_change, plan
+from .edits import (
+    apply_local,
+    command_bias,
+    describe_change,
+    plan,
+    removed_text,
+)
 from .refine import ask, refine
 from .thread import Thread
 
@@ -544,7 +550,14 @@ class Session:
                 # — the model wrote X, they wanted Y. Exactly the supervision hotwords
                 # need, and free to collect.
                 if self.profile is not None and p.op in ("replace", "replace_all"):
-                    self.profile.learn_pair(p.target, p.payload)
+                    # The pair comes from the *texts*, not from the plan. "change
+                    # sameer to Samir" is transcribed "change Samir to Samir" — the
+                    # spoken target and payload are homophones, which is precisely why
+                    # the correction was needed — so learning from the plan discards
+                    # exactly the corrections worth learning. What was removed from the
+                    # draft is the model's own wrong reading, which is the label.
+                    gone = removed_text(before, new).split(" … ")[0]
+                    self.profile.learn_pair(gone, p.payload)
                 self._emit("note", f"local: {describe_change(p, before, new)}")
             else:
                 # Asked for something we could not do locally — escalate rather than

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import SAMPLE_RATE
-from .audio import BLOCK, Mic, SpeechGate, rms_db
+from .audio import BLOCK, FLOOR_MAX_DB, FLOOR_MIN_DB, Mic, SpeechGate, rms_db
 
 #: The passage. Chosen to be ordinary developer speech rather than a pangram: it has to
 #: elicit the delivery the gate and the model will actually meet. About 45–60 s read at
@@ -116,22 +116,36 @@ def measure(
     """
     levels: list[float] = []
     blocks: list[np.ndarray] = []
+
+    def observe(block: np.ndarray, elapsed: float | None = None) -> None:
+        # Digital silence is not a room, and the gate already refuses to learn its
+        # floor from it. Calibration has to refuse too, or it writes -180 dB into the
+        # profile and `apply` pushes that straight past the very guard the gate has —
+        # producing a floor no real input can sit under and a gate that opens on
+        # anything. Found by calibrating on synthesised speech, which pads with exact
+        # zeros; a muted or noise-gated microphone does the same thing.
+        if not block.any():
+            return
+        blocks.append(block)
+        levels.append(rms_db(block))
+        if on_level is not None and elapsed is not None:
+            on_level(levels[-1], elapsed)
+
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         for block in mic.drain():
-            blocks.append(block)
-            levels.append(rms_db(block))
-            if on_level is not None:
-                on_level(levels[-1], time.monotonic() - (end - seconds))
+            observe(block, time.monotonic() - (end - seconds))
         time.sleep(0.02)
     for block in mic.drain():
-        blocks.append(block)
-        levels.append(rms_db(block))
+        observe(block)
 
     if not levels:
         return Calibration(-55.0, -55.0, None, 0.0, 0.0)
 
     floor, speech, mid = _split(levels)
+    # Bounded by the same limits the gate enforces on its own adaptation, so a stored
+    # profile can never describe a gate the gate itself would refuse to become.
+    floor = max(FLOOR_MIN_DB, min(FLOOR_MAX_DB, floor))
     per_block = BLOCK / SAMPLE_RATE
     speech_sec = sum(1 for x in levels if x >= mid) * per_block
     quiet_sec = sum(1 for x in levels if x < mid) * per_block

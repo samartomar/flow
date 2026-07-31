@@ -15,7 +15,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow import SAMPLE_RATE  # noqa: E402
-from flow.audio import BLOCK, SpeechGate  # noqa: E402
+from flow.audio import (  # noqa: E402
+    BLOCK,
+    FLOOR_MAX_DB,
+    FLOOR_MIN_DB,
+    SpeechGate,
+)
 from flow.calibrate import apply, measure  # noqa: E402
 from flow.clean import (  # noqa: E402
     LOW_CONFIDENCE,
@@ -264,3 +269,100 @@ class TestPerSpeakerConfidence(unittest.TestCase):
 
         self.assertEqual(WhisperTranscriber(baseline=-0.62).baseline, -0.62)
         self.assertIsNone(WhisperTranscriber().baseline)
+
+
+class TestCalibrationRefusesDigitalSilence(unittest.TestCase):
+    """A muted or noise-gated mic emits exact zeros, and they are not a room.
+
+    The gate already refuses to learn its floor from digital silence. Calibration did
+    not, so it would store -180 dB and `apply` would push that straight past the very
+    guard the gate has — leaving a gate that opens on anything. Found by calibrating on
+    synthesised speech, which pads with exact zeros between sentences.
+    """
+
+    def test_zero_blocks_do_not_become_the_floor(self):
+        rng = np.random.default_rng(4)
+        voice = [rng.normal(0, 10 ** (-45 / 20), BLOCK).astype(np.float32)
+                 for _ in range(200)]
+        room = [rng.normal(0, 10 ** (-70 / 20), BLOCK).astype(np.float32)
+                for _ in range(60)]
+        digital = [np.zeros(BLOCK, dtype=np.float32) for _ in range(60)]
+        c = measure(ReplayMic(digital + room + voice), seconds=0.0)
+        self.assertGreater(c.floor_db, -120.0)
+
+    def test_the_floor_stays_inside_the_gate_s_own_bounds(self):
+        # A stored profile must never describe a gate the gate would refuse to become.
+        rng = np.random.default_rng(9)
+        blocks = [np.zeros(BLOCK, dtype=np.float32) for _ in range(40)]
+        blocks += [rng.normal(0, 10 ** (-30 / 20), BLOCK).astype(np.float32)
+                   for _ in range(200)]
+        c = measure(ReplayMic(blocks), seconds=0.0)
+        self.assertGreaterEqual(c.floor_db, FLOOR_MIN_DB)
+        self.assertLessEqual(c.floor_db, FLOOR_MAX_DB)
+
+    def test_an_all_silent_reading_is_not_usable(self):
+        digital = [np.zeros(BLOCK, dtype=np.float32) for _ in range(120)]
+        self.assertFalse(measure(ReplayMic(digital), seconds=0.0).usable)
+
+
+class TestLearningUsesTheRemovedText(unittest.TestCase):
+    """The confusion pair comes from the two drafts, not from the spoken command.
+
+    "change sameer to Samir" is transcribed "change Samir to Samir": the spoken target
+    and the payload are homophones, which is exactly *why* the correction was needed.
+    Learning from the plan therefore threw away precisely the corrections worth
+    learning — every pair it kept was one where the model had already heard both sides
+    correctly.
+    """
+
+    DRAFT = "hi priya, sameer is writing the release notes."
+
+    def _session(self, profile):
+        from flow.session import Session
+
+        class NoAsr:
+            def load(self, final=None): ...
+
+            def text(self, a, *, final=False, hotwords=""):
+                return ""
+
+        class Dead:
+            level_db = -70.0
+
+            def start(self): ...
+
+            def stop(self): ...
+
+            @property
+            def active(self):
+                return True
+
+            def restart(self): ...
+
+            def drain(self):
+                return []
+
+        return Session(asr=NoAsr(), mic=Dead(), profile=profile)
+
+    def test_a_homophone_correction_is_still_learned(self):
+        p = tmp_profile()
+        s = self._session(p)
+        for _ in range(2):
+            s.draft.set(self.DRAFT)
+            # What the transcriber produces for "change sameer to Samir".
+            s._route("change Samir to Samir")
+        self.assertEqual(p.learned_terms(), ["Samir"])
+
+    def test_the_wrong_reading_is_the_one_that_was_removed(self):
+        p = tmp_profile()
+        s = self._session(p)
+        s.draft.set(self.DRAFT)
+        s._route("change Samir to Samir")
+        self.assertIn("sameer -> Samir", p.pairs)
+
+    def test_an_edit_that_removes_nothing_teaches_nothing(self):
+        p = tmp_profile()
+        s = self._session(p)
+        s.draft.set("hi priya, Samir is writing the notes.")
+        s._route("change Samir to Samir")
+        self.assertFalse(p.pairs)

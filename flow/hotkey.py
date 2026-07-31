@@ -46,7 +46,12 @@ VK_SPACE, VK_RETURN, VK_ESCAPE = 0x20, 0x0D, 0x1B
 
 
 _MOD_NAMES = ((MOD_CONTROL, "ctrl"), (MOD_ALT, "alt"), (MOD_SHIFT, "shift"), (MOD_WIN, "win"))
-_VK_NAMES = {0x20: "space", 0x0D: "enter", 0x1B: "esc", 0xDC: "backslash", 0xBA: "semicolon"}
+#: Letters are named by their letter. Without this the mode binding printed as
+#: "ctrl+alt+vk0x4d" in the startup diagnostics, which is a key nobody can find.
+_VK_NAMES = {
+    0x20: "space", 0x0D: "enter", 0x1B: "esc", 0xDC: "backslash", 0xBA: "semicolon",
+    **{code: chr(code) for code in range(0x41, 0x5B)},
+}
 
 
 def describe(mods: int, vk: int) -> str:

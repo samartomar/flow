@@ -2100,3 +2100,54 @@ Verified: pill at (1100, 608) with its right edge at 1252 and bottom at 648, bub
 above the pill as designed.
 
 **375 tests green.**
+
+### 2026-07-31 — driving it myself, and what that found
+
+Every harness here tested one layer. `command_bench` routes strings, `gate_bench` gates
+audio, the unit tests drive the state machine with a fake transcriber. None of them
+answered the question a user asks: *does the thing work*. That gap is why the last three
+sessions each found a defect by hand that no test could have — a chip whose label the
+grammar rejected, a mode with no way to turn the voice on, a window that placed itself
+off the screen.
+
+**`scripts/selfdrive.py`** closes it. A Windows SAPI voice speaks each utterance to a
+WAV; the WAV is fed to a real `Session` as microphone blocks, through the real gate, the
+real two-tier decoder, the real router, the real apply. The assertions are on the draft
+afterwards. **29 checks, all passing**, covering dictation, five correction shapes,
+undo, rescue, send, converse against the live CLI, a spoken follow-up, the asking-state
+UI, calibration, the learning loop, and window placement.
+
+SAPI is not an accented speaker, so this proves nothing about P1 or P3 — those still
+need the recordings. What it proves is that the wiring holds end to end.
+
+**It found two real defects on its first outings.**
+
+**Calibration would store a floor no room can produce.** Synthesised speech pads with
+exact zeros, so the first calibration run measured the room at **−180 dB** — and passed,
+because every assertion was about separation rather than plausibility. `SpeechGate`
+already refuses to learn its floor from digital silence; `calibrate.measure` did not, so
+`apply()` pushed −180 dB straight past the guard the gate has and produced a gate that
+would open on anything. A muted or noise-gated microphone does exactly what the
+synthesiser does. Digital blocks are now excluded, and the stored floor is clamped to
+the same bounds the gate enforces on itself.
+
+**P4 was learning from the wrong pair, and discarding the ones that matter.** "change
+sameer to Samir" is transcribed **"change Samir to Samir"** — the spoken target and the
+payload are homophones, which is precisely *why* the correction was needed. Learning
+from the plan therefore threw away exactly the corrections worth learning, and kept only
+those where the model had already heard both sides correctly. The pair now comes from
+the two drafts: what was removed is the model's own wrong reading, which is the label.
+`{'sameer -> Samir': 2}`, promoted to a hotword, driven entirely from speech.
+
+**Two harness bugs worth recording, because both hid results rather than showing them.**
+
+Two `tk.Tk` roots in one interpreter end the run with `Tcl_AsyncDelete: async handler
+deleted by the wrong thread` — an **abort**, not an exception. It killed the process
+before stdout flushed, so a full passing run reported *no output at all* and exit 0. The
+Tk scenarios now run in their own process, and every line is flushed.
+
+And a multi-part patch with a single `assert s != orig` at the end silently dropped one
+of its three replacements — `_run_isolated` was defined and never called, and the assert
+passed on the strength of the other two. The isolation looked done for a whole run.
+
+**381 tests green** (378 + 3), 29/29 self-drive checks.
