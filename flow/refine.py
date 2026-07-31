@@ -33,9 +33,27 @@ _PROMPT = (
 
 #: P5. Dictating a prompt and writing one are different acts: spoken thought arrives as
 #: context, correction and afterthought, in the order it occurred to the speaker. This
-#: asks for the one transformation that reliably makes it a better prompt — reordering
-#: into context, then constraints, then the request — while forbidding the two things
-#: that would make it worse: losing the specifics, or inventing new ones.
+#: asks for the one transformation that reliably makes it a better prompt, while
+#: forbidding the two things that would make it worse: losing the specifics, or
+#: inventing new ones.
+#:
+#: Three decisions here are the reviewer's, taken 2026-07-31 after reading five polished
+#: outputs, and each is written into the instruction rather than left to the model:
+#:
+#: **Request first.** The reader should see what is being asked for without hunting for
+#: it. Context and constraints follow, because they qualify a request the reader has
+#: already understood.
+#:
+#: **The request stands alone.** A requirement that *defines the result* belongs in the
+#: request — "a nullable last_seen_at column" is what is being asked for, and a request
+#: reading "add a column" has lost the point. A standing prohibition ("do not delete any
+#: test") is not part of the result and stays a constraint, so the request does not
+#: become a restatement of everything.
+#:
+#: **Normalise only what is certain.** "a five hundred" is HTTP 500 and "postgres
+#: fifteen" is PostgreSQL 15 — writing them as spoken makes a prompt look transcribed.
+#: Where a number could mean more than one thing, the speaker's words are kept, because
+#: guessing a number wrong is worse than leaving it colloquial.
 #:
 #: "Request" rather than "ask", deliberately: Ask is a product surface (P9 converse
 #: mode), and a prompt instruction that says "the ask" invites confusion with it.
@@ -45,9 +63,18 @@ _PROMPT = (
 #: number and the exact error string, which are the parts a reader actually needs.
 _POLISH_PROMPT = (
     "Rewrite the dictated text below as a clear prompt for an AI coding assistant.\n"
-    "Order it as: context first, then constraints, then the specific request.\n"
-    "Keep EVERY concrete detail the speaker gave - names, numbers, versions, file "
-    "paths, error text, identifiers - verbatim. Invent nothing that was not said.\n"
+    "Order it as: the REQUEST first, then supporting context, then any constraints. "
+    "The first line must state what is being asked for.\n"
+    "The request must be independently actionable: fold in the requirements that "
+    "define the result being asked for (a column that must be nullable is 'a nullable "
+    "column'), but leave standing rules and prohibitions as separate constraints "
+    "rather than repeating them in the request.\n"
+    "Normalise technical numbers and product names where the meaning is certain: "
+    "'a five hundred' is HTTP 500, 'postgres fifteen' is PostgreSQL 15, 'version two "
+    "point three point one' is version 2.3.1. Where a number or term could mean more "
+    "than one thing, keep the speaker's words rather than guessing.\n"
+    "Keep EVERY concrete detail the speaker gave - names, versions, file paths, error "
+    "text, identifiers. Invent nothing that was not said.\n"
     "Remove filler, false starts, repetition and thinking-aloud.\n"
     "Output ONLY the prompt: no preamble, no explanation, no code fences, no "
     "surrounding quotes, no headings unless the speaker asked for them.\n\n"
