@@ -722,3 +722,72 @@ block at once), once a metric silently stopped sampling after a bounded deque sa
 once a suite aborted without printing a summary line, and once a test invented a bug that
 was purely its own scripting. Every one of them produced plausible output. **Check the
 denominator, and check the run finished.**
+
+---
+
+## Log — accuracy & product track (from 2026-07-31)
+
+The v0.1 build above answered "does the loop work". This track answers the question it
+left open: does it work for the user in [docs/product.md](docs/product.md) — a developer
+speaking accented English. Plan and phases in [docs/roadmap.md](docs/roadmap.md).
+
+### 2026-07-31 — Phase 0: the R4 partial-latency gate, measured on accented speech
+
+The Phase 0 accent run picked `small.en` as the default on WER grounds and left one
+gate unrun: does `small.en` still show a partial within 1.5 s? Ran it. It does not —
+and neither, in two regimes, does the `base.en` we ship today.
+
+**What changed.** `scripts/asr_bench.py` grew a real gate in place of its six-line
+prefix loop. It now cuts growing prefixes from the *longest real accented clip in each
+L1 group* (16–20 s of EdAcc: Indian, Japanese, Russian, Spanish, us-control) plus the
+SAPI `long.wav` as a control, decodes each with the exact production partial parameters
+(`beam_size=1`, `vad_filter=False`, `condition_on_previous_text=False`), takes the
+median of N repeats per (length, source) cell, and gates on the **worst source** — a
+user does not experience a median. `--prefix-only`, `--repeats=N` and `--finals` flags;
+results merge into `.bench/accent/prefix-gate.json` rather than overwriting, so
+re-running one model to settle a noisy cell no longer deletes the other's numbers.
+`summarise_gate()` is pure and unit-tested: worst-case-not-median, and no operating
+point above a breach (a 16 s cell that passes over a failing 12 s cell is not reachable).
+
+**Measured** — 195 timed decodes for `base.en` (39 cells × 5 repeats), 117 for
+`small.en` (× 3), plus 144 finals decodes:
+
+| prefix | base.en med / worst | small.en med / worst |
+|---|---|---|
+| 1 s | 0.78 / **1.67** | 2.60 / 2.62 |
+| 2–8 s | 0.80–0.93 / 0.84–0.98 | 2.66–3.11 / 2.75–3.42 |
+| 12 s | 1.02 / **1.76** | 3.37 / 6.34 |
+| 16 s | 1.21 / **1.87** | 3.75 / 3.97 |
+
+- **`small.en` breaches at every length, 1.7–2.5× over budget.** Whisper pads to one
+  30 s mel window, so cost is nearly flat in prefix length: there is no short-utterance
+  regime where this tier is fast. It cannot drive partials on this CPU, full stop.
+- **`base.en` is clean only in the 2–8 s band.** At ≥ 12 s the Spanish clip costs
+  1.73–1.91 s across five repeats — dense speech, more tokens, real work, reproducible.
+- **The 1 s breach has a different cause, and it is now diagnosed.** The Japanese 1 s
+  prefix scores `avg_logprob` −1.15, under faster-whisper's `log_prob_threshold` of
+  −1.0, so the library silently re-decodes up the entire temperature ladder:
+  **1.69–3.24 s uncapped vs 0.69–0.76 s at `temperature=[0.0]` — 2.4–4.7×, and
+  nondeterministic run to run.** The Spanish cell is unaffected (`avg_logprob` −0.21),
+  which is what proves the two breaches are not the same bug. The Phase 1 temperature
+  cap is now a measured latency fix pointed straight at accented audio.
+- **Finals** (full 10–20 s utterance, median/worst of 6 sources): base.en beam 2
+  1.12 / 1.53 s, beam 5 1.37 / 2.52 s; small.en beam 2 4.07 / 4.90 s, beam 5
+  4.87 / 6.12 s. Beam 5 costs ~20%. Finals are not latency-bound — the draft is held
+  (R5) — so that is affordable where a partial is not.
+
+**What this breaks.** The Phase 2 "default moves to `small.en`" decision, as written.
+It splits instead: `base.en` on partials, `small.en` on the final that is actually
+pasted. Phase 2 is rewritten as decided, and Phase 3 inherits a new open question —
+past ~12 s of continuous speech even `base.en` misses R4, so partials must eventually
+decode a trailing window rather than the whole utterance, or the utterance must be cut
+before 24 s.
+
+**What this says about the old number.** The SAPI control passes every cell at
+0.73–0.79 s, reproducing stage 2b's "R4 gate passed: 0.75–0.91 s" almost exactly. That
+gate was not run wrong. It was run on synthesised US English, and every breach found
+today lives in the audio it never contained. Same lesson as the five in the section
+above, sixth instance: **check the denominator.**
+
+**91 tests green** (79 + 12 new in `tests/test_bench.py` covering `summarise_gate`,
+`median` and `wer`). No product code changed this iteration — this was measurement.
