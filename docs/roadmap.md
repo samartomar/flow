@@ -56,7 +56,7 @@ faster-whisper 1.2.1), final beam 2 vs library default 5, uncapped temperature f
 
 | Metric | Today | Target |
 |---|---|---|
-| Per-accent WER, every anchor group (P1) | **read register: 5.2–6.3% (small.en), 5.8–8.5% (base.en)** — target met, Spanish unmeasured. Conversational EdAcc: 15.1–23.4% (small.en) | **≤ 12% floor** (not average) |
+| Per-accent WER, every anchor group (P1) | **read register: 5.2–6.3% (small.en), 5.8–8.5% (base.en)** — target met for **3 of 4** groups. **Spanish is closed as unmeasurable**: no obtainable read-register corpus contains it (see below). Conversational EdAcc: 15.1–23.4% (small.en), Spanish 16.3% | **≤ 12% floor** (not average) |
 | Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% — and **every drop is now logged with its signals** | **< 1%**, every drop logged |
 | Command recognition, accented (P3) | **10/11 end-to-end from phone audio, 1 speaker (us-control)** — decode + route, not transcripts. Synthetic grammar: 100% recall on all six corruption classes, 0/580 misroutes on real speech | **≥ 95%**; silent misroutes ≈ 0 |
 | Personal-lexicon entity accuracy (P4) | no biasing exists | **≥ 90%** |
@@ -66,10 +66,10 @@ Benchmark composition (all local, redistribution-safe for internal eval):
 **EdAcc** (CC BY-SA — the only open corpus with Spanish/Russian/Japanese/Indian slices
 under one L1 metadata schema; conversational, treat as stress test) + **AESRC2020**
 (community re-upload, no declared licence, local eval only; read register, Indian +
-Japanese + Russian + US control, **no Spanish**) + **L2-ARCTIC**
-(CC BY-NC, read speech ≈ dictation register, Spanish + Hindi) + **VoxPopuli
-`en_accented`** (CC0, Spanish supplement). *Svarah was in this list and is dropped —
-see the corpus table below.* No published per-model numbers exist for
+Japanese + Russian + US control, **no Spanish**) + **VoxPopuli
+`en_accented`** (CC0, 5 Spanish clips — too few to quote). *Svarah and L2-ARCTIC were
+in this list and are both dropped — see the corpus table below.* No published
+per-model numbers exist for
 Russian- or Japanese-accented English — this harness produces new data.
 
 ## Phases
@@ -135,7 +135,7 @@ was tried and none works from this machine:
 | Svarah (`ai4bharat/Svarah`) | **401** — gated (CC BY 4.0, not paid: someone accepts the terms and supplies an `HF_TOKEN`). **Dropped** — see below; AESRC answered the question it was for |
 | VoxPopuli `en_accented` (CC0) | paged `rows` endpoint returns **500** on every attempt (3 retries, all splits); only `first-rows` works, giving 100 rows whose L1s are European — **5 Spanish clips and none of the other anchor groups** |
 | Common Voice (read speech, L1-labelled) | official repos **401**, community mirror **501** |
-| L2-ARCTIC | distributed by request form, not on the datasets-server |
+| L2-ARCTIC | request form, not on the datasets-server. **Dropped** — unobtainable here, and it was the last read-register corpus with Spanish |
 
 **Svarah is dropped, and not because it is gated.** It was queued to answer one
 question — is the accent gap smaller in dictation register than in EdAcc's conversation?
@@ -215,7 +215,11 @@ deletion, and the command grammar were real defects on their own evidence), but 
 mean the headline accuracy problem was largely a property of the benchmark.
 
 Four things keep this honest rather than triumphant:
-- **Spanish is absent from AESRC.** One of the four anchor groups is unmeasured in this
+- **Spanish is absent from AESRC, and now permanently.** L2-ARCTIC (request form) and
+  Common Voice (401) were the alternatives and neither is obtainable, so the Spanish
+  read-register cell is closed as unmeasurable rather than left open. It does not
+  become a new gap: the only way to fill it is a Spanish volunteer recording, which is
+  the ask already outstanding. One of the four anchor groups is unmeasured in this
   register, and it is the one EdAcc rated hardest after Japanese.
 - **AESRC is prompted studio-ish read speech**, so it is an optimistic bound just as
   EdAcc is a pessimistic one. Real use sits between them.

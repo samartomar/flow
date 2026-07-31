@@ -103,8 +103,22 @@ _BREAK = re.compile("^" + _LEAD + r"new\s+(paragraph|line)$", re.I)
 _INSERT = re.compile(
     "^" + _LEAD + r"(?:insert|add)\s+(.+?)\s+(before|after)\s+(.+)$", re.I
 )
+#: "Change *every* Tuesday to Wednesday" — the same edit as _REPLACE but across the
+#: whole draft. It used to accept exactly one phrasing, `replace all X with Y`, which
+#: is the one nobody says: every natural form ("change every X to Y", "change all the
+#: Xs to Y", "change every mention of X to Y") fell through to the generic replace,
+#: took "all Tuesday" as its target, failed to find it and escalated to a 7 s CLI call
+#: — defect 4's exact signature, on the one operation where the CLI is least needed.
+#:
+#: `make all the Xs Y` is deliberately absent. With no connective, "make all the tests
+#: pass" is the same shape, and turning that into a replacement is worse than leaving
+#: a real correction to the CLI.
 _REPLACE_ALL = re.compile(
-    "^" + _LEAD + r"replace\s+all\s+(.+?)\s+(?:with|by)\s+(.+)$", re.I
+    "^" + _LEAD + r"(?:replace|change|swap|switch)\s+(?:all|every|each|both)\s+"
+    r"(?:of\s+)?(?:the\s+)?"
+    r"(?:mentions?|instances?|occurrences?|references?)?\s*(?:of\s+)?"
+    r"(.+?)\s+(?:with|by|to|for)\s+(.+)$",
+    re.I,
 )
 _DELETE_RANGE = re.compile(
     "^" + _LEAD + r"(?:delete|remove|cut)\s+from\s+(.+?)\s+to\s+(.+)$", re.I

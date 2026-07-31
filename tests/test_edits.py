@@ -396,3 +396,50 @@ class TestRescueFrame(unittest.TestCase):
         for text in ("that was a command", "no, that was a command",
                      "I meant that as an instruction", "that was meant as an edit"):
             self.assertEqual(plan(text, self.DRAFT).kind, "rescue", text)
+
+
+class TestReplaceAllPhrasings(unittest.TestCase):
+    """The whole-draft replacement, in the ways people actually ask for it.
+
+    It used to accept exactly one phrasing — "replace all X with Y" — which is the one
+    nobody says. Every natural form fell through to the single-target replace, took
+    "all Tuesday" as its target, failed to find it and escalated to a 7 s CLI call.
+    Found because the recording sheet's own example for this item did not do what the
+    sheet said it did.
+    """
+
+    DRAFT = ("hi priya, the deploy is scheduled for Tuesday afternoon. sameer is "
+             "writing the RELEASE NOTES. tell me if Tuesday still works.")
+
+    def test_the_natural_phrasings_all_reach_replace_all(self):
+        for text in ("change every Tuesday to Wednesday",
+                     "change all Tuesdays to Wednesday",
+                     "change all the Tuesdays to Wednesday",
+                     "change every mention of Tuesday to Wednesday",
+                     "swap all Tuesday for Wednesday",
+                     "replace every instance of sameer with Samir",
+                     "can you please change every Tuesday to Wednesday"):
+            p = plan(text, self.DRAFT)
+            self.assertEqual((p.kind, p.op), ("local", "replace_all"), text)
+
+    def test_the_original_phrasing_still_works(self):
+        p = plan("replace all Tuesday with Wednesday", self.DRAFT)
+        self.assertEqual((p.kind, p.op), ("local", "replace_all"))
+
+    def test_it_replaces_every_occurrence_including_from_a_plural_target(self):
+        for text in ("change every Tuesday to Wednesday",
+                     "change all the Tuesdays to Wednesday"):
+            out, ok = apply_local(self.DRAFT, plan(text, self.DRAFT))
+            self.assertTrue(ok, text)
+            self.assertNotIn("Tuesday", out, text)
+            self.assertEqual(out.count("Wednesday"), 2, text)
+
+    def test_a_missing_target_still_escalates_rather_than_guessing(self):
+        p = plan("change every Thursday to Friday", self.DRAFT)
+        self.assertEqual(p.kind, "semantic")
+        self.assertTrue(p.escalated)
+
+    def test_the_connectiveless_frame_is_left_alone(self):
+        # "make all the tests pass" has the same shape as "make all the Tuesdays
+        # Wednesday". Turning that into a replacement is worse than not catching it.
+        self.assertEqual(plan("make all the tests pass", self.DRAFT).kind, "append")

@@ -1730,3 +1730,49 @@ after the number that would have prevented the pad problem entirely.
 that failed.
 
 **Still zero recordings from any anchor group.** The pipeline is no longer the blocker.
+
+### 2026-07-31 — replace_all only answered to the one phrasing nobody uses
+
+Correcting the recording sheet's item 1 to "change **every** Tuesday to Wednesday"
+turned out to be worth more than the correction. The new wording did not work either.
+
+`_REPLACE_ALL` accepted exactly one frame: `replace all X with Y`. Everything a person
+would actually say fell through to the single-target replace, which took **"all
+Tuesday"** as its target, failed to find it in the draft, and escalated to a 7 s CLI
+call — defect 4's signature, on the one operation where the CLI is least needed:
+
+| said | before | after |
+|---|---|---|
+| change every Tuesday to Wednesday | semantic (7 s CLI) | **local/replace_all** |
+| change all Tuesdays to Wednesday | semantic | **local/replace_all** |
+| change all the Tuesdays to Wednesday | semantic | **local/replace_all** |
+| change every mention of Tuesday to Wednesday | semantic | **local/replace_all** |
+| swap all Tuesday for Wednesday | semantic | **local/replace_all** |
+| replace every instance of sameer with Samir | semantic | **local/replace_all** |
+| can you make all the Tuesdays Wednesday | append | append *(deliberate)* |
+
+The verb set is now replace/change/swap/switch, the quantifier all/every/each/both,
+the connective with/by/to/for, and "mention(s)/instance(s)/occurrence(s) of" is
+absorbed. The plural target resolves through the phonetic layer, so "all the
+**Tuesdays**" still finds "Tuesday" and both occurrences are replaced.
+
+**`make all the Xs Y` is left appending on purpose.** With no connective it is the
+same shape as "make all the tests pass", and turning that into a replacement is worse
+than leaving a real correction to the CLI.
+
+**Cost: none measured.** Precision held at 0 misroutes on 580 real utterances,
+adversarial dictation unchanged at 5/20, synthetic recall unchanged at 100%.
+
+**How it was found is the point.** Not from a corpus and not from review — from writing
+the *answer key* for the live-mic harness and having it disagree with the router on
+line one. A benchmark that states what it expects, before it runs, catches things a
+benchmark that reports what happened cannot.
+
+**`scripts/live_check.py`** is that harness: five stages a file cannot exercise —
+capture continuity, the gate against a real room's noise floor, R4 partial latency
+under real CPU contention, the eleven commands spoken live, and what P7 sees in the
+target window. It reads only; nothing is ever pasted. Awaiting a human at a microphone.
+
+**313 tests green** (308 + 5). The recorded phone number is unchanged at 10/11 —
+us-control_02 was recorded against the old sheet, so her item 1 was a plain replace and
+routed correctly as one.
