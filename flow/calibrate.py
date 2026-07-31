@@ -159,13 +159,34 @@ def apply(profile, gate: SpeechGate) -> bool:
     return True
 
 
+def _meter(level_db: float, width: int = 24) -> str:
+    filled = int(width * max(0.0, min(1.0, (level_db + 70.0) / 60.0)))
+    return "#" * filled + "." * (width - filled)
+
+
 def run(mic: Mic, profile, asr=None, seconds: float = LISTEN_SEC, log=print) -> bool:
     """Calibrate, store, and report. Returns False if the reading was not usable."""
     log("Read the passage below at your normal pace. Listening for "
         f"{seconds:.0f} seconds.\n")
     log(PASSAGE + "\n")
-    result = measure(mic, asr=asr, seconds=seconds)
+
+    # A minute of silence from the program while the user reads aloud is
+    # indistinguishable from a program that has hung, and the first thing anyone does
+    # about that is stop it — which is the one thing that ruins the measurement.
+    last = [0.0]
+
+    def tick(level_db: float, elapsed: float) -> None:
+        if elapsed - last[0] < 2.0:
+            return
+        last[0] = elapsed
+        log(f"  {elapsed:4.0f}s / {seconds:.0f}s  [{_meter(level_db)}] "
+            f"{level_db:6.1f} dB")
+
+    result = measure(mic, asr=asr, seconds=seconds, on_level=tick)
+    log("\nlistening done; decoding what you read...")
     log(result.describe())
+    if result.text:
+        log(f"heard: {result.text[:110]}")
     if not result.usable:
         log("not usable — needs at least "
             f"{MIN_SPEECH_SEC:.0f}s of speech and {MIN_QUIET_SEC:.0f}s of quiet")
