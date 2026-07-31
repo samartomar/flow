@@ -193,7 +193,93 @@ def precision() -> dict:
     return {k: len(v) for k, v in misroutes.items()} | {"n": n}
 
 
+#: The message on the recording sheet, which is the draft every recorded command is
+#: aimed at. It has to match the sheet exactly: half these operations are only legal
+#: because their target is present, so a paraphrase here would score the wrong thing.
+RECORDED_DRAFT = (
+    "hi priya, the deploy is scheduled for Tuesday afternoon. sameer is writing the "
+    "RELEASE NOTES and running the migration. I attached the summary from the "
+    "standup. tell me if Tuesday still works."
+)
+
+#: What each manifest op should come back as, in (kind, op) form. Four of the eleven
+#: are whole-utterance routes with no op, which is why this is not a plain string
+#: compare against Plan.op.
+ROUTES = {
+    "replace_all": ("local", "replace_all"), "replace": ("local", "replace"),
+    "capitalize": ("local", "capitalize"), "lower": ("local", "lower"),
+    "delete": ("local", "delete"), "delete_last": ("local", "delete_last"),
+    "insert_before": ("local", "insert_before"), "undo": ("undo", ""),
+    "polish": ("semantic", "polish"), "followup": ("followup", ""),
+    "rescue": ("rescue", ""),
+}
+
+
+def recorded() -> dict:
+    """The same question as recall(), asked of real accented audio instead of strings.
+
+    Everything above this line corrupts clean text the way ASR is *believed* to corrupt
+    it. This decodes what a person actually said, through the real final-tier model,
+    and routes the transcript — so an accent that defeats the acoustic model and an
+    accent that defeats the grammar both show up, and they show up separately.
+    """
+    from flow.asr import WhisperTranscriber
+
+    mf = Path(__file__).resolve().parent.parent / ".bench" / "recorded" / \
+        "manifest-recorded.jsonl"
+    if not mf.exists():
+        print("\nno recorded manifest — run scripts/ingest_recordings.py")
+        return {}
+    rows = [json.loads(line) for line in mf.read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+    commands = [r for r in rows if r["op"] in ROUTES]
+    if not commands:
+        return {}
+
+    import wave
+
+    import numpy as np
+
+    asr = WhisperTranscriber()
+    root = mf.parent
+    print(f"\nRECORDED — {len(commands)} spoken commands from "
+          f"{len({r['speaker'] for r in commands})} speaker(s), decoded and routed\n")
+    print(f"{'spk':<14}{'#':>3} {'expected':<14}{'routed':<14}{'transcript'}")
+
+    out: dict[str, dict] = {}
+    for row in commands:
+        with wave.open(str(root / row["wav"]), "rb") as w:
+            pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        text = asr.text(pcm.astype(np.float32) / 32768.0, final=True)
+        p = plan(text, RECORDED_DRAFT)
+        want = ROUTES[row["op"]]
+        got = (p.kind, p.op)
+        hit = got == want
+        group = out.setdefault(row["group"], {"n": 0, "hit": 0, "miss": []})
+        group["n"] += 1
+        group["hit"] += hit
+        if not hit:
+            group["miss"].append({"item": row["item"], "want": row["op"],
+                                  "got": f"{p.kind}/{p.op}", "text": text})
+        mark = " " if hit else "*"
+        print(f"{row['speaker']:<14}{row['item']:>3}{mark}{row['op']:<14}"
+              f"{(p.op or p.kind):<14}{text[:40]}")
+
+    print()
+    for group, s in sorted(out.items()):
+        print(f"  {group:<14}{s['hit']:>3}/{s['n']:<4} {s['hit'] / s['n']:>7.1%}")
+    return out
+
+
 def main() -> None:
+    if "--recorded" in sys.argv:
+        rec = recorded()
+        out = BENCH / "command-bench-recorded.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+        print(f"\ndetail -> {out}")
+        return
+
     print("RECALL — canonical commands, corrupted (synthetic, see module docstring)\n")
     r = recall()
     a = adversarial()

@@ -41,10 +41,16 @@ _NUMS = {
 #: speaker barking "delete that" — so the polite forms were being routed as dictation
 #: and appended into the draft verbatim. Repeatable (`*`), because "no, sorry, can you"
 #: is one utterance, not three.
+#:
+#: The terminator is `[.,!?]?`, not `[,]?`, because that is what the recordings return.
+#: People pause after the hedge, and Whisper punctuates a pause as a sentence end: the
+#: first recorded session produced "Wait. Undo that." — which routed to dictation and
+#: would have typed the words "wait undo that" into the user's draft. The hedge is the
+#: same hedge whichever mark the model chose to put after it.
 _LEAD = (
-    r"(?:(?:no|actually|wait|sorry|hang on|hold on|erm|um|uh|okay|ok|right|so|"
-    r"i mean|i meant)[,]?\s+|(?:can|could|would|will) you,?\s+|please,?\s+|"
-    r"let's,?\s+|lets,?\s+|just,?\s+)*"
+    r"(?:(?:no|oh|hey|aye|well|hmm|actually|wait|sorry|hang on|hold on|erm|um|uh|"
+    r"okay|ok|right|so|i mean|i meant)[.,!?]?\s+|(?:can|could|would|will) you,?\s+|"
+    r"please,?\s+|let's,?\s+|lets,?\s+|just,?\s+)*"
 )
 
 #: Kept as the old name so the patterns read the same; it is now the full lead-in.
@@ -53,11 +59,18 @@ _HEDGE = _LEAD
 #: "That was a command" — the user telling Flow it misheard the *kind* of the last
 #: utterance, not its words. Undo plus re-speaking costs two utterances and the user's
 #: patience; this costs one short phrase and re-reads what they already said.
+#:
+#: `comment` is not a synonym, it is what the final model returned when a recorded
+#: speaker said "command" — the same observed-mis-hearing rule the verb aliases follow.
+#: Admitting it is only safe because the frame now has to be the *whole* utterance:
+#: with the old trailing `\W`, "that was a comment on the pull request" would have
+#: re-run someone's dictation as an edit. That looseness was already there for
+#: "command" ("that was a command on the PR" rescued), so tightening pays for itself.
 _RESCUE = re.compile(
-    "^" + _LEAD + r"(?:that was (?:a|an) (?:command|instruction|edit)|"
-    r"i meant that as (?:a|an) (?:command|instruction|edit)|"
-    r"that was meant as (?:a|an) (?:command|instruction|edit)|"
-    r"no,? that was (?:a|an) (?:command|instruction|edit))(?:\W|$)",
+    "^" + _LEAD + r"(?:that was (?:a|an) (?:command|comment|instruction|edit)|"
+    r"i meant that as (?:a|an) (?:command|comment|instruction|edit)|"
+    r"that was meant as (?:a|an) (?:command|comment|instruction|edit)|"
+    r"no,? that was (?:a|an) (?:command|comment|instruction|edit))[.!?]*$",
     re.I,
 )
 

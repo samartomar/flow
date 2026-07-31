@@ -21,6 +21,11 @@ from accent_bench import (  # noqa: E402
     wer_counts,
 )
 from asr_bench import median, summarise_gate, wer  # noqa: E402
+from ingest_recordings import (  # noqa: E402
+    find_boundaries,
+    free_end,
+    number_at,
+)
 
 
 def seg(text, ns, lp):
@@ -182,3 +187,83 @@ class TestWer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def w(word, start, end):
+    return {"word": word, "start": start, "end": end}
+
+
+class TestFindBoundaries(unittest.TestCase):
+    """The splitter that turns one continuous recording into scored clips.
+
+    It has no labels to work from — only the order of the spoken numbers — so every
+    way that order can be violated is a way to mislabel every clip after it.
+    """
+
+    def test_returns_number_start_and_speech_start_separately(self):
+        # The number is scaffolding. A clip that opens with "two" is not a command,
+        # and the first scoring run routed 10 of 11 to dictation for exactly that.
+        words = [w("One.", 0.0, 0.4), w(" delete", 0.4, 0.9), w(" that", 0.9, 1.2),
+                 w(" Two.", 2.0, 2.4), w(" undo", 2.4, 2.8)]
+        b = find_boundaries(words, 2)
+        self.assertEqual(b[1][0], 0.0)
+        self.assertGreater(b[1][1], 0.0)
+        self.assertLessEqual(b[1][1], 0.4)
+
+    def test_speech_start_is_padded_not_clamped_to_the_number_end(self):
+        # Whisper reports word ends late and contiguous with the next start, so
+        # clamping to the number's end silently zeroed the pad and ate the verb.
+        words = [w("One.", 0.0, 1.0), w(" delete", 1.0, 1.6)]
+        self.assertLess(find_boundaries(words, 1)[1][1], 1.0)
+
+    def test_last_occurrence_wins_because_that_is_a_retake(self):
+        words = [w("One.", 0.0, 0.3), w(" delete", 0.3, 0.7),
+                 w(" One.", 1.0, 1.3), w(" delete", 1.3, 1.7), w(" that", 1.7, 2.0)]
+        self.assertEqual(find_boundaries(words, 1)[1][0], 1.0)
+
+    def test_a_number_word_in_ordinary_speech_cannot_capture_a_later_slot(self):
+        # "delete the last two words" contains "two". If that opened item 2, every
+        # label after it would shift by one.
+        words = [w("One.", 0.0, 0.3), w(" delete", 0.3, 0.6), w(" the", 0.6, 0.8),
+                 w(" last", 0.8, 1.0), w(" two", 1.0, 1.2), w(" words", 1.2, 1.5),
+                 w(" Two.", 3.0, 3.3), w(" undo", 3.3, 3.6)]
+        self.assertEqual(find_boundaries(words, 2)[2][0], 3.0)
+
+    def test_a_skipped_item_does_not_shift_the_rest(self):
+        words = [w("One.", 0.0, 0.3), w(" delete", 0.3, 0.6),
+                 w(" Three.", 2.0, 2.3), w(" undo", 2.3, 2.6)]
+        b = find_boundaries(words, 3)
+        self.assertNotIn(2, b)
+        self.assertEqual(b[3][0], 2.0)
+
+    def test_digits_and_words_are_both_numbers(self):
+        self.assertEqual(number_at("Seven."), 7)
+        self.assertEqual(number_at(" 7,"), 7)
+        self.assertIsNone(number_at("deploy"))
+
+
+class TestFreeEnd(unittest.TestCase):
+    """Where the last prompted command stops and the free-speech window begins.
+
+    Only needed for recordings made before the sheet numbered the free window. In the
+    first real one, no silence and no full stop marked the seam, so the boundary is
+    the end of the known wording — matched phonetically, because these recordings
+    exist precisely because the wording arrives accented.
+    """
+
+    def test_finds_the_end_of_the_known_phrase(self):
+        words = [w("Eleven.", 0.0, 0.4), w(" that", 0.5, 0.7), w(" was", 0.7, 0.9),
+                 w(" a", 0.9, 1.0), w(" command", 1.0, 1.5),
+                 w(" fix", 1.5, 1.8), w(" the", 1.8, 2.0), w(" spelling", 2.0, 2.5)]
+        self.assertAlmostEqual(free_end(words, 0.0, "that was a command"), 1.5)
+
+    def test_matches_through_a_mis_hearing(self):
+        words = [w("Eleven.", 0.0, 0.4), w(" that", 0.5, 0.7), w(" was", 0.7, 0.9),
+                 w(" a", 0.9, 1.0), w(" comment", 1.0, 1.5), w(" fix", 1.5, 1.8),
+                 w(" the", 1.8, 2.0), w(" spelling", 2.0, 2.5)]
+        self.assertAlmostEqual(free_end(words, 0.0, "that was a command"), 1.5)
+
+    def test_returns_none_when_the_phrase_is_not_there(self):
+        words = [w("Eleven.", 0.0, 0.4), w(" fix", 0.5, 0.8),
+                 w(" the", 0.8, 1.0), w(" spelling", 1.0, 1.5)]
+        self.assertIsNone(free_end(words, 0.0, "that was a command"))

@@ -58,7 +58,7 @@ faster-whisper 1.2.1), final beam 2 vs library default 5, uncapped temperature f
 |---|---|---|
 | Per-accent WER, every anchor group (P1) | **read register: 5.2–6.3% (small.en), 5.8–8.5% (base.en)** — target met, Spanish unmeasured. Conversational EdAcc: 15.1–23.4% (small.en) | **≤ 12% floor** (not average) |
 | Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% — and **every drop is now logged with its signals** | **< 1%**, every drop logged |
-| Command recognition, accented (P3) | unmeasured | **≥ 95%**; silent misroutes ≈ 0 |
+| Command recognition, accented (P3) | **10/11 end-to-end from phone audio, 1 speaker (us-control)** — decode + route, not transcripts. Synthetic grammar: 100% recall on all six corruption classes, 0/580 misroutes on real speech | **≥ 95%**; silent misroutes ≈ 0 |
 | Personal-lexicon entity accuracy (P4) | no biasing exists | **≥ 90%** |
 | Partial latency (R4) | base.en **clean to 8 s of speech** (worst 1.07 s) after the Phase 1 decode fix, breaching only at ≥ 12 s (1.98 s worst); small.en 2.66–3.78 s median at every length | **< 1.5 s, preserved** |
 
@@ -581,5 +581,7 @@ utterance never pays for `small.en` at all.
   measured gap.
 - Streaming/word-level partials (the Wispr smoothness gap): architecture-level, and
   worthless until the words being streamed are the right ones.
-- The command-phrase recorded benchmark: needs real accented speakers; prompt inventory
-  is ready when they are.
+- The command-phrase recorded benchmark: **the pipeline is done and scored** (recording
+  sheet, `scripts/ingest_recordings.py`, `command_bench.py --recorded`), and one control
+  speaker has been through it end to end. What is still missing is people — zero
+  recordings exist for any of the four L1 anchor groups.

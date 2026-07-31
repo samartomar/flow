@@ -339,3 +339,60 @@ class TestReferentialTargets(unittest.TestCase):
         self.assertEqual(plan("delete the bit about the weather", REAL).kind, "append")
         self.assertEqual(plan("the part about the budget was unclear", REAL).kind,
                          "append")
+
+
+class TestHedgesFromRecordings(unittest.TestCase):
+    """Lead-in forms the first recorded session produced, which used to route as text.
+
+    Whisper punctuates a pause as a sentence end, so a speaker who hesitates gets
+    "Wait. Undo that." — the hedge terminated by a full stop rather than a comma. The
+    old lead-in only accepted a comma, so the whole utterance was typed into the
+    draft as the words "wait undo that" instead of undoing anything.
+    """
+
+    DRAFT = "Meeting on Tuesday with Sameer about the release notes."
+
+    def test_a_hedge_ended_by_a_full_stop_is_still_a_hedge(self):
+        self.assertEqual(plan("Wait. Undo that.", self.DRAFT).kind, "undo")
+
+    def test_the_comma_form_still_works(self):
+        self.assertEqual(plan("wait, undo that", self.DRAFT).kind, "undo")
+
+    def test_oh_and_hey_open_corrections_too(self):
+        self.assertEqual(plan("oh, delete the last sentence", self.DRAFT).op,
+                         "delete_last")
+        self.assertEqual(plan("Hey, undo that.", self.DRAFT).kind, "undo")
+
+    def test_hedges_still_stack(self):
+        self.assertEqual(plan("oh no, sorry, can you undo that", self.DRAFT).kind,
+                         "undo")
+
+    def test_a_hedge_word_that_opens_real_dictation_is_not_stripped_into_a_command(self):
+        # "Well" and "right" begin ordinary sentences far more often than corrections.
+        for text in ("Well the deploy failed again this morning.",
+                     "Right now the connection pool is exhausted."):
+            self.assertEqual(plan(text, self.DRAFT).kind, "append", text)
+
+
+class TestRescueFrame(unittest.TestCase):
+    """Rescue is a whole utterance, and it survives one observed mis-hearing.
+
+    "comment" is not a synonym for "command" — it is what the final model returned
+    when a recorded speaker said "command". Admitting it is only safe because the
+    frame now has to be the entire utterance.
+    """
+
+    DRAFT = "Meeting on Tuesday with Sameer about the release notes."
+
+    def test_the_observed_mis_hearing_rescues(self):
+        self.assertEqual(plan("That was a comment.", self.DRAFT).kind, "rescue")
+
+    def test_trailing_words_mean_it_was_dictation(self):
+        for text in ("that was a comment on the pull request",
+                     "that was a command on the PR"):
+            self.assertEqual(plan(text, self.DRAFT).kind, "append", text)
+
+    def test_the_canonical_forms_still_rescue(self):
+        for text in ("that was a command", "no, that was a command",
+                     "I meant that as an instruction", "that was meant as an edit"):
+            self.assertEqual(plan(text, self.DRAFT).kind, "rescue", text)

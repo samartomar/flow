@@ -3,6 +3,10 @@
 You need about **ten minutes** and **your phone**. No app to install, no special
 microphone, nothing to set up.
 
+There is also a guided version of this that walks you through one screen at a time. If
+you have it, use that instead — this page is the same session in one piece, for people
+who would rather read ahead or work offline.
+
 ## What this is for
 
 We are testing a voice tool that types what you say and lets you correct it by
@@ -22,34 +26,31 @@ that is completely fine.
 3. Hold the phone where you would normally hold it. Not right against your mouth.
 4. **Record one single recording** for the whole thing. Do not start a new file for
    each item.
-5. **Say the item number before each one**, then say the thing. Like this:
+5. **Say the item number, pause for a second, then say the thing.** Like this:
 
-   > "One … can you move that to Wednesday"
+   > "One" … *(one second)* … "change every Tuesday to Wednesday"
    >
-   > *(pause about two seconds)*
-   >
-   > "Two … his name is spelled Samir"
+   > "Two" … *(one second)* … "his name is spelled Samir"
 
-   The numbers are how we line your recording up with the list. If you skip one or
-   redo one, just say the number again — that is what it is there for.
+   The numbers are how we line your recording up with the list, and **the pause is what
+   keeps the number from running into your first word.** Without it we lose the verb —
+   "delete the standup bit" arrives as "the standup bit", which is not a command at
+   all. If you skip an item or redo one, just say its number again; that is what the
+   numbers are there for.
 
-6. When you have done all fifteen, **do the whole list a second time**, saying the
-   numbers again. People phrase things differently the second time and that variation
-   is genuinely useful. If you only have time for one pass, one pass is fine.
+6. If you have time, **do the whole list a second time**, saying the numbers again.
+   People phrase things differently the second time and that variation is genuinely
+   useful. One pass is fine.
 
-## Say it the way you would actually say it
+## Say it your way
 
-This matters more than anything else on this page.
-
-**Do not read the items out.** They are descriptions of what you *want*, not lines to
-perform. Say whatever you would naturally say to a computer to make it happen.
+Each item below shows a line you can read out. **Reading it out is completely fine** —
+it is a real thing to say. But if your own way of saying it comes to mind first, say
+that instead. Both are useful; the second one more so.
 
 - "Um" and "uh" are fine. Leave them in.
 - Starting a sentence over is fine. Leave that in too.
-- Being polite is fine — "can you", "please", "sorry, could you" — many people are, and
-  we need to handle it.
-- If you would say it in a way that is nothing like our wording, **say it your way**.
-  That is the entire point.
+- Being polite is fine — "can you", "please", "sorry, could you". Many people are.
 
 ## The text you are correcting
 
@@ -59,40 +60,43 @@ Imagine you just dictated this message and it came out like this:
 > RELEASE NOTES and running the migration. I attached the summary from the standup.
 > tell me if Tuesday still works.
 
-**Each item below starts again from that same text.** They do not stack up — item 5
-does not happen after item 4. Just imagine the message above is on screen each time.
+**Each item starts again from that same text.** They do not stack up — item 5 does not
+happen after item 4. Just imagine the message above is on screen each time.
 
-## The fifteen items
+## The eleven items
 
-1. It all moved to **Wednesday** — every mention of Tuesday, not just one.
-2. His name is spelled **Samir**, not sameer.
-3. His name should start with a **capital** letter.
-4. **RELEASE NOTES** should not be shouting.
-5. Take out the part about the **standup**.
-6. Get rid of the **last sentence**.
-7. Put the word **draft** in front of the release notes.
-8. Add **thanks** at the end.
-9. Remove everything **from "I attached" up to "standup"**.
-10. Actually, undo that — you did not want it.
-11. Turn the whole message into a **proper prompt** for an AI assistant.
-12. Bring back the **last thing you sent**.
-13. You have already sent it, and now you want to **add something about the rollback
-    plan**.
-14. The tool just typed your words into the message instead of doing what you asked.
-    Tell it that **what you said was a command**.
-15. Say anything at all, in your own words, asking it to fix a spelling mistake
-    somewhere in the message.
+| # | What you want | One way to say it |
+|---|---|---|
+| 1 | Both Tuesdays become Wednesday | "change **every** Tuesday to Wednesday" |
+| 2 | His name is spelled Samir | "change sameer to Samir" |
+| 3 | His name needs a capital letter | "capitalize sameer" |
+| 4 | RELEASE NOTES should stop shouting | "lowercase release notes" |
+| 5 | Take out the standup part | "delete the bit about the standup" |
+| 6 | Get rid of the last sentence | "delete the last sentence" |
+| 7 | Put "draft" in front of release notes | "insert draft before release notes" |
+| 8 | Actually, undo that | "undo that" |
+| 9 | Turn it into a proper AI prompt | "make it a proper prompt" |
+| 10 | You already sent it, now add to it | "follow up and mention the rollback plan" |
+| 11 | It typed your words instead of obeying | "that was a command" |
 
-## Last part — read this out loud
+Item 1 says **every** on purpose. "Change Tuesday to Wednesday" only changes the first
+one, which is a different instruction.
 
-For the final bit, please **do** just read this paragraph normally, at your own pace.
-About thirty seconds.
+## 12 — the last part, in your own words
 
-> The deploy failed again this morning, about ten minutes after the migration started.
-> I checked the logs and the connection pool was exhausted, so every request after the
-> first hundred timed out. The fix is probably to raise the pool size, but I would like
-> to understand why it only happens in staging and never in production before we change
-> anything.
+Say **"twelve"**, pause, then talk to it however you like for about forty-five seconds.
+This is the part that matters most, because it is the only part where we did not put
+words in your mouth.
+
+Things you could ask it:
+
+- "fix the spelling of priya"
+- "make it more polite"
+- "add that I will be late"
+- "shorten it"
+
+Or anything else at all. Ramble if you like — a real sentence with a false start in it
+is more useful to us than a tidy one.
 
 Then stop the recording. That is everything.
 

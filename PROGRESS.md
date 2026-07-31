@@ -1665,3 +1665,68 @@ sentence boundaries. That can take more than intended when a sentence has two cl
 it is the deliberate trade, and it is undoable.
 
 **291 tests green** (286 + 5), including the exact utterance that failed.
+
+### 2026-07-31 — the recording pipeline, scored end to end
+
+The previous entry's "11/11" was routing measured on *transcripts*. This one decodes
+the audio. Those are different measurements, and the gap between them is the whole
+value of having recorded a person.
+
+**`scripts/ingest_recordings.py`** cuts one continuous phone recording into one clip
+per item and writes the manifest the harnesses already read. **`command_bench.py
+--recorded`** decodes each clip through the real final-tier model and routes the
+result, so an accent that defeats the acoustic model and an accent that defeats the
+grammar show up separately.
+
+**10/11 on the one control speaker.** One person, eleven utterances, recorded on a
+phone — a denominator far too small to quote against the ≥95% target, and it is a
+control (US-born) rather than an anchor group. It is the first P3 number taken from
+audio rather than from strings.
+
+**Getting there cost four defects, three of them mine.**
+
+*The clips contained the spoken item number.* First scoring run: 1/11. "2. Change
+Samir to Samir" is not a command, it is a sentence starting with a number, so ten of
+eleven routed to dictation. The number bounds the *previous* item; the following word
+opens this one.
+
+*Then the pad ate the verb.* Clipping at the number's end time gave 5/11 — "the bit
+about the standup", with no "delete" in front of it. Whisper reports word ends late and
+contiguous with the next start, so the `max()` I used to be safe silently zeroed the
+pad. Swept it: 0.08 → 5/11, 0.20 → 9/11, flat through 0.50. Set at 0.35.
+
+*And the free-speech window was glued to item 11* — 17 s holding the rescue command
+plus four unrelated requests, scored as one utterance. Nothing separates them: the
+largest silence anywhere after item 11 is 0.68 s and Whisper punctuated the entire tail
+as one run-on. Numbers are the only signal that survives a phone speaker, a room and a
+phone mic, so the free window is now item **12**. Recordings made before that fall back
+to matching the known wording phonetically.
+
+**Two defects were in the product, and only real speech would have surfaced them.**
+
+*A hedge ending in a full stop was not a hedge.* `_LEAD` accepted `wait,` but not
+`Wait.` — and Whisper punctuates a pause as a sentence end, which is exactly what a
+hesitating speaker produces. "Wait. Undo that." was typed into the draft as text.
+`oh`, `hey`, `aye`, `well` and `hmm` were missing outright.
+
+*Rescue died on one mis-hearing.* "That was a command" came back as "That was a
+comment" and routed to dictation — the failure mode rescue exists to fix, failing.
+`comment` is now admitted as an observed mis-hearing, the same rule the verb aliases
+follow. That is only safe because the frame is now the **whole** utterance: the old
+trailing `\W` meant "that was a comment on the pull request" would have re-run
+someone's dictation as an edit. The same looseness was already live for "command".
+
+**Neither cost anything.** Precision held at **0 misroutes on 580 real utterances**,
+adversarial dictation unchanged at 5/20, synthetic recall unchanged at 100%.
+
+**The last failure is the sheet's, not the code's.** Item 1 asks for *both* Tuesdays
+and offered "change Tuesday to Wednesday" as the example — a plain `replace`. The sheet
+handed the speaker a command that does not do what the sheet says. Now reads "change
+**every** Tuesday to Wednesday", and `docs/recording-kit.md` — still the superseded
+15-item version — has been rewritten to match the page, including the one-second pause
+after the number that would have prevented the pad problem entirely.
+
+**308 tests green** (291 + 17): the splitter's ordering rules, and the exact utterances
+that failed.
+
+**Still zero recordings from any anchor group.** The pipeline is no longer the blocker.

@@ -1,0 +1,393 @@
+<title>Flow — voice recording session</title>
+
+<style>
+  :root {
+    --shell: #12161f;
+    --surface: #1a1f2b;
+    --raised: #1f2632;
+    --line: #2a3242;
+    --text: #e6e9ef;
+    --muted: #8b93a5;
+    --live: #22c55e;
+    --held: #f59e0b;
+    --shadow: rgba(0, 0, 0, .5);
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --shell: #f4f5f7; --surface: #ffffff; --raised: #eceef2; --line: #d8dce4;
+      --text: #171c26; --muted: #5f6878; --live: #15803d; --held: #b45309;
+      --shadow: rgba(20, 26, 38, .12);
+    }
+  }
+  :root[data-theme="light"] {
+    --shell: #f4f5f7; --surface: #ffffff; --raised: #eceef2; --line: #d8dce4;
+    --text: #171c26; --muted: #5f6878; --live: #15803d; --held: #b45309;
+    --shadow: rgba(20, 26, 38, .12);
+  }
+  :root[data-theme="dark"] {
+    --shell: #12161f; --surface: #1a1f2b; --raised: #1f2632; --line: #2a3242;
+    --text: #e6e9ef; --muted: #8b93a5; --live: #22c55e; --held: #f59e0b;
+    --shadow: rgba(0, 0, 0, .5);
+  }
+
+  * { box-sizing: border-box; }
+
+  .page {
+    min-height: 100vh; background: var(--shell); color: var(--text);
+    font-family: var(--sans); display: flex; justify-content: center;
+    padding: 20px 16px 40px;
+  }
+  .frame { width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 18px; }
+
+  .rail { display: flex; gap: 4px; }
+  .rail span {
+    height: 3px; flex: 1; border-radius: 2px; background: var(--line);
+    transition: background .25s ease;
+  }
+  .rail span.done { background: var(--live); }
+  .rail span.now { background: var(--held); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    padding: 24px 22px; box-shadow: 0 12px 32px -20px var(--shadow);
+    display: flex; flex-direction: column; gap: 16px;
+  }
+
+  .eyebrow {
+    font-size: .7rem; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--muted); font-variant-numeric: tabular-nums;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .eyebrow .num { color: var(--held); font-weight: 700; font-size: 1.5rem; letter-spacing: 0; }
+
+  .msg {
+    font-family: var(--serif); font-size: .95rem; line-height: 1.7; color: var(--muted);
+    background: var(--raised); border-left: 3px solid var(--line);
+    border-radius: 0 8px 8px 0; padding: 12px 14px;
+  }
+  .msg mark {
+    background: color-mix(in srgb, var(--held) 26%, transparent);
+    color: var(--text); font-weight: 700; border-radius: 3px;
+    padding: 1px 3px; text-decoration: none;
+  }
+  .msg del { color: var(--muted); text-decoration: line-through; opacity: .65; }
+
+  .want {
+    font-family: var(--serif); font-size: 1.32rem; line-height: 1.4;
+    text-wrap: balance; margin: 0;
+  }
+  .want b { color: var(--held); }
+  @media (min-width: 480px) { .want { font-size: 1.5rem; } }
+
+  .hint { font-size: .88rem; color: var(--muted); line-height: 1.55; margin: 0; }
+
+  .btn {
+    appearance: none; border: 0; border-radius: 12px; padding: 17px 20px;
+    font-family: var(--sans); font-size: 1.02rem; font-weight: 650;
+    background: var(--live); color: var(--shell); cursor: pointer; width: 100%;
+    transition: filter .15s ease, transform .1s ease;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 3px solid var(--held); outline-offset: 3px; }
+  .btn.ghost {
+    background: transparent; color: var(--muted); border: 1px solid var(--line);
+    font-weight: 550; padding: 12px 16px; font-size: .88rem;
+  }
+  .row { display: flex; gap: 10px; }
+  .row .btn { flex: 1; }
+
+  .want .arrow { color: var(--live); padding: 0 .2em; }
+  .want em { font-style: normal; color: var(--muted); font-size: .78em; }
+
+  .egs {
+    border: 1px dashed var(--line); border-radius: 10px; padding: 12px 14px;
+    background: var(--raised);
+  }
+  .eglead { margin: 0 0 8px; font-size: .8rem; color: var(--muted); }
+  .egs ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; }
+  .egs li { font-family: var(--serif); font-size: 1.02rem; line-height: 1.4; color: var(--text); }
+
+  details.help {
+    border: 1px dashed var(--line); border-radius: 10px; padding: 0 14px;
+    background: var(--raised);
+  }
+  details.help > summary {
+    cursor: pointer; padding: 12px 0; font-size: .86rem; color: var(--muted);
+    list-style: none;
+  }
+  details.help > summary::-webkit-details-marker { display: none; }
+  details.help > summary::before { content: "＋  "; color: var(--held); font-weight: 700; }
+  details.help[open] > summary::before { content: "－  "; }
+  details.help > summary:focus-visible { outline: 2px solid var(--held); outline-offset: 2px; }
+  details.help ul { margin: 0 0 14px; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+  details.help li { font-family: var(--serif); font-size: .98rem; line-height: 1.45; color: var(--text); }
+  details.help p { margin: 0 0 14px; font-size: .8rem; color: var(--muted); line-height: 1.5; }
+
+  h1 { font-family: var(--serif); font-size: 1.95rem; line-height: 1.2; margin: 0; text-wrap: balance; }
+  ol.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 11px; }
+  ol.steps li { line-height: 1.55; }
+
+  .timer {
+    font-size: 3.4rem; font-weight: 700; font-variant-numeric: tabular-nums;
+    text-align: center; color: var(--held); margin: 0;
+  }
+  .say {
+    display: inline-block; background: var(--raised); border: 1px dashed var(--line);
+    border-radius: 8px; padding: 6px 10px; font-size: .84rem; color: var(--muted);
+  }
+  .say b { color: var(--live); font-weight: 700; }
+  .foot { font-size: .78rem; color: var(--muted); line-height: 1.6; text-align: center; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <div class="frame">
+    <div class="rail" id="rail"></div>
+    <div id="stage"></div>
+    <p class="foot" id="foot"></p>
+  </div>
+</div>
+
+<script>
+  // The message, with the part each situation touches marked up per item. Showing the
+  // change instead of describing it is the whole design: "make this say that" is a
+  // concrete task, "imagine you wanted to change something" is an improvisation
+  // exercise, and improvising into a recorder is hard for anyone.
+  const BASE = 'hi priya, the deploy is scheduled for {A} afternoon. {B} is writing the '
+             + '{C} and running the migration. {D} tell me if {E} still works.';
+
+  function msg(parts) {
+    return BASE
+      .replace("{A}", parts.A || "Tuesday")
+      .replace("{B}", parts.B || "sameer")
+      .replace("{C}", parts.C || "RELEASE NOTES")
+      .replace("{D}", parts.D === undefined ? "I attached the summary from the standup." : parts.D)
+      .replace("{E}", parts.E || "Tuesday");
+  }
+  const M = (s) => "<mark>" + s + "</mark>";
+  const D = (s) => "<del>" + s + "</del>";
+
+  const ITEMS = [
+    {
+      show: msg({ A: M("Tuesday"), E: M("Tuesday") }),
+      change: 'Tuesday <span class="arrow">&rarr;</span> Wednesday <em>(both)</em>',
+      eg: ["change every Tuesday to Wednesday", "can you make all the Tuesdays Wednesday"]
+    },
+    {
+      show: msg({ B: M("sameer") }),
+      change: 'sameer <span class="arrow">&rarr;</span> Samir',
+      eg: ["change sameer to Samir", "his name is Samir, s-a-m-i-r"]
+    },
+    {
+      show: msg({ B: M("sameer") }),
+      change: 'sameer <span class="arrow">&rarr;</span> Sameer',
+      eg: ["capitalise sameer", "make the s a capital"]
+    },
+    {
+      show: msg({ C: M("RELEASE NOTES") }),
+      change: 'RELEASE NOTES <span class="arrow">&rarr;</span> release notes',
+      eg: ["lowercase release notes", "stop shouting release notes"]
+    },
+    {
+      show: msg({ D: D("I attached the summary from the standup.") }),
+      change: 'that sentence <span class="arrow">&rarr;</span> <em>gone</em>',
+      eg: ["delete the bit about the standup", "remove I attached the summary"]
+    },
+    {
+      show: msg({ E: D("Tuesday still works."), }).replace("tell me if", D("tell me if")),
+      change: 'the last sentence <span class="arrow">&rarr;</span> <em>gone</em>',
+      eg: ["delete the last sentence", "get rid of the last line"]
+    },
+    {
+      show: msg({ C: M("RELEASE NOTES") }),
+      change: 'release notes <span class="arrow">&rarr;</span> draft release notes',
+      eg: ["insert draft before release notes", "put the word draft in front of that"]
+    },
+    {
+      label: "Undo the change you just made",
+      eg: ["undo that", "scratch that", "no, put it back"]
+    },
+    {
+      label: "Turn the whole message into a prompt",
+      eg: ["make it a proper prompt", "turn this into a prompt"]
+    },
+    {
+      label: "Add to something already sent",
+      eg: ["follow up, and mention the rollback plan", "also, add something about the rollback"]
+    },
+    {
+      label: "It typed your words instead of obeying them",
+      eg: ["that was a command", "no, I meant that as an instruction"]
+    }
+  ];
+
+  const FREE_SECONDS = 45;
+  const stage = document.getElementById("stage");
+  const rail = document.getElementById("rail");
+  const foot = document.getElementById("foot");
+  let step = -1;
+
+  let audio = null;
+  function tone(freq, at, dur) {
+    const t = audio.currentTime + at;
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.32, t + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+  // One high tone means "moving on"; two low ones mean "ignore that, a better take is
+  // coming". The file then says which take to keep without anyone remembering anything.
+  function beep(kind) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (kind === "retake") { tone(520, 0, 0.09); tone(520, 0.16, 0.09); }
+      else { tone(880, 0, 0.20); }
+    } catch (e) { /* silent phone — the spoken number is the backup marker */ }
+  }
+
+  function drawRail() {
+    rail.innerHTML = "";
+    for (let i = 0; i < ITEMS.length + 1; i++) {
+      const el = document.createElement("span");
+      if (step > i) el.className = "done";
+      else if (step === i) el.className = "now";
+      rail.appendChild(el);
+    }
+    rail.style.visibility = step < 0 ? "hidden" : "visible";
+  }
+
+  function setup() {
+    foot.textContent = "";
+    stage.innerHTML = `
+      <div class="card">
+        <h1>Ten minutes, your phone, your own words.</h1>
+        <p class="hint">We are testing a voice tool that types what you say and lets you
+        correct it by speaking. It works well for some accents and we do not know yet how
+        well it works for others. Your recording stays on one laptop, is never uploaded,
+        and is deleted whenever you ask.</p>
+        <ol class="steps">
+          <li><b>Start your phone's voice recorder now</b> and leave it running for the
+          whole session. One recording, not one per screen.</li>
+          <li>Sit somewhere normal — a kitchen, an office, a room with a fan.
+          <b>Do not</b> find a quiet room and <b>do not</b> turn on noise removal.</li>
+          <li>Each screen shows one change. <b>Say the number out loud first</b> — that is
+          how we find your place in the recording — then <b>pause for one second</b>
+          before saying the thing. The pause is what keeps the number from running into
+          your words. Tap Next.</li>
+          <li>Fluffed one? Tap <b>Say that one again</b> and redo it. You can go Back too.
+          Nothing is ruined.</li>
+        </ol>
+        <p class="hint">Every screen shows a few ways people say it. <b>Reading one out
+        is completely fine</b> — but if your own way of saying it comes to mind first,
+        say that instead. Both are useful to us.</p>
+        <p class="hint"><b>This page does not record you.</b> Your phone's recorder does,
+        and the file stays with you until you send it.</p>
+        <button class="btn" id="go">My recorder is running — begin</button>
+      </div>`;
+    document.getElementById("go").onclick = () => { step = 0; render(); };
+  }
+
+  function item(i) {
+    const it = ITEMS[i];
+    foot.textContent = it.scenario ? "" : "Highlighted in the message above.";
+    stage.innerHTML = `
+      <div class="card">
+        <div class="eyebrow">
+          <span>${i + 1} of ${ITEMS.length}</span>
+          <span class="num">${i + 1}</span>
+        </div>
+        ${it.show ? `<div class="msg">${it.show}</div>` : ""}
+        <p class="want">${it.change || it.label}</p>
+        <span class="say">Start with <b>&ldquo;${i + 1}&rdquo;</b>, then say it.</span>
+        <div class="egs">
+          <p class="eglead">Say it your way &mdash; or just say one of these:</p>
+          <ul>${it.eg.map((e) => `<li>&ldquo;${e}&rdquo;</li>`).join("")}</ul>
+        </div>
+        <button class="btn" id="next">${i === ITEMS.length - 1 ? "Next — last one" : "Next"}</button>
+        <div class="row">
+          <button class="btn ghost" id="again">Say that one again</button>
+          ${i > 0 ? `<button class="btn ghost" id="back">Back</button>` : ""}
+        </div>
+      </div>`;
+    document.getElementById("next").onclick = () => { beep("next"); step = i + 1; render(); };
+    const again = document.getElementById("again");
+    again.onclick = () => {
+      beep("retake");
+      again.textContent = "Go ahead — say it again";
+      setTimeout(() => { again.textContent = "Say that one again"; }, 2600);
+    };
+    const back = document.getElementById("back");
+    if (back) back.onclick = () => { beep("retake"); step = i - 1; render(); };
+  }
+
+  function free() {
+    let left = FREE_SECONDS;
+    foot.textContent = "";
+    stage.innerHTML = `
+      <div class="card">
+        <div class="eyebrow"><span>Last part — your own</span><span class="num">12</span></div>
+        <p class="want">Say &ldquo;twelve&rdquo;, then anything you like to it.</p>
+        <p class="hint">This part matters most, because it is the only part where we did
+        not put words in your mouth.</p>
+        <details class="help" open>
+          <summary>Things you could ask it</summary>
+          <ul>
+            <li>&ldquo;fix the spelling of priya&rdquo;</li>
+            <li>&ldquo;make it more polite&rdquo;</li>
+            <li>&ldquo;add that I will be late&rdquo;</li>
+            <li>&ldquo;shorten it&rdquo;</li>
+          </ul>
+          <p>Or anything else at all. Ramble if you like — a real sentence with a false
+          start in it is more useful to us than a tidy one.</p>
+        </details>
+        <p class="timer" id="clock">0:${String(left).padStart(2, "0")}</p>
+        <button class="btn ghost" id="skip">Done early</button>
+      </div>`;
+    const clock = document.getElementById("clock");
+    const tick = setInterval(() => {
+      left -= 1;
+      clock.textContent = "0:" + String(Math.max(left, 0)).padStart(2, "0");
+      if (left <= 0) { clearInterval(tick); beep("next"); step += 1; render(); }
+    }, 1000);
+    document.getElementById("skip").onclick = () => {
+      clearInterval(tick); beep("next"); step += 1; render();
+    };
+  }
+
+  function done() {
+    foot.textContent = "";
+    stage.innerHTML = `
+      <div class="card">
+        <h1>That is everything. Stop your recorder.</h1>
+        <p class="hint">Send the file however is easiest — email, chat, a shared drive.
+        Any format your phone made is fine: m4a, mp3, wav or opus. Please do not convert,
+        trim or clean it up.</p>
+        <p class="hint">One thing to include with it: <b>which language you grew up
+        speaking</b>. That single detail is what makes the recording useful.</p>
+        <button class="btn ghost" id="again">Start again from the top</button>
+      </div>`;
+    document.getElementById("again").onclick = () => { step = -1; render(); };
+  }
+
+  function render() {
+    drawRail();
+    if (step < 0) setup();
+    else if (step < ITEMS.length) item(step);
+    else if (step === ITEMS.length) free();
+    else done();
+    window.scrollTo(0, 0);
+  }
+
+  render();
+</script>
