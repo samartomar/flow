@@ -493,3 +493,29 @@ class TestDestructiveEditsAreNamed(unittest.TestCase):
         new, ok = apply_local(long_draft, p)
         self.assertTrue(ok)
         self.assertLessEqual(len(removed_text(long_draft, new)), 60)
+
+
+class TestRescueMatchesItsOwnButton(unittest.TestCase):
+    """The chip is labelled "Was a command", so that phrase has to work when spoken.
+
+    The first person to say it aloud had it typed into their draft: the grammar
+    demanded "*that* was a command". A label the grammar rejects is the worst kind of
+    defect, because the user did exactly what the product told them to.
+    """
+
+    DRAFT = "Meeting on Tuesday with Sameer about the release notes."
+
+    def test_the_button_label_works_as_speech(self):
+        self.assertEqual(plan("Was a command", self.DRAFT).kind, "rescue")
+
+    def test_every_natural_subject_works(self):
+        for text in ("was a command", "that was a command", "it was a command",
+                     "this was a command", "was meant to be a command",
+                     "I meant that as an instruction", "sorry, that was a command"):
+            self.assertEqual(plan(text, self.DRAFT).kind, "rescue", text)
+
+    def test_it_is_still_the_whole_utterance_or_nothing(self):
+        for text in ("that was a comment on the pull request",
+                     "was a command line tool that we used",
+                     "the command failed"):
+            self.assertEqual(plan(text, self.DRAFT).kind, "append", text)

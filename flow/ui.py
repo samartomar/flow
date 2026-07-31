@@ -258,6 +258,13 @@ class Pill(tk.Tk):
             style=tk.ARC, outline=accent, width=2,
         )
         c.create_line(cx, cy + 6, cx, cy + 10, fill=accent, width=2)
+        # P9: which mode Send is in, readable at a glance. Without it, "there was no
+        # spoken reply" and "I was never in converse mode" look identical.
+        if getattr(self.session, "mode", DICTATE) != DICTATE:
+            c.create_text(
+                cx, PILL_H - 7, text="ASK", fill=accent,
+                font=("Segoe UI", 6, "bold"),
+            )
 
         # Level bars (R13). Mirrored around the centre line so quiet reads as a
         # flat line rather than an empty box.
@@ -438,18 +445,23 @@ class Bubble(tk.Toplevel):
                 ("Was a command", self._was_a_command,
                  "re-read the last dictation as an instruction"),
             )
-        specs.append(("Send", self.pill._send, "hand the draft off"))
+        converse = getattr(self.pill.session, "mode", DICTATE) != DICTATE
+        specs.append(
+            ("Ask", self.pill._send, "put this to the agent CLI")
+            if converse
+            else ("Send", self.pill._send, "hand the draft off")
+        )
         x = PAD
         y2 = self._h - PAD
         y1 = y2 - 26
         for label, cmd, _tip in specs:
             w = 20 + 7 * len(label)
-            fill = self.pill.accent if label == "Send" else CHIP
+            fill = self.pill.accent if label in ("Send", "Ask") else CHIP
             tag = f"chip-{label}"
             _round_rect(c, x, y1, x + w, y2, 13, fill=fill, outline="", tags=tag)
             c.create_text(
                 x + w / 2, (y1 + y2) / 2, text=label,
-                fill=SHELL if label == "Send" else TEXT,
+                fill=SHELL if label in ("Send", "Ask") else TEXT,
                 font=("Segoe UI", 9, "bold"), tags=tag,
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())

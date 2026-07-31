@@ -1996,3 +1996,35 @@ feature built to remove an accent penalty must not add a new one to whoever meas
 themselves. Measuring yourself can buy leniency; it cannot cost you.
 
 **367 tests green** (361 + 6).
+
+### 2026-07-31 — first real use, and the product taught the user a phrase it rejected
+
+One session at the microphone, three defects. The first is the worst kind.
+
+**The chip is labelled "Was a command". Saying "Was a command" typed it into the
+draft.** The rescue grammar demanded "*that* was a command", so the one person who read
+the button aloud got the button's own text appended to their message. The user did
+exactly what the product told them to and the product punished them for it. The subject
+is now optional and any of that/this/it works, along with "was meant to be a command".
+Still whole-utterance-or-nothing, so "was a command line tool that we used" is still
+dictation. Precision unchanged: 0 misroutes on 580 real utterances, adversarial 5/20.
+
+**Nothing on screen said which mode Send was in.** The report was "there was no audio
+reply" — and "the reply was not spoken" and "I was never in converse mode" have
+identical symptoms, with nothing anywhere to tell them apart. Three fixes, all
+statements of fact rather than features: the pill carries an **ASK** badge in converse
+mode, the Send chip renames itself to **Ask** (in converse mode "Send" is a lie —
+nothing is sent anywhere), and startup now prints the mode either way instead of only
+when `--converse` was passed.
+
+**The transcription itself was poor** — "I have not hear and dislike hear any voice
+from you" — which is the accent gap this whole track exists for, on a voice with no
+recordings in any benchmark. Not fixable by a patch. It is the same finding the
+recording drive is meant to quantify, arriving from the developer's own microphone.
+
+**One thing the session showed working.** `dropped 'Thank you very much.'
+(unconfident, ns=0.86 lp=-1.10)` — a hallucination caught by both signals agreeing and
+reported with its evidence, exactly as P2 requires. The user could see what vanished
+and why.
+
+**370 tests green** (367 + 3).

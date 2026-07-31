@@ -67,11 +67,17 @@ _HEDGE = _LEAD
 #: with the old trailing `\W`, "that was a comment on the pull request" would have
 #: re-run someone's dictation as an edit. That looseness was already there for
 #: "command" ("that was a command on the PR" rescued), so tightening pays for itself.
+#: The subject is optional, and that is not a nicety. The chip in the UI is labelled
+#: **"Was a command"** — so the product itself teaches the phrase, and the first person
+#: to say it out loud had it typed into their draft, because the grammar demanded
+#: "*that* was a command". A label the grammar rejects is the worst kind of defect:
+#: the user did exactly what they were told.
+_RESCUE_NOUN = r"(?:command|comment|instruction|edit)"
 _RESCUE = re.compile(
-    "^" + _LEAD + r"(?:that was (?:a|an) (?:command|comment|instruction|edit)|"
-    r"i meant that as (?:a|an) (?:command|comment|instruction|edit)|"
-    r"that was meant as (?:a|an) (?:command|comment|instruction|edit)|"
-    r"no,? that was (?:a|an) (?:command|comment|instruction|edit))[.!?]*$",
+    "^" + _LEAD + r"(?:(?:that|this|it)\s+)?(?:"
+    rf"was (?:a|an) {_RESCUE_NOUN}|"
+    rf"was meant (?:as|to be) (?:a|an) {_RESCUE_NOUN})[.!?]*$"
+    rf"|^{_LEAD}i meant (?:that|this|it)?\s*as (?:a|an) {_RESCUE_NOUN}[.!?]*$",
     re.I,
 )
 

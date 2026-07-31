@@ -123,8 +123,10 @@ def main(argv: list[str] | None = None) -> int:
 
         speaker = Speaker()
         if not speaker.available:
-            say("speech engine unavailable - replies will be silent")
+            say("speech: engine unavailable - replies will be silent")
             speaker = None
+        else:
+            say("speech: on (converse-mode replies are read aloud)")
 
     session = Session(
         asr=WhisperTranscriber(
@@ -158,8 +160,15 @@ def main(argv: list[str] | None = None) -> int:
         if apply_profile(profile, session.gate):
             say(f"gate: floor {session.gate.floor_db:.1f} dB, "
                 f"margin {session.gate.margin_db:.1f} dB (calibrated)")
+    # Stated either way, and unprompted. "There was no spoken reply" and "I was never
+    # in converse mode" produce identical symptoms, and the first live user hit exactly
+    # that: nothing on screen or in the log distinguished them.
     if args.converse:
         session.toggle_mode()
+        say("mode: CONVERSE - Send asks the agent CLI and the reply appears in Flow")
+    else:
+        say("mode: DICTATE - Send pastes into the focused window "
+            "(--converse, or ctrl+alt+M, to ask instead)")
 
     hotkeys = None
     if not args.no_hotkeys:
@@ -188,7 +197,6 @@ def main(argv: list[str] | None = None) -> int:
 
     say(
         ("listening | " if args.arm else "click the pill to arm | ")
-        + ("converse: Send asks the CLI | " if args.converse else "")
         + "right-click for the menu | esc quits"
     )
     Pill(session, on_send=on_send, hotkeys=hotkeys, arm=args.arm).mainloop()
