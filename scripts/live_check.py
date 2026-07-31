@@ -281,15 +281,18 @@ def stage_e() -> dict:
     print("\nE — paste target (read-only, nothing is sent)")
     ask("Click the window you would dictate into, then come back and press Enter.")
     target = foreground_target()
-    payload, warning = prepare("delete the last sentence", target)
-    print(f"  window class : {target.cls}")
-    print(f"  process      : {target.process}")
-    print(f"  terminal     : {target.terminal}")
-    print(f"  bracketed    : {payload != 'delete the last sentence'}")
+    sample = "delete the last sentence"
+    payload, warning = prepare(sample, target)
+    print(f"  window class : {target.window_class!r}")
+    print(f"  process      : {target.process!r}")
+    print(f"  terminal     : {target.is_terminal}")
+    print(f"  bracketed    : {target.brackets_paste} "
+          f"(payload {'wrapped' if payload != sample else 'unchanged'})")
     print(f"  warning      : {warning or '(none)'}")
-    return {"cls": target.cls, "process": target.process,
-            "terminal": target.terminal, "bracketed": payload != "delete the last sentence",
-            "warning": warning}
+    return {"window_class": target.window_class, "process": target.process,
+            "is_terminal": target.is_terminal,
+            "brackets_paste": target.brackets_paste,
+            "wrapped": payload != sample, "warning": warning}
 
 
 def main() -> None:

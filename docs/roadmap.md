@@ -371,7 +371,17 @@ screen (R5) — so small.en is affordable there and beam 5 costs it ~20% more.
   design). On 580 real EdAcc utterances, 0 misroutes both ways — though `snap()` alters
   only one of those 580, so that column bounds the risk on conversational dictation
   rather than proving much.
-- Code-switch guardrail: low-confidence utterances cannot trigger destructive edits.
+- ~~Code-switch guardrail: low-confidence utterances cannot trigger destructive
+  edits.~~ **done 2026-07-31, and not the way it was written.** Two stricter forms were
+  built and both were measured and rejected. A bar on `avg_logprob` is an accent tax:
+  at −0.7 it puts **38% of ordinary Spanish speech** behind a confirmation against 0–5%
+  for every other group (Spanish median −0.62 vs −0.27…−0.32 for the rest), while still
+  passing a misheard "Release the bit about the stand up" at −0.65. Refusing snapped
+  verbs for `delete_last` — the one destructive op with no target to verify — works,
+  but costs 100% → 92.9% recall on three corruption classes to prevent something that
+  fires **0 times in 580 real utterances**. So the shipped guarantee is P2's, extended
+  from dropped speech to deleted speech: a deletion may happen, it may not happen
+  *unexplained*. Every destructive edit now reports the words it removed.
 
 ### Phase 2 — Model decision (accuracy track, from Phase 0 data) — **shipped 2026-07-31**
 

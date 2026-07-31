@@ -177,6 +177,9 @@ class WhisperTranscriber:
         #: Recent rejections, newest last. Written on the decode thread and drained on
         #: the UI thread, so it is a deque with a maxlen rather than a growing list.
         self._drops: deque[Drop] = deque(maxlen=DROP_HISTORY)
+        #: Worst avg_logprob of the last decode's kept segments. Drained
+        #: by take_confidence(); see there for why it is not a mean.
+        self._confidence: float | None = None
 
     def take_drops(self) -> list[Drop]:
         """Return and clear the recorded rejections.
@@ -214,6 +217,21 @@ class WhisperTranscriber:
                 with self._lock:
                     self._models[tier] = model
 
+    def take_confidence(self) -> float | None:
+        """The worst `avg_logprob` among the segments the last decode kept.
+
+        Worst, not mean: an utterance the model was sure about for four words and lost
+        on the fifth is exactly the case the guardrail exists for, and a mean would
+        hide it. None when the decode produced nothing, or when the model reported no
+        score — callers must treat that as "unknown", never as "confident".
+
+        Drained like `take_drops()`, because a stale reading is worse than no reading:
+        it would let one confident utterance vouch for the next one.
+        """
+        with self._lock:
+            out, self._confidence = self._confidence, None
+        return out
+
     def unload(self) -> None:
         """Release both models after a long idle period (R8)."""
         with self._lock:
@@ -246,6 +264,7 @@ class WhisperTranscriber:
         bias = hotwords or self.lexicon.hotwords()
         segments, _ = model.transcribe(audio, **decode_options(final, bias))
         kept = []
+        worst: float | None = None
         for s in segments:
             # Drop segments the model invented rather than heard, and record every one
             # with the evidence used (P2). See flow/clean.py for the measurements
@@ -258,4 +277,8 @@ class WhisperTranscriber:
                     self._drops.append(Drop(s.text, reason, ns, lp, final))
                 continue
             kept.append(s.text.strip())
+            if lp is not None:
+                worst = lp if worst is None else min(worst, lp)
+        with self._lock:
+            self._confidence = worst
         return normalise(" ".join(kept))

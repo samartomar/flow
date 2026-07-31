@@ -13,7 +13,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flow.edits import apply_local, plan  # noqa: E402
+from flow.edits import (  # noqa: E402
+    apply_local,
+    describe_change,
+    plan,
+    removed_text,
+)
 
 DRAFT = "Call Bob today. The meeting is on Tuesday afternoon at nasa."
 
@@ -443,3 +448,48 @@ class TestReplaceAllPhrasings(unittest.TestCase):
         # "make all the tests pass" has the same shape as "make all the Tuesdays
         # Wednesday". Turning that into a replacement is worse than not catching it.
         self.assertEqual(plan("make all the tests pass", self.DRAFT).kind, "append")
+
+
+class TestDestructiveEditsAreNamed(unittest.TestCase):
+    """A deleted sentence must never vanish unexplained (P2, extended to deletions).
+
+    `describe()` reports what was *asked for* — "delete_last('sentence')" — which is
+    exactly the message that lets words disappear without the user knowing which ones.
+    Only the two texts know what actually went.
+    """
+
+    DRAFT = ("hi priya, the deploy is scheduled for Tuesday afternoon. sameer is "
+             "writing the RELEASE NOTES. I attached the summary from the standup. "
+             "tell me if Tuesday still works.")
+
+    def _apply(self, utterance):
+        p = plan(utterance, self.DRAFT)
+        new, ok = apply_local(self.DRAFT, p)
+        self.assertTrue(ok, utterance)
+        return p, new
+
+    def test_delete_last_names_the_sentence_it_took(self):
+        p, new = self._apply("delete the last sentence")
+        self.assertIn("tell me if Tuesday still works.",
+                      describe_change(p, self.DRAFT, new))
+
+    def test_a_referential_delete_names_the_whole_sentence_it_widened_to(self):
+        p, new = self._apply("delete the bit about the standup")
+        self.assertIn("I attached the summary from the standup.",
+                      describe_change(p, self.DRAFT, new))
+
+    def test_removals_are_reported_in_words_not_characters(self):
+        # A character diff of Tuesday->Wednesday reports "Tu … Tu", which is noise.
+        p, new = self._apply("change every Tuesday to Wednesday")
+        self.assertEqual(removed_text(self.DRAFT, new), "Tuesday … Tuesday")
+
+    def test_non_destructive_edits_are_left_alone(self):
+        p, new = self._apply("capitalize sameer")
+        self.assertEqual(describe_change(p, self.DRAFT, new), p.describe())
+
+    def test_the_note_is_bounded(self):
+        long_draft = " ".join(f"word{i}" for i in range(400)) + "."
+        p = plan("delete the last sentence", long_draft)
+        new, ok = apply_local(long_draft, p)
+        self.assertTrue(ok)
+        self.assertLessEqual(len(removed_text(long_draft, new)), 60)

@@ -23,7 +23,7 @@ import numpy as np
 from . import MAX_UTTERANCE_SEC, SAMPLE_RATE
 from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
-from .edits import apply_local, command_bias, plan
+from .edits import apply_local, command_bias, describe_change, plan
 from .refine import refine
 from .thread import Thread
 
@@ -495,10 +495,11 @@ class Session:
             if not self.draft.undo():
                 self._emit("note", "nothing to undo")
         elif p.kind == "local":
-            new, applied = apply_local(self.draft.text, p)
+            before = self.draft.text
+            new, applied = apply_local(before, p)
             if applied:
                 self.draft.set(new)
-                self._emit("note", f"local: {p.describe()}")
+                self._emit("note", f"local: {describe_change(p, before, new)}")
             else:
                 # Asked for something we could not do locally — escalate rather than
                 # silently no-op, which would read as the app ignoring the user.
@@ -576,10 +577,11 @@ class Session:
 
         p = plan(utterance, self.draft.text)
         if p.kind == "local":
-            new, applied = apply_local(self.draft.text, p)
+            before = self.draft.text
+            new, applied = apply_local(before, p)
             if applied:
                 self.draft.set(new)
-                self._emit("note", f"re-read as {p.describe()}")
+                self._emit("note", f"re-read as {describe_change(p, before, new)}")
                 self._after_draft_change()
                 return True
 
@@ -631,10 +633,12 @@ class Session:
             original, self._post_hoc = self._post_hoc, None
             p = plan(text, self.draft.text) if text else None
             if p is not None and p.kind == "local":
-                new, applied = apply_local(self.draft.text, p)
+                before = self.draft.text
+                new, applied = apply_local(before, p)
                 if applied:
                     self.draft.set(new)
-                    self._emit("note", f"re-read as {p.describe()}")
+                    self._emit("note",
+                               f"re-read as {describe_change(p, before, new)}")
                     self._after_draft_change()
                     return
             self._give_back(original, "could not re-read that as a command")
@@ -645,10 +649,11 @@ class Session:
             return  # a rescue nobody is waiting for; ignore rather than act on it
         p = plan(text, self.draft.text) if text else None
         if p is not None and p.kind == "local":
-            new, applied = apply_local(self.draft.text, p)
+            before = self.draft.text
+            new, applied = apply_local(before, p)
             if applied:
                 self.draft.set(new)
-                self._emit("note", f"re-heard as {p.describe()}")
+                self._emit("note", f"re-heard as {describe_change(p, before, new)}")
                 self._after_draft_change()
                 return
         # The second read did not find a command either. The CLI was always the

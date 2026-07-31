@@ -13,7 +13,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flow.audio import BLOCK, PREROLL_BLOCKS, SpeechGate  # noqa: E402
+from flow.audio import (  # noqa: E402
+    BLOCK,
+    FLOOR_MAX_DB,
+    PREROLL_BLOCKS,
+    SpeechGate,
+)
 from flow.session import Session, State  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
@@ -166,3 +171,47 @@ class TestSessionKeepsTheOnset(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestQuietRoomFloor(unittest.TestCase):
+    """The adaptive floor has to be able to descend to a real room.
+
+    The first live-microphone run failed here: a quiet room with a USB mic measures
+    about -96.7 dB, the floor was clamped at -70 and classified anything under -80 as
+    digital silence, so it never trained at all. It stayed at its -55 dB start, the
+    trigger stayed at -45, and the gate simply never opened. Every file-driven test
+    fed it speech or literal zeros, and neither is a room.
+    """
+
+    def _room(self, db, blocks=60, seed=7):
+        rng = np.random.default_rng(seed)
+        amp = 10 ** (db / 20)
+        return [rng.normal(0, amp, BLOCK).astype(np.float32) for _ in range(blocks)]
+
+    def test_the_floor_descends_to_a_quiet_room(self):
+        gate = SpeechGate()
+        for block in self._room(-96.7):
+            gate.push(block)
+        self.assertLess(gate.floor_db, -80.0)
+
+    def test_a_normal_voice_then_opens_the_gate(self):
+        gate = SpeechGate()
+        for block in self._room(-96.7):
+            gate.push(block)
+        rng = np.random.default_rng(11)
+        voice = rng.normal(0, 10 ** (-60 / 20), BLOCK).astype(np.float32)
+        self.assertTrue(gate.push(voice)[0])
+
+    def test_literal_zeros_are_still_not_a_room(self):
+        # The clamp's real job: padded silence in a WAV must not train the floor.
+        gate = SpeechGate()
+        before = gate.floor_db
+        for _ in range(50):
+            gate.push(np.zeros(BLOCK, dtype=np.float32))
+        self.assertEqual(gate.floor_db, before)
+
+    def test_a_loud_room_still_cannot_deafen_the_gate(self):
+        gate = SpeechGate()
+        for block in self._room(-10.0):
+            gate.push(block)
+        self.assertLessEqual(gate.floor_db, FLOOR_MAX_DB)

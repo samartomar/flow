@@ -1776,3 +1776,82 @@ target window. It reads only; nothing is ever pasted. Awaiting a human at a micr
 **313 tests green** (308 + 5). The recorded phone number is unchanged at 10/11 —
 us-control_02 was recorded against the old sheet, so her item 1 was a plain replace and
 routed correctly as one.
+
+### 2026-07-31 — a real microphone, and the guardrail that measured badly
+
+Two strands, and the live run is what made the second one honest.
+
+**The first live-microphone session in this project's history.** `scripts/live_check.py`
+— five stages a file cannot exercise. Results, one speaker, one room, one machine:
+
+| | | |
+|---|---|---|
+| A capture | **98.1%** of expected blocks (46 of ~47), room at −96.7 dB | pass |
+| B gate | **never opened** | **fail** |
+| C partial latency | median **1.34 s**, worst **2.55 s** over 9.3 s of speech | **breach of R4's 1.5 s** |
+| D commands | **10/11**, same items and draft as the phone recording | — |
+| E paste target | crashed on my own typo (`target.cls`) | fixed |
+
+**B is a real defect and only a microphone could have found it.** The adaptive noise
+floor was clamped at −70 dB and treated anything below −80 dB as digital silence. A
+quiet room with a decent USB mic measures **−96.7 dB** — so it was classified as a
+padded WAV, never trained the floor, and the floor sat at its −55 dB starting value
+with the trigger at −45 dB. The gate never opened because *the adaptive floor was not
+adapting at all*. Every file-driven test had either speech or literal zeros in it, and
+neither is a room. Digital silence is now tested exactly (`block.any()`) rather than by
+loudness, and the floor may descend to −100 dB. Verified: floor reaches −94.8 dB in a
+−96.7 dB room, and a −60 dB voice opens the gate. `gate_bench.py` unchanged at 0.281
+WER / 98.4% kept audio.
+
+**C says R4's published number is optimistic.** 0.78–0.93 s median came from decoding
+prefixes cut out of a WAV back to back — that measures the model. Under real capture,
+with the gate and the mic callback competing for the same CPU, the same tier runs
+1.34 s median and breaches at 2.55 s. Recorded, not fixed; the budget is a Phase 1
+number and this is the first evidence it does not survive contact.
+
+**D's one miss was "standup" heard as "standard"** — which routed to `append`, so the
+command was typed into the draft rather than deleting the wrong thing. Annoying, not
+dangerous. Worth noting the four *correct* routes that survived a mis-hearing: "and do
+that" → undo, "release nodes" → lower, "release notches" → insert_before, "role by
+plan" → followup.
+
+**The code-switch guardrail, and why it does not look like its roadmap line.**
+
+The line said: low-confidence utterances cannot trigger destructive edits. The obvious
+reading is a bar on `avg_logprob`. `scripts/guardrail_bench.py` measured it on 200
+clips of real accented speech and it is an **accent tax**:
+
+| group | n | median lp | blocked at −0.7 |
+|---|---|---|---|
+| indian | 40 | −0.27 | 0% |
+| japanese | 40 | −0.32 | 0% |
+| russian | 40 | −0.31 | 0% |
+| us-control | 40 | −0.29 | 0% |
+| **spanish** | 40 | **−0.62** | **38%** |
+
+A third of ordinary Spanish speech behind a confirmation, to buy what? The same harness
+degraded the recorded destructive commands until they *were* misheard, and confidence
+did not move with correctness: "Release the bit about the stand up" scores −0.65, and
+"Change the mirror to S-A-M-I-R" scores −0.51 — *better* than the clean reading's −0.60.
+It penalises the accent, not the error. Rejected.
+
+The second attempt was better aimed: refuse a snapped verb for `delete_last`, the one
+destructive op with **no target to verify** — the same argument `plan()` already makes
+for undo, written in that docstring and never applied to the other targetless deletion.
+It works, and it stops **"believe the last sentence"** deleting a sentence. It also
+costs 100% → 92.9% recall on three corruption classes, taking "deleting the last
+sentence" and "delet the last sentence" down with it — to prevent something that fires
+**0 times in 580 real utterances**. Measurable cost, unmeasurable benefit. Rejected.
+
+So the shipped guarantee is the one P2 already makes about dropped speech, extended to
+deleted speech: **a deletion may happen; it may not happen unexplained.** Every edit in
+`DESTRUCTIVE` now reports the words it took — diffed from the two texts, because
+`delete_last` counts trailing sentences and never names them, and a phonetic `replace`
+matches a span the user did not spell the way the draft does. "delete_last('sentence')"
+becomes `delete_last('sentence') — removed 'tell me if Tuesday still works.'`. Diffed by
+word, not character, because a character diff of Tuesday→Wednesday reports "Tu … Tu".
+
+**Cost: none.** Recall 100% on all six corruption classes, 0 misroutes on 580 real
+utterances, adversarial unchanged at 5/20.
+
+**322 tests green** (313 + 9), including the quiet room that broke the gate.

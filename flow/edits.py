@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Literal
 
 from .phonetic import find_span, find_spans
@@ -410,6 +411,67 @@ def plan(utterance: str, draft: str = "") -> Plan:
         if fuzzy.kind == "undo" and exact.kind != "undo" and _is_alias(utterance):
             return fuzzy
     return exact
+
+
+#: Operations that take existing words away. They are not blocked — they are *named*.
+#:
+#: Two stricter guardrails were built for these and both were measured and rejected:
+#:
+#: **A confidence bar on `avg_logprob`.** The obvious design, and an accent tax. On
+#: 200 clips of real accented speech a −0.7 bar puts **38% of ordinary Spanish speech**
+#: behind a confirmation against 0–5% for every other group (Spanish median −0.62 vs
+#: −0.27…−0.32) — while still passing "Release the bit about the stand up" at −0.65 and
+#: "Change the mirror to S-A-M-I-R" at −0.51, which is *better* than the clean
+#: reading's −0.60. It penalises the accent and not the error.
+#:
+#: **Refusing snapped verbs for `delete_last`**, which is the one destructive op with
+#: no target to verify — the same argument `plan()` already makes for undo. It works:
+#: it stops "believe the last sentence" deleting a sentence. It also costs 100% → 92.9%
+#: recall on three corruption classes, taking "deleting the last sentence" and "delet
+#: the last sentence" with it, to prevent something that fires **0 times in 580 real
+#: utterances**. Measurable cost, unmeasurable benefit.
+#:
+#: So the guarantee is the one P2 already makes about dropped speech, extended to
+#: deleted speech: it may happen, it may not happen *unexplained*. Every destructive
+#: edit reports the words it removed, and the undo stack still holds them.
+DESTRUCTIVE = frozenset({"delete", "delete_last", "delete_range", "replace",
+                         "replace_all"})
+
+
+def removed_text(before: str, after: str, limit: int = 60) -> str:
+    """The words an edit took away, for the note that announces it.
+
+    Diffed rather than reconstructed from the Plan: `delete_last` counts trailing
+    sentences and never names them, and a phonetic `replace` matches a span the user
+    did not spell the way the draft does. In both cases the plan knows what was *asked
+    for*, and only the two texts know what actually went.
+    """
+    # Words, not characters. A character diff of "Tuesday"→"Wednesday" reports that
+    # "Tu … Tu" went missing, which tells the user nothing; the unit they think in is
+    # the word they said.
+    old, new = before.split(), after.split()
+    gone = []
+    for tag, i1, i2, _, _ in SequenceMatcher(
+        None, old, new, autojunk=False
+    ).get_opcodes():
+        if tag in ("delete", "replace"):
+            gone.append(" ".join(old[i1:i2]))
+    joined = " … ".join(x for x in gone if x)
+    return joined if len(joined) <= limit else joined[: limit - 1] + "…"
+
+
+def describe_change(p: Plan, before: str, after: str) -> str:
+    """What to tell the user an edit just did.
+
+    For everything that adds or reshapes text, the plan says it: `insert_before`,
+    `capitalize`, `break`. For anything in DESTRUCTIVE it does not — `delete_last`
+    names a unit and a count, never the sentence, so "delete_last('sentence')" is
+    precisely the message that lets words disappear unnoticed. Those get the words.
+    """
+    if p.op not in DESTRUCTIVE:
+        return p.describe()
+    gone = removed_text(before, after)
+    return f"{p.describe()} — removed {gone!r}" if gone else p.describe()
 
 
 def _is_alias(utterance: str) -> bool:

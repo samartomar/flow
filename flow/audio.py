@@ -28,9 +28,15 @@ BLOCK = 1024  # 64 ms at 16 kHz — fine enough for a responsive level meter (R1
 
 # Bounds on the adaptive noise floor. Without them, a stretch of true digital silence
 # drags the floor arbitrarily low and every subsequent block reads as speech.
-FLOOR_MIN_DB = -70.0
+#
+# The minimum was −70 dB, and the first live-microphone run showed what that costs: a
+# quiet room with a decent USB mic measures **−96.7 dB**, so the floor could never
+# descend to meet it. It stayed pinned at its −55 dB start, the trigger stayed at
+# −45 dB, and the gate simply never opened. The adaptive floor was not adapting at
+# all — every file-driven test had either speech or true digital silence in it, and
+# neither exercises a real room's noise floor.
+FLOOR_MIN_DB = -100.0
 FLOOR_MAX_DB = -25.0
-DIGITAL_SILENCE_DB = -80.0
 
 #: How much audio to keep from *before* the gate opened, in blocks of 64 ms.
 #:
@@ -178,7 +184,13 @@ class SpeechGate:
             # floor ran away to -142 dB and the gate turned hypersensitive:
             #   - digital silence is not room noise, so it must not train the floor
             #   - the floor is bounded, so no input can make the gate deaf or paranoid
-            if level > DIGITAL_SILENCE_DB:
+            #
+            # Digital silence is tested exactly, not by loudness. It used to be "below
+            # -80 dB", which is a guess about where rooms stop and files begin — and a
+            # real quiet room came in at -96.7 dB, was classified as a padded WAV, and
+            # never trained the floor. A block of literal zeros is the only thing this
+            # clamp was ever meant to catch, and `any()` catches exactly that.
+            if block.any():
                 self.floor_db += 0.05 * (level - self.floor_db)
                 self.floor_db = min(FLOOR_MAX_DB, max(FLOOR_MIN_DB, self.floor_db))
             self._preroll.append(block)
