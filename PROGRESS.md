@@ -1196,3 +1196,58 @@ harness reports 4/20 either way again.
 
 **180 tests green** (178 + 2). Two of the three bugs in this entry were found by the
 harness rather than by the tests, which is the argument for building the harness first.
+
+### 2026-07-31 — Phase 3: matching the target by sound (defect 4, second half)
+
+The remaining half of the command defect is not the verb but the *target*. The user
+says "change Sameer to Samir"; the draft, transcribed from the same accented voice
+seconds earlier, says "summer". An exact substring search finds nothing, so a free
+local edit escalates to a ~7 s CLI call over text that does not contain the word.
+
+**What changed.** `flow/phonetic.py` vendors Double Metaphone — about 200 lines of
+table lookup, stdlib only, so R16's three dependencies hold. It returns two codes
+because English pronunciation is genuinely ambiguous ("ch" is K in "school", X in
+"chair"), and two words match if any codes agree. `similarity()` blends the phonetic
+key with `difflib`'s spelling ratio, because neither is sufficient alone: keys are
+coarse enough that "Tuesday" and "Thursday" are neighbours, and spelling alone misses
+exactly the substitutions accent produces. `find_span()` / `find_spans()` then search
+word windows sized around the target's word count ±1, since a mis-transcription moves
+word boundaries as readily as letters — "Sameer" comes back as "some ear" as often as
+"summer". Both exact-match sites now route through it.
+
+**Measured** with `scripts/command_bench.py`, extended for this:
+
+| threshold | pairs found | correct span | false spans (354 real utterances) |
+|---|---|---|---|
+| 0.75 | 10/10 | 10/10 | 19 |
+| 0.80 | 10/10 | 10/10 | 10 |
+| **0.82** | **10/10** | **10/10** | **4** |
+| 0.85 | 7/10 | 7/10 | 4 |
+| 0.90 | 5/10 | 5/10 | 3 |
+
+0.82 is where recall is still complete and the false-span curve has flattened. And the
+number the whole item exists for: **10 of 10 corrections whose target the draft spells
+differently now stay local and edit the right span**, where every one of them
+previously paid a ~7 s CLI call to rewrite text that did not contain the word.
+
+**Denominators, because they are small.** Ten mis-transcription pairs, hand-written
+from the substitution classes accent produces (vowel colouring, lost syllable
+boundaries, th/t, v/w, f/ph). They are not recordings. The 354 false-span trials *are*
+real EdAcc utterances, each paired with a content word from a distant utterance and
+checked absent — that side has a denominator worth quoting; the recall side does not
+yet, and will not until there are recorded speakers.
+
+**What broke.** Three things, two of them mine and both silent. A scripted edit to
+`apply_local`'s `replace_all` did not apply — the pattern contained a backslash — so
+the phonetic path was wired into every operation *except* that one, and the tests
+passed until the one test that covered it failed. Then the appended `spans()` function
+landed after the `if __name__` block, so `main()` ran before it existed. And a heredoc
+turned `\n` inside an f-string into a real newline, producing an unterminated literal.
+None of these are interesting bugs; all three are the same lesson, which is that a
+scripted edit that silently matches nothing looks exactly like a scripted edit that
+worked.
+
+**200 tests green** (180 + 20): the metaphone keys, the pairs that must match and the
+pairs that must not, empty and vowel-only input, span selection including the
+last-occurrence rule, non-overlap in `find_spans`, and six end-to-end corrections that
+now land locally.

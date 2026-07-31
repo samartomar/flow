@@ -198,13 +198,126 @@ def main() -> None:
     r = recall()
     a = adversarial()
     p = precision()
+    sp = spans()
+    esc = escalations()
     out = BENCH / "command-bench.json" if BENCH.exists() else Path("command-bench.json")
     out.write_text(
-        json.dumps({"recall": r, "adversarial": a, "precision": p}, indent=1),
+        json.dumps({"recall": r, "adversarial": a, "precision": p, "spans": sp,
+                    "escalations": esc}, indent=1),
         encoding="utf-8",
     )
     print(f"\ndetail -> {out}")
 
+
+
+#: Spoken target vs the draft the same voice produced a moment earlier. These are the
+#: substitutions accented English actually makes — vowel colouring, a lost or added
+#: syllable boundary, th/t and v/w and b/v swaps — and each one is a case where the
+#: exact matcher escalates a free local edit to a 7 s CLI call over text that does not
+#: contain the word.
+TARGET_PAIRS = [
+    ("Meeting on Tuesday with summer about the release.", "Sameer", "summer"),
+    ("Call some ear tomorrow about the deploy.", "Sameer", "some ear"),
+    ("The fone rang twice during standup.", "phone", "fone"),
+    ("We shipped it on Wensday afternoon.", "Wednesday", "Wensday"),
+    ("Ask Catherine to review the migration.", "Katherine", "Catherine"),
+    ("Nakamora signed off on the design.", "Nakamura", "Nakamora"),
+    ("Send it to Adithya before the standup.", "Aditya", "Adithya"),
+    ("The realease notes are still in draft.", "release", "realease"),
+    ("It happens every nite around two.", "night", "nite"),
+    ("Smyth wrote the original parser.", "Smith", "Smyth"),
+]
+
+#: Targets that are genuinely absent. A span here is a silent rewrite of the wrong
+#: words, which is worse than escalating to the CLI.
+ABSENT = [
+    ("Meeting on Tuesday with Sameer about the release.", "Wednesday"),
+    ("Meeting on Tuesday with Sameer about the release.", "deployment"),
+    ("Call Bob today about the invoice.", "Alice"),
+    ("The report is due at the end of the month.", "support"),
+    ("We deleted the old branch yesterday.", "completed"),
+    ("Send the draft to the team.", "Friday"),
+    ("The parser handles nested quotes.", "Sameer"),
+    ("Ask about the migration timeline.", "notes"),
+]
+
+
+def _corpus_absent() -> list[tuple[str, str]]:
+    """Real utterances paired with a word that is genuinely not in them.
+
+    The hand-written ABSENT list is eight cases; this is the same question asked of
+    every EdAcc reference, so the false-span rate has a denominator worth quoting.
+    """
+    entries = []
+    for mf in sorted(BENCH.glob("manifest-edacc*.jsonl")):
+        with mf.open(encoding="utf-8") as f:
+            entries.extend(json.loads(line) for line in f if line.strip())
+    refs = [e["ref"] for e in entries if len(e["ref"].split()) >= 4]
+    out = []
+    for i, ref in enumerate(refs):
+        # A content word from a distant utterance, checked to be absent from this one.
+        donor = refs[(i + len(refs) // 2) % len(refs)].split()
+        candidates = [w.strip(".,!?").lower() for w in donor if len(w) > 4]
+        target = next((w for w in candidates if w not in ref.lower()), None)
+        if target:
+            out.append((ref, target))
+    return out
+
+
+def escalations() -> dict:
+    """What phonetic matching is *for*: corrections that stay local.
+
+    Each pair is a real command whose target the draft spells differently. Exact
+    matching cannot find it, so the router escalates to a ~7 s CLI call over text that
+    does not contain the word. The measure is how many of those become free local
+    edits, and whether the edit lands on the right span.
+    """
+    from flow.phonetic import find_span
+
+    cases = [(draft, f"change {target} to REPLACED", expected)
+             for draft, target, expected in TARGET_PAIRS]
+    local = correct = 0
+    for draft, utterance, expected in cases:
+        p = plan(utterance, draft)
+        if p.kind != "local":
+            continue
+        local += 1
+        span = find_span(draft, p.target)
+        correct += bool(span) and draft[span[0]:span[1]].strip(" .,").lower() == expected.lower()
+    n = len(cases)
+    print(f"\ncorrections whose target the draft spells differently ({n} cases):")
+    print(f"  stayed local (no 7s CLI call):  {local}/{n}  {local / n:.0%}")
+    print(f"  ...and edited the right span:   {correct}/{n}  {correct / n:.0%}")
+    return {"n": n, "local": local, "correct": correct}
+
+
+def spans() -> dict:
+    """Sweep the phonetic match threshold: recall against false spans."""
+    from flow.phonetic import find_span
+
+    corpus_absent = _corpus_absent()
+    print(f"\n{'threshold':<11}{'found':>8}{'correct':>9}{'false spans':>13}"
+          f"{'corpus false':>15}")
+    out = {}
+    for t in (0.75, 0.80, 0.82, 0.85, 0.88, 0.90):
+        found = correct = 0
+        for draft, target, expected in TARGET_PAIRS:
+            span = find_span(draft, target, threshold=t)
+            if span:
+                found += 1
+                correct += draft[span[0]:span[1]].strip(" .,").lower() == expected.lower()
+        false = sum(1 for draft, target in ABSENT if find_span(draft, target, threshold=t))
+        corpus_false = sum(
+            1 for draft, target in corpus_absent
+            if find_span(draft, target, threshold=t)
+        )
+        print(f"{t:<11}{f'{found}/{len(TARGET_PAIRS)}':>8}"
+              f"{f'{correct}/{len(TARGET_PAIRS)}':>9}{f'{false}/{len(ABSENT)}':>13}"
+              f"{f'{corpus_false}/{len(corpus_absent)}':>15}")
+        out[str(t)] = {"found": found, "correct": correct, "false": false,
+                       "corpus_false": corpus_false, "n_pairs": len(TARGET_PAIRS),
+                       "n_absent": len(ABSENT), "n_corpus": len(corpus_absent)}
+    return out
 
 if __name__ == "__main__":
     main()

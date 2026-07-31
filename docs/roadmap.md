@@ -357,9 +357,30 @@ utterance never pays for `small.en` at all.
 
 ### Phase 3 — Correction loop that survives accents (both tracks)
 
-- Phonetic target matching: one `find_span()` (double-metaphone, vendored ~100 lines,
-  + `difflib` ratio) replacing both exact-match sites — *"change Sameer to Samir"*
-  finds "summer" in the draft (defect 4, second half → P3).
+- ~~Phonetic target matching: one `find_span()` replacing both exact-match sites~~
+  **done 2026-07-31.** `flow/phonetic.py` vendors Double Metaphone (~200 lines, stdlib
+  only, R16 intact) plus a `similarity()` that blends sound with spelling, and
+  `find_span()` / `find_spans()` search word windows sized around the target's own word
+  count ±1 — a mis-transcription moves word boundaries as readily as letters
+  ("Sameer" → "some ear"). Both exact-match sites now go through it: `in_draft()` in
+  the router, and every span operation in `apply_local()`.
+
+  **The threshold was swept, not chosen** — ten real mis-transcription pairs against
+  354 real utterances paired with a genuinely absent word:
+
+  | threshold | pairs found | false spans |
+  |---|---|---|
+  | 0.75 | 10/10 | 19/354 |
+  | 0.80 | 10/10 | 10/354 |
+  | **0.82** | **10/10** | **4/354** |
+  | 0.85 | 7/10 | 4/354 |
+  | 0.90 | 5/10 | 3/354 |
+
+  0.82 keeps full recall where the false-span rate has already flattened; stricter
+  costs three of ten recoveries and buys nothing until 0.90, which trades half the
+  recall for one span. **All 10 corrections whose target the draft spells differently
+  now stay local (no ~7 s CLI call) and edit the right span** — the escalation this
+  defect caused is gone on the measured set.
 - Constrained re-decode of suspected commands, biased with the trigger lexicon + draft
   tokens via `hotwords` (~1 s, replaces the 7 s CLI escalation).
 - Post-hoc "that was a command" rescue chip; pre-roll ring buffer + gate retune

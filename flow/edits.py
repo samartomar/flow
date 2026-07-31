@@ -24,6 +24,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from .phonetic import find_span, find_spans
+
 Kind = Literal["append", "local", "semantic", "undo"]
 
 # Spoken numbers, for "delete the last two words".
@@ -317,7 +319,9 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
         return Plan("append")
 
     def in_draft(target: str) -> bool:
-        return bool(target) and target.lower() in draft.lower()
+        # Phonetic, not literal: the draft was transcribed from the same voice moments
+        # earlier, so the word the user is naming may be spelled differently there.
+        return bool(target) and find_span(draft, target) is not None
 
     if _UNDO.match(u):
         return Plan("undo")
@@ -415,36 +419,41 @@ def apply_local(text: str, p: Plan) -> tuple[str, bool]:
         return joined.strip(), True
 
     if p.op == "replace_all":
-        # The replacement is a *function*, not a template: as a string, `re.sub`
-        # reads backslashes in it as group references, so dictating a Windows path
-        # or a regex ("replace all foo with \1") either raises or silently splices
-        # in a captured group. The target was already escaped; the payload is the
-        # user's literal words and must stay literal.
-        out = re.sub(re.escape(p.target), lambda _m: p.payload, text, flags=re.I)
+        # Spans, not `re.sub`: the target may be spelled differently in different
+        # places (a name the model was unsure about twice), and the payload must be
+        # inserted literally — as a substitution template, a dictated backslash reads
+        # as a group reference and either raises or splices in captured text.
+        # Right to left, so each replacement cannot shift the spans still to come.
+        spans = find_spans(text, p.target)
+        out = text
+        for begin, end in reversed(spans):
+            out = out[:begin] + p.payload + out[end:]
         return _tidy(out), out != text
 
     if p.op == "delete_range":
-        low = text.lower()
-        start = low.rfind(p.target.lower())
-        if start < 0:
+        first = find_span(text, p.target)
+        if first is None:
             return text, False
+        start = first[0]
         # Search for the end marker only *after* the start, so "delete from X to Y"
         # cannot silently produce a reversed, text-eating range.
-        end = low.find(p.payload.lower(), start + len(p.target))
-        if end < 0:
+        tail = find_span(text[first[1]:], p.payload)
+        if tail is None:
             return text, False
-        return _tidy(text[:start] + text[end + len(p.payload) :]), True
+        return _tidy(text[:start] + text[first[1] + tail[1]:]), True
 
     if p.op in (
         "replace", "delete", "capitalize", "upper", "lower",
         "insert_before", "insert_after",
     ):
-        # Case-insensitive search, hitting the LAST occurrence: a spoken correction
-        # almost always refers to what was just said, not to the first time it appeared.
-        idx = text.lower().rfind(p.target.lower())
-        if idx < 0:
+        # Hits the LAST occurrence: a spoken correction almost always refers to what
+        # was just said, not to the first time it appeared. Phonetic, so the span may
+        # be spelled differently from what the user said — `found` is the draft's own
+        # text, which is what case operations must transform.
+        span = find_span(text, p.target)
+        if span is None:
             return text, False
-        end = idx + len(p.target)
+        idx, end = span
         found = text[idx:end]
         if p.op == "replace":
             new = p.payload
