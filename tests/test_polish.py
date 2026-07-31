@@ -59,9 +59,37 @@ class TestVerb(unittest.TestCase):
 class TestPrompt(unittest.TestCase):
     def test_it_says_request_not_ask(self):
         # "Ask" is a product surface (P9 converse mode); the Refine instruction must
-        # not borrow the word for the third part of its structure.
-        self.assertNotIn(" ask.", _POLISH_PROMPT.lower())
-        self.assertIn("specific request", _POLISH_PROMPT.lower())
+        # not borrow the word as the name of a structural part. "asked for" as a verb
+        # is fine — it is the noun that collides.
+        low = _POLISH_PROMPT.lower()
+        self.assertIn("request", low)
+        for noun in (" the ask", "specific ask", "the ask.", "ask first"):
+            self.assertNotIn(noun, low)
+
+    def test_the_request_comes_first(self):
+        # Decision 1: a reader must see what is being asked for without hunting.
+        low = _POLISH_PROMPT.lower()
+        self.assertIn("request first", low)
+        self.assertIn("first line", low)
+
+    def test_it_says_which_requirements_belong_in_the_request(self):
+        # Decision 2: defining requirements fold in, standing prohibitions do not.
+        low = _POLISH_PROMPT.lower()
+        self.assertIn("independently actionable", low)
+        self.assertIn("nullable", low)  # the reviewer's own worked example
+        self.assertIn("separate constraints", low)
+
+    def test_normalisation_is_scoped_to_the_certain_cases(self):
+        # Decision 3, and the tension it creates with "verbatim": details are kept
+        # verbatim *apart from* the normalisations, and an ambiguous number is left
+        # as spoken rather than guessed.
+        low = _POLISH_PROMPT.lower()
+        self.assertIn("http 500", low)
+        self.assertIn("postgresql 15", low)
+        self.assertIn("2.3.1", low)
+        self.assertIn("keep the speaker's words", low)
+        self.assertIn("apart from those normalisations", low)
+        self.assertIn("verbatim", low)
 
     def test_the_instruction_names_the_structure_and_forbids_invention(self):
         low = _POLISH_PROMPT.lower()
