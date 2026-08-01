@@ -53,7 +53,7 @@ ROWS = [
     ("run 1", 9, "Make it a proper brown.", "semantic/polish",
      "semantic/", "semantic/polish"),
     ("run 1", 10, "follow and mention the roleback plan", "followup/",
-     "append/", "append/"),
+     "append/", "followup/"),
     ("run 1", 11, "That was a command.", "rescue/", "rescue/", "rescue/"),
 
     ("run 2", 1, "Change every Tuesday to Wednesday", "local/replace_all",
@@ -125,23 +125,39 @@ class TestTheSheetReplays(unittest.TestCase):
         self.assertEqual({r[3] for r in ROWS}, wanted)
 
 
+#: Every row the grammar has moved since the day it was recorded, and why. Adding one
+#: is the deliberate act — the test below is what makes it deliberate.
+MOVED = {
+    ("run 2", 4): "'lower case' as two words, admitted as a spelling variant",
+    ("run 1", 9): "'brown' snapped to 'prompt' inside the polish frame",
+    ("run 1", 10): "'follow and', the elided particle, priced at 0/580 first",
+}
+
+
 class TestWhatThisItemMoved(unittest.TestCase):
-    """Two rows, named, and nothing else.
+    """Named rows, and nothing else.
 
     The value of the table is this test: a grammar change that moves a row nobody
     argued for is a regression, and without the recorded column it would look like
     progress.
     """
 
-    def test_exactly_two_rows_differ_from_what_was_recorded(self):
+    def test_exactly_the_named_rows_differ_from_what_was_recorded(self):
         moved = {(run, item) for run, item, _h, _w, rec, now in ROWS if rec != now}
-        self.assertEqual(moved, {("run 2", 4), ("run 1", 9)})
+        self.assertEqual(moved, set(MOVED))
 
-    def test_both_of_them_moved_from_a_miss_to_a_hit(self):
+    def test_all_of_them_moved_from_a_miss_to_a_hit(self):
         for run, item, _h, want, rec, now in ROWS:
-            if (run, item) in {("run 2", 4), ("run 1", 9)}:
+            if (run, item) in MOVED:
                 self.assertNotEqual(rec, want, "was recorded as a hit already")
                 self.assertEqual(now, want)
+
+    def test_and_each_one_carries_the_reason_it_was_allowed_to_move(self):
+        # A row that moved without an argument beside it is the regression this file
+        # exists to catch, whichever direction it moved in.
+        for key, why in MOVED.items():
+            with self.subTest(row=key):
+                self.assertTrue(why.strip())
 
 
 class TestTheScores(unittest.TestCase):
@@ -149,9 +165,13 @@ class TestTheScores(unittest.TestCase):
         got = [sum(1 for r in ROWS if r[0] == run and r[4] == r[3]) for run in RUNS]
         self.assertEqual(got, [7, 8, 6])
 
-    def test_and_the_two_fixes_are_worth_one_item_each(self):
+    def test_and_each_fix_is_worth_one_item_in_the_run_it_came_from(self):
+        # Run 1 gains two (the polish frame's noun snap, and the elided "follow and"),
+        # run 2 one (lower case as two words), run 3 none — which is the honest shape:
+        # every fix so far came from a specific miss in a specific take, and none of
+        # them generalised to a take that did not produce the same mis-hearing.
         got = [sum(1 for r in ROWS if r[0] == run and r[5] == r[3]) for run in RUNS]
-        self.assertEqual(got, [8, 9, 6])
+        self.assertEqual(got, [9, 9, 6])
 
     def test_no_item_held_across_all_three_takes_except_three_and_eleven(self):
         # The plan's own summary said "2, 3 and 11 hit every run". Item 2 did not:
@@ -161,10 +181,15 @@ class TestTheScores(unittest.TestCase):
                 if all(r[4] == r[3] for r in ROWS if r[1] == item)}
         self.assertEqual(held, {3, 11})
 
-    def test_the_lower_case_fix_is_the_only_one_that_makes_an_item_stable(self):
+    def test_which_items_the_fixes_have_made_stable_across_all_three(self):
+        # 4 came from the lower-case variant, 10 from the elided "follow and". Both are
+        # stable *because all three takes produced a form the grammar now reads* — not
+        # because the underlying mis-hearing stopped happening, which no grammar change
+        # can do. Items 1, 5, 6, 7, 8 are still take-dependent and 2 needs a declared
+        # correction rather than a rule.
         held = {item for item in range(1, 12)
                 if all(r[5] == r[3] for r in ROWS if r[1] == item)}
-        self.assertEqual(held, {3, 4, 11})
+        self.assertEqual(held, {3, 4, 10, 11})
 
 
 class TestTheBitAboutQuestion(unittest.TestCase):
@@ -209,10 +234,17 @@ class TestWhatTheMissesActuallyWere(unittest.TestCase):
     def test_the_follow_up_verb_lost_its_particle(self):
         # Run 1 item 10: "follow and mention the roleback plan". "roleback" was never
         # the problem — it scores 0.94 against "rollback" — the missing "up" was.
-        # Admitting bare "follow" would route "follow the steps in the README" as a
-        # follow-up, which is why this stays a fixture and not a rule.
-        self.assertEqual(routed("follow and mention the roleback plan"), "append/")
+        #
+        # This row used to be pinned as a miss, on the grounds that admitting "follow"
+        # would route "follow the steps in the README" as a follow-up. That was true of
+        # *bare* "follow" and is still refused; what is admitted is the elision only —
+        # "follow" immediately before "and" — and it was priced before being admitted:
+        # 0/580 misroutes on the real-utterance corpus, unchanged, and the whole
+        # command_bench output identical apart from its date. The corpus has no
+        # "follow and" utterance in it, so nothing else moved either.
+        self.assertEqual(routed("follow and mention the roleback plan"), "followup/")
         self.assertEqual(routed("follow up and mention the roleback plan"), "followup/")
+        self.assertEqual(routed("follow the steps in the README"), "append/")
         self.assertGreater(similarity("roleback", "rollback"), MATCH_THRESHOLD)
 
     def test_a_no_op_replace_still_scores_as_a_hit(self):

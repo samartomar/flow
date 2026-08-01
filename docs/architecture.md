@@ -429,6 +429,18 @@ same operation as `lowercase`, as `all caps` already was to `uppercase`. Runs 1 
 live sheet returned one token for that command and run 2 returned two, from the same speaker
 saying the same words.
 
+**Elisions belong there too**, and for the same reason — they are a way the same phrase comes
+out, not another phrase. `_FOLLOWUP` accepts `follow` immediately before `and`, because live
+run 1 said "follow up and mention the rollback plan" and the decoder dropped the unstressed
+"up" between two stressed words. "roleback" was never the problem: it scores 0.938 against
+"rollback", comfortably over `MATCH_THRESHOLD`. **Bare `follow` stays refused** — "follow the
+steps in the README" is a sentence somebody dictated — so the lookahead is the whole safety
+argument, and it is priced rather than argued: run against `command_bench.py`'s corpus before
+being admitted, **0/580** misroutes on real utterances (unchanged), adversarial 5/20
+(unchanged), corruption-class recall 100% on all six classes, threshold sweep identical. The
+whole result file came back identical apart from its date, because the corpus contains no
+"follow and" utterance at all — which is what "costs nothing" means here.
+
 **Phonetic target matching.** `phonetic.find_span()` — vendored Double Metaphone blended with
 spelling, threshold `MATCH_THRESHOLD = 0.82`, searching word windows sized around the
 target's own word count ±1, because a mis-transcription moves word boundaries as readily as
@@ -708,7 +720,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (661 tests, ~13 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (701 tests, ~13 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -782,8 +794,8 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 | Check | Command | Result |
 |---|---|---|
 | bench provenance | `uv run python scripts/command_bench.py`, twice | the `identity` block resolves here (faster-whisper 1.2.1, ctranslate2 4.8.1, date) and the non-identity content of two consecutive runs is **identical**, so item 14's byte-for-byte idiom survives the addition |
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **661 passed**, 13.4 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
-| command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by the 2026-08-01 grammar additions, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **701 passed**, 13.2 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
+| command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by every 2026-08-01 grammar addition, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row. Run again *before* admitting the `follow and` elision, as the admission gate rather than as a check afterwards — every figure identical, and so was the rest of the file bar its date |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
 | **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |
 | the menu and the drag ↻ | same run, `== the pill itself` | The menu opens and dismisses, holds the foreground while it is up and gives it back; the pill tracks the cursor to the pixel. Both measured because both are what `WS_EX_NOACTIVATE` can break — and the first attempt did break the menu outright: it posted and `tk_popup` never returned |

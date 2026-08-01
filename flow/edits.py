@@ -153,9 +153,19 @@ _RECALL = re.compile(
 
 #: The trailing group is the rest of the utterance, so "follow up, and add the logs"
 #: is one turn rather than two: the user should not have to pause after the verb.
+#:
+#: `follow(?=,?\s+and\b)` is an elision, not a new verb. Live run 1 said "follow up and
+#: mention the rollback plan" and the decoder dropped the unstressed "up" between two
+#: stressed words — "roleback" scored 0.938 against the draft and was never the problem.
+#: It lives in the pattern rather than in the alternation list for the reason `_LOWER`
+#: carries `lower\s?case` there: it is a way the same phrase comes out, not another
+#: phrase. The lookahead is the whole safety argument — bare "follow" must stay
+#: dictation, because "follow the steps in the README" is a sentence somebody dictated.
+#: Priced before admitting, on `command_bench.py`'s 580 real utterances: 0 misroutes,
+#: unchanged from before the change.
 _FOLLOWUP = re.compile(
-    "^" + _LEAD + r"(?:follow[- ]?up|following up|also|and also|one more thing|"
-    r"add to that|on top of that)(?:[,:]| -)?(?:\s+(.*))?$",
+    "^" + _LEAD + r"(?:follow[- ]?up|follow(?=,?\s+and\b)|following up|also|and also|"
+    r"one more thing|add to that|on top of that)(?:[,:]| -)?(?:\s+(.*))?$",
     re.I,
 )
 

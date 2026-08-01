@@ -495,6 +495,66 @@ class TestDestructiveEditsAreNamed(unittest.TestCase):
         self.assertLessEqual(len(removed_text(long_draft, new)), 60)
 
 
+class TestTheFollowUpParticleCanBeElided(unittest.TestCase):
+    """"follow and ..." is a follow-up; "follow the ..." is dictation.
+
+    Live run 1 said "follow up and mention the rollback plan" and the decoder dropped the
+    unstressed "up" between two stressed words — "roleback" itself scored 0.938 against
+    the draft and was never the problem. So this is an elision, the same kind of thing
+    `_LOWER` handles by carrying `lower\\s?case` in the pattern rather than as a table
+    entry, and it lives in the pattern for the same reason.
+
+    Bare "follow" stays out, permanently: "follow the steps in the README" is dictation
+    and admitting it would cost a sentence to save a particle. The two cases sit in one
+    class because they are one diff apart, and the whole question is whether that diff
+    can tell them apart.
+    """
+
+    DRAFT = "Ship the release notes on Tuesday. Mention the rollback plan."
+
+    def routed(self, text: str) -> str:
+        p = plan(text, self.DRAFT)
+        return f"{p.kind}/{p.op}"
+
+    def test_the_elision_is_a_follow_up(self):
+        self.assertEqual(self.routed("follow and mention the rollback plan"),
+                         "followup/")
+
+    def test_and_carries_the_rest_of_the_turn_like_the_spelled_form(self):
+        # "follow up, and add the logs" has always been one turn rather than two; the
+        # elided form must not become the exception that makes the user pause.
+        self.assertEqual(plan("follow and mention the rollback plan", self.DRAFT).payload,
+                         plan("follow up and mention the rollback plan",
+                              self.DRAFT).payload)
+
+    def test_a_comma_between_them_is_the_same_utterance(self):
+        self.assertEqual(self.routed("follow, and add the logs"), "followup/")
+
+    def test_bare_follow_is_still_dictation(self):
+        for s in (
+            "follow the steps in the README",
+            "follow up on this later",  # 'follow up' with no 'and' still matches
+            "follow Bob on the thread",
+            "follow along with the recording",
+        ):
+            with self.subTest(s=s):
+                expected = "followup/" if s.startswith("follow up") else "append/"
+                self.assertEqual(self.routed(s), expected)
+
+    def test_and_a_sentence_that_merely_contains_it_is_dictation(self):
+        # The pattern is anchored, so "follow and" mid-sentence is prose.
+        self.assertEqual(
+            self.routed("the tests follow and then the deploy runs"), "append/")
+
+    def test_the_spelled_forms_are_untouched(self):
+        for s in ("follow up and mention the rollback plan",
+                  "follow-up, and add the logs",
+                  "following up and add the logs",
+                  "also mention the rollback plan"):
+            with self.subTest(s=s):
+                self.assertEqual(self.routed(s), "followup/")
+
+
 class TestRescueMatchesItsOwnButton(unittest.TestCase):
     """The chip is labelled "Was a command", so that phrase has to work when spoken.
 
