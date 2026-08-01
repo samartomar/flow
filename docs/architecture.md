@@ -296,10 +296,10 @@ instead.
 
 ```mermaid
 flowchart LR
-    s1["Start<br/>0.40 s import<br/>43 MB"]
-    s2["Armed<br/>base.en ready first<br/>181 MB"]
-    s3["Preload done<br/>small.en resident too<br/>450 MB"]
-    s4["Idle 5 min<br/>both released<br/>100 MB"]
+    s1["Start<br/>0.37 s import<br/>38 MB"]
+    s2["Armed<br/>base.en ready, 1.9 s<br/>174 MB"]
+    s3["Preload done<br/>small.en too, 3.3 s<br/>432 MB"]
+    s4["Idle unload<br/>both released<br/>83 MB"]
     s1 -->|"click the pill"| s2
     s2 -->|"the preload thread keeps going"| s3
     s3 -->|"no speech, no draft"| s4
@@ -307,6 +307,15 @@ flowchart LR
     classDef heavy fill:#d6e4ff,stroke:#3b6ea5,color:#12314f
     class s2,s3 heavy
 ```
+
+Measured 2026-08-01 with `scripts/soak.py`'s own PSAPI reader, two runs agreeing to
+0.5 MB, models already in the HF cache: 38.3 MB after import, 174.2 MB at 1.89 s when
+`base.en` becomes resident, 431.7 MB at 3.25 s when `small.en` joins it, 82.8 MB after
+the idle unload. The unload was reached by winding `IDLE_UNLOAD_SEC` to zero and
+ticking — the real path in `_pump_health`, not a direct call to `unload()`. Every
+figure is a little under what this section said before, and the shape is unchanged:
+the finals tier is the expensive half, and releasing both gives back more than
+arming cost because the import itself is not what is large.
 
 Arming pays for both tiers, deliberately. `Session.start()` spawns the preload thread and
 does **not** await it — a first run includes the download, and doing that inline froze the
@@ -649,9 +658,9 @@ is the point. See NEEDS_YOU.md.
 
 The boundary, loading and invariant corrections dated 2026-08-01 were read from source
 (`refine.py`, `session.py`, `asr.py`, `inject.py`), not re-measured. One number moved
-stages rather than changing: the 450 MB reading now sits at "preload done" instead of
-"first final", because that is when both models are resident; a fresh soak measurement of
-the arm → preload-done timeline is queued work.
+stages rather than changing: the 450 MB reading sat at "preload done" instead of "first
+final", because that is when both models are resident. That whole timeline was then
+re-measured on 2026-08-01 — see the loading section — and now reads 38 → 174 → 432 → 83 MB.
 
 | Check | Command | Result |
 |---|---|---|
