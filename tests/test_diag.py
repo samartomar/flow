@@ -237,3 +237,54 @@ class TestTracingIsSomethingTheAppTurnsOn(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWhatProducedAMeasurement(Temp):
+    """Half the numbers in the architecture doc are latencies and error rates, and
+    every one belongs to a build. A ctranslate2 release changes the arithmetic and a
+    model revision changes the weights; neither announces itself, so a result six
+    months old could only be compared to a fresh one by hoping."""
+
+    def record(self) -> dict:
+        from flow.diag import record_identity
+
+        diag = Diag(self.path)
+        record_identity(diag, models=("base.en",))
+        return {r["component"]: r["version"] for r in self.lines()}
+
+    def test_the_packages_that_decide_the_numbers_are_named(self):
+        got = self.record()
+        for component in ("faster-whisper", "ctranslate2", "numpy", "python", "os"):
+            self.assertIn(component, got)
+            self.assertTrue(got[component], f"{component} recorded empty")
+
+    def test_the_model_is_recorded_as_a_revision_not_a_name(self):
+        # "base.en" names a model, not a build of one. Two runs of that name months
+        # apart are not necessarily the same weights.
+        got = self.record()
+        self.assertIn("model:base.en", got)
+
+    def test_an_absent_package_is_recorded_as_absent_rather_than_omitted(self):
+        # A missing line reads as "nobody looked". This has to read as "it was not here".
+        from flow.diag import _packages
+
+        with mock.patch("importlib.metadata.version", side_effect=Exception("nope")):
+            self.assertTrue(all(v == "absent" for _n, v in _packages()))
+
+    def test_an_uncached_model_says_so(self):
+        from flow.diag import model_revision
+
+        self.assertEqual(model_revision("no-such-model-flow-test"), "")
+
+    def test_every_value_survives_the_redaction_guard(self):
+        # Versions and hashes are tokens; a path or a banner line would not be, and
+        # would land in the file as <refused> instead.
+        for version in self.record().values():
+            self.assertNotEqual(version, REFUSED)
+
+    def test_a_broken_probe_cannot_stop_the_app_starting(self):
+        from flow.diag import record_identity
+
+        with mock.patch("flow.diag.identity", side_effect=OSError("no")):
+            record_identity(Diag(self.path), models=())
+        self.assertEqual(self.lines(), [])

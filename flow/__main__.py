@@ -269,6 +269,19 @@ def main(argv: list[str] | None = None) -> int:
     quits = (f"{hotkeys.chosen['quit']} quits"
              if hotkeys is not None and "quit" in hotkeys.chosen
              else "quit from the right-click menu")
+    if diag is not None:
+        # Off the startup path on purpose: two CLI process starts and a handful of file
+        # reads, none of which anybody is waiting for. The pill is on screen in 0.40 s
+        # and this must not be part of that number.
+        import threading as _threading
+
+        from .diag import record_identity
+
+        _threading.Thread(
+            target=record_identity, args=(diag, (partial_name, final_name)),
+            daemon=True, name="identity",
+        ).start()
+
     say(
         ("listening | " if args.arm else "click the pill to arm | ")
         + f"right-click for the menu | {quits}"

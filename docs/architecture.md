@@ -600,7 +600,7 @@ narrowed to stay true while these are open; each is queued work.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (536 tests, ~11 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (542 tests, ~11 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -625,6 +625,22 @@ synthetic Tk event cannot do. A harness that cannot reproduce the defect cannot 
 Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8. The rows marked **↻**
 were re-measured on 2026-08-01 — four when the indicator was added, and the Send rows when
 the paste target was fixed; the rest are as recorded on the 31st and were not re-run.
+
+Since 2026-08-01 the identity behind a measurement is recorded rather than remembered.
+At startup, off the path that puts the pill on screen, `diag.record_identity()` writes the
+`faster-whisper`, `ctranslate2`, `numpy`, `sounddevice` and `tokenizers` versions, the
+Python and Windows builds, the HF commit each model name resolved to in the local cache,
+and `codex --version` / `claude --version`. On this machine that reads: faster-whisper
+1.2.1, ctranslate2 4.8.1, numpy 2.5.1, Python 3.12.10, Windows 10.0.26200, `base.en` at
+`3d3d5dee`, `small.en` at `d1d751a5`, codex 0.145.0, claude 2.1.218. Half the numbers in
+this document are latencies and error rates, and every one of them belongs to a build:
+without this, a result six months old can only be compared to a fresh one by hoping.
+
+The model revision is **recorded, not pinned**. `WhisperModel(...)` does accept a
+`revision`, so pinning is available; a complete table to pin *from* is not, because
+`--model` takes any name and the benchmarks use several beyond the two defaults. A pin
+covering only those two would silently not apply to exactly the runs whose reproducibility
+is the point. See NEEDS_YOU.md.
 
 The boundary, loading and invariant corrections dated 2026-08-01 were read from source
 (`refine.py`, `session.py`, `asr.py`, `inject.py`), not re-measured. One number moved

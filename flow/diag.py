@@ -69,6 +69,8 @@ FIELDS = frozenset({
     "reason",     # an error *category*, never a message
     "ok",         # whether it worked
     "mode",       # dictate | converse
+    "component",  # what a version belongs to: a package, the OS, a model, a CLI
+    "version",    # a version string or a revision hash, never a path
 })
 
 #: Named so that adding one to FIELDS fails loudly. These are the words themselves —
@@ -170,3 +172,117 @@ class Diag:
             os.replace(self.path, backup)
         except OSError:
             pass
+
+
+# -- what produced a measurement -------------------------------------------
+
+#: How long to wait for a CLI to say what version it is. Each costs a process start,
+#: which is why this whole section runs off the startup path.
+_VERSION_TIMEOUT_SEC = 10.0
+
+#: Where faster-whisper's short names come from. Recorded so a decode result can be
+#: matched to the weights that produced it: "base.en" names a model, not a build of one.
+_HF_PREFIX = "Systran/faster-whisper-"
+
+_VERSION_IN = re.compile(r"\d+(?:\.\d+)+[A-Za-z0-9._+-]*")
+
+
+def _packages() -> list[tuple[str, str]]:
+    import importlib.metadata as md
+
+    out = []
+    # ctranslate2 is not a declared dependency of this project and is the one that
+    # actually decides decode speed and numerics, so it is worth more here than most
+    # of the things that are.
+    for name in ("faster-whisper", "ctranslate2", "numpy", "sounddevice", "tokenizers"):
+        try:
+            out.append((name, md.version(name)))
+        except Exception:
+            out.append((name, "absent"))
+    return out
+
+
+def _hub_cache() -> Path:
+    hub = os.environ.get("HF_HUB_CACHE")
+    if hub:
+        return Path(hub)
+    home = os.environ.get("HF_HOME")
+    if home:
+        return Path(home) / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def model_revision(name: str) -> str:
+    """The commit the local cache resolved a model name to, or "".
+
+    Read from the cache's own `refs/main` rather than asked over the network: the point
+    is to record what this machine actually decoded with, and a lookup that could
+    disagree with the files on disk would be recording the wrong thing.
+
+    Recorded and not pinned, which was a decision rather than an omission.
+    `WhisperModel(...)` does take a `revision`, so pinning is available; what is not
+    available is a complete table to pin *from*. `--model` accepts any name, the
+    benchmarks use several beyond the two defaults, and a pin covering only `base.en`
+    and `small.en` would quietly not apply to exactly the runs whose reproducibility is
+    the reason for wanting it. A guarantee that silently does not hold where it is
+    needed is worse than a recorded fact that always does. The pin is a decision for
+    the owner, with the cost written down in NEEDS_YOU.md.
+    """
+    repo = name if "/" in name else _HF_PREFIX + name
+    ref = _hub_cache() / ("models--" + repo.replace("/", "--")) / "refs" / "main"
+    try:
+        return ref.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _cli_version(name: str) -> str:
+    """`<name> --version`, reduced to the version in it. "" if it will not say."""
+    import subprocess
+
+    try:
+        done = subprocess.run(
+            [name, "--version"], capture_output=True, text=True,
+            timeout=_VERSION_TIMEOUT_SEC, stdin=subprocess.DEVNULL,
+            encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    found = _VERSION_IN.search((done.stdout or "") + " " + (done.stderr or ""))
+    return found.group(0) if found else ""
+
+
+def identity(models=()) -> list[tuple[str, str]]:
+    """Everything that decides what a measurement means, as (component, version).
+
+    Gathered rather than assumed. Half the numbers in `docs/architecture.md` are decode
+    latencies and word error rates, and every one of them belongs to a build: a
+    ctranslate2 release changes the arithmetic, a model revision changes the weights, and
+    neither announces itself. Without this a benchmark result six months old cannot be
+    compared to a fresh one except by hoping.
+
+    Costs several process starts and a handful of file reads, so callers run it off the
+    startup path.
+    """
+    import platform
+
+    out = list(_packages())
+    out.append(("python", platform.python_version()))
+    out.append(("os", platform.version()))
+    for name in models:
+        revision = model_revision(name)
+        out.append((f"model:{name}", revision or "uncached"))
+    for cli in ("codex", "claude"):
+        version = _cli_version(cli)
+        if version:
+            out.append((f"cli:{cli}", version))
+    return out
+
+
+def record_identity(diag, models=()) -> None:
+    """Write `identity()` into the trace. Best-effort, like everything else here."""
+    try:
+        for component, version in identity(models):
+            diag.write("identity", component=component, version=version)
+    except Exception:
+        pass
