@@ -207,7 +207,8 @@ class TestDecodeScheduling(unittest.TestCase):
         w.close()
         # Losing a final would lose the user's words, so these are a FIFO.
         self.assertEqual(len(results), 6)
-        self.assertEqual([t for _k, t in results], [f"final:{i}" for i in range(6)])
+        self.assertEqual([t for _k, t, _s in results],
+                         [f"final:{i}" for i in range(6)])
 
 
 if __name__ == "__main__":

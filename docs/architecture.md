@@ -186,6 +186,13 @@ the more so now that Flow goes deaf while it reads a reply aloud.
 `Session.events()` drains what happened. The UI never reads session internals; it reacts to
 the event stream.
 
+The event stream now has a persistent shadow. `Session.diag` writes the same moments to
+`~/.flow/diag.jsonl` with the words removed — a state change records which states, a route
+records which kind and how many characters, a CLI call records its operation id, duration,
+provider and outcome category. It is a different thing from the event stream and not a
+replacement for it: events are how the UI learns what to draw, the trace is what is left
+after Flow is closed. See [§9](#9-what-is-written-to-disk) and `flow/diag.py`.
+
 ### States
 
 | State | Pill | Indicator | Bars | Meaning |
@@ -502,6 +509,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `~/.flow/lexicon.txt` | never by Flow | the user's own terms. Read-only to the app; re-read by mtime on every decode |
 | `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, and whether auto-ask is on. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
+| `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters and error *categories*. Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and the volunteer recordings. **Tracked**, because a result is a measurement taken at a moment and a recording is a person — neither is reproducible by re-running anything. A recording being a person is also a constraint, not only a reason to keep it: the clips ride every clone and push (they are on the private origin today), so this history must never be made public while they are in it, and any open-sourcing starts with moving them out and rewriting history — an owner's decision, never a cleanup script's. The downloadable accent corpora are excluded and their manifests are not; [`.bench/README.md`](../.bench/README.md) is the inventory |
 
 Send is the commit point for the profile: rare, user-initiated, and the moment a session's
@@ -592,7 +600,7 @@ narrowed to stay true while these are open; each is queued work.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (523 tests, ~10 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (536 tests, ~11 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

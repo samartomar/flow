@@ -1,0 +1,172 @@
+"""A content-free record of what Flow did, on this machine and nowhere else.
+
+Every defect worth fixing in this project so far was found by *measuring* it, and the
+measurements all came from harnesses that had to be set up in advance for a failure
+somebody had already seen. This is the other half: a running record of shape and timing
+so that the next report — "it stopped hearing me for a bit", "the answer took ages" —
+has something behind it besides memory.
+
+The whole design question is what may be written down. A voice app's log is the one log
+that can quietly become a transcript, and a transcript of everything somebody dictated
+is worse than no diagnostics at all. So the rule here is not "be careful with content",
+it is **content cannot get in**:
+
+  **Field names are an allow-list.** `FIELDS` is the complete set. A value is safe
+  because of where it came from, and only the field name records that — a draft reading
+  "yes" is indistinguishable from a status token by inspection, so inspection is not
+  what decides.
+
+  **The words are named and refused as well.** `NEVER` lists the fields that would carry
+  user text. It exists so that adding one to `FIELDS` fails at import rather than
+  quietly shipping somebody's draft, and so the intent is written down where the next
+  person edits.
+
+  **Values are numbers, booleans, or short tokens.** Anything else is replaced with a
+  marker, so a mistake shows up in the file as a refusal instead of as content.
+
+R9 is enforced the same way it is in `profile.py`: there is no code here that could send
+anything anywhere. R8 too — the file is bounded and rotates once, so a long session
+costs what a short one costs.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import threading
+import time
+from pathlib import Path
+
+DEFAULT_PATH = Path.home() / ".flow" / "diag.jsonl"
+
+#: R8. Past this the file is rotated to `.1` and a fresh one started, so the trace costs
+#: at most twice this on disk however long Flow runs. A megabyte is roughly a day of
+#: heavy use at the rates below — enough to still contain yesterday's puzzle.
+MAX_BYTES = 1_000_000
+
+#: Every field that may be written, and nothing else.
+#:
+#: An allow-list, not a filter. What makes a value safe to record is where it came from,
+#: and the field name is the only thing that knows that: `chars` is a length, `route` is
+#: one of six words the router chose, `provider` is the name of an executable. None of
+#: them can be a sentence somebody said.
+FIELDS = frozenset({
+    "t",          # seconds since the epoch, rounded to milliseconds
+    "kind",       # what this record is
+    "op",         # operation id, for matching a CLI result to its request
+    "state",      # a State value
+    "was",        # the State it replaced
+    "route",      # append | local | semantic | undo | rescue | recall | followup
+    "tier",       # base.en | small.en
+    "ms",         # a duration
+    "provider",   # codex | claude
+    "chars",      # a length, never the thing measured
+    "sent",       # a length: how much of an over-long input the CLI was given
+    "n",          # a count
+    "dropped",    # microphone blocks lost, cumulative
+    "echo",       # blocks discarded because Flow was talking, cumulative
+    "reason",     # an error *category*, never a message
+    "ok",         # whether it worked
+    "mode",       # dictate | converse
+})
+
+#: Named so that adding one to FIELDS fails loudly. These are the words themselves —
+#: what the user said, what Flow drafted, what came back, what was on their clipboard,
+#: what they taught it. A trace containing any of them is a transcript.
+NEVER = frozenset({
+    "text", "draft", "reply", "answer", "transcript", "utterance", "partial",
+    "instruction", "question", "payload", "clipboard", "lexicon", "term", "hotwords",
+    "device", "path", "window", "title",
+})
+
+assert not (FIELDS & NEVER), "a field that may never be written is on the allow-list"
+
+#: A value that is text at all has to be a token: short, and from a vocabulary the code
+#: chose rather than the user. A draft, a reply or a clipboard cannot be squeezed
+#: through this and still be one.
+_TOKEN = re.compile(r"^[A-Za-z0-9._:+-]{1,40}$")
+
+#: What replaces a value that does not qualify. Written rather than dropped, so a
+#: mistake reads as a refusal in the file instead of as an absence nobody notices.
+REFUSED = "<refused>"
+
+
+def _safe(value):
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, str) and _TOKEN.match(value):
+        return value
+    return REFUSED
+
+
+class NullDiag:
+    """Records nothing, and is the default.
+
+    The same shape as `profile=None` disabling learning, and for the same reason: a
+    test, a benchmark or a probe constructs a `Session` in its hundreds, and a default
+    that wrote to `~/.flow/diag.jsonl` would fill the real user's trace with runs that
+    were never theirs. Tracing is something the app turns on, not something a `Session`
+    does by existing.
+    """
+
+    path = None
+
+    def write(self, kind: str, /, **fields) -> None: ...
+
+
+class Diag:
+    """Append-only JSONL, one record per line, bounded and rotated once.
+
+    Every method is best-effort: a diagnostics writer that can raise is a diagnostics
+    writer that takes the app down with it, and nothing here is worth that. A disk that
+    is full or a file that is locked means no trace, not a stack trace.
+    """
+
+    def __init__(self, path: Path | str | None = None, max_bytes: int = MAX_BYTES) -> None:
+        self.path = Path(path) if path is not None else DEFAULT_PATH
+        self.max_bytes = max_bytes
+        #: Records refused for an unknown field name. Counted rather than written,
+        #: because the safest thing to do with a record nobody vetted is nothing.
+        self.rejected = 0
+        self._lock = threading.Lock()
+
+    def write(self, kind: str, /, **fields) -> None:
+        record = {"t": round(time.time(), 3), "kind": _safe(kind)}
+        for key, value in fields.items():
+            # `t` and `kind` are this method's own, so a caller passing either as a
+            # field would silently rewrite the record's identity. Positional-only
+            # above stops the collision; this stops the overwrite.
+            if key in ("t", "kind"):
+                self.rejected += 1
+            elif key in FIELDS:
+                record[key] = _safe(value)
+            else:
+                # An unknown field is a caller this module has not agreed with. Refusing
+                # the *field* rather than the record keeps the timing evidence, which is
+                # the part that was never in question.
+                self.rejected += 1
+        line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+        with self._lock:
+            try:
+                self._rotate_if_needed(len(line) + 1)
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with self.path.open("a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+            except OSError:
+                pass
+
+    def _rotate_if_needed(self, incoming: int) -> None:
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            return
+        if size + incoming <= self.max_bytes:
+            return
+        # One generation, deliberately. Two files with a known ceiling is a bound; a
+        # numbered series is a log directory that grows until somebody notices.
+        backup = self.path.with_suffix(self.path.suffix + ".1")
+        try:
+            os.replace(self.path, backup)
+        except OSError:
+            pass

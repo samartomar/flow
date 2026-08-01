@@ -23,6 +23,7 @@ import numpy as np
 from . import MAX_UTTERANCE_SEC, SAMPLE_RATE
 from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
+from .diag import Diag, NullDiag
 from .edits import (
     added_text,
     apply_local,
@@ -144,7 +145,10 @@ class DecodeWorker:
         #: mis-heard command. Queued like finals, because losing one means paying the
         #: CLI call this exists to avoid.
         self._rescues: deque[tuple[np.ndarray, str]] = deque()
-        self._out: deque[tuple[str, str]] = deque()
+        #: (kind, text, seconds). The duration rides along so a caller can record
+        #: it without draining `timings`, which the soak test reads for its own
+        #: latency check and would otherwise find empty.
+        self._out: deque[tuple[str, str, float]] = deque()
         #: Recent decode durations as (kind, seconds). Bounded, so this is safe to keep
         #: on in a long session; the soak test reads it to check latency does not drift.
         self.timings: deque[tuple[str, float]] = deque(maxlen=300)
@@ -180,7 +184,7 @@ class DecodeWorker:
             self._rescues.append((audio, hotwords))
             self._cv.notify()
 
-    def results(self) -> list[tuple[str, str]]:
+    def results(self) -> list[tuple[str, str, float]]:
         with self._cv:
             out = list(self._out)
             self._out.clear()
@@ -238,7 +242,7 @@ class DecodeWorker:
             with self._cv:
                 self._busy = False
                 self.timings.append((kind, elapsed))
-                self._out.append((kind, text))
+                self._out.append((kind, text, elapsed))
 
 
 @dataclass
@@ -308,6 +312,7 @@ class Session:
         mic: Mic | None = None,
         speaker: object | None = None,
         profile: object | None = None,
+        diag: Diag | None = None,
     ) -> None:
         # `mic` and `asr` are injectable so the state machine can be tested without a
         # microphone or a 141 MB model — the routing logic is where the subtle bugs live.
@@ -380,6 +385,13 @@ class Session:
         #: None disables learning entirely — the tests and the benchmarks pass None so
         #: a harness run never writes to the user's real profile.
         self.profile = profile
+        #: A content-free shadow of the event stream (see flow/diag.py). Off unless
+        #: the caller passes one, for the same reason `profile=None` disables learning:
+        #: the tests build sessions in their hundreds, and a default that wrote to
+        #: `~/.flow/diag.jsonl` would fill the real user's trace with runs that were
+        #: never theirs. Caught exactly that way — the first run of this file left 1513
+        #: records from the unit suite in a real profile directory.
+        self.diag = diag if diag is not None else NullDiag()
         self._ask_result: tuple[int, tuple[str | None, str]] | None = None
         self._ask_lock = threading.Lock()
         #: The last answer, kept so the UI can re-render it and so a follow-up has
@@ -401,6 +413,9 @@ class Session:
         #: The device a mismatch has already been reported for, so a mic that keeps
         #: being reopened does not say the same thing every five seconds.
         self._noted_device: str | None = None
+        #: When the CLI call in flight began. One of each kind runs at a time, so one
+        #: slot is enough; it is only ever read by the trace.
+        self._cli_started = 0.0
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -506,8 +521,37 @@ class Session:
 
     def _set_state(self, state: State) -> None:
         if state != self.state:
+            self.diag.write("state", was=self.state.value, state=state.value)
             self.state = state
             self._emit("state", state.value)
+
+    def _trace_cli(self, kind: str, op: int, ok: bool, note: str) -> None:
+        """Record how a CLI call ended, without recording what it said.
+
+        `note` is the provider's name on success and a failure reason on the way out,
+        and a failure reason is a sentence built from the CLI's own stderr — so it is
+        reduced to a category here rather than written down. The categories are the
+        ones `refine._invoke` produces.
+        """
+        reason = ""
+        if not ok:
+            low = note.lower()
+            for word, category in (("timed out", "timeout"), ("cancelled", "cancelled"),
+                                   ("exited", "exit"), ("failed to start", "no-start"),
+                                   ("no agent cli", "no-cli"),
+                                   ("commentary", "commentary"),
+                                   ("returned nothing", "empty")):
+                if word in low:
+                    reason = category
+                    break
+            else:
+                reason = "other"
+        self.diag.write(
+            kind, op=op, ok=ok,
+            ms=round((time.perf_counter() - self._cli_started) * 1000),
+            provider=note if ok else None,
+            reason=reason or None,
+        )
 
     def _next_op(self) -> int:
         """Identity for one CLI call.
@@ -645,8 +689,10 @@ class Session:
                 try:
                     self.mic.restart()
                 except Exception as exc:
+                    self.diag.write("device", ok=False, reason="reopen-failed")
                     self._emit("error", f"could not reopen the mic: {exc}")
                 else:
+                    self.diag.write("device", ok=True, reason="reopened")
                     # A device that went away is often replaced by a different one —
                     # the USB mic is unplugged and the laptop array takes over — and
                     # the reopened stream is calibrated for neither.
@@ -685,6 +731,8 @@ class Session:
             self.mic_dropped += lost
             seconds = lost * BLOCK / SAMPLE_RATE
             amount = f"{seconds:.1f} s" if seconds >= 1.0 else f"{seconds * 1000:.0f} ms"
+            self.diag.write("overflow", n=lost, ms=round(seconds * 1000),
+                            dropped=self.mic_dropped)
             self._emit(
                 "note",
                 f"microphone overflowed — about {amount} of audio was lost while the "
@@ -769,7 +817,8 @@ class Session:
         self._decoded_sec = 0.0
 
     def _pump_decodes(self) -> None:
-        for kind, text in self.worker.results():
+        for kind, text, elapsed in self.worker.results():
+            self.diag.write("decode", route=kind, ms=round(elapsed * 1000))
             if kind == "error":
                 self._emit("error", text)
             elif kind == "partial":
@@ -798,29 +847,41 @@ class Session:
         # draft, and then a minute later had an ordinary sentence routed to the CLI.
         forced = self._take_force_next()
 
+        # Traced at every exit rather than once at the top, because the kind is not
+        # known until the branch is taken. A single call after the early returns is
+        # what the first version did, and it left the commonest route of all — the
+        # first sentence into an empty draft — recorded nowhere.
+        def trace(kind: str) -> None:
+            self.diag.write("route", route=kind, chars=len(utterance))
+
         # The two thread verbs are the only commands that mean anything with an empty
         # draft — which is precisely the state Send leaves behind.
         thread_plan = plan(utterance, self.draft.text)
         if thread_plan.kind == "recall":
+            trace("recall")
             self._recall()
             return
         if thread_plan.kind == "followup":
+            trace("followup")
             self._start_followup(thread_plan.payload)
             return
 
         if not self.draft.text:
+            trace("append")
             self.draft.append(utterance)
             self._remember_append(utterance)
             self._after_draft_change()
             return
 
         if forced == "append":
+            trace("append")
             self.draft.append(utterance)
             self._remember_append(utterance)
             self._after_draft_change()
             return
 
         p = plan(utterance, self.draft.text)
+        trace(p.kind)
         if forced == "edit" and p.kind == "append":
             # The user explicitly said "this is an instruction", so honour that over
             # the heuristic and let the CLI interpret whatever they asked for.
@@ -1137,6 +1198,10 @@ class Session:
             self._emit("note", "still rewriting — say that again when it lands")
             return
         op = self._refine_op = self._next_op()
+        self.diag.write("refine", op=op, chars=len(self.draft.text),
+                        sent=tail_sent(self.draft.text),
+                        route="polish" if polish else "semantic")
+        self._cli_started = time.perf_counter()
         # The version this rewrite is an answer about. The draft stays editable for
         # the whole ~7 s the CLI takes, so the result has to be checked against it.
         revision = self.draft.revision
@@ -1182,12 +1247,14 @@ class Session:
             # rescue nobody asked for: ignore it rather than act on it.
             return
         self._refine_op = None
+        self._trace_cli("refine", op, revised is not None, note)
         if revised is None:
             self._emit("error", f"refine failed ({note}) — draft unchanged")
         elif revision != self.draft.revision:
             # A rewrite of text that no longer exists. Applying it would delete
             # whatever was said while the CLI was thinking, and would do it invisibly,
             # because what replaced the draft reads like a plausible draft.
+            self.diag.write("stale", op=op, route="refine")
             self._emit("note", "discarded a stale rewrite — the draft moved on")
         else:
             self.draft.set(revised)
@@ -1299,6 +1366,9 @@ class Session:
     def _start_ask(self, question: str) -> None:
         """P9: put the draft to the CLI off the hot path (R11) and wait for the reply."""
         op = self._ask_op = self._next_op()
+        self.diag.write("ask", op=op, chars=len(question),
+                        sent=tail_sent(question), mode=self.mode)
+        self._cli_started = time.perf_counter()
         self._set_state(State.ASKING)
         self._emit("note", "asking…")
         sent = tail_sent(question)
@@ -1333,6 +1403,7 @@ class Session:
         if op != self._ask_op:
             return
         self._ask_op = None
+        self._trace_cli("ask", op, answer is not None, note)
         if answer is None:
             # Non-destructive by construction: the question is still in the thread, so
             # "say that again" and a retry both still work.

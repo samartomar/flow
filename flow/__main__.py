@@ -115,15 +115,25 @@ def main(argv: list[str] | None = None) -> int:
     final_name = args.model or args.final_model
     say(f"models: {partial_name} for partials, {final_name} for finals")
 
+    from .diag import Diag
     from .profile import Profile
 
+    # Tied to the same flag as the profile, and deliberately: --no-profile means
+    # "write nothing about me this session", and a trace is a thing written about
+    # somebody even when it holds none of their words.
     profile = None if args.no_profile else Profile()
+    diag = None if args.no_profile else Diag()
     learned = profile.learned_terms if profile is not None else None
     if profile is not None and profile.calibrated:
         say(f"profile: room {profile.floor_db:.1f} dB, "
             f"margin {profile.margin_db():.1f} dB, {len(profile.pairs)} learned pairs")
     elif profile is not None:
         say("profile: not calibrated - run `flow --calibrate` once for this room")
+    # Said out loud, unprompted. A file that records what somebody did is one they are
+    # entitled to know exists and to delete, and the surest way to make it feel like
+    # telemetry is for them to find it by accident.
+    say(f"trace: {diag.path} (timings and state only, no words; --no-profile to disable)"
+        if diag is not None else "trace: off")
 
     lexicon = Lexicon(
         NUL_PATH if args.no_lexicon else args.lexicon, learned=learned
@@ -173,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
         speaker=speaker,
         profile=profile,
+        diag=diag,
     )
 
     if args.calibrate:
