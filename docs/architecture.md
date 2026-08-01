@@ -10,7 +10,54 @@ against a run — see [Verification](#verification) at the end.
 
 ---
 
-## 1. The loop, end to end
+## 1. The parts
+
+Seventeen modules in five bands. The bands are drawn by *cost*, not by feature: the top
+two are pure Python and stdlib, which is why the pill is on screen in 0.40 s and why a
+literal correction is microseconds. The three declared dependencies only matter in one
+box, and only two boxes are another process.
+
+```mermaid
+flowchart TB
+    surface["<b>Surface</b> — tkinter and ctypes, stdlib only<br/>ui.py · hotkey.py · inject.py"]
+    core["<b>Core</b> — pure python, no model, microseconds<br/>session.py · edits.py · phonetic.py · thread.py"]
+    speech["<b>Speech in</b> — lazy, and where the memory is<br/>audio.py · asr.py · clean.py"]
+    personal["<b>Personal</b> — plain files under ~/.flow, never sent<br/>calibrate.py · profile.py · lexicon.py"]
+    external["<b>Out of process</b> — nothing leaves the machine<br/>refine.py · speak.py"]
+    surface --> core --> speech
+    personal -. "learned terms bias both tiers" .-> speech
+    external -. "half-duplex: mic is not evidence while talking" .-> speech
+    core -. "semantic rewrites and questions only" .-> external
+    classDef heavy fill:#d6e4ff,stroke:#3b6ea5,color:#12314f
+    classDef proc fill:#ffe8cc,stroke:#b3701a,color:#4d2f08
+    class speech heavy
+    class external proc
+```
+
+The three dotted edges are the couplings that are not obvious from the data flow below:
+the agent CLI is reached only for a rewrite or a question, Flow goes deaf while it talks,
+and what the profile learns is merged into the lexicon at read time — never written into
+the user's own file — so the merged result biases both decoder tiers.
+
+| Module | Band | Does |
+|---|---|---|
+| `ui.py` | surface | the pill and the draft bubble, DPI-aware |
+| `hotkey.py` | surface | `RegisterHotKey` on its own message-loop thread |
+| `inject.py` | surface | clipboard + `SendInput`, terminal-safe paste (P7) |
+| `session.py` | core | the state machine and the pump |
+| `edits.py` | core | routes an utterance, applies the local edits |
+| `phonetic.py` | core | vendored Double Metaphone, span search |
+| `thread.py` | core | what has already been sent (P6) |
+| `audio.py` | speech | mic capture and the speech gate |
+| `asr.py` | speech | faster-whisper in two tiers — **the only module that holds a model** |
+| `clean.py` | speech | rejects text the model invented, with the evidence |
+| `calibrate.py` | personal | measures this room and this voice (P8) |
+| `profile.py` | personal | what was measured and learned, as JSON |
+| `lexicon.py` | personal | the user's own terms, re-read on change |
+| `refine.py` | external | rewrite, polish (P5) and converse ask (P9) |
+| `speak.py` | external | one long-lived SAPI host; owns `speaking`, which gates the mic |
+
+## 2. The loop, end to end
 
 ```
   microphone
@@ -59,7 +106,7 @@ The rule that shapes all of it: **the agent CLI is never on the hot path.** A CL
 measured at ~7 s, which is slower than fixing a word by hand, so `edits.py` exists to keep
 every literal correction away from it.
 
-## 2. Threads
+## 3. Threads
 
 Ten things run concurrently. Getting this wrong is the main way to break the app, so it
 is written down.
@@ -85,7 +132,7 @@ The per-tier lock is not decoration: without it the preload thread and the decod
 each build a model and one is thrown away. Held *per tier* so preloading `small.en` cannot
 block a partial that only needs `base.en`.
 
-## 3. The pump
+## 4. The pump
 
 `Session.tick()` is a pump the caller drives — `tkinter.after()` in the app, a `while` loop
 in the headless harnesses. No UI framework is imported in `session.py`.
@@ -136,7 +183,7 @@ the event stream.
 | `mode` | `dictate` / `converse` | pill badge and chip label (an accompanying `note` is what the user reads) |
 | `drop` | a rejected segment with its evidence | shown as a note — P2 is that a rejection is never *silent* |
 
-## 4. Decoding
+## 5. Decoding
 
 Two tiers, because one model cannot serve both paths on this CPU.
 
@@ -167,6 +214,34 @@ Capping the ladder removes Whisper's own escape from repetition loops, so
 `clean.collapse_repeats()` and `clean.collapse_phrase_repeats()` break them deterministically
 instead.
 
+### Loading, and what it costs
+
+```mermaid
+flowchart LR
+    s1["Start<br/>0.40 s import<br/>43 MB"]
+    s2["Armed<br/>base.en, 141 MiB<br/>181 MB"]
+    s3["First final<br/>small.en, 464 MiB<br/>450 MB"]
+    s4["Idle 5 min<br/>both released<br/>100 MB"]
+    s1 -->|"click the pill"| s2
+    s2 -->|"an utterance ends"| s3
+    s3 -->|"no speech, no draft"| s4
+    s4 -. "the mic was never closed, so speech wakes it" .-> s2
+    classDef heavy fill:#d6e4ff,stroke:#3b6ea5,color:#12314f
+    class s2,s3 heavy
+```
+
+Each tier loads lazily and independently, which is the point: a session that shows partials
+and never finalises an utterance never pays for `small.en` at all. `Session.start()` spawns
+the preload thread and does **not** await it — a first run includes the download, and doing
+that inline froze the whole UI on the first click with nothing on screen to explain why.
+
+The idle unload at `IDLE_UNLOAD_SEC` releases both models and **keeps the microphone open**.
+That is a deliberate narrowing of the original design, which released the mic too: releasing
+it would leave the app unable to hear its own wake-up, and a mic is cheap where a model is
+hundreds of megabytes.
+
+Memory figures are recorded from earlier soak runs, not re-measured for this document.
+
 ### The drop filter
 
 `clean.invented_reason()` returns which rule rejected a segment, or `None` to keep it.
@@ -186,7 +261,7 @@ ever *relax* the bar. Shortness is deliberately **not** a signal: a spoken corre
 short, so dropping on length preferentially deletes commands from the people whose speech
 scores worst on `no_speech_prob`, which is exactly the user Flow is for.
 
-## 5. Routing
+## 6. Routing
 
 `edits.plan(utterance, draft)` decides what a spoken utterance means. The draft is a required
 argument, not decoration: *"Delete key handling is broken"* is dictation and *"delete key
@@ -234,7 +309,7 @@ nowhere in the draft. That is likelier a mis-hearing than a request for judgemen
 earns one biased re-decode (`edits.command_bias()`: every trigger verb plus the draft's own
 long words, capped at 48 terms) before any CLI call.
 
-## 6. Send
+## 7. Send
 
 ### Dictate
 
@@ -257,7 +332,7 @@ the thing it was just asked.
 anything longer than what it was given, because commentary pasted into a draft is a defect.
 An answer *is* commentary, so that guard would reject every correct result.
 
-## 7. Constants, and what is behind them
+## 8. Constants, and what is behind them
 
 Only the ones with a measurement or a failure behind them. Everything else is in the source.
 
@@ -288,7 +363,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern |
 | `Draft.MAX_HISTORY` / `MAX_HISTORY_CHARS` | 30 / 200 000 | 30 snapshots of a very long draft is where undo quietly becomes megabytes |
 
-## 8. What is written to disk
+## 9. What is written to disk
 
 | Path | When | What |
 |---|---|---|
@@ -303,7 +378,7 @@ corrections have proved themselves by surviving to a handoff.
 There is no code in `profile.py` that could send anything anywhere. R9 is not enforced by
 policy here; it is enforced by absence.
 
-## 9. Invariants worth not breaking
+## 10. Invariants worth not breaking
 
 1. **Tk is touched from one thread.** Hotkeys, decodes, refines and asks all hand results
    back through a queue or a lock and are drained on the UI thread.
@@ -326,7 +401,7 @@ policy here; it is enforced by absence.
 9. **`decode_options()` is the only place decode parameters live**, so the benchmarks measure
    the build that ships.
 
-## 10. Testing layers
+## 11. Testing layers
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
