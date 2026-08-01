@@ -1,0 +1,45 @@
+{
+ "model": "small.en",
+ "rows": {
+  "clean": {
+   "n": 24,
+   "first": 23,
+   "rescued": 24,
+   "appended": 1,
+   "escalated": 0,
+   "rescue_s": 1.9933864999911748
+  },
+  "15 dB": {
+   "n": 24,
+   "first": 23,
+   "rescued": 24,
+   "appended": 1,
+   "escalated": 0,
+   "rescue_s": 2.0371423000469804
+  },
+  "10 dB": {
+   "n": 24,
+   "first": 21,
+   "rescued": 24,
+   "appended": 3,
+   "escalated": 0,
+   "rescue_s": 2.0252567999996245
+  },
+  "5 dB": {
+   "n": 24,
+   "first": 20,
+   "rescued": 24,
+   "appended": 3,
+   "escalated": 1,
+   "rescue_s": 2.034572999982629
+  },
+  "0 dB": {
+   "n": 24,
+   "first": 15,
+   "rescued": 21,
+   "appended": 8,
+   "escalated": 1,
+   "rescue_s": 2.036836899991613
+  }
+ }
+}

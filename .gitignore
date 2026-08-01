@@ -1,7 +1,24 @@
 .venv/
 __pycache__/
 *.pyc
-# Generated benchmark audio and soak logs — reproducible via scripts/, not worth tracking.
-.bench/
+# Benchmark artifacts ARE tracked — see .bench/README.md for what is in there and why.
+# Three things are still excluded, each for its own reason:
+#
+# Third-party corpora. Every directory under accent/ is re-downloadable with
+# scripts/fetch_accent_data.py, together they are ~98 MB, and the AESRC re-upload
+# declares no licence at all — that script says so at the point of use, and "local
+# internal eval only" is not a posture that survives being committed anywhere. The
+# manifests and result JSONs beside them are kept, which is what makes a re-fetch
+# comparable to what was measured before.
+.bench/accent/*/
+# Unreferenced scratch. Nothing under scripts/ reads a .npy; these are debug dumps of
+# raw audio arrays left behind by ingest, one of them named after the person it came
+# from. 19 MB, no reader, and regenerable from inbox/ if one is ever wanted again.
+.bench/**/*.npy
+.bench/**/*.bak
+# A run marker: `send_check.py --live` deletes and rewrites it every time, so tracking
+# it would mean a dirty worktree after every measurement. Its content is the word
+# "landed".
+.bench/send-check-console.txt
 # Editor state, not project content: pane layout and local UI preferences.
 .obsidian/

@@ -1,0 +1,152 @@
+{
+ "cost": {
+  "indian": {
+   "n": 40,
+   "median": -0.27,
+   "blocked": {
+    "-0.5": 0.0,
+    "-0.6": 0.0,
+    "-0.7": 0.0,
+    "-0.8": 0.0,
+    "-0.9": 0.0,
+    "-1.0": 0.0
+   }
+  },
+  "japanese": {
+   "n": 40,
+   "median": -0.321,
+   "blocked": {
+    "-0.5": 0.1,
+    "-0.6": 0.025,
+    "-0.7": 0.0,
+    "-0.8": 0.0,
+    "-0.9": 0.0,
+    "-1.0": 0.0
+   }
+  },
+  "russian": {
+   "n": 40,
+   "median": -0.312,
+   "blocked": {
+    "-0.5": 0.05,
+    "-0.6": 0.05,
+    "-0.7": 0.05,
+    "-0.8": 0.0,
+    "-0.9": 0.0,
+    "-1.0": 0.0
+   }
+  },
+  "spanish": {
+   "n": 40,
+   "median": -0.616,
+   "blocked": {
+    "-0.5": 0.775,
+    "-0.6": 0.55,
+    "-0.7": 0.375,
+    "-0.8": 0.25,
+    "-0.9": 0.1,
+    "-1.0": 0.025
+   }
+  },
+  "us-control": {
+   "n": 40,
+   "median": -0.289,
+   "blocked": {
+    "-0.5": 0.0,
+    "-0.6": 0.0,
+    "-0.7": 0.0,
+    "-0.8": 0.0,
+    "-0.9": 0.0,
+    "-1.0": 0.0
+   }
+  }
+ },
+ "benefit": {
+  "rows": [
+   {
+    "item": 1,
+    "snr": null,
+    "lp": -0.41668807715177536,
+    "text": "Change Tuesday to Wednesday.",
+    "intact": false
+   },
+   {
+    "item": 1,
+    "snr": 5,
+    "lp": -0.362790085375309,
+    "text": "Change Tuesday to Wednesday.",
+    "intact": false
+   },
+   {
+    "item": 1,
+    "snr": 0,
+    "lp": -0.9623076234545026,
+    "text": "Thanks for watching!",
+    "intact": false
+   },
+   {
+    "item": 2,
+    "snr": null,
+    "lp": -0.5976902604103088,
+    "text": "Change Samir to SAMIR.",
+    "intact": false
+   },
+   {
+    "item": 2,
+    "snr": 5,
+    "lp": -0.5131440443151137,
+    "text": "Change the mirror to S-A-M-I-R.",
+    "intact": false
+   },
+   {
+    "item": 2,
+    "snr": 0,
+    "lp": -0.6142626812583522,
+    "text": "I'm going to change the music S-A-M-I-R",
+    "intact": false
+   },
+   {
+    "item": 5,
+    "snr": null,
+    "lp": -0.4361047798937017,
+    "text": "Delete the bit about the stand up.",
+    "intact": false
+   },
+   {
+    "item": 5,
+    "snr": 5,
+    "lp": -0.6491606885736639,
+    "text": "Release the bit about the stand up.",
+    "intact": false
+   },
+   {
+    "item": 5,
+    "snr": 0,
+    "lp": -0.6006652414798737,
+    "text": "release a bit about the stand-up.",
+    "intact": false
+   },
+   {
+    "item": 6,
+    "snr": null,
+    "lp": -0.3674766591617039,
+    "text": "delete the last sentence",
+    "intact": true
+   },
+   {
+    "item": 6,
+    "snr": 5,
+    "lp": -0.627967581152916,
+    "text": "Delete the last sentence.",
+    "intact": false
+   },
+   {
+    "item": 6,
+    "snr": 0,
+    "lp": -0.7411718898349338,
+    "text": "Release the last of them.",
+    "intact": false
+   }
+  ]
+ }
+}

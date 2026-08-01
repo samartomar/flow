@@ -1,0 +1,53 @@
+# flowrs configuration. Every value has a default; delete any line to restore it.
+#
+# triggers  - words you SPEAK to act on the draft. A trigger only fires when it is the
+#             entire content of its own utterance, bounded by silence, so saying one
+#             mid-sentence dictates it as text instead.
+# agents    - tried in order; the first one actually installed is used. No API key: these
+#             are CLIs you already log into. {prompt} is replaced with the instruction.
+# gate      - speech detection. detector = "rms" is an energy threshold: enter_margin_db was
+#             measured usable over 8..12 dB on one microphone, and if dictation starts on its
+#             own, raise it. detector = "silero" is a neural classifier, needs no tuning, and
+#             makes every dB field here inert.
+
+[asr]
+model = "whisper-base.en"
+no_speech_threshold = 0.6
+
+[triggers]
+send = ["boom"]
+refine = ["polish that"]
+continue = ["keep going"]
+fillers = [
+    "okay",
+    "ok",
+    "um",
+    "uh",
+    "so",
+    "and",
+]
+max_words = 3
+
+[gate]
+detector = "silero"
+enter_margin_db = 10.0
+exit_margin_db = 6.0
+enter_blocks = 2
+exit_blocks = 8
+floor_max_db = -40.0
+
+[[agents]]
+name = "claude"
+command = "claude"
+args = [
+    "-p",
+    "{prompt}",
+]
+
+[[agents]]
+name = "codex"
+command = "codex"
+args = [
+    "exec",
+    "{prompt}",
+]

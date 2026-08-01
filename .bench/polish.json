@@ -1,0 +1,85 @@
+{
+ "cli": "codex",
+ "records": [
+  {
+   "dictation": "so the login is broken when you use SSO, um, it throws a five hundred, this is on version 2.3.1 and it only happens in staging, I need you to find the root cause",
+   "tokens": [
+    "SSO",
+    "2.3.1",
+    "staging"
+   ],
+   "numbers": [
+    "500"
+   ],
+   "request": [
+    "root cause"
+   ],
+   "polished": "Find the root cause of the HTTP 500 error that occurs when using SSO login.\n\nThis issue occurs on version 2.3.1 and only in staging.",
+   "first_line": "Find the root cause of the HTTP 500 error that occurs when using SSO login.",
+   "seconds": 7.62
+  },
+  {
+   "dictation": "okay so I want to add a retry to the upload thing in src/uploader/client.py, it should back off exponentially, max three attempts, and don't retry on a 4xx",
+   "tokens": [
+    "src/uploader/client.py",
+    "three",
+    "4xx"
+   ],
+   "numbers": [],
+   "request": [
+    "retry"
+   ],
+   "polished": "Add exponential-backoff retries to the upload logic in src/uploader/client.py, with a maximum of three attempts.\n\nDo not retry on HTTP 4xx responses.",
+   "first_line": "Add exponential-backoff retries to the upload logic in src/uploader/client.py, with a maximum of three attempts.",
+   "seconds": 6.94
+  },
+  {
+   "dictation": "the test suite takes eleven minutes now which is too slow, I think it is the fixtures, can you profile it and tell me what to cut, but don't delete any test",
+   "tokens": [
+    "eleven",
+    "fixtures"
+   ],
+   "numbers": [],
+   "request": [
+    "profile"
+   ],
+   "polished": "Profile the test suite and identify what to cut to reduce its eleven-minute runtime.\n\nThe fixtures may be causing the slowdown.\n\nDo not delete any test.",
+   "first_line": "Profile the test suite and identify what to cut to reduce its eleven-minute runtime.",
+   "seconds": 4.91
+  },
+  {
+   "dictation": "write a migration that adds a nullable column called last_seen_at to the users table, postgres fifteen, and it has to be online, no table lock",
+   "tokens": [
+    "last_seen_at",
+    "users",
+    "fifteen"
+   ],
+   "numbers": [
+    "15"
+   ],
+   "request": [
+    "nullable",
+    "last_seen_at"
+   ],
+   "polished": "Write an online PostgreSQL 15 migration that adds a nullable column called `last_seen_at` to the `users` table.\n\nConstraints:\n- Do not lock the table.",
+   "first_line": "Write an online PostgreSQL 15 migration that adds a nullable column called `last_seen_at` to the `users` table.",
+   "seconds": 5.43
+  },
+  {
+   "dictation": "Sameer says the webhook signature check fails intermittently, about one in twenty, we are on HMAC SHA256, figure out why",
+   "tokens": [
+    "Sameer",
+    "HMAC",
+    "SHA256",
+    "twenty"
+   ],
+   "numbers": [],
+   "request": [
+    "why"
+   ],
+   "polished": "Investigate why the HMAC SHA256 webhook signature check fails intermittently, about one in twenty times.\n\nSameer reported the issue.",
+   "first_line": "Investigate why the HMAC SHA256 webhook signature check fails intermittently, about one in twenty times.",
+   "seconds": 5.97
+  }
+ ]
+}

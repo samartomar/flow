@@ -447,7 +447,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `~/.flow/lexicon.txt` | never by Flow | the user's own terms. Read-only to the app; re-read by mtime on every decode |
 | `~/.flow/profile.json` | `--calibrate`, and every Send | schema 1. Room, voice, this speaker's confidence, learned confusion pairs, misroute signatures. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
-| `.bench/` | `scripts/` only | generated audio and results, git-ignored |
+| `.bench/` | `scripts/` only | generated audio, benchmark results and the volunteer recordings. **Tracked**, because a result is a measurement taken at a moment and a recording is a person — neither is reproducible by re-running anything. The downloadable accent corpora are excluded and their manifests are not; [`.bench/README.md`](../.bench/README.md) is the inventory |
 
 Send is the commit point for the profile: rare, user-initiated, and the moment a session's
 corrections have proved themselves by surviving to a handoff.

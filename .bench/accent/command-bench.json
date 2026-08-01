@@ -1,0 +1,105 @@
+{
+ "recall": {
+  "clean": {
+   "n": 14,
+   "exact": 14,
+   "snapped": 14
+  },
+  "politeness": {
+   "n": 112,
+   "exact": 112,
+   "snapped": 112
+  },
+  "verb suffix": {
+   "n": 14,
+   "exact": 0,
+   "snapped": 14
+  },
+  "one substitution": {
+   "n": 14,
+   "exact": 2,
+   "snapped": 14
+  },
+  "transposition": {
+   "n": 14,
+   "exact": 2,
+   "snapped": 14
+  },
+  "known mis-hearing": {
+   "n": 12,
+   "exact": 0,
+   "snapped": 12
+  }
+ },
+ "adversarial": {
+  "exact": 5,
+  "snapped": 5,
+  "n": 20
+ },
+ "precision": {
+  "exact": 0,
+  "snapped": 0,
+  "n": 580
+ },
+ "spans": {
+  "0.75": {
+   "found": 10,
+   "correct": 10,
+   "false": 0,
+   "corpus_false": 19,
+   "n_pairs": 10,
+   "n_absent": 8,
+   "n_corpus": 354
+  },
+  "0.8": {
+   "found": 10,
+   "correct": 10,
+   "false": 0,
+   "corpus_false": 10,
+   "n_pairs": 10,
+   "n_absent": 8,
+   "n_corpus": 354
+  },
+  "0.82": {
+   "found": 10,
+   "correct": 10,
+   "false": 0,
+   "corpus_false": 4,
+   "n_pairs": 10,
+   "n_absent": 8,
+   "n_corpus": 354
+  },
+  "0.85": {
+   "found": 7,
+   "correct": 7,
+   "false": 0,
+   "corpus_false": 4,
+   "n_pairs": 10,
+   "n_absent": 8,
+   "n_corpus": 354
+  },
+  "0.88": {
+   "found": 5,
+   "correct": 5,
+   "false": 0,
+   "corpus_false": 4,
+   "n_pairs": 10,
+   "n_absent": 8,
+   "n_corpus": 354
+  },
+  "0.9": {
+   "found": 5,
+   "correct": 5,
+   "false": 0,
+   "corpus_false": 3,
+   "n_pairs": 10,
+   "n_absent": 8,
+   "n_corpus": 354
+  }
+ },
+ "escalations": {
+  "n": 10,
+  "local": 10,
+  "correct": 10
+ }
+}

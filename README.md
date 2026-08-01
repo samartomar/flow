@@ -531,10 +531,36 @@ cannot establish "this is never dictation".
 | `~/.flow/lexicon.txt` | you, by hand | one term per line. Does not exist until you create it — creating it *is* the opt-in |
 | `~/.flow/profile.json` | `--calibrate`, and Send | measured room/voice/confidence, learned confusion pairs, misroute signatures. Plain JSON, readable and deletable by hand |
 | `~/.cache/huggingface/hub/` | first decode | the models. `base.en` 141 MiB, `small.en` 464 MiB |
-| `.bench/` | `scripts/` | generated benchmark audio and results. Git-ignored, reproducible |
+| `.bench/` | `scripts/` | benchmark audio, results and volunteer recordings. **Tracked**, except for the downloadable corpora — see below |
 
 Deleting `~/.flow/profile.json` forgets every inference and nothing else. Nothing here is
 ever uploaded.
+
+### Why `.bench/` is in the repository
+
+It was git-ignored for most of this project's life, on the reasoning that `scripts/`
+reproduces it. That is true of the audio and false of everything else:
+
+- **A result is a measurement taken at a moment.** Re-running `accent_bench.py` produces
+  a new number, not the old one. The `-shipped` / `-proposed` pairs under
+  `.bench/accent/` are the A/B comparisons the tuning decisions were made on, and this
+  project decides almost nothing without a before and an after.
+- **A recording is a person.** The clips under `.bench/recorded/` came from volunteers
+  reading the sheet in [docs/recording-kit.md](docs/recording-kit.md). They are the only
+  material that answers P1 and P3 at all, they are not on the internet, and losing that
+  directory loses them.
+- **The generated fixtures are cheap to store and slow to remake** — a cold self-drive
+  run spends minutes synthesising WAVs one at a time through PowerShell.
+
+**The accent corpora are excluded** (`.bench/accent/edacc/`, `edacc-short/`, `aesrc/` —
+about 98 MB). They are re-downloadable with `scripts/fetch_accent_data.py`, so storing
+them buys only repository size; and the AESRC slice comes from a community re-upload
+that declares no licence, which `fetch_accent_data.py` flags as local internal eval only
+— not a claim that survives being committed anywhere. Their **manifests are kept**, so a
+fresh fetch can be checked against the rows an old result was computed from.
+
+[`.bench/README.md`](.bench/README.md) is the full inventory: what is tracked, what is
+not, and which harness remakes each thing that is missing.
 
 ## Layout
 

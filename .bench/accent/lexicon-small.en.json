@@ -1,0 +1,402 @@
+{
+ "model": "small.en",
+ "stats": {
+  "base": [
+   253,
+   1143,
+   152.0259584999876
+  ],
+  "oracle": [
+   246,
+   1143,
+   85.43697940011043
+  ],
+  "distract": [
+   288,
+   1143,
+   218.2583481001784
+  ]
+ },
+ "targets": 55,
+ "recovered": 15,
+ "detail": [
+  {
+   "wav": "edacc/us-control/00001.wav",
+   "group": "us-control",
+   "targets": [
+    "dash"
+   ],
+   "recovered": [
+    "dash"
+   ],
+   "base": "C11-P2",
+   "oracle": "C11 dash P2"
+  },
+  {
+   "wav": "edacc/us-control/00007.wav",
+   "group": "us-control",
+   "targets": [
+    "everybody"
+   ],
+   "recovered": [],
+   "base": "I mean, obviously, but it's been, I'd rather go right now as well as everybody's been there and probably be a little bit grim.",
+   "oracle": "i mean obviously but it's been i'd rather go right now as well stay where he's been there and pop us we're a little bit grim"
+  },
+  {
+   "wav": "edacc/us-control/00011.wav",
+   "group": "us-control",
+   "targets": [
+    "i'll",
+    "nobody"
+   ],
+   "recovered": [],
+   "base": "I mean, we could offer after this. Yeah. I don't say everybody's like saying, Oh yeah, go bourbon and all that stuff. Like somebody really cares.",
+   "oracle": "i mean we could offer after this yeah but i don't say everybody's like saying oh yeah go bourbon all that stuff like somebody really cares"
+  },
+  {
+   "wav": "edacc/us-control/00013.wav",
+   "group": "us-control",
+   "targets": [
+    "wanna"
+   ],
+   "recovered": [],
+   "base": "It sounds really grim. I would not want to go there.",
+   "oracle": "It sounds really grim. I would not want to go there."
+  },
+  {
+   "wav": "edacc/us-control/00015.wav",
+   "group": "us-control",
+   "targets": [
+    "promo"
+   ],
+   "recovered": [],
+   "base": "No, never again. I know you're the big promoter there, but...",
+   "oracle": "No, never again I know you're the big promoter there"
+  },
+  {
+   "wav": "edacc/us-control/00023.wav",
+   "group": "us-control",
+   "targets": [
+    "dumpling"
+   ],
+   "recovered": [],
+   "base": "I mean, I mean, depends when because I think when I was in Ukraine, I would definitely say it was like the dumplings dividing the key.",
+   "oracle": "i mean depends when because i think when i was in ukraine i would definitely say it was like the dumplings dividing the keep"
+  },
+  {
+   "wav": "edacc/us-control/00027.wav",
+   "group": "us-control",
+   "targets": [
+    "by",
+    "realistic"
+   ],
+   "recovered": [],
+   "base": "I mean, they're just all just realistically, they're all just like lamb or beef or pork with stuffed with herbs, which I mean, depends obviously, but just differently depending on where you're from. But it's realistically that with a very thick outer crust. And most of the time you'll have sour cream with them and they are so good, they're delicious.",
+   "oracle": "I mean, they're just all just realistically, they're all just like lamb or beef or pork with stuffed with herbs, which I mean, depends obviously, which is a different depending on where you're from. But it's really realistically that with a very thick outer crust. And most of the time you'll have cream, sour cream with them and they are so good. They're delicious."
+  },
+  {
+   "wav": "edacc/us-control/00043.wav",
+   "group": "us-control",
+   "targets": [
+    "family",
+    "tradition"
+   ],
+   "recovered": [
+    "family",
+    "tradition"
+   ],
+   "base": "Yeah, you watch Die Hard as well for Christmas, which is like honestly the best sound recognition. Like who cares?",
+   "oracle": "You watch Die Hard as well for Christmas, which is like honestly the best family tradition like who cares?"
+  },
+  {
+   "wav": "edacc/us-control/00053.wav",
+   "group": "us-control",
+   "targets": [
+    "lo",
+    "lie"
+   ],
+   "recovered": [],
+   "base": "I mean, any man is insane when they watch Die Hard 4 and not go away.",
+   "oracle": "I mean, any man is insane when they watch Die Hard 4 and not go away."
+  },
+  {
+   "wav": "edacc/us-control/00059.wav",
+   "group": "us-control",
+   "targets": [
+    "about",
+    "airpods"
+   ],
+   "recovered": [
+    "about",
+    "airpods"
+   ],
+   "base": "People said that, but everybody's wearing that right now.",
+   "oracle": "People said that about airpods, everybody's wearing that right now"
+  },
+  {
+   "wav": "edacc/us-control/00071.wav",
+   "group": "us-control",
+   "targets": [
+    "brings",
+    "up"
+   ],
+   "recovered": [],
+   "base": "Remember the whole like Google glasses thing that came out that whole thing that was so dumb",
+   "oracle": "remember the whole like google glasses thing that came out that whole thing that was so dumb"
+  },
+  {
+   "wav": "edacc/us-control/00077.wav",
+   "group": "us-control",
+   "targets": [
+    "cataracts"
+   ],
+   "recovered": [
+    "cataracts"
+   ],
+   "base": "Probably, they probably have, like, capitalized.",
+   "oracle": "Probably, they probably have like cataracts"
+  },
+  {
+   "wav": "edacc/us-control/00081.wav",
+   "group": "us-control",
+   "targets": [
+    "looked"
+   ],
+   "recovered": [],
+   "base": "I mean, yeah, you look like an absolute tool walking around with that, but it's fine, I'm not going to judge.",
+   "oracle": "I mean, yeah, it looks released. You look like an absolute tool walking around with that, but it's fine. I'm not going to judge"
+  },
+  {
+   "wav": "edacc/us-control/00083.wav",
+   "group": "us-control",
+   "targets": [
+    "seeing"
+   ],
+   "recovered": [
+    "seeing"
+   ],
+   "base": "Some beautiful questions that I've seen.",
+   "oracle": "some beautiful questions I'm seeing"
+  },
+  {
+   "wav": "edacc/us-control/00085.wav",
+   "group": "us-control",
+   "targets": [
+    "adventure",
+    "supremacy",
+    "honestly",
+    "still"
+   ],
+   "recovered": [
+    "adventure",
+    "supremacy"
+   ],
+   "base": "Oh, absolutely. Adventurer types of privacy all the way on the please.",
+   "oracle": "oh absolutely adventure type supremacy all the way on the please"
+  },
+  {
+   "wav": "edacc/us-control/00089.wav",
+   "group": "us-control",
+   "targets": [
+    "watched"
+   ],
+   "recovered": [],
+   "base": "It's amazing, what have you ever seen? Like as a kid watching that, coming back from school and just watch that, that was amazing.",
+   "oracle": "it's amazing what have you ever seen like as a kid watching that coming back from school and just watch that that was amazing"
+  },
+  {
+   "wav": "edacc/us-control/00099.wav",
+   "group": "us-control",
+   "targets": [
+    "try",
+    "any"
+   ],
+   "recovered": [],
+   "base": "I'm just like, I'm just imagine like, like a primary school teacher trying to explain to kids that this is somehow normal, just",
+   "oracle": "I'm just like, I'm just imagine like, like a primary school teacher trying to explain to kids that this is somehow normal, just"
+  },
+  {
+   "wav": "edacc/us-control/00103.wav",
+   "group": "us-control",
+   "targets": [
+    "playing",
+    "their",
+    "floating"
+   ],
+   "recovered": [
+    "their",
+    "floating"
+   ],
+   "base": "Just play football with your head. Let me tell you about it.",
+   "oracle": "just like football with their head, floating about"
+  },
+  {
+   "wav": "edacc/us-control/00105.wav",
+   "group": "us-control",
+   "targets": [
+    "wait"
+   ],
+   "recovered": [],
+   "base": "What about, what was like your, I can see it's a very like big movie man. It was like your like formatting movie as a kid.",
+   "oracle": "what about what was like your i i can see it's a very like big movie man it was like your like formatting movie as it did"
+  },
+  {
+   "wav": "edacc/us-control/00117.wav",
+   "group": "us-control",
+   "targets": [
+    "real",
+    "apparently"
+   ],
+   "recovered": [],
+   "base": "But it reminds me, remember, I remember watching as a kid, like the whole, like, I remember my teacher showed me the, what was it again, the Wizard of Oz, and I like learned like 10 years later.",
+   "oracle": "It reminds me, remember, I remember watching as a kid, like the whole like, I remember my teacher showed me the, what was it again? The Wizard of Oz and I like learned like 10 years later"
+  },
+  {
+   "wav": "edacc/us-control/00119.wav",
+   "group": "us-control",
+   "targets": [
+    "characters",
+    "paints"
+   ],
+   "recovered": [
+    "paints"
+   ],
+   "base": "but like massive amounts of skin cancer from the mercury and the paint because the lighting was so poor",
+   "oracle": "but like massive amounts of skin cancer from the mercury and the paints because the lighting was so poor"
+  },
+  {
+   "wav": "edacc/us-control/00125.wav",
+   "group": "us-control",
+   "targets": [
+    "wicked",
+    "west"
+   ],
+   "recovered": [
+    "wicked"
+   ],
+   "base": "Oh my god, I remember watching that.",
+   "oracle": "wicked oh my god i remember watching that"
+  },
+  {
+   "wav": "edacc/us-control/00127.wav",
+   "group": "us-control",
+   "targets": [
+    "will"
+   ],
+   "recovered": [],
+   "base": "Because I think it's such a cult thing. It's like Disney movies, people would just rewatch them whenever. But in the play industry...",
+   "oracle": "I think it's such a cult thing, it's like Disney movies, people just rewatch them whenever. But in the play industry..."
+  },
+  {
+   "wav": "edacc/us-control/00131.wav",
+   "group": "us-control",
+   "targets": [
+    "don't"
+   ],
+   "recovered": [],
+   "base": "see that in in countries it's like are not like english speaking like you only ever see that in",
+   "oracle": "see that in in countries it's like are not like english speaking like you only ever see that in like"
+  },
+  {
+   "wav": "edacc/us-control/00133.wav",
+   "group": "us-control",
+   "targets": [
+    "speaking",
+    "countries",
+    "seen",
+    "greece"
+   ],
+   "recovered": [],
+   "base": "like when have you received that in like",
+   "oracle": "like when have you received that in like"
+  },
+  {
+   "wav": "edacc/us-control/00151.wav",
+   "group": "us-control",
+   "targets": [
+    "must've"
+   ],
+   "recovered": [],
+   "base": "And then it was just like, did you understand all of it? Or were you just like still learning as a kid? Yeah.",
+   "oracle": "been like, did you understand all of it? Or were you like still working as a kid?"
+  },
+  {
+   "wav": "edacc/us-control/00153.wav",
+   "group": "us-control",
+   "targets": [
+    "were",
+    "singing",
+    "adapted"
+   ],
+   "recovered": [],
+   "base": "Oh, what do you say in English where they like adopt it to Greek?",
+   "oracle": "Oh, what do you say in English where they like adopted Greek?"
+  },
+  {
+   "wav": "edacc/us-control/00163.wav",
+   "group": "us-control",
+   "targets": [
+    "word"
+   ],
+   "recovered": [],
+   "base": "It's just in one frame, it's just the wind slut in the ocean, it's amazing.",
+   "oracle": "It's just in one frame, it's just the wind slut in the ocean, it's amazing"
+  },
+  {
+   "wav": "edacc/us-control/00165.wav",
+   "group": "us-control",
+   "targets": [
+    "we're"
+   ],
+   "recovered": [],
+   "base": "Probably not. It probably means something other than the end, but imagine watching a really emotional kids movie, all of his family dies looking for his wife, he's met a really special friend, and now it's just a slut at the end.",
+   "oracle": "probably not it probably means something other than the end but it's like imagine watching a really emotional kids movie all his family died looking for his wife he's met a really like special friend and now it's like it's just a slut at the end"
+  },
+  {
+   "wav": "edacc/us-control/00169.wav",
+   "group": "us-control",
+   "targets": [
+    "joe",
+    "podcast"
+   ],
+   "recovered": [],
+   "base": "I feel like it's on a show, Rogan Fokka.",
+   "oracle": "i think it's on a show, rogan focus"
+  },
+  {
+   "wav": "edacc/us-control/00173.wav",
+   "group": "us-control",
+   "targets": [
+    "three",
+    "p"
+   ],
+   "recovered": [
+    "three"
+   ],
+   "base": "Alright, um, I am participant C13B1.",
+   "oracle": "all right um i am participant c 1 3 b 1"
+  },
+  {
+   "wav": "edacc/us-control/00209.wav",
+   "group": "us-control",
+   "targets": [
+    "told"
+   ],
+   "recovered": [],
+   "base": "And I was going to mention because usually every time you tell me that you're going to go to work, it's like, because of the whole 24 hour thing, I expect that, okay, right now, you would still be at work and then tomorrow in the afternoon, you'd say, I got free now, I'm free.",
+   "oracle": "And I was gonna mention because usually every time you tell me that you're gonna go to work, it's like, because of the whole 24 hour thing, I expect that okay, right now you would still be at work and then tomorrow, in the afternoon you'd say, I got free now, I'm free."
+  },
+  {
+   "wav": "edacc/us-control/00211.wav",
+   "group": "us-control",
+   "targets": [
+    "shift"
+   ],
+   "recovered": [
+    "shift"
+   ],
+   "base": "Um, but it's weird that you started in the morning and you're free now, which is how the average person works with, with, with you, it's the 24 hour shifts. So,",
+   "oracle": "but it's weird that you started in the morning and you're free now which is how the average person works with you, it's the 24-hour shift"
+  }
+ ]
+}

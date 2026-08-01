@@ -1,0 +1,280 @@
+{"wav": "edacc-short/us-control/00031.wav", "ref": "ARE THEY NOT", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 31, "duration": 0.58}
+{"wav": "edacc-short/us-control/00033.wav", "ref": "YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 33, "duration": 0.43}
+{"wav": "edacc-short/us-control/00035.wav", "ref": "BANANA LEAVES", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 35, "duration": 0.82}
+{"wav": "edacc-short/us-control/00037.wav", "ref": "THE CABBAGE RIGHT SORT OF", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 37, "duration": 1.48}
+{"wav": "edacc-short/us-control/00039.wav", "ref": "OH MY GOD <DTMF>", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 39, "duration": 1.15}
+{"wav": "edacc-short/us-control/00041.wav", "ref": "THAT'S <OVERLAP>", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 41, "duration": 0.43}
+{"wav": "edacc-short/us-control/00047.wav", "ref": "WATCHING DIE HARD", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 47, "duration": 0.94}
+{"wav": "edacc-short/us-control/00061.wav", "ref": "LIKE HAVE YOU EVER LIKE PEOPLE LIKE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 61, "duration": 1.48}
+{"wav": "edacc-short/us-control/00065.wav", "ref": "YEAH THEY WERE TERRIBLE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 65, "duration": 0.7}
+{"wav": "edacc-short/us-control/00067.wav", "ref": "THEY HURT THEY WERE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 67, "duration": 0.67}
+{"wav": "edacc-short/us-control/00073.wav", "ref": "YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 73, "duration": 0.37}
+{"wav": "edacc-short/us-control/00093.wav", "ref": "VERY VAGUELY", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 93, "duration": 0.55}
+{"wav": "edacc-short/us-control/00095.wav", "ref": "YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 95, "duration": 0.4}
+{"wav": "edacc-short/us-control/00097.wav", "ref": "OF COURSE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 97, "duration": 0.52}
+{"wav": "edacc-short/us-control/00107.wav", "ref": "YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 107, "duration": 0.52}
+{"wav": "edacc-short/us-control/00109.wav", "ref": "OH THE MASK WAS SO GOOD", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 109, "duration": 1.18}
+{"wav": "edacc-short/us-control/00111.wav", "ref": "IT'S AMAZING", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 111, "duration": 0.82}
+{"wav": "edacc-short/us-control/00113.wav", "ref": "OH MY GOD YES", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 113, "duration": 0.52}
+{"wav": "edacc-short/us-control/00121.wav", "ref": "YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 121, "duration": 0.55}
+{"wav": "edacc-short/us-control/00129.wav", "ref": "THEY JUST HAVE TO LIKE KEEP IT", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 129, "duration": 1.06}
+{"wav": "edacc-short/us-control/00135.wav", "ref": "LIKE AMERICANS AMERICANS", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 135, "duration": 0.97}
+{"wav": "edacc-short/us-control/00141.wav", "ref": "YEAH OF COURSE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 141, "duration": 0.73}
+{"wav": "edacc-short/us-control/00143.wav", "ref": "NO I THINK", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 143, "duration": 0.31}
+{"wav": "edacc-short/us-control/00145.wav", "ref": "I THINK THAT WAS WHAT HAPPEND", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 145, "duration": 0.7}
+{"wav": "edacc-short/us-control/00147.wav", "ref": "THAT'S AWESOME", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 147, "duration": 0.4}
+{"wav": "edacc-short/us-control/00149.wav", "ref": "THAT'S SO AWESOME", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 149, "duration": 0.49}
+{"wav": "edacc-short/us-control/00157.wav", "ref": "RIGHT IT'S <OVERLAP> YOU HAVE TO WATCH IT", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 157, "duration": 1.15}
+{"wav": "edacc-short/us-control/00167.wav", "ref": "FROM <OVERLAP>", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 167, "duration": 0.4}
+{"wav": "edacc-short/us-control/00171.wav", "ref": "<OVERLAP> TOODLES", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C06-B", "row_idx": 171, "duration": 0.49}
+{"wav": "edacc-short/us-control/00195.wav", "ref": "YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 195, "duration": 0.4}
+{"wav": "edacc-short/us-control/00203.wav", "ref": "MM HMM", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 203, "duration": 0.31}
+{"wav": "edacc-short/us-control/00237.wav", "ref": "DID YOU DO THAT TOO", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 237, "duration": 0.94}
+{"wav": "edacc-short/us-control/00239.wav", "ref": "JESUS I DIDN'T KNOW THAT", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 239, "duration": 1.18}
+{"wav": "edacc-short/us-control/00243.wav", "ref": "PICK UP W WOW", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 243, "duration": 0.55}
+{"wav": "edacc-short/us-control/00255.wav", "ref": "YEAH THAT'S COOL", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 255, "duration": 0.7}
+{"wav": "edacc-short/us-control/00265.wav", "ref": "YEAH FAIR ENOUGH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 265, "duration": 0.7}
+{"wav": "edacc-short/us-control/00275.wav", "ref": "I KNOW BUT IT CAN BE A NUISANCE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 275, "duration": 0.88}
+{"wav": "edacc-short/us-control/00283.wav", "ref": "MM HMM YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 283, "duration": 0.82}
+{"wav": "edacc-short/us-control/00291.wav", "ref": "AND THEY'RE ALL DIFFERENT SO", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 291, "duration": 0.97}
+{"wav": "edacc-short/us-control/00293.wav", "ref": "YEAH LET'S SEE HOW THAT IS", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 293, "duration": 0.85}
+{"wav": "edacc-short/us-control/00321.wav", "ref": "YES SO THERE'S", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 321, "duration": 0.37}
+{"wav": "edacc-short/us-control/00327.wav", "ref": "UM", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 327, "duration": 0.55}
+{"wav": "edacc-short/us-control/00359.wav", "ref": "THEY SEEMED", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 359, "duration": 0.46}
+{"wav": "edacc-short/us-control/00367.wav", "ref": "NOTHING BAD THOUGH REALLY", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 367, "duration": 0.91}
+{"wav": "edacc-short/us-control/00375.wav", "ref": "UM", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 375, "duration": 0.49}
+{"wav": "edacc-short/us-control/00381.wav", "ref": "DIRTY DANCING", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 381, "duration": 0.61}
+{"wav": "edacc-short/us-control/00393.wav", "ref": "UM YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 393, "duration": 0.46}
+{"wav": "edacc-short/us-control/00395.wav", "ref": "WHAT", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 395, "duration": 0.4}
+{"wav": "edacc-short/us-control/00401.wav", "ref": "NO NO ARE YOU CRAZY NO NO", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 401, "duration": 1.36}
+{"wav": "edacc-short/us-control/00403.wav", "ref": "HOLY SHIT", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 403, "duration": 0.52}
+{"wav": "edacc-short/us-control/00413.wav", "ref": "YEAH", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 413, "duration": 0.34}
+{"wav": "edacc-short/us-control/00417.wav", "ref": "YEAH NOT NOT <OVERLAP>", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 417, "duration": 1.24}
+{"wav": "edacc-short/us-control/00425.wav", "ref": "I HAVE HEARD OF IT YEAH I DON'T", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 425, "duration": 1.3}
+{"wav": "edacc-short/us-control/00429.wav", "ref": "OBVIOUSLY EVERYONE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C07-A", "row_idx": 429, "duration": 0.79}
+{"wav": "edacc-short/indian/00437.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 437, "duration": 0.52}
+{"wav": "edacc-short/indian/00439.wav", "ref": "SO WHAT ARE WE TALKING ABOUT", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 439, "duration": 1.12}
+{"wav": "edacc-short/indian/00442.wav", "ref": "FIRST THE FIRST ONE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 442, "duration": 1.12}
+{"wav": "edacc-short/indian/00454.wav", "ref": "MM HMM THAT MAKES SENSE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 454, "duration": 0.7}
+{"wav": "edacc-short/indian/00457.wav", "ref": "YEAH EXACTLY", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 457, "duration": 1.18}
+{"wav": "edacc-short/indian/00458.wav", "ref": "THAT MAKES SENSE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 458, "duration": 0.91}
+{"wav": "edacc-short/indian/00463.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 463, "duration": 0.55}
+{"wav": "edacc-short/indian/00465.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 465, "duration": 0.49}
+{"wav": "edacc-short/indian/00466.wav", "ref": "BECAUSE IT'S IT'S", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 466, "duration": 0.88}
+{"wav": "edacc-short/indian/00469.wav", "ref": "HAVE YOU READ HUNGER GAMES", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 469, "duration": 1.39}
+{"wav": "edacc-short/indian/00475.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 475, "duration": 0.37}
+{"wav": "edacc-short/indian/00479.wav", "ref": "YEAH CINNA", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 479, "duration": 0.58}
+{"wav": "edacc-short/indian/00480.wav", "ref": "THOSE CREATIONS", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 480, "duration": 1.27}
+{"wav": "edacc-short/indian/00483.wav", "ref": "YEAH YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 483, "duration": 1.03}
+{"wav": "edacc-short/indian/00486.wav", "ref": "MM HMM", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 486, "duration": 0.31}
+{"wav": "edacc-short/indian/00493.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 493, "duration": 0.31}
+{"wav": "edacc-short/indian/00498.wav", "ref": "MM HMM", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 498, "duration": 0.4}
+{"wav": "edacc-short/indian/00507.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 507, "duration": 0.34}
+{"wav": "edacc-short/indian/00509.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 509, "duration": 0.37}
+{"wav": "edacc-short/indian/00511.wav", "ref": "YEAH YEAH YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 511, "duration": 0.67}
+{"wav": "edacc-short/indian/00516.wav", "ref": "UH EFFIE EFFIE TRINKET", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 516, "duration": 1.3}
+{"wav": "edacc-short/indian/00518.wav", "ref": "<LAUGH> HUH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 518, "duration": 1.45}
+{"wav": "edacc-short/indian/00520.wav", "ref": "MM HMM TRUE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 520, "duration": 0.7}
+{"wav": "edacc-short/indian/00526.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 526, "duration": 0.58}
+{"wav": "edacc-short/indian/00527.wav", "ref": "LIKE YOU KNOW THIS IS THE MESSAGE <OVERLAP>", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 527, "duration": 1.48}
+{"wav": "edacc-short/indian/00535.wav", "ref": "YEAH TRUE TRUE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 535, "duration": 0.4}
+{"wav": "edacc-short/indian/00537.wav", "ref": "OKAY WERE YOU", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 537, "duration": 1.09}
+{"wav": "edacc-short/indian/00541.wav", "ref": "YEAH YEAH YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 541, "duration": 0.85}
+{"wav": "edacc-short/indian/00547.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 547, "duration": 0.34}
+{"wav": "edacc-short/indian/00549.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 549, "duration": 0.58}
+{"wav": "edacc-short/indian/00550.wav", "ref": "LIKE TICKING TIME BOMB <OVERLAP>", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 550, "duration": 1.15}
+{"wav": "edacc-short/indian/00552.wav", "ref": "YEAH THEY", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 552, "duration": 0.88}
+{"wav": "edacc-short/indian/00553.wav", "ref": "SOMEONE WHO CAN CALM YOU DOWN", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 553, "duration": 1.39}
+{"wav": "edacc-short/indian/00558.wav", "ref": "NO NONE OF THEM", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 558, "duration": 0.49}
+{"wav": "edacc-short/indian/00562.wav", "ref": "NEITHER", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 562, "duration": 0.67}
+{"wav": "edacc-short/indian/00566.wav", "ref": "OH MY GOD THAT'S JUST", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 566, "duration": 1.18}
+{"wav": "edacc-short/indian/00567.wav", "ref": "SHIRTLESS TAYLOR LAUTNER", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 567, "duration": 0.88}
+{"wav": "edacc-short/indian/00571.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 571, "duration": 0.31}
+{"wav": "edacc-short/indian/00576.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 576, "duration": 0.46}
+{"wav": "edacc-short/indian/00577.wav", "ref": "OF AZKABAN", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 577, "duration": 0.52}
+{"wav": "edacc-short/indian/00583.wav", "ref": "YES", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 583, "duration": 0.49}
+{"wav": "edacc-short/indian/00585.wav", "ref": "I DON'T KNOW", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 585, "duration": 0.55}
+{"wav": "edacc-short/indian/00589.wav", "ref": "CHARACTERS", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 589, "duration": 0.34}
+{"wav": "edacc-short/indian/00590.wav", "ref": "UH HUH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 590, "duration": 0.91}
+{"wav": "edacc-short/indian/00593.wav", "ref": "FRED", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 593, "duration": 0.61}
+{"wav": "edacc-short/indian/00601.wav", "ref": "AH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 601, "duration": 0.58}
+{"wav": "edacc-short/indian/00602.wav", "ref": "MAYBE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 602, "duration": 0.46}
+{"wav": "edacc-short/indian/00603.wav", "ref": "MAKES SENSE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 603, "duration": 0.34}
+{"wav": "edacc-short/indian/00606.wav", "ref": "REALLY <LAUGH>", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 606, "duration": 0.67}
+{"wav": "edacc-short/indian/00611.wav", "ref": "GOBLET OF FIRE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 611, "duration": 0.82}
+{"wav": "edacc-short/indian/00616.wav", "ref": "YEAH YEAH YEAH CHARACTERS", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 616, "duration": 1.12}
+{"wav": "edacc-short/indian/00617.wav", "ref": "LIKE KNOWING THAT THERE ARE OTHER", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 617, "duration": 1.42}
+{"wav": "edacc-short/indian/00618.wav", "ref": "YEAH", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 618, "duration": 0.43}
+{"wav": "edacc-short/indian/00621.wav", "ref": "OH YES", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 621, "duration": 0.52}
+{"wav": "edacc-short/indian/00631.wav", "ref": "ANOTHER THING THAT I WILL NEVER", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 631, "duration": 1.3}
+{"wav": "edacc-short/indian/00632.wav", "ref": "<OVERLAP> THIS MUCH EMOTION", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 632, "duration": 1.21}
+{"wav": "edacc-short/indian/00633.wav", "ref": "FORGET IN THESE", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 633, "duration": 1.0}
+{"wav": "edacc-short/indian/00638.wav", "ref": "OTHER ONE THE MA MARIETTA", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 638, "duration": 1.42}
+{"wav": "edacc-short/indian/00640.wav", "ref": "EDGECOMBE SOMETHING SOMETHING SOMETHING", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-B", "row_idx": 640, "duration": 1.09}
+{"wav": "edacc-short/indian/00641.wav", "ref": "YES", "group": "indian", "dataset": "edacc", "speaker": "EDACC-C09-A", "row_idx": 641, "duration": 0.7}
+{"wav": "edacc-short/us-control/01353.wav", "ref": "TWO SIX P TWO", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C14-A", "row_idx": 1353, "duration": 1.21}
+{"wav": "edacc-short/us-control/01355.wav", "ref": "NICE OKAY", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C14-A", "row_idx": 1355, "duration": 1.12}
+{"wav": "edacc-short/us-control/01359.wav", "ref": "<LAUGH> COOL", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C14-A", "row_idx": 1359, "duration": 1.42}
+{"wav": "edacc-short/us-control/01361.wav", "ref": "YEAH YEAH THAT WAS A GOOD ONE", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C14-A", "row_idx": 1361, "duration": 1.42}
+{"wav": "edacc-short/us-control/01365.wav", "ref": "I KNOW", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C14-A", "row_idx": 1365, "duration": 0.64}
+{"wav": "edacc-short/japanese/01370.wav", "ref": "OKAY", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1370, "duration": 0.34}
+{"wav": "edacc-short/japanese/01372.wav", "ref": "OKAY", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1372, "duration": 0.37}
+{"wav": "edacc-short/japanese/01374.wav", "ref": "OH YOU'RE ALREADY RECORDING", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1374, "duration": 1.3}
+{"wav": "edacc-short/japanese/01376.wav", "ref": "OKAY", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1376, "duration": 0.64}
+{"wav": "edacc-short/us-control/01377.wav", "ref": "HAI YES", "group": "us-control", "dataset": "edacc", "speaker": "EDACC-C14-A", "row_idx": 1377, "duration": 0.46}
+{"wav": "edacc-short/japanese/01384.wav", "ref": "AND YOU OF COURSE", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1384, "duration": 0.91}
+{"wav": "edacc-short/japanese/01395.wav", "ref": "OKAY OKAY", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1395, "duration": 1.3}
+{"wav": "edacc-short/japanese/01397.wav", "ref": "MM HMM TOMORROW MORNING", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1397, "duration": 1.21}
+{"wav": "edacc-short/japanese/01399.wav", "ref": "UH WHEN W WHEN", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1399, "duration": 0.85}
+{"wav": "edacc-short/japanese/01417.wav", "ref": "YOU HARDLY SEE MORE JAPANESE", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1417, "duration": 1.39}
+{"wav": "edacc-short/japanese/01423.wav", "ref": "YEAH", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1423, "duration": 0.37}
+{"wav": "edacc-short/japanese/01433.wav", "ref": "YEAH", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1433, "duration": 0.4}
+{"wav": "edacc-short/japanese/01441.wav", "ref": "SO THE THE UM", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1441, "duration": 0.76}
+{"wav": "edacc-short/japanese/01455.wav", "ref": "OH NICE", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1455, "duration": 0.43}
+{"wav": "edacc-short/japanese/01461.wav", "ref": "DAVE WITH THAT DAVE", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1461, "duration": 0.82}
+{"wav": "edacc-short/japanese/01463.wav", "ref": "WITH HER", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1463, "duration": 0.49}
+{"wav": "edacc-short/japanese/01471.wav", "ref": "WHOA", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1471, "duration": 0.91}
+{"wav": "edacc-short/japanese/01473.wav", "ref": "SO YOU'RE GOING TO NEW YORK", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1473, "duration": 1.33}
+{"wav": "edacc-short/japanese/01475.wav", "ref": "FOR A WEDDING", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1475, "duration": 0.64}
+{"wav": "edacc-short/japanese/01479.wav", "ref": "MM HMM WOW", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1479, "duration": 1.21}
+{"wav": "edacc-short/japanese/01481.wav", "ref": "CONGRATULATIONS", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1481, "duration": 0.76}
+{"wav": "edacc-short/japanese/01485.wav", "ref": "YEAH YEAH", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1485, "duration": 0.76}
+{"wav": "edacc-short/japanese/01492.wav", "ref": "NICE MM HMM", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1492, "duration": 0.4}
+{"wav": "edacc-short/japanese/01494.wav", "ref": "MM HMM", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1494, "duration": 0.4}
+{"wav": "edacc-short/japanese/01504.wav", "ref": "YOU'RE ABOUT TO MAKE IT", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1504, "duration": 1.15}
+{"wav": "edacc-short/japanese/01506.wav", "ref": "IT'S A LOT <LAUGH>", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1506, "duration": 1.06}
+{"wav": "edacc-short/japanese/01508.wav", "ref": "SO YOU'LL BE BUSY", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1508, "duration": 1.15}
+{"wav": "edacc-short/japanese/01514.wav", "ref": "TWO MONTHS", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1514, "duration": 0.31}
+{"wav": "edacc-short/japanese/01522.wav", "ref": "MM HMM THAT IS", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1522, "duration": 0.49}
+{"wav": "edacc-short/japanese/01524.wav", "ref": "YES YOU TOLD ME AND I WENT", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1524, "duration": 1.27}
+{"wav": "edacc-short/japanese/01528.wav", "ref": "NO NO NO NO", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1528, "duration": 0.37}
+{"wav": "edacc-short/japanese/01530.wav", "ref": "MM NO NO", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1530, "duration": 0.97}
+{"wav": "edacc-short/japanese/01545.wav", "ref": "YEAH", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1545, "duration": 0.43}
+{"wav": "edacc-short/japanese/01561.wav", "ref": "YEAH", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1561, "duration": 0.76}
+{"wav": "edacc-short/japanese/01575.wav", "ref": "YEAH", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1575, "duration": 0.46}
+{"wav": "edacc-short/japanese/01583.wav", "ref": "<LAUGH> PROBABLY", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1583, "duration": 0.73}
+{"wav": "edacc-short/japanese/01585.wav", "ref": "SMALL", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1585, "duration": 0.61}
+{"wav": "edacc-short/japanese/01597.wav", "ref": "YEAH", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1597, "duration": 0.37}
+{"wav": "edacc-short/japanese/01601.wav", "ref": "MAYBE I SHOULD", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1601, "duration": 0.49}
+{"wav": "edacc-short/japanese/01607.wav", "ref": "NE HAVE YOU DONE IT", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1607, "duration": 1.27}
+{"wav": "edacc-short/japanese/01609.wav", "ref": "BECAUSE IT'S SO", "group": "japanese", "dataset": "edacc", "speaker": "EDACC-C14-B", "row_idx": 1609, "duration": 0.76}
+{"wav": "edacc-short/russian/03374.wav", "ref": "PERFECT", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3374, "duration": 0.55}
+{"wav": "edacc-short/russian/03378.wav", "ref": "YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3378, "duration": 0.31}
+{"wav": "edacc-short/russian/03382.wav", "ref": "YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3382, "duration": 0.79}
+{"wav": "edacc-short/russian/03384.wav", "ref": "YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3384, "duration": 0.37}
+{"wav": "edacc-short/russian/03386.wav", "ref": "MM HMM", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3386, "duration": 0.52}
+{"wav": "edacc-short/russian/03388.wav", "ref": "YES", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3388, "duration": 0.64}
+{"wav": "edacc-short/russian/03392.wav", "ref": "WHAT'S UPCOMING", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3392, "duration": 0.88}
+{"wav": "edacc-short/russian/03404.wav", "ref": "YEAH YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3404, "duration": 0.73}
+{"wav": "edacc-short/russian/03418.wav", "ref": "YEAH YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3418, "duration": 0.58}
+{"wav": "edacc-short/russian/03420.wav", "ref": "I THINK YOU'RE FINE YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3420, "duration": 0.97}
+{"wav": "edacc-short/russian/03422.wav", "ref": "I DON'T KNOW WHAT YOU'RE TALKING ABOUT", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3422, "duration": 1.3}
+{"wav": "edacc-short/russian/03424.wav", "ref": "WITH NO WHAT", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3424, "duration": 0.82}
+{"wav": "edacc-short/russian/03428.wav", "ref": "YES", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3428, "duration": 0.43}
+{"wav": "edacc-short/russian/03434.wav", "ref": "MM HMM OKAY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3434, "duration": 0.73}
+{"wav": "edacc-short/russian/03440.wav", "ref": "ALMOST ANYTHING IN SCOTLAND SO WHATEVER", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3440, "duration": 1.15}
+{"wav": "edacc-short/russian/03446.wav", "ref": "DID YOU GET ACCESS TO THAT", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3446, "duration": 0.94}
+{"wav": "edacc-short/russian/03448.wav", "ref": "YOU DO OKAY THAT'S GREAT", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3448, "duration": 1.27}
+{"wav": "edacc-short/russian/03452.wav", "ref": "YES UH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3452, "duration": 1.09}
+{"wav": "edacc-short/russian/03456.wav", "ref": "FIFTEENTH I THINK", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3456, "duration": 1.06}
+{"wav": "edacc-short/russian/03468.wav", "ref": "OKAY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3468, "duration": 0.31}
+{"wav": "edacc-short/russian/03482.wav", "ref": "YES", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3482, "duration": 1.09}
+{"wav": "edacc-short/russian/03488.wav", "ref": "YES", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3488, "duration": 0.43}
+{"wav": "edacc-short/russian/03494.wav", "ref": "OKAY THAT MAKES SENSE", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3494, "duration": 1.36}
+{"wav": "edacc-short/russian/03508.wav", "ref": "UH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3508, "duration": 0.7}
+{"wav": "edacc-short/russian/03512.wav", "ref": "YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3512, "duration": 0.43}
+{"wav": "edacc-short/russian/03514.wav", "ref": "RIGHT", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3514, "duration": 0.49}
+{"wav": "edacc-short/russian/03520.wav", "ref": "YES", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3520, "duration": 0.61}
+{"wav": "edacc-short/russian/03526.wav", "ref": "AT LOCH NESS YOU KNOW", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3526, "duration": 1.03}
+{"wav": "edacc-short/russian/03530.wav", "ref": "SO", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3530, "duration": 0.55}
+{"wav": "edacc-short/russian/03536.wav", "ref": "YEAH YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3536, "duration": 0.37}
+{"wav": "edacc-short/russian/03556.wav", "ref": "IT DO YOU KNOW", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3556, "duration": 0.49}
+{"wav": "edacc-short/russian/03558.wav", "ref": "YES", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3558, "duration": 0.52}
+{"wav": "edacc-short/russian/03566.wav", "ref": "I THINK", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3566, "duration": 0.61}
+{"wav": "edacc-short/russian/03572.wav", "ref": "YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3572, "duration": 0.46}
+{"wav": "edacc-short/russian/03576.wav", "ref": "OH ON THE COAST OKAY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3576, "duration": 0.55}
+{"wav": "edacc-short/russian/03580.wav", "ref": "YES I SEE", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3580, "duration": 0.85}
+{"wav": "edacc-short/russian/03590.wav", "ref": "OKAY SO", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3590, "duration": 0.73}
+{"wav": "edacc-short/russian/03604.wav", "ref": "THAT WOULD BE DAY ONE", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3604, "duration": 0.94}
+{"wav": "edacc-short/russian/03612.wav", "ref": "THEY DON'T DO A TASTING HUH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3612, "duration": 1.18}
+{"wav": "edacc-short/russian/03616.wav", "ref": "OKAY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3616, "duration": 0.52}
+{"wav": "edacc-short/russian/03618.wav", "ref": "SO YOU KNOW THE DATE", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3618, "duration": 1.06}
+{"wav": "edacc-short/russian/03622.wav", "ref": "YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3622, "duration": 0.49}
+{"wav": "edacc-short/russian/03630.wav", "ref": "OKAY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3630, "duration": 0.31}
+{"wav": "edacc-short/russian/03634.wav", "ref": "OKAY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3634, "duration": 0.61}
+{"wav": "edacc-short/russian/03653.wav", "ref": "UH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3653, "duration": 0.34}
+{"wav": "edacc-short/russian/03657.wav", "ref": "YES", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3657, "duration": 0.46}
+{"wav": "edacc-short/russian/03671.wav", "ref": "YEAH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3671, "duration": 0.4}
+{"wav": "edacc-short/russian/03677.wav", "ref": "REALLY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3677, "duration": 0.43}
+{"wav": "edacc-short/russian/03687.wav", "ref": "I SEE", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3687, "duration": 0.37}
+{"wav": "edacc-short/russian/03689.wav", "ref": "YEAH I THINK THEY WANTED TO", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3689, "duration": 1.15}
+{"wav": "edacc-short/russian/03691.wav", "ref": "UH HUH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3691, "duration": 0.34}
+{"wav": "edacc-short/russian/03697.wav", "ref": "BECAUSE ALL THE TOURISTS GOT TO", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3697, "duration": 1.03}
+{"wav": "edacc-short/russian/03699.wav", "ref": "YEAH YEAH YEAH I DON'T", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3699, "duration": 1.3}
+{"wav": "edacc-short/russian/03703.wav", "ref": "HAMLETS", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3703, "duration": 0.34}
+{"wav": "edacc-short/russian/03707.wav", "ref": "WHAT A SURPRISE", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3707, "duration": 0.97}
+{"wav": "edacc-short/russian/03712.wav", "ref": "MM NOT SURPRISED", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3712, "duration": 0.76}
+{"wav": "edacc-short/russian/03732.wav", "ref": "WELL I I MEAN CAN WE JUST ACTUALLY", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3732, "duration": 0.97}
+{"wav": "edacc-short/russian/03736.wav", "ref": "UH HUH", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3736, "duration": 0.37}
+{"wav": "edacc-short/russian/03738.wav", "ref": "BUT IN ANY SO", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3738, "duration": 1.12}
+{"wav": "edacc-short/russian/03746.wav", "ref": "YEAH THAT MAKES SENSE", "group": "russian", "dataset": "edacc", "speaker": "EDACC-C24-A", "row_idx": 3746, "duration": 1.36}
+{"wav": "edacc-short/spanish/04064.wav", "ref": "READY", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4064, "duration": 0.43}
+{"wav": "edacc-short/spanish/04080.wav", "ref": "<LAUGH> I THOUGHT YOU WERE SAYING LIKE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4080, "duration": 1.39}
+{"wav": "edacc-short/spanish/04104.wav", "ref": "I DON'T KNOW", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4104, "duration": 0.61}
+{"wav": "edacc-short/spanish/04106.wav", "ref": "NEVER EVER", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4106, "duration": 0.94}
+{"wav": "edacc-short/spanish/04118.wav", "ref": "BUT I DON'T REMEMBER", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4118, "duration": 0.94}
+{"wav": "edacc-short/spanish/04124.wav", "ref": "OKAY", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4124, "duration": 0.64}
+{"wav": "edacc-short/spanish/04142.wav", "ref": "I DON'T KNOW", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4142, "duration": 0.37}
+{"wav": "edacc-short/spanish/04144.wav", "ref": "AND WHAT IS THAT LANGUAGES AGAIN", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4144, "duration": 1.15}
+{"wav": "edacc-short/spanish/04148.wav", "ref": "NO BAD PRACTICE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4148, "duration": 0.85}
+{"wav": "edacc-short/spanish/04150.wav", "ref": "WELL YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4150, "duration": 0.79}
+{"wav": "edacc-short/spanish/04190.wav", "ref": "BACK THEN", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4190, "duration": 0.55}
+{"wav": "edacc-short/spanish/04202.wav", "ref": "BOB SPONGE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4202, "duration": 0.61}
+{"wav": "edacc-short/spanish/04210.wav", "ref": "BOB THE <RING>", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4210, "duration": 0.88}
+{"wav": "edacc-short/spanish/04216.wav", "ref": "YES", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4216, "duration": 0.76}
+{"wav": "edacc-short/spanish/04220.wav", "ref": "LIKE WHICH ONES", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4220, "duration": 0.73}
+{"wav": "edacc-short/spanish/04224.wav", "ref": "LIKE WHAT", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4224, "duration": 0.67}
+{"wav": "edacc-short/spanish/04228.wav", "ref": "<LAUGH> LIKE WHAT", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C04-A", "row_idx": 4228, "duration": 0.73}
+{"wav": "edacc-short/spanish/08527.wav", "ref": "YEAH YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8527, "duration": 0.46}
+{"wav": "edacc-short/spanish/08537.wav", "ref": "I SEE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8537, "duration": 0.31}
+{"wav": "edacc-short/spanish/08541.wav", "ref": "FOR HOLIDAYS", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8541, "duration": 0.61}
+{"wav": "edacc-short/spanish/08547.wav", "ref": "I THINK THE LAST", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8547, "duration": 0.91}
+{"wav": "edacc-short/spanish/08561.wav", "ref": "THEY ARE TWO SEPARATE THINGS", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8561, "duration": 1.21}
+{"wav": "edacc-short/spanish/08569.wav", "ref": "IS IT IN SP IS IT IN SPAIN", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8569, "duration": 1.48}
+{"wav": "edacc-short/spanish/08573.wav", "ref": "WHAT", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8573, "duration": 0.46}
+{"wav": "edacc-short/spanish/08605.wav", "ref": "I SEE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8605, "duration": 0.37}
+{"wav": "edacc-short/spanish/08628.wav", "ref": "WHAT WHAT DOES IT MEAN", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8628, "duration": 1.39}
+{"wav": "edacc-short/spanish/08634.wav", "ref": "WELL I DON'T LIKE CHEESE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8634, "duration": 0.97}
+{"wav": "edacc-short/spanish/08662.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8662, "duration": 0.4}
+{"wav": "edacc-short/spanish/08672.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8672, "duration": 0.34}
+{"wav": "edacc-short/spanish/08680.wav", "ref": "IN MY HOMETOWN YES", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8680, "duration": 1.33}
+{"wav": "edacc-short/spanish/08686.wav", "ref": "UH YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8686, "duration": 0.73}
+{"wav": "edacc-short/spanish/08718.wav", "ref": "SORRY", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8718, "duration": 0.55}
+{"wav": "edacc-short/spanish/08726.wav", "ref": "YEAH EDINBURGH YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8726, "duration": 0.82}
+{"wav": "edacc-short/spanish/08732.wav", "ref": "WELL I DON'T KNOW", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8732, "duration": 0.88}
+{"wav": "edacc-short/spanish/08748.wav", "ref": "OKAY", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C54-B", "row_idx": 8748, "duration": 0.37}
+{"wav": "edacc-short/spanish/08760.wav", "ref": "NECESSARY <LAUGH>", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8760, "duration": 1.03}
+{"wav": "edacc-short/spanish/08764.wav", "ref": "<LAUGH> YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8764, "duration": 0.43}
+{"wav": "edacc-short/spanish/08774.wav", "ref": "WHAT TYPE OF FOOD DO YOU", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8774, "duration": 1.18}
+{"wav": "edacc-short/spanish/08792.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8792, "duration": 0.46}
+{"wav": "edacc-short/spanish/08804.wav", "ref": "OH MY GOD I UNDERSTAND", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8804, "duration": 1.09}
+{"wav": "edacc-short/spanish/08808.wav", "ref": "I DISLIKE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8808, "duration": 0.79}
+{"wav": "edacc-short/spanish/08812.wav", "ref": "<LAUGH> OH MY GOD YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8812, "duration": 0.97}
+{"wav": "edacc-short/spanish/08816.wav", "ref": "IT'S NOT", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8816, "duration": 0.34}
+{"wav": "edacc-short/spanish/08818.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8818, "duration": 0.31}
+{"wav": "edacc-short/spanish/08820.wav", "ref": "AND DO YOU DO YOU LIKE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8820, "duration": 0.97}
+{"wav": "edacc-short/spanish/08834.wav", "ref": "BUT IT IS POSSIBLE", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8834, "duration": 0.94}
+{"wav": "edacc-short/spanish/08836.wav", "ref": "WHAT", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8836, "duration": 0.46}
+{"wav": "edacc-short/spanish/08840.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8840, "duration": 0.31}
+{"wav": "edacc-short/spanish/08842.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8842, "duration": 0.43}
+{"wav": "edacc-short/spanish/08850.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8850, "duration": 0.55}
+{"wav": "edacc-short/spanish/08854.wav", "ref": "YOU'RE NOT PICKY AT ALL", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8854, "duration": 1.09}
+{"wav": "edacc-short/spanish/08860.wav", "ref": "WHAT", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8860, "duration": 0.52}
+{"wav": "edacc-short/spanish/08862.wav", "ref": "WELL I DON'T LIKE <OVERLAP>", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8862, "duration": 1.48}
+{"wav": "edacc-short/spanish/08872.wav", "ref": "YEAH <LAUGH>", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8872, "duration": 0.4}
+{"wav": "edacc-short/spanish/08874.wav", "ref": "OH MY GOD THAT'S DELICIOUS", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8874, "duration": 1.42}
+{"wav": "edacc-short/spanish/08876.wav", "ref": "YES", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8876, "duration": 0.31}
+{"wav": "edacc-short/spanish/08878.wav", "ref": "YEAH", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8878, "duration": 0.58}
+{"wav": "edacc-short/spanish/08880.wav", "ref": "NO", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8880, "duration": 0.67}
+{"wav": "edacc-short/spanish/08882.wav", "ref": "YOU DIDN'T LIKE IT", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8882, "duration": 0.58}
+{"wav": "edacc-short/spanish/08886.wav", "ref": "OH THAT'S AMAZING", "group": "spanish", "dataset": "edacc", "speaker": "EDACC-C55-A", "row_idx": 8886, "duration": 1.3}

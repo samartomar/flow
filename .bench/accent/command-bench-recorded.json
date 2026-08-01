@@ -1,0 +1,14 @@
+{
+ "us-control": {
+  "n": 11,
+  "hit": 10,
+  "miss": [
+   {
+    "item": 1,
+    "want": "replace_all",
+    "got": "local/replace",
+    "text": "Change Tuesday to Wednesday."
+   }
+  ]
+ }
+}
