@@ -30,6 +30,7 @@ import json
 import time
 from collections import Counter
 from pathlib import Path
+from typing import Sequence
 
 DEFAULT_PATH = Path.home() / ".flow" / "profile.json"
 
@@ -85,6 +86,11 @@ class Profile:
         #: Utterances the router appended that the user then undid — the signature of a
         #: command read as dictation.
         self.misroutes: Counter[str] = Counter()
+        #: Pairs the user has been offered and said no to. Kept so the menu does not ask
+        #: again about a decision already made — the answer "no" is worth as much as the
+        #: answer "yes" and is otherwise the only one Flow forgets. Additive, and schema
+        #: stays 1: an older profile loads with an empty set, exactly as `voice` does.
+        self.dismissed: set[str] = set()
         self.load()
 
     # -- persistence -------------------------------------------------------
@@ -108,6 +114,7 @@ class Profile:
         self.voice = raw.get("voice")
         self.pairs = Counter(raw.get("pairs") or {})
         self.misroutes = Counter(raw.get("misroutes") or {})
+        self.dismissed = {str(k) for k in (raw.get("dismissed") or [])}
         return True
 
     def save(self) -> bool:
@@ -122,6 +129,10 @@ class Profile:
             "auto_ask": self.auto_ask,
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
+            # Sorted so two saves of the same state produce the same file — a set's
+            # iteration order is not stable across runs, and a profile that rewrites
+            # itself differently every launch is one nobody can diff.
+            "dismissed": sorted(self.dismissed)[:MAX_PAIRS],
         }
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +233,54 @@ class Profile:
             if right not in out:
                 out.append(right)
         return out
+
+    #: How many offers the menu may carry. It is a native modal loop that already costs
+    #: a measured ~16 s stall at worst and one mic-overflow note, so it must not grow
+    #: with the profile. The full list has no other UI on purpose: this is not a
+    #: settings page, and building one stays refused.
+    MAX_OFFERS = 3
+
+    def offered_pairs(
+        self,
+        declared: Sequence[tuple[str, str]] = (),
+        promote_after: int = PROMOTE_AFTER,
+        limit: int = MAX_OFFERS,
+    ) -> list[tuple[str, str]]:
+        """Inferred corrections worth asking the user to declare.
+
+        Asking, and never doing. An inferred pair is a guess from a word-level diff, and
+        the difference between "seen twice" and "the user says so" is the whole reason
+        `learn_pair` feeds hotwords and not substitutions: a hotword biases toward a
+        spelling and changes no text, while a substitution rewrites what somebody said.
+        This does not move that line — it moves the *typing*, because a correction that
+        requires opening a text file and knowing the arrow syntax is one that will not
+        get written.
+
+        `declared` is what the lexicon already contains, matched on the left side the
+        way the file itself matches it: case-insensitively. A pair that has been acted
+        on stops being offered, so the tap's own consequence clears the menu entry.
+        """
+        already = {w.strip().lower() for w, _r in declared}
+        out: list[tuple[str, str]] = []
+        for key, count in self.pairs.most_common():
+            if count < promote_after or key in self.dismissed:
+                continue
+            wrong, _, right = key.partition(" -> ")
+            if not wrong or not right or wrong.lower() in already:
+                continue
+            out.append((wrong, right))
+            if len(out) >= limit:
+                break
+        return out
+
+    def dismiss_pair(self, wrong: str, right: str) -> None:
+        """Never offer this one again. Does not unlearn it.
+
+        "Stop asking" is not "forget what you learned": the inferred *hotword* was never
+        the thing that needed consent, because it biases toward the right spelling and
+        rewrites nothing. Only the substitution did.
+        """
+        self.dismissed.add(f"{wrong.lower()} -> {right}")
 
     def note_misroute(self, utterance: str) -> None:
         """An appended utterance the user immediately undid.

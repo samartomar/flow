@@ -113,6 +113,12 @@ TEMPLATE = """\
 #
 # Saved without restarting Flow: the next thing you say picks this up.
 #
+# FLOW ADDS A LINE HERE ONLY WHEN YOU ASK IT TO. When it has watched you correct the
+# same word twice, it offers the pair in the right-click menu - "Add correction: semir
+# -> Samir" - and one tap appends it below. That is the only thing Flow ever writes to
+# this file after creating it: one new line at the end, never an edit to yours, never a
+# reorder, never a deletion. "Never offer" in the same menu makes it stop asking.
+#
 # SETTINGS THAT HAVE A VALUE live next door in profile.json - `voice` (which installed
 # voice reads replies aloud) and `auto_ask` (true or false: whether a settled converse
 # draft asks itself after a pause). Plain JSON, yours to edit, but edit it with Flow
@@ -237,6 +243,42 @@ def ensure(path: Path | str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(TEMPLATE, encoding="utf-8")
     return True
+
+
+def append_pair(path: Path | str, wrong: str, right: str) -> str:
+    """Add one `wrong -> right` line. "" if it went in, otherwise the reason.
+
+    The whole of what Flow may do to this file. It appends one line, only on an explicit
+    tap in the menu, and never edits, reorders or removes one — the file is the user's,
+    and the second thing anyone does with it is delete the comments Flow wrote. So the
+    existing bytes come back byte for byte and the new line goes at the end.
+
+    A missing file is created from the template first, because the alternative is a file
+    containing one arrow and none of the explanation of what an arrow is.
+
+    `MAX_TERMS` is refused rather than trimmed. It is one budget across terms and
+    corrections together, and a silent drop past a cap is the exact failure this project
+    already found once in the decoder's own library.
+    """
+    path = Path(path)
+    try:
+        ensure(path)
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"could not open {path}: {exc}"
+    terms, corrections = entries(text)
+    if len(terms) + len(corrections) >= MAX_TERMS:
+        return (f"the lexicon is full at {MAX_TERMS} entries - "
+                "remove a line before adding another")
+    # A file whose last line has no newline would otherwise be joined to this one, and
+    # `term-> right` is a different entry from either of the two it was made of.
+    lead = "" if not text or text.endswith("\n") else "\n"
+    try:
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{lead}{wrong} -> {right}\n")
+    except OSError as exc:
+        return f"could not write {path}: {exc}"
+    return ""
 
 
 class Lexicon:

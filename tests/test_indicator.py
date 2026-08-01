@@ -434,6 +434,8 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
 
         pill = self._pill()
         pill.session.speaker = None  # skip the voice cascade; not what this pins
+        pill.session.profile = None  # nor the correction offers
+        pill.bubble = mock.Mock()
         with mock.patch.object(ui, "available", return_value=[]):
             pill._draw()
         self.assertEqual([t for _, _, t in pill.canvas.texts], ["ASK"])

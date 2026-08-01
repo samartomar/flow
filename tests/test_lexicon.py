@@ -415,7 +415,8 @@ class TestTheMenuOffersIt(unittest.TestCase):
         import flow.ui as ui
 
         pill = ui.Pill.__new__(ui.Pill)
-        pill.session = mock.Mock(mode=ui.DICTATE, speaker=None)
+        pill.session = mock.Mock(mode=ui.DICTATE, speaker=None, profile=None)
+        pill.settings_path = Path(tempfile.mkdtemp()) / "lexicon.txt"
         commands: dict = {}
 
         class FakeMenu:

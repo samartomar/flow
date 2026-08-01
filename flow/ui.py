@@ -21,7 +21,12 @@ from collections import deque
 from pathlib import Path
 
 from .inject import foreground_hwnd, owned_by_flow, take_warnings
-from .lexicon import DEFAULT_PATH as LEXICON_PATH, ensure as ensure_lexicon
+from .lexicon import (
+    DEFAULT_PATH as LEXICON_PATH,
+    append_pair,
+    ensure as ensure_lexicon,
+    pairs,
+)
 from .refine import available
 from .session import DICTATE, Session, State
 
@@ -372,6 +377,7 @@ class Pill(tk.Tk):
                 command=self.session.toggle_speech,
             )
             self._voice_menu(m)
+        self._offer_pairs(m)
         m.add_command(label="Clear draft", command=self._clear)
         m.add_command(label="Open settings folder", command=self._open_settings)
         m.add_separator()
@@ -455,6 +461,67 @@ class Pill(tk.Tk):
             self.bubble.show_sent(text)
         # Nothing else: an empty `text` means send() refused and said why in a note, and
         # hiding the bubble here is what used to take that explanation off the screen.
+
+    def _offer_pairs(self, m: tk.Menu) -> None:
+        """Words Flow keeps seeing corrected, offered for the user to declare.
+
+        Never silent. An inferred pair is a guess from a word-level diff, and turning
+        one into a substitution on its own would be Flow rewriting speech on evidence
+        it collected about itself. What the owner said is the other half: "unless it is
+        exposed to UI right click … i will not be able to use it" — so the boundary
+        stays and the typing goes. One tap on the offer declares it.
+
+        "Never" gets a submenu rather than a second tap on the offer, because the tap
+        that matters is the one that says yes.
+        """
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            return  # --no-profile: nothing was learned, so nothing is offered
+        # Everything that reads state is inside the guard, and the guard is wide on
+        # purpose. This runs on the UI thread from a right-click binding, *not* from
+        # `_tick` — so `_tick`'s catch cannot reach it, and an exception here would take
+        # out the menu, which is how somebody reaches Quit. Offers are the least
+        # important thing in it.
+        try:
+            try:
+                declared = pairs(Path(self.settings_path).read_text(encoding="utf-8"))
+            except OSError:
+                declared = []  # no file yet is the normal case, not a failure
+            offers = profile.offered_pairs(declared=declared)
+        except Exception as exc:
+            self.bubble.note(f"could not read the corrections: {exc}")
+            return
+        if not offers:
+            return
+        for wrong, right in offers:
+            m.add_command(
+                label=f"Add correction:  {wrong} → {right}",
+                command=lambda w=wrong, r=right: self._declare_pair(w, r),
+            )
+        never = tk.Menu(m, tearoff=0)
+        for wrong, right in offers:
+            never.add_command(
+                label=f"{wrong} → {right}",
+                command=lambda w=wrong, r=right: self._dismiss_pair(w, r),
+            )
+        m.add_cascade(label="Never offer", menu=never)
+        m.add_separator()
+
+    def _declare_pair(self, wrong: str, right: str) -> None:
+        """Write the arrow line the user has just agreed to."""
+        reason = append_pair(self.settings_path, wrong, right)
+        self.bubble.note(reason if reason
+                         else f"correction added: {wrong} → {right}")
+
+    def _dismiss_pair(self, wrong: str, right: str) -> None:
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            return
+        profile.dismiss_pair(wrong, right)
+        # Saved now rather than at the next Send, for the reason `set_voice` gives: a
+        # choice made just before closing the app is still a choice.
+        profile.save()
+        self.bubble.note(f"not offering {wrong} → {right} again")
 
     def _open_settings(self) -> None:
         """Show the folder Flow reads, with a lexicon file in it to type into.

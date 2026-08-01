@@ -582,14 +582,14 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `Thread.MAX_TURNS` / `MAX_CHARS` | 20 / 20 000 | R8. Measured: 5000 sends of a realistic prompt settle at 20 turns, 1640 chars |
 | `CONTEXT_CHARS` | 1500 | What a CLI rewrite may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |
 | `Lexicon.MAX_TERMS` | 64 | The library truncates its prompt at 223 tokens *silently, mid-term*, which would bias toward a fragment. Terms and corrections share it: one file, one person filling it, and counting them apart would let 64 corrections buy 64 hotwords past the budget |
-| `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern |
+| `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern. Two consumers now: it promotes a term to a hotword, and it decides when a pair is worth *offering* in the menu — the same bar for suggesting a substitution as for biasing toward a spelling, though only one of them rewrites what somebody said |
 | `Draft.MAX_HISTORY` / `MAX_HISTORY_CHARS` | 30 / 200 000 | 30 snapshots of a very long draft is where undo quietly becomes megabytes |
 
 ## 9. What is written to disk
 
 | Path | When | What |
 |---|---|---|
-| `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. Otherwise read-only to the app; re-read by mtime on every decode |
+| `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. **The one other thing Flow may write is a single appended `wrong -> right` line, and only on an explicit tap in the right-click menu** (see below): it never edits, reorders, removes or reformats a line, so everything already in the file comes back byte for byte. Re-read by mtime on every decode, which is how a pair added from the menu reaches the very next utterance |
 | `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, and whether auto-ask is on. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, and — on each route — how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
@@ -599,9 +599,18 @@ Send is the commit point for the profile: rare, user-initiated, and the moment a
 corrections have proved themselves by surviving to a handoff.
 
 There is no settings dialog, and the two files above are the reason: everything a user can
-set is already hand-editable text, and the whole gap was that nobody could find it. The
-right-click menu's **Open settings folder** writes `lexicon.txt` if it is missing and hands
-the folder to Explorer — `os.startfile`, so R16 keeps its three dependencies. The template's
+set is already hand-editable text. Finding it was **half** the gap — this document used to
+say it was the whole one, and the owner said otherwise: "unless it is exposed to UI right
+click … i will not be able to use it". Knowing where a file is does not make somebody open
+it, learn an arrow syntax and type into it. So the menu does both halves: **Open settings
+folder** writes `lexicon.txt` if it is missing and hands the folder to Explorer —
+`os.startfile`, so R16 keeps its three dependencies — and **the correction offers** put the
+pairs Flow has inferred twice straight into the menu, where one tap appends the arrow line
+and a **Never offer** submenu records a no that survives a restart. At most three are shown,
+most-seen first: the menu is a native modal loop that already costs a measured ~16 s stall
+at worst, and it must not grow with the profile. Offering is as far as it goes — an inferred
+pair is a guess from a word-level diff, and nothing turns one into a substitution without
+being told to. The template's
 comments are the documentation for both files, including the measured cost of biasing, on
 the grounds that the person about to add forty terms is the one who needs that number.
 
