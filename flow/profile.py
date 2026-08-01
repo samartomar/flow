@@ -134,9 +134,38 @@ class Profile:
     # -- what was learned --------------------------------------------------
 
     def learn_pair(self, wrong: str, right: str) -> None:
-        """Record one spoken correction as a confusion pair."""
-        wrong, right = wrong.strip(), right.strip()
-        if not wrong or not right or wrong.lower() == right.lower():
+        """Record one spoken correction as a confusion pair.
+
+        Two things here were quietly throwing away the corrections most worth keeping.
+
+        **Case-only fixes are the point, not a no-op.** The guard used to compare
+        `wrong.lower() == right.lower()`, which discards "priya" -> "Priya" — and
+        capitalising a name is the single most common vocabulary correction there is.
+        The model wrote the lower-case form and the user wants the upper-case one; that
+        is exactly the supervision `hotwords` needs. Only an *identical* string is a
+        genuine no-op.
+
+        **Punctuation split the counter.** Both sides come from a word-level diff of the
+        draft, so the same name arrives as "priya," in one sentence and "priya" in the
+        next — two keys, one count each, and a term corrected twice never reaches
+        `PROMOTE_AFTER` and is never learned at all. Stripped on *both* sides: the
+        right-hand side becomes a hotword verbatim, and "Priya," biases the decoder
+        toward a spelling with a comma welded to it.
+        """
+        edge = ".,!?;:\"'"
+        wrong, right = wrong.strip().strip(edge), right.strip().strip(edge)
+        if not wrong or not right or wrong == right:
+            return
+        # A case fix that only *removes* capitals is formatting, not vocabulary:
+        # "RELEASE NOTES" -> "release notes" teaches a common phrase, and biasing the
+        # decoder toward common phrases is the measured harm in flow/lexicon.py, not the
+        # benefit. Going the other way — "priya" -> "Priya", "nasa" -> "NASA" — is a
+        # proper noun being marked as one, which is exactly what a hotword is for.
+        #
+        # Note this tests the pair, not the case of the result: "cube cuttle" ->
+        # "kubectl" is not a case variant at all, and an all-lower-case identifier is
+        # one of the most valuable terms there is.
+        if wrong.lower() == right.lower() and right == right.lower():
             return
         if len(right) > 40 or len(right.split()) > 4:
             return  # a hotword, not a sentence

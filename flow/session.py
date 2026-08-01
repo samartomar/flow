@@ -24,12 +24,22 @@ from . import MAX_UTTERANCE_SEC, SAMPLE_RATE
 from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
 from .edits import (
+    added_text,
     apply_local,
     command_bias,
     describe_change,
     plan,
     removed_text,
 )
+
+#: P4/P8: the local operations that teach Flow a spelling. Every one of these replaces
+#: some words with others, so the diff names both halves of a confusion pair. The rest
+#: (delete, insert, break, undo) either take words away or add words that were never a
+#: correction of anything, and have nothing to teach.
+#: `lower` is deliberately absent. The other four mark a token as a name, an acronym or
+#: a different word; lower-casing marks it as ordinary prose, which is the one thing not
+#: worth biasing a decoder toward.
+LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
 from .refine import ask, refine
 from .thread import Thread
 
@@ -602,18 +612,24 @@ class Session:
             new, applied = apply_local(before, p)
             if applied:
                 self.draft.set(new)
-                # P8: "change X to Y" is a confusion pair the user labelled themselves
-                # — the model wrote X, they wanted Y. Exactly the supervision hotwords
+                # P8: a correction is a confusion pair the user labelled themselves —
+                # the model wrote X, they wanted Y. Exactly the supervision hotwords
                 # need, and free to collect.
-                if self.profile is not None and p.op in ("replace", "replace_all"):
-                    # The pair comes from the *texts*, not from the plan. "change
+                #
+                # The case operations are in this list, and they are not an afterthought:
+                # "capitalize sameer" is how people fix a name, it is item 3 on the
+                # recording sheet, and it used to teach nothing at all because the plan
+                # carries only a target and no payload.
+                if self.profile is not None and p.op in LEARNABLE:
+                    # Both sides come from the *texts*, not from the plan. "change
                     # sameer to Samir" is transcribed "change Samir to Samir" — the
                     # spoken target and payload are homophones, which is precisely why
                     # the correction was needed — so learning from the plan discards
-                    # exactly the corrections worth learning. What was removed from the
-                    # draft is the model's own wrong reading, which is the label.
+                    # exactly the corrections worth learning. What left the draft is the
+                    # model's own wrong reading; what arrived is the spelling wanted.
                     gone = removed_text(before, new).split(" … ")[0]
-                    self.profile.learn_pair(gone, p.payload)
+                    got = added_text(before, new).split(" … ")[0]
+                    self.profile.learn_pair(gone, got or p.payload)
                 self._emit("note", f"local: {describe_change(p, before, new)}")
             else:
                 # Asked for something we could not do locally — escalate rather than

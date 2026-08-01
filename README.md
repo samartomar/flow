@@ -406,11 +406,30 @@ Two sources bias it back:
 changes so a name added mid-session lands on the next utterance. Capped at 64 whole terms
 (the library silently truncates mid-term at 223 tokens).
 
-**What Flow learned from you** — every "change X to Y" you speak is a confusion pair you
-labelled yourself: the model wrote X, you wanted Y. Once a pair recurs, Y joins the decode
-bias. Only Y: the wrong reading is what the model already produces unaided, so feeding it
-back would bias toward the mistake. These live in the profile, not in your file — the file
-stays something you typed and own.
+**What Flow learned from you** — a spoken correction is a confusion pair you labelled
+yourself: the model wrote X, you wanted Y. Say the same fix **twice** and Y joins the
+decode bias, live, with no file to edit and no restart. Only Y: the wrong reading is what
+the model already produces unaided, so feeding it back would bias toward the mistake.
+These live in the profile, not in your file — the file stays something you typed and own.
+
+Both phrasings teach, and they agree with each other:
+
+```
+capitalize sameer          -> learns Sameer
+change sameer to Samir     -> learns Samir
+all caps nasa              -> learns NASA
+change cube cuttle to kubectl -> learns kubectl
+```
+
+Two things deliberately teach nothing. **Lower-casing** (`lowercase RELEASE NOTES`) is
+formatting rather than vocabulary, and biasing a decoder toward a common phrase is the
+measured harm below, not the benefit. And **one correction is not enough** — once is as
+likely to be you changing your mind as the model mishearing; twice is a pattern.
+
+The catch is that this rides on the correction grammar, so it only fires when a
+correction is *recognised*. If you phrase corrections descriptively rather than as
+commands, nothing is learned either — see the register limitation in
+[Known limitations](#known-limitations).
 
 Undo-straight-after-append is also recorded, as the signature of a command read as
 dictation. It is **reported**, never applied automatically: changing the alias table

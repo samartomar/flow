@@ -466,6 +466,25 @@ def removed_text(before: str, after: str, limit: int = 60) -> str:
     return joined if len(joined) <= limit else joined[: limit - 1] + "…"
 
 
+def added_text(before: str, after: str, limit: int = 60) -> str:
+    """The words an edit put in, the mirror of `removed_text`.
+
+    Needed because a case operation has no payload to learn from: "capitalize sameer"
+    carries only a target, and the corrected spelling exists nowhere except in the
+    resulting draft. Taken from the diff for the same reason `removed_text` is — the
+    plan knows what was asked for, and only the two texts know what actually landed.
+    """
+    old, new = before.split(), after.split()
+    got = []
+    for tag, _, _, j1, j2 in SequenceMatcher(
+        None, old, new, autojunk=False
+    ).get_opcodes():
+        if tag in ("insert", "replace"):
+            got.append(" ".join(new[j1:j2]))
+    joined = " … ".join(x for x in got if x)
+    return joined if len(joined) <= limit else joined[: limit - 1] + "…"
+
+
 def describe_change(p: Plan, before: str, after: str) -> str:
     """What to tell the user an edit just did.
 

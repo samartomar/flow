@@ -366,3 +366,81 @@ class TestLearningUsesTheRemovedText(unittest.TestCase):
         s.draft.set("hi priya, Samir is writing the notes.")
         s._route("change Samir to Samir")
         self.assertFalse(p.pairs)
+
+
+class TestCorrectionsTeachVocabularyOnTheFly(unittest.TestCase):
+    """P4: a spoken correction is a labelled confusion pair, so it should be the way a
+    name enters the decode bias — no file to edit, no restart.
+
+    It mostly was not. Three separate gaps meant the corrections people actually make
+    taught nothing: case fixes were discarded as no-ops, punctuation split the counter
+    so a name corrected twice never reached the promotion threshold, and the case
+    operations were not in the learnable set at all despite "capitalize sameer" being
+    how anyone fixes a name — it is item 3 on the recording sheet.
+    """
+
+    DRAFT = "hi priya, sameer is writing the notes."
+    OTHER = "I told priya about the migration."
+
+    def _learn(self, pairs):
+        """Drive the real router and the real learning path over (utterance, draft)."""
+        from flow.edits import added_text, apply_local, plan, removed_text
+        from flow.session import LEARNABLE
+
+        p = tmp_profile()
+        for utterance, draft in pairs:
+            planned = plan(utterance, draft)
+            if planned.kind != "local":
+                continue
+            new, applied = apply_local(draft, planned)
+            if applied and planned.op in LEARNABLE:
+                gone = removed_text(draft, new).split(" … ")[0]
+                got = added_text(draft, new).split(" … ")[0]
+                p.learn_pair(gone, got or planned.payload)
+        return p
+
+    def test_capitalising_a_name_teaches_it(self):
+        p = self._learn([("capitalize sameer", self.DRAFT)] * 2)
+        self.assertEqual(p.learned_terms(), ["Sameer"])
+
+    def test_punctuation_does_not_split_the_counter(self):
+        # "priya," in one sentence and "priya" in the next is the same name. Kept as
+        # two keys, each is stuck at one and neither is ever promoted.
+        p = self._learn([
+            ("change priya to Priya", self.DRAFT),
+            ("change priya to Priya", self.OTHER),
+        ])
+        self.assertEqual(p.learned_terms(), ["Priya"])
+
+    def test_two_different_phrasings_of_the_same_fix_agree(self):
+        p = self._learn([
+            ("capitalize priya", self.DRAFT),
+            ("change priya to Priya", self.OTHER),
+        ])
+        self.assertEqual(p.learned_terms(), ["Priya"])
+
+    def test_an_acronym_is_learned(self):
+        p = self._learn([("all caps nasa", "i work at nasa today.")] * 2)
+        self.assertEqual(p.learned_terms(), ["NASA"])
+
+    def test_lower_casing_teaches_nothing(self):
+        # Formatting, not vocabulary. Biasing the decoder toward a common phrase is the
+        # measured harm in flow/lexicon.py, not the benefit.
+        p = self._learn([("lowercase RELEASE NOTES", "the RELEASE NOTES are ready.")] * 2)
+        self.assertEqual(p.learned_terms(), [])
+
+    def test_an_all_lower_case_identifier_is_still_learned(self):
+        # The guard above tests the *pair*, not the case of the result: "kubectl" is
+        # not a case variant of "cube cuttle", and it is worth biasing toward.
+        p = self._learn([("change cube cuttle to kubectl", "run cube cuttle apply now.")] * 2)
+        self.assertEqual(p.learned_terms(), ["kubectl"])
+
+    def test_one_correction_is_not_enough(self):
+        # Once is as likely to be the user changing their mind as the model mishearing.
+        p = self._learn([("capitalize sameer", self.DRAFT)])
+        self.assertEqual(p.learned_terms(), [])
+
+    def test_a_learned_term_reaches_the_decoder_without_a_lexicon_file(self):
+        p = self._learn([("capitalize sameer", self.DRAFT)] * 2)
+        lx = Lexicon(NUL_PATH, learned=p.learned_terms)
+        self.assertEqual(lx.hotwords(), "Sameer")
