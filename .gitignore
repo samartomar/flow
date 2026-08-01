@@ -16,6 +16,10 @@ __pycache__/
 # from. 19 MB, no reader, and regenerable from inbox/ if one is ever wanted again.
 .bench/**/*.npy
 .bench/**/*.bak
+# Voice auditions. `voices.py --speak --wav` renders one WAV per installed voice so a
+# voice can be chosen by ear; the set changes whenever Windows gains or loses one, and
+# nothing reads them afterwards.
+.bench/voices/
 # A run marker: `send_check.py --live` deletes and rewrites it every time, so tracking
 # it would mean a dirty worktree after every measurement. Its content is the word
 # "landed".

@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         help="never read converse-mode replies aloud",
     )
     ap.add_argument(
+        "--voice", default=None,
+        help="voice for spoken replies: a name, part of one, or male/female "
+             "(list them with scripts/voices.py)",
+    )
+    ap.add_argument(
         "--no-auto-ask", action="store_true",
         help="in converse mode, wait for the Ask button instead of a pause",
     )
@@ -141,14 +146,24 @@ def main(argv: list[str] | None = None) -> int:
     # the opt-in; a conversation you have to read is not the feature.
     speaker = None
     if not args.no_speak:
-        from .speak import Speaker
+        from .speak import Speaker, installed_voices, pick
 
-        speaker = Speaker()
+        # The flag wins over the profile, and the profile over the engine default. A
+        # saved voice that has since been uninstalled resolves to None and is said out
+        # loud rather than silently ignored — the reply would otherwise come back in a
+        # voice nobody chose, which reads as the setting not working.
+        wanted = args.voice or (profile.voice if profile is not None else None)
+        chosen = pick(wanted)
+        if wanted and chosen is None:
+            say(f"voice: {wanted!r} is not installed - using the engine default")
+        speaker = Speaker(voice=chosen)
         if not speaker.available:
             say("speech: engine unavailable - replies will be silent")
             speaker = None
         else:
-            say("speech: on (converse-mode replies are read aloud; --no-speak to mute)")
+            n = len(installed_voices())
+            say(f"speech: on, voice {chosen or 'engine default'} "
+                f"({n} installed; --voice, or the right-click menu, to change)")
 
     session = Session(
         asr=WhisperTranscriber(

@@ -109,7 +109,7 @@ refine CLI: codex
 models: base.en for partials, small.en for finals
 profile: room -96.5 dB, margin 18.0 dB, 2 learned pairs
 lexicon: none - create C:\Users\you\.flow\lexicon.txt to bias names and jargon
-speech: on (converse-mode replies are read aloud; --no-speak to mute)
+speech: on, voice Microsoft Susan (9 installed; --voice, or the right-click menu, to change)
 mode: DICTATE - Send pastes into the focused window (--converse, or ctrl+alt+M, to ask instead)
 hotkey  toggle   ctrl+alt+space
 hotkey  send     ctrl+alt+enter
@@ -136,6 +136,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--no-profile` | ignore the stored profile and learn nothing this session |
 | `--converse` | start in converse mode: Send asks the agent CLI instead of pasting ([P9](#converse-mode-p9)) |
 | `--no-speak` | never read converse-mode replies aloud |
+| `--voice X` | voice for spoken replies: a name, part of one, or `male`/`female` |
 | `--no-auto-ask` | in converse mode, wait for the Ask button instead of a pause |
 
 If capture cannot start — no microphone, device held exclusively by another app, a bad
@@ -399,6 +400,36 @@ reply. That is not an optimisation: a subprocess that has already been launched 
 told to stop talking, and PowerShell costs ~700 ms of startup before the first phoneme.
 Nothing is installed and nothing leaves the machine.
 
+### Choosing the voice
+
+Flow used to speak in whatever voice the engine defaulted to, which was never chosen by
+anyone — on the development machine, the oldest voice installed. Pick one instead:
+
+```bash
+uv run python scripts/voices.py --speak      # hear each installed voice in turn
+uv run flow --voice susan                    # a name, part of one, or male / female
+```
+
+…or **right-click → Voice**, which lists what is installed and ticks the one in use. The
+choice is saved to `~/.flow/profile.json` immediately, so it survives a restart. A saved
+voice that has since been uninstalled falls back to the engine default and *says so* at
+startup rather than quietly speaking in something else.
+
+**If everything on offer sounds dated, that is the machine and not Flow.** Windows ships
+far better voices than it installs. Add them under *Settings → Accessibility → Narrator →
+Add natural voices*; anything you add appears in the list and the menu with no change to
+Flow. macOS has the same shape of fix under *Settings → Accessibility → Spoken Content →
+Manage Voices* — though Flow does not run there yet.
+
+One measured detail that decides what you can reach: `System.Speech` is a .NET API with
+two implementations, and they do not enumerate the same voices. Windows PowerShell 5.1
+reads only the legacy SAPI5 store; PowerShell 7 also reads the OneCore store, which is
+where Windows registers everything modern, natural voices included. On the development
+machine that was the difference between **2 voices and 9**. Flow therefore prefers `pwsh`
+and falls back to `powershell`, and uses the same executable to list and to speak — a
+menu offering voices the host cannot select would fail silently, which is how you end up
+choosing a voice and hearing a different one.
+
 ### Asking without pressing anything
 
 A conversation where you press a button after every sentence is not a conversation. In
@@ -652,6 +683,7 @@ anywhere, and Send reporting success. After: 18 of 18.
 | `send_check.py` | do the words a pressed Send hands over actually arrive — `--live` opens a window and a console and clicks the chip with the real mouse |
 | `fetch_accent_data.py` | pull per-accent evaluation slices into `.bench/` |
 | `ingest_recordings.py` | turn a volunteer's phone recording into scored clips (P3) |
+| `voices.py` | which voices this machine has, and what each one sounds like — `--speak` says a line in each, `--wav` writes them |
 | `tk_probe.py` | the window attributes the pill depends on |
 | `ui_probe.py` | render the pill and bubble against a fake session that walks every state — `--hold STATE` pins one, `--bare` drops the draft, `--sent` presses Send so the card it leaves behind can be looked at |
 | `slim.py` | trim the unreachable dependencies |

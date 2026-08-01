@@ -59,6 +59,12 @@ class Profile:
         self.speech_db: float | None = None
         self.confidence: float | None = None
         self.calibrated_at: float | None = None
+        #: P9: which voice reads the replies. A name, not an index — the engine's own
+        #: identifier, so a voice added or removed between sessions cannot silently
+        #: shift the choice onto a different one. No schema bump: every read here has a
+        #: fallback, so an older profile loads with no voice and an older Flow ignores
+        #: the key it does not know.
+        self.voice: str | None = None
         #: "wrong -> right", counted. Counted rather than listed so a one-off does not
         #: become a permanent bias.
         self.pairs: Counter[str] = Counter()
@@ -80,6 +86,7 @@ class Profile:
         self.speech_db = raw.get("speech_db")
         self.confidence = raw.get("confidence")
         self.calibrated_at = raw.get("calibrated_at")
+        self.voice = raw.get("voice")
         self.pairs = Counter(raw.get("pairs") or {})
         self.misroutes = Counter(raw.get("misroutes") or {})
         return True
@@ -91,6 +98,7 @@ class Profile:
             "speech_db": self.speech_db,
             "confidence": self.confidence,
             "calibrated_at": self.calibrated_at,
+            "voice": self.voice,
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
         }

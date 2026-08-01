@@ -332,6 +332,7 @@ class Pill(tk.Tk):
                 label="Mute replies" if not self.session.muted else "Speak replies",
                 command=self.session.toggle_speech,
             )
+            self._voice_menu(m)
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
         m.add_command(label="Quit", command=self.quit_app)
@@ -359,6 +360,37 @@ class Pill(tk.Tk):
             m.grab_release()  # the documented idiom; harmless, and cheap insurance
             if previous:
                 _user32.SetForegroundWindow(previous)
+
+    def _voice_menu(self, parent: tk.Menu) -> None:
+        """A submenu of the voices this machine actually has.
+
+        Listed rather than cycled: "next voice" is unusable when the good one is fourth
+        of nine, and the whole reason this exists is that the engine's default is the
+        oldest voice on the box and nobody had ever chosen it. A tick marks the one in
+        use, so the answer to "which am I hearing" is on screen and not in a log line
+        that scrolled away at startup.
+        """
+        voices = self.session.voices()
+        if not voices:
+            return
+        sub = tk.Menu(parent, tearoff=0)
+        # Read from the engine and rebuilt on every open, so it cannot drift from a
+        # voice set by --voice or by a profile written in another session. Held on self
+        # because a Tk variable that goes out of scope stops driving the indicator.
+        self._voice_var = tk.StringVar(
+            value=getattr(self.session.speaker, "voice", None) or ""
+        )
+        sub.add_radiobutton(
+            label="Engine default", value="", variable=self._voice_var,
+            command=lambda: self.session.set_voice(None),
+        )
+        sub.add_separator()
+        for v in voices:
+            sub.add_radiobutton(
+                label=v.describe(), value=v.name, variable=self._voice_var,
+                command=lambda name=v.name: self.session.set_voice(name),
+            )
+        parent.add_cascade(label="Voice", menu=sub)
 
     def _send(self) -> None:
         """R5: hand the draft over, and leave it recoverable either way."""

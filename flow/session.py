@@ -1020,6 +1020,38 @@ class Session:
 
     # -- actions -----------------------------------------------------------
 
+    def voices(self) -> list:
+        """What this machine can speak with. Empty when there is no engine at all.
+
+        Cached in `speak`, and warmed at startup by `__main__` when the engine is
+        available — which matters because the UI thread calls this to build the menu,
+        and the uncached answer costs a PowerShell start-up (measured: 516 ms cold,
+        0.01 ms warm). Left as a plain call rather than made async: it is warm by the
+        time any menu opens, and a background thread here would be a second way to
+        reach the engine for no benefit.
+        """
+        if self.speaker is None:
+            return []
+        from .speak import installed_voices
+
+        return installed_voices()
+
+    def set_voice(self, name: str | None) -> bool:
+        """P9: choose the voice that reads the replies, and remember it.
+
+        Saved immediately rather than at the next Send, which is where the profile is
+        normally committed. A voice is chosen by listening to it, and someone who picks
+        one and closes the app has still made the choice.
+        """
+        if self.speaker is None:
+            return False
+        self.speaker.use(name)
+        if self.profile is not None:
+            self.profile.voice = name
+            self.profile.save()
+        self._emit("note", f"voice: {name}" if name else "voice: engine default")
+        return True
+
     def toggle_speech(self) -> bool:
         """Mute or unmute spoken replies mid-session. True when it will now speak."""
         self.muted = not self.muted

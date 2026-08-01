@@ -55,7 +55,7 @@ the user's own file — so the merged result biases both decoder tiers.
 | `profile.py` | personal | what was measured and learned, as JSON |
 | `lexicon.py` | personal | the user's own terms, re-read on change |
 | `refine.py` | external | rewrite, polish (P5) and converse ask (P9) |
-| `speak.py` | external | one long-lived SAPI host; owns `speaking`, which gates the mic |
+| `speak.py` | external | one long-lived SAPI host; owns `speaking`, which gates the mic, and which voice reads the reply |
 
 ## 2. The loop, end to end
 
@@ -420,6 +420,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `ui.SENT_LINGER_SEC` | 4 s | How long the bubble holds what a dictate-mode Send just handed over, with the chip that puts it back. Deliberately **not** `AUTO_ASK_SEC`, which is also 4 s and is a different four seconds: that one is how long a settled draft waits before asking itself, this is how long words stay recoverable after they have gone, and either could move without the other. The number it replaces was zero — the bubble was withdrawn on Send, so a Send that went nowhere and a Send that worked left the same empty screen |
 | `ui.DOT_SEC` | 0.4 s | One dot of the indeterminate-wait animation. The bubble renders on events and a wait has no events, so the frame is computed and compared before anything is drawn — at this cadence that is ~2.5 repaints a second instead of the 33 that redrawing every pump would cost. Same discipline as the auto-ask countdown |
 | `DEAF_DB` | −120.0 | What `level_db` reports while the microphone is not evidence. Below any real room — a quiet room with a good USB mic measures −96.7 dB — so every meter maps it to silence without having to know why |
+| `speak.HOSTS` | `pwsh`, then `powershell` | Which PowerShell speaks. Not a style choice: `System.Speech` is a .NET API with two implementations that do not enumerate the same voices. Windows PowerShell 5.1 reads only the legacy SAPI5 token store; PowerShell 7 also reads OneCore, where Windows registers everything modern — natural voices included. Measured: **2 voices under `powershell`, 9 under `pwsh`** on the same machine. The same executable must list *and* speak, or the menu offers names `SelectVoice` will quietly refuse |
 | `speak.WORDS_PER_SEC` | 1.5 | Half the measured rate (a 15-word sentence took 4.9 s at rate 1), so the derived ceiling on `speaking` is generous. It gates the microphone, and a latched value would leave Flow permanently deaf — far worse than leaking a little echo |
 | `BLOCK` | 1024 (64 ms) | Fine enough for a responsive level meter |
 | `PREROLL_BLOCKS` | 4 (256 ms) | A gate can only open after hearing something loud, so the quiet head of that word is already gone — the unaspirated stop, the soft fricative. Without it "delete" becomes "leet". Measured: gating without pre-roll deletes 2.6% of the audio; any pre-roll from 128 ms up returns WER to the ungated level |
@@ -445,7 +446,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | Path | When | What |
 |---|---|---|
 | `~/.flow/lexicon.txt` | never by Flow | the user's own terms. Read-only to the app; re-read by mtime on every decode |
-| `~/.flow/profile.json` | `--calibrate`, and every Send | schema 1. Room, voice, this speaker's confidence, learned confusion pairs, misroute signatures. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
+| `~/.flow/profile.json` | `--calibrate`, every Send, and choosing a voice | schema 1. Room, voice, this speaker's confidence, learned confusion pairs, misroute signatures, and which installed voice reads the replies (additive — an older profile loads with none). Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and the volunteer recordings. **Tracked**, because a result is a measurement taken at a moment and a recording is a person — neither is reproducible by re-running anything. The downloadable accent corpora are excluded and their manifests are not; [`.bench/README.md`](../.bench/README.md) is the inventory |
 
