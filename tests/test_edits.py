@@ -555,6 +555,44 @@ class TestTheFollowUpParticleCanBeElided(unittest.TestCase):
                 self.assertEqual(self.routed(s), "followup/")
 
 
+class TestTakingTheAnswerCanBeSpoken(unittest.TestCase):
+    """An exact small set, whole-utterance only — item 20's discipline exactly.
+
+    "use that answer in the summary" is prose and must stay dictation, which is what
+    whole-utterance matching buys: the phrase is a command only when it is the entire
+    thing said, so a false fire needs the speaker to have said nothing else.
+    """
+
+    DRAFT = "Ship the release notes on Tuesday."
+
+    def routed(self, text: str) -> str:
+        p = plan(text, self.DRAFT)
+        return f"{p.kind}/{p.op}"
+
+    def test_the_exact_forms_route_to_the_take(self):
+        for s in ("use that answer", "use that reply", "Use that answer.",
+                  "use the answer", "take that answer"):
+            with self.subTest(s=s):
+                self.assertEqual(self.routed(s), "take/")
+
+    def test_a_hedge_in_front_is_still_the_same_utterance(self):
+        # `_LEAD` already carries "okay", "so", "please" everywhere else in this file.
+        self.assertEqual(self.routed("okay, use that answer"), "take/")
+
+    def test_the_same_words_inside_a_sentence_are_dictation(self):
+        for s in ("use that answer in the summary",
+                  "use that reply as the opening paragraph",
+                  "I will use that answer tomorrow",
+                  "we should use the answer from the other thread"):
+            with self.subTest(s=s):
+                self.assertEqual(self.routed(s), "append/")
+
+    def test_and_neighbouring_phrases_are_not_swept_in(self):
+        for s in ("use that", "answer that", "use it"):
+            with self.subTest(s=s):
+                self.assertNotEqual(self.routed(s), "take/")
+
+
 class TestRescueMatchesItsOwnButton(unittest.TestCase):
     """The chip is labelled "Was a command", so that phrase has to work when spoken.
 

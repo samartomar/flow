@@ -558,3 +558,114 @@ class TestTheProviderIsNamedBeforeTheFact(unittest.TestCase):
             s._start_ask("can you hear me")
             s.wait_idle(timeout=5.0)
         self.assertIn("asking codex", self.notes(s))
+
+
+class TestTheReplyCanBecomeTheDraft(unittest.TestCase):
+    """P9 promised the verb and the loop dead-ended without it.
+
+    The owner's workshop loop is discuss in converse, refine, then send the good version
+    to the terminal — and `send()` hands over the *draft*, while the refined prompt is in
+    the *reply*. P9's own scenario promises the connection ("turn that last answer into a
+    code comment" and paste it); nothing built it, so the answer could only be re-typed.
+
+    Replace, never append: an answer is a whole thing, and gluing it onto a half-written
+    question makes a third thing nobody asked for. Undo is what makes that safe.
+    """
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def answered(self, text: str = "Write a migration that adds last_seen_at.", **kw):
+        s = session(**kw)
+        s.toggle_mode()
+        s.draft.set("how do I add a column")
+        with mock.patch("flow.session.ask", return_value=(text, "codex")):
+            s.send()
+            s.wait_idle(timeout=5.0)
+        self.assertEqual(s.reply, text)
+        s.events()
+        return s
+
+    def test_taking_it_into_an_empty_draft_is_verbatim(self):
+        s = self.answered()
+        self.assertEqual(s.draft.text, "")
+        self.assertTrue(s.take_reply())
+        self.assertEqual(s.draft.text, "Write a migration that adds last_seen_at.")
+
+    def test_and_the_revision_moved_so_undo_holds_the_empty_state(self):
+        s = self.answered()
+        was = s.draft.revision
+        s.take_reply()
+        self.assertGreater(s.draft.revision, was)
+        s.draft.undo()
+        self.assertEqual(s.draft.text, "")
+
+    def test_a_non_empty_draft_is_replaced_and_the_note_says_what_went(self):
+        s = self.answered()
+        s.draft.set("some half-written question")
+        s.events()
+        s.take_reply()
+        self.assertEqual(s.draft.text, "Write a migration that adds last_seen_at.")
+        self.assertIn("replaced", self.notes(s))
+        s.draft.undo()
+        self.assertEqual(s.draft.text, "some half-written question")
+
+    def test_taking_it_flips_to_dictate_and_says_send_now_pastes(self):
+        # Staying in converse would make the next Send re-ask Flow's own answer back at
+        # the CLI, which is the exact confusion this verb exists to remove.
+        s = self.answered()
+        self.assertEqual(s.mode, CONVERSE)
+        s.take_reply()
+        self.assertEqual(s.mode, DICTATE)
+        self.assertIn("paste", self.notes(s).lower())
+
+    def test_it_does_not_arm_the_auto_ask_countdown(self):
+        # A taken draft is not a settled utterance. Without this the trap is converse
+        # auto-asking the owner's own answer straight back at the CLI. Item 17's editor
+        # held the countdown; this removes what it counts from, which is the stronger
+        # guard of the two — there is no clock to run down rather than a clock on hold.
+        s = self.answered()
+        s.take_reply()
+        self.assertIsNone(s.auto_ask_in, "the countdown armed on a taken reply")
+        # Even back in converse, and even after the pause has elapsed: nothing settled
+        # this draft, so there is nothing counting.
+        s.mode = CONVERSE
+        with mock.patch("flow.session.ask", return_value=("no", "codex")) as asked:
+            for _ in range(5):
+                s.tick()
+            self.assertIsNone(s.auto_ask_in)
+            asked.assert_not_called()
+        s.close()
+
+    def test_but_speaking_afterwards_settles_it_the_ordinary_way(self):
+        # The guard is "a taken reply is not an utterance", not "this draft is frozen".
+        # Once the user says something in converse, the countdown is theirs again.
+        s = self.answered()
+        s.take_reply()
+        s.mode = CONVERSE
+        s._route("and mention the rollback plan")
+        self.assertIsNotNone(s.auto_ask_in, "speech no longer settles the draft")
+        s.close()
+
+    def test_taking_it_stops_the_reply_being_read_aloud(self):
+        # Reaching for the text is "I have what I need".
+        sp = FakeSpeaker()
+        s = self.answered(speaker=sp)
+        self.assertTrue(sp.speaking)
+        s.take_reply()
+        self.assertFalse(sp.speaking)
+
+    def test_with_no_reply_there_is_nothing_to_take(self):
+        s = session()
+        self.assertFalse(s.take_reply())
+        self.assertEqual(s.draft.text, "")
+        self.assertIn("no answer", self.notes(s))
+
+    def test_a_twelve_thousand_character_artifact_is_taken_whole(self):
+        # ASK_ARTIFACT_MAX_CHARS is 12 000 and taking one as the draft is legitimate —
+        # the artifact *was* the deliverable. refine.MAX_CHARS still applies if the
+        # owner then rewrites it, and the existing tail note already says so.
+        big = "x" * 12_000
+        s = self.answered(big)
+        s.take_reply()
+        self.assertEqual(len(s.draft.text), 12_000)

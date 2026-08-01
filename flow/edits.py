@@ -151,6 +151,24 @@ _RECALL = re.compile(
     re.I,
 )
 
+#: P9. "That answer is the prompt I wanted" — the reply becomes the draft.
+#:
+#: An exact small set, and **whole-utterance only**, which is the entire safety argument:
+#: "use that answer in the summary" is prose and must stay dictation, so the phrase is a
+#: command only when it is the whole thing said. A false fire therefore needs the speaker
+#: to have said nothing else, which is a much rarer accident than a phrase appearing
+#: mid-sentence. Priced on `command_bench.py` before admitting, the way "follow and" was.
+#:
+#: The chip on the bubble does the same thing and is the floor: it cannot be mis-decoded,
+#: and the workshop loop has to work for somebody this decoder keeps mis-hearing.
+_TAKE_REPLY = re.compile(
+    "^" + _LEAD + r"(?:use|take|keep|grab)"
+    r"(?: that| the| this)?(?: last)?"
+    r"(?: answer| reply| response)"
+    r"[.!?]*$",
+    re.I,
+)
+
 #: The trailing group is the rest of the utterance, so "follow up, and add the logs"
 #: is one turn rather than two: the user should not have to pause after the verb.
 #:
@@ -614,6 +632,11 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
 
     if _RECALL.match(u):
         return Plan("recall")
+
+    # Before `_FOLLOWUP`, which has no overlap today but is the neighbouring thread verb
+    # and the one somebody would extend next.
+    if _TAKE_REPLY.match(u):
+        return Plan("take")
 
     if m := _FOLLOWUP.match(u):
         return Plan("followup", payload=_strip(m[1] or ""))

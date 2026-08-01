@@ -1101,6 +1101,9 @@ class Bubble(tk.Toplevel):
         # present but usually does nothing teaches people to ignore it.
         if getattr(self.pill.session, "can_rescue", False):
             specs.append(("Was a command", "Was a command", self._was_a_command))
+        # Same gating, same reason: only while an answer is on screen to take.
+        if self._reply and getattr(self.pill.session, "can_take_reply", False):
+            specs.append(("Use this", "Use this", self._take_reply))
         if getattr(self.pill.session, "mode", DICTATE) != DICTATE:
             # The countdown lives on the button it is going to press. Anywhere else it
             # is just a timer running somewhere on screen; here it says which action is
@@ -1249,6 +1252,19 @@ class Bubble(tk.Toplevel):
         # Reaching for any chip means the user is still working on this draft.
         self.pill.session.hold_auto_ask()
         self.pill.session.rescue_last_append()
+
+    def _take_reply(self) -> None:
+        """P9's verb, on the card the answer is drawn on.
+
+        The chip is the floor for this feature whatever the spoken form does: it cannot
+        be mis-decoded, and the workshop loop is unusable without *some* way across.
+        """
+        if self.pill.session.take_reply():
+            # The answer has been moved, so the card stops showing it as an answer —
+            # otherwise the same text sits on screen twice, once as a reply and once as
+            # the draft, and only one of them is what Send will hand over.
+            self._reply = ""
+            self._render()
 
     # -- repairing the text by hand ----------------------------------------
 

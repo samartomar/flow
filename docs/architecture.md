@@ -137,8 +137,19 @@ which is 34% of the 30 ms the UI thread has to draw in.
       ├── DICTATE  ──▶ inject.paste()   clipboard + SendInput, terminal-aware
       └── CONVERSE ──▶ refine.ask()     agent CLI, reply rendered + spoken
                             │
-                            └──▶ Thread (bounded), so the next question has context
+                            ├──▶ Thread (bounded), so the next question has context
+                            │
+                            └──▶ Session.take_reply()   the "Use this" chip, or
+                                 the answer *becomes* the draft, replacing it,
+                                 and the mode flips to DICTATE so the next Send
+                                 pastes rather than re-asking Flow's own answer
 ```
+
+That last arrow is the loop closing. Converse mode is where a prompt gets discussed and
+refined, and until it existed the refined prompt was in the *reply* while `send()` handed
+over the *draft* — so the only way across was to re-type it. Replace and not append: an
+answer is a whole thing, and gluing it onto a half-written question makes a third thing
+nobody asked for. Undo is what makes that safe, and the note names what was displaced.
 
 The rule that shapes all of it: **the agent CLI is never on the hot path.** A CLI call was
 measured at ~7 s, which is slower than fixing a word by hand, so `edits.py` exists to keep
@@ -441,6 +452,18 @@ being admitted, **0/580** misroutes on real utterances (unchanged), adversarial 
 whole result file came back identical apart from its date, because the corpus contains no
 "follow and" utterance at all — which is what "costs nothing" means here.
 
+**The thread verbs.** `recall` brings the last sent prompt back, `followup` marks the
+next thing said as a continuation, and `take` moves the CLI's answer into the draft.
+All three mean something with an *empty* draft, which is why they are checked before
+the empty-draft early return — and an empty draft is exactly the state Send leaves
+behind, and the state an answer arrives into. `take` is whole-utterance only: "use
+that answer" is the command, "use that answer in the summary" is prose, and a false
+fire therefore needs the speaker to have said nothing else. Priced before admitting,
+as `follow and` was — **0/580** on the real-utterance corpus, adversarial 5/20, recall
+100%, the whole result file identical bar its date. The **Use this** chip on the
+bubble does the same thing and is the floor: it cannot be mis-decoded, and this loop
+has to work for somebody the decoder keeps mis-hearing.
+
 **Phonetic target matching.** `phonetic.find_span()` — vendored Double Metaphone blended with
 spelling, threshold `MATCH_THRESHOLD = 0.82`, searching word windows sized around the
 target's own word count ±1, because a mis-transcription moves word boundaries as readily as
@@ -661,6 +684,11 @@ policy here; it is enforced by absence.
    asking is not one. Switching it off is remembered, because a setting that decides
    whether words leave the machine unpressed is not one to make the user re-state every
    launch. A Send that refuses says why — a button that does nothing reads as broken.
+   Taking a reply into the draft (`take_reply`) is reviewed here and changes nothing:
+   it moves text *within* Flow, nothing reaches another window, and it flips the mode
+   to dictate so the following Send is the ordinary explicit one. It deliberately does
+   **not** settle the draft — a taken answer is not an utterance somebody finished, and
+   settling it would arm the countdown against Flow's own answer.
 6. **Flow does not listen to itself, and does not claim to.** While a reply is playing the
    microphone is not evidence. There is no echo cancellation and there is not going to be
    one (R16), so converse mode is half-duplex and interrupting is an explicit action. A VAD
@@ -720,7 +748,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (701 tests, ~13 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (720 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -794,7 +822,7 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 | Check | Command | Result |
 |---|---|---|
 | bench provenance | `uv run python scripts/command_bench.py`, twice | the `identity` block resolves here (faster-whisper 1.2.1, ctranslate2 4.8.1, date) and the non-identity content of two consecutive runs is **identical**, so item 14's byte-for-byte idiom survives the addition |
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **701 passed**, 13.2 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **720 passed**, 13.8 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
 | command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by every 2026-08-01 grammar addition, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row. Run again *before* admitting the `follow and` elision, as the admission gate rather than as a check afterwards — every figure identical, and so was the rest of the file bar its date |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
 | **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |

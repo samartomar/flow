@@ -947,6 +947,12 @@ class Session:
             trace("recall")
             self._recall()
             return
+        if thread_plan.kind == "take":
+            # Also meaningful with an empty draft — which is precisely the state an
+            # answer arrives into, since asking clears the question.
+            trace("take")
+            self.take_reply()
+            return
         if thread_plan.kind == "followup":
             trace("followup")
             self._start_followup(thread_plan.payload)
@@ -1045,6 +1051,53 @@ class Session:
         self.following_up = True
         self._emit("note", "brought back the last prompt")
         self._after_draft_change()
+
+    @property
+    def can_take_reply(self) -> bool:
+        """True when there is an answer on screen to move into the draft."""
+        return bool(self.reply)
+
+    def take_reply(self) -> bool:
+        """P9's promised verb: the answer becomes the thing Send hands over.
+
+        The workshop loop — discuss, refine, send the good version to the terminal —
+        dead-ended here. `send()` hands over the *draft*, and the refined prompt is in
+        the *reply*, so the only way across was to re-type it.
+
+        **Replace, never append.** An answer is a whole thing, and gluing it onto a
+        half-written question makes a third thing nobody asked for. `_recall` appends
+        because a recalled prompt is *more of the same request*; this is not that. Undo
+        is what makes replacing safe, and the note names what was displaced.
+        """
+        if not self.reply:
+            self._emit("note", "no answer to take yet")
+            return False
+        # Reaching for the text is "I have what I need" — the same interrupt Clear uses.
+        self.stop_speaking()
+        displaced = self.draft.text
+        self.draft.set(self.reply)
+        # Staying in converse would make the next Send re-ask Flow's own answer back at
+        # the CLI, which is the confusion this verb exists to remove. The flip is said
+        # out loud because it changes what the button under the user's cursor does.
+        was = self.mode
+        self.mode = DICTATE
+        if was != DICTATE:
+            self._emit("mode", DICTATE)
+        self._emit(
+            "note",
+            ("took the answer - Send now pastes it" if not displaced
+             else "took the answer, replaced the draft - Send now pastes it "
+                  "(one undo brings your text back)"),
+        )
+        self.diag.write("take", chars=len(self.reply), mode=was)
+        # Deliberately *not* `_after_draft_change()`. That is what settles a draft, and a
+        # settled converse draft is what the countdown fires on — so the whole guard
+        # would be the trap it exists to prevent: converse auto-asking Flow's own answer
+        # straight back at the CLI. A taken draft is not an utterance somebody finished.
+        self._settle_state()
+        self._settled_at = None
+        self._emit("draft", self.draft.text)
+        return True
 
     def _start_followup(self, rest: str) -> None:
         """P6: the next thing said continues the thread rather than starting over."""

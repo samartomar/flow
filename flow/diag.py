@@ -57,7 +57,7 @@ FIELDS = frozenset({
     "op",         # operation id, for matching a CLI result to its request
     "state",      # a State value
     "was",        # the State it replaced
-    "route",      # append | local | semantic | undo | rescue | recall | followup
+    "route",      # append | local | semantic | undo | rescue | recall | followup | take
     "tier",       # base.en | small.en
     "ms",         # a duration
     "provider",   # codex | claude
