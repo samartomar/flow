@@ -1,33 +1,33 @@
 {
  "A_capture": {
   "blocks": 46,
-  "expected": 46.9,
+  "expected": 47.1,
   "median_db": -96.7,
-  "max_db": -95.6
+  "max_db": -89.6
  },
  "B_gate": {
   "opened": true,
-  "start_s": 1.08,
-  "stop_s": 2.23,
+  "start_s": 1.02,
+  "stop_s": 2.09,
   "preroll_blocks": 4,
-  "floor_db": -77.4
+  "floor_db": -76.4
  },
  "C_partial_latency": {
   "partials": 13,
-  "speech_s": 14.6,
-  "median_s": 0.64,
-  "worst_s": 1.25,
+  "speech_s": 15.1,
+  "median_s": 0.61,
+  "worst_s": 0.74,
   "pass": true
  },
  "D_commands": {
   "n": 11,
-  "hit": 8,
+  "hit": 6,
   "rows": [
    {
     "item": 1,
-    "hit": true,
-    "text": "Change every Tuesday to Wednesday",
-    "got": "local/replace_all",
+    "hit": false,
+    "text": "Change a bit used into an aspect.",
+    "got": "semantic/",
     "want": "local/replace_all"
    },
    {
@@ -40,56 +40,56 @@
    {
     "item": 3,
     "hit": true,
-    "text": "Capitalize Samir",
+    "text": "Capitalized Samir.",
     "got": "local/capitalize",
     "want": "local/capitalize"
    },
    {
     "item": 4,
-    "hit": false,
-    "text": "Lower case release notes",
-    "got": "append/",
+    "hit": true,
+    "text": "lowercase release notes",
+    "got": "local/lower",
     "want": "local/lower"
    },
    {
     "item": 5,
-    "hit": true,
-    "text": "Delete the bit about the standup.",
-    "got": "local/delete",
+    "hit": false,
+    "text": "Delete the bit about the standard",
+    "got": "append/",
     "want": "local/delete"
    },
    {
     "item": 6,
-    "hit": true,
-    "text": "Delete the last sentence",
-    "got": "local/delete_last",
+    "hit": false,
+    "text": "delete the task sentence",
+    "got": "append/",
     "want": "local/delete_last"
    },
    {
     "item": 7,
     "hit": false,
-    "text": "Instead, try before release notes",
+    "text": "Insert before release nodes",
     "got": "append/",
     "want": "local/insert_before"
    },
    {
     "item": 8,
-    "hit": false,
-    "text": "I'd do that.",
-    "got": "append/",
+    "hit": true,
+    "text": "and do that",
+    "got": "undo/",
     "want": "undo/"
    },
    {
     "item": 9,
-    "hit": true,
-    "text": "Make it a proper prompt.",
-    "got": "semantic/polish",
+    "hit": false,
+    "text": "Make it a drop a drop.",
+    "got": "semantic/",
     "want": "semantic/polish"
    },
    {
     "item": 10,
     "hit": true,
-    "text": "Follow up and mention the rollback plan.",
+    "text": "Follow up and mention the rollback plant.",
     "got": "followup/",
     "want": "followup/"
    },
