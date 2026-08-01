@@ -395,6 +395,23 @@ Politeness was the missing half: those forms were being appended into the draft 
 lead-in, because every command in the inventory is five words or fewer and a guess about a
 long utterance is a guess about a sentence.
 
+One noun is snapped the same way, and only one: inside "make/turn it (into) a *proper·good·
+better·…* X", a known mis-hearing of "prompt" is read as "prompt" (`_MISHEARD_PROMPT`). Live
+run 1 said "make it a proper prompt" and got back **"Make it a proper brown"**, which routed
+to a generic CLI rewrite instead of the prompt-shaping pass. A table rather than a threshold
+because the numbers leave no room for one: "brown" scores 0.36 against "prompt" and shares no
+phonetic key with it, while "proper" itself scores 0.67 — any bar that admits the mis-hearing
+admits words that mean something else in the same frame. It is bounded on all three sides: the
+exact reading is tried first, the frame has to match whole, and it changes *which* instruction
+a semantic plan carries, never whether one is sent — so the worst case is a prompt-shaping
+pass where a generic rewrite was wanted, and the mis-heard word never reaches the CLI at all
+(`refine(polish=True)` substitutes its own prompt).
+
+Spelling variants belong to the patterns rather than to either table: `lower case` is the
+same operation as `lowercase`, as `all caps` already was to `uppercase`. Runs 1 and 3 of the
+live sheet returned one token for that command and run 2 returned two, from the same speaker
+saying the same words.
+
 **Phonetic target matching.** `phonetic.find_span()` — vendored Double Metaphone blended with
 spelling, threshold `MATCH_THRESHOLD = 0.82`, searching word windows sized around the
 target's own word count ±1, because a mis-transcription moves word boundaries as readily as
@@ -632,12 +649,13 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (588 tests, ~15 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (616 tests, ~16 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
 | looking at it | `scripts/ui_probe.py` | renders the pill and bubble against a fake session that walks every state, so there is something to screenshot without a microphone, a model or a person. `--hold STATE` pins one; `--bare` drops the draft, which is the case the indicator exists for; `--sent` presses Send, which is the only way to see the card that stays behind |
-| a person | `scripts/live_check.py` | the only layer that can answer P1 and P3 *live*: a real room, a real microphone, this speaker, this loop. Needs someone at the desk, so it can never run unattended. The recorded layer beside it — `.bench/recorded/`, two speaker groups so far — covers decoding and routing on real voices, but not this live capture path, and two groups is a smoke check, not accent coverage |
+| a person | `scripts/live_check.py` | the only layer that can answer P1 and P3 *live*: a real room, a real microphone, this speaker, this loop. Needs someone at the desk, so it can never run unattended. The recorded layer beside it — `.bench/recorded/`, two speaker groups so far — covers decoding and routing on real voices, but not this live capture path, and two groups is a smoke check, not accent coverage. **Stage D takes `--takes N`**, and it should be used: three single runs of the eleven-item sheet scored 7/11, 8/11 and 6/11, no two missing the same set, and only items 3 and 11 held across all three. A total from one take is not a measurement — the per-item column is, which is why the harness now reports what held every take and what never worked once |
+| replay | `tests/test_live_replay.py` | all 33 utterances those three runs produced, routed against the same draft, with what the harness recorded that day beside what the grammar does now. It cannot hear anything; what it can do is make the blast radius of a grammar change a test rather than a claim — a change that moves a row nobody argued for fails here |
 
 The self-drive layer exists because three consecutive sessions each found a defect by hand
 that no layer-specific harness could have caught: a chip whose label the grammar rejected, a
@@ -682,7 +700,8 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 
 | Check | Command | Result |
 |---|---|---|
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **588 passed**, 14.9 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **616 passed**, 15.9 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
+| command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by the 2026-08-01 grammar additions, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
 | **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |
 | the menu and the drag ↻ | same run, `== the pill itself` | The menu opens and dismisses, holds the foreground while it is up and gives it back; the pill tracks the cursor to the pixel. Both measured because both are what `WS_EX_NOACTIVATE` can break — and the first attempt did break the menu outright: it posted and `tk_popup` never returned |

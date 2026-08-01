@@ -103,8 +103,14 @@ _DELETE = re.compile(
 #: upper-case turned "capitalize john" into "JOHN", which is the more jarring mistake.
 _CAPS = re.compile("^" + _LEAD + r"capitali[sz]e\s+(.+)$", re.I)
 _UPPER = re.compile("^" + _LEAD + r"(?:uppercase|all\s+caps|caps)\s+(.+)$", re.I)
+#: `lower\s?case`, because the word has two spellings and the speaker chooses neither
+#: — Whisper does. Live run 2 said the sheet's "lowercase release notes" and got back
+#: "Lower case release notes", which routed to dictation and typed the command into the
+#: draft; runs 1 and 3 said the same thing and got one token. This is the same shape
+#: `_UPPER` has carried from the start, where "uppercase", "all caps" and "caps" are all
+#: spellings of one operation.
 _LOWER = re.compile(
-    "^" + _LEAD + r"(?:lowercase\s+(.+)|make\s+(.+?)\s+lowercase)$", re.I
+    "^" + _LEAD + r"(?:lower\s?case\s+(.+)|make\s+(.+?)\s+lower\s?case)$", re.I
 )
 _BREAK = re.compile("^" + _LEAD + r"new\s+(paragraph|line)$", re.I)
 _INSERT = re.compile(
@@ -170,6 +176,32 @@ _POLISH = re.compile(
     r")(?:\W|$)",
     re.I,
 )
+
+#: The same frame with the noun left open, and a list of what the noun came back as.
+#:
+#: Live run 1, item 9: "make it a proper prompt" decoded as **"Make it a proper brown"**
+#: and routed to a generic CLI rewrite instead of the prompt-shaping pass — the frame
+#: survived the accent and the one word carrying the meaning did not.
+#:
+#: A list of what was heard, not a similarity bar, and the numbers are why: "brown"
+#: scores **0.36** against "prompt" (`phonetic.similarity`), less than half of
+#: `MATCH_THRESHOLD`, and they share no phonetic key at all — while "proper" itself
+#: scores 0.67 and "drop" 0.60. Any bar low enough to admit the mis-hearing admits
+#: words that mean something else in the very same frame, so there is no threshold to
+#: find. `_ALIASES` made this argument first.
+#:
+#: Bounded three ways, which is what makes one observation enough to act on: it is
+#: consulted only after the exact reading fails, only inside a frame this specific, and
+#: it changes *which instruction* a semantic plan carries — never whether one is sent.
+#: "Make it a proper sentence" is a different request and stays a generic rewrite. And
+#: a polish ignores the instruction text entirely (`refine.refine(polish=True)` swaps in
+#: its own prompt), so the mis-heard word cannot reach the CLI even when this fires.
+_POLISH_FRAME = re.compile(
+    "^" + _LEAD + r"(?:make|turn)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+|an\s+)?"
+    r"(?:proper|good|better|real|decent|clean|clear|nice)\s+(\w+)[.!?]*$",
+    re.I,
+)
+_MISHEARD_PROMPT = {"brown"}
 
 #: P9. The converse requests that ask for a piece of *work* rather than an answer.
 #: `ASK_SENTENCES` exists to keep a spoken reply carryable, and it is exactly wrong for
@@ -531,6 +563,12 @@ def _is_alias(utterance: str) -> bool:
     return any(low == p or low.startswith(p + " ") for p in _ALIASES)
 
 
+def _polish_misheard(utterance: str) -> bool:
+    """Whether this is the polish frame with a known mis-hearing where "prompt" goes."""
+    m = _POLISH_FRAME.match(utterance)
+    return bool(m) and m[1].lower() in _MISHEARD_PROMPT
+
+
 def _plan_exact(utterance: str, draft: str = "") -> Plan:
     u = _strip(utterance)
     if not u:
@@ -633,7 +671,7 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
                         referential=bool(referential))
         return Plan("append")
 
-    if _POLISH.match(u):
+    if _POLISH.match(u) or _polish_misheard(u):
         # `payload` is the draft-shaping request itself; refine.py substitutes its own
         # instruction, so nothing here has to describe *how* to write a prompt.
         return Plan("semantic", payload=u, op="polish")
