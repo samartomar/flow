@@ -26,7 +26,8 @@ from .asr import FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .hotkey import DEFAULT_BINDINGS, Hotkeys
 from .inject import paste, take_warnings
-from .refine import available
+from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
+from .refine import CANDIDATES, available, named
 from .session import AUTO_ASK_SEC, Session
 from .ui import Pill
 
@@ -99,17 +100,41 @@ def main(argv: list[str] | None = None) -> int:
         "--no-auto-ask", action="store_true",
         help="in converse mode, wait for the Ask button instead of a pause",
     )
+    ap.add_argument(
+        "--cli", default=None, metavar="NAME",
+        help="pin the agent CLI (codex or claude) instead of trying each in turn",
+    )
+    ap.add_argument(
+        "--cli-timeout", type=float, default=REFINE_TIMEOUT_SEC, metavar="SEC",
+        help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f})",
+    )
     args = ap.parse_args(argv)
 
     from .asr import WhisperTranscriber
 
     clis = [c.name for c in available()]
+    pinned = None
+    if args.cli:
+        pinned = named(args.cli)
+        if pinned is None:
+            say(f"--cli {args.cli}: not a known CLI "
+                f"({', '.join(c.name for c in CANDIDATES)})")
+            return 2
+        if pinned.name not in clis:
+            say(f"--cli {pinned.name}: not on PATH")
+            return 2
     # Console strings are ASCII on purpose: redirected stdout uses the locale encoding,
     # and a legacy console code page (cp437/cp850) cannot encode chars like en-dash or
     # middle-dot, which would turn a startup message into a UnicodeEncodeError crash.
-    say(f"refine CLI: {clis[0] if clis else 'NONE - semantic rewrites disabled'}")
-    if clis:
-        say(f"  (fallbacks: {', '.join(clis[1:]) or 'none'})")
+    if pinned is not None:
+        say(f"refine CLI: {pinned.name} (pinned; no fallback)")
+    else:
+        say(f"refine CLI: {clis[0] if clis else 'NONE - semantic rewrites disabled'}")
+    if clis and pinned is None:
+        rest = ", ".join(clis[1:])
+        say(f"  (falls back to {rest} if it fails)" if rest
+            else "  (no fallback - only one CLI on PATH)")
+    say(f"CLI timeout: {args.cli_timeout:.0f}s per call")
 
     partial_name = args.model or args.partial_model
     final_name = args.model or args.final_model
@@ -185,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
         speaker=speaker,
         profile=profile,
         diag=diag,
+        cli=pinned,
+        cli_timeout=args.cli_timeout,
     )
 
     if args.calibrate:

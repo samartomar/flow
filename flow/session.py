@@ -42,6 +42,7 @@ from .edits import (
 #: a different word; lower-casing marks it as ordinary prose, which is the one thing not
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
+from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import ask, available, refine, tail_sent
 from .thread import Thread
 
@@ -323,6 +324,8 @@ class Session:
         speaker: object | None = None,
         profile: object | None = None,
         diag: Diag | None = None,
+        cli: object | None = None,
+        cli_timeout: float = REFINE_TIMEOUT_SEC,
     ) -> None:
         # `mic` and `asr` are injectable so the state machine can be tested without a
         # microphone or a 141 MB model — the routing logic is where the subtle bugs live.
@@ -355,6 +358,10 @@ class Session:
         self._decoded_sec = 0.0
         self._events: deque[Event] = deque()
         self._refine_cwd = refine_cwd
+        #: A pinned agent CLI, or None to walk the preference order with fallback.
+        #: Pinning is a decision and is never second-guessed; None is a preference.
+        self._cli = cli
+        self._cli_timeout = cli_timeout
         #: (op, draft revision, result) — see `_next_op`.
         self._refine_result: tuple[int, int, tuple[str | None, str]] | None = None
         self._refine_lock = threading.Lock()
@@ -1198,6 +1205,23 @@ class Session:
         if self._settled_at is not None:
             self._settled_at = time.perf_counter()
 
+    @property
+    def cli(self):
+        """The pinned agent CLI, or None when the preference order is being walked."""
+        return self._cli
+
+    def set_cli(self, cli) -> None:
+        """Choose which agent CLI to use, mid-session.
+
+        Pinning is what makes a slow or wedged CLI recoverable without a restart: the
+        fallback below only runs *after* the first one has failed, which for a timeout
+        costs the full wait before the second is even tried. Someone who already knows
+        which one is answering should not have to pay that on every call.
+        """
+        self._cli = cli
+        self._emit("note", f"agent CLI: {cli.name}" if cli is not None
+                   else "agent CLI: automatic, in preference order")
+
     def toggle_auto_ask(self) -> bool:
         self.auto_ask = not self.auto_ask
         # Saved now rather than at the next Send, for the reason `set_voice` gives: this
@@ -1260,6 +1284,7 @@ class Session:
             result = refine(
                 before, instruction, cwd=self._refine_cwd, polish=polish,
                 context=context, cancel=self._cancel,
+                cli=self._cli, timeout=self._cli_timeout,
             )
             with self._refine_lock:
                 self._refine_result = (op, revision, result)
@@ -1432,7 +1457,8 @@ class Session:
 
         def work() -> None:
             result = ask(question, cwd=self._refine_cwd, context=context,
-                         cancel=self._cancel, artifact=artifact)
+                         cancel=self._cancel, artifact=artifact,
+                         cli=self._cli, timeout=self._cli_timeout)
             with self._ask_lock:
                 self._ask_result = (op, result)
 

@@ -109,6 +109,53 @@ def available() -> list[Cli]:
     return [c for c in CANDIDATES if shutil.which(c.argv[0])]
 
 
+def named(name: str) -> Cli | None:
+    """Look a CLI up by name, so a user can pin one rather than take the order."""
+    want = name.strip().lower()
+    return next((c for c in CANDIDATES if c.name == want), None)
+
+
+def _invoke_any(
+    cli: Cli | None,
+    prompt: str,
+    *,
+    timeout: float,
+    cwd: str | None = None,
+    cancel: threading.Event | None = None,
+) -> tuple[str | None, str, Cli | None]:
+    """Run `prompt`, falling through the preference order until one CLI answers.
+
+    `CANDIDATES` has always been documented as a preference order and startup has always
+    printed "(fallbacks: claude)", but both entry points took `next(iter(available()))`
+    and stopped there — so the fallback was a promise the code never kept. The first
+    person to hit a `codex` timeout got a dead feature and a message naming a second CLI
+    that was installed, working, and never tried.
+
+    Falls over on *not answering at all*: failing to start, exiting non-zero, timing out,
+    or returning nothing. A CLI that answers badly has still answered, and the callers'
+    own quality guards deal with that — retrying the same prompt on another model would
+    double the wait to relitigate a judgement.
+
+    An explicit `cli=` is a decision, not a preference, so it is never second-guessed.
+    Cancellation stops the walk: quitting should not start a second process.
+    """
+    if cli is not None:
+        out, reason = _invoke(cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+        return out, reason, cli
+
+    reasons: list[str] = []
+    for candidate in available():
+        out, reason = _invoke(candidate, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+        if out is not None:
+            return out, "", candidate
+        reasons.append(reason)
+        if cancel is not None and cancel.is_set():
+            break
+    if not reasons:
+        return None, "no agent CLI found on PATH", None
+    return None, "; then ".join(reasons), None
+
+
 #: P9. Converse mode sends the draft to the CLI as a *question* rather than as text to
 #: be rewritten, so none of the rewrite discipline applies: the answer is allowed to be
 #: longer than the input, allowed to be prose, and must not be measured against the
@@ -317,10 +364,6 @@ def refine(
     always be non-destructive: the caller keeps the pre-edit draft, so a CLI that is
     slow, missing or misbehaving degrades the feature instead of losing the user's words.
     """
-    chosen = cli or next(iter(available()), None)
-    if chosen is None:
-        return None, "no agent CLI found on PATH"
-
     head, tail = _split_tail(text)
     prompt = (
         _POLISH_PROMPT.format(text=tail)
@@ -334,7 +377,9 @@ def refine(
             + chr(10) + prior + chr(10) + chr(10) + prompt
         )
 
-    out, reason = _invoke(chosen, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+    out, reason, chosen = _invoke_any(
+        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel
+    )
     if out is None:
         return None, reason
 
@@ -385,10 +430,6 @@ def ask(
     the caller keeps the draft, so an absent or slow CLI degrades converse mode to
     dictate mode rather than losing what was said.
     """
-    chosen = cli or next(iter(available()), None)
-    if chosen is None:
-        return None, "no agent CLI found on PATH"
-
     _, tail = _split_tail(question)
     prompt = (
         _ASK_ARTIFACT_PROMPT.format(text=tail)
@@ -402,7 +443,9 @@ def ask(
             + chr(10) + prior + chr(10) + chr(10) + prompt
         )
 
-    out, reason = _invoke(chosen, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+    out, reason, chosen = _invoke_any(
+        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel
+    )
     if out is None:
         return None, reason
 

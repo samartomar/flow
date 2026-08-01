@@ -12,6 +12,8 @@ was asked. The last class here is about that being said out loud.
 import subprocess
 import sys
 import unittest
+
+import flow.refine as refine_mod
 from pathlib import Path
 from unittest import mock
 
@@ -224,3 +226,86 @@ class TestTailSent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheFallbackIsReal(unittest.TestCase):
+    """`CANDIDATES` was always documented as a preference order and startup always
+    printed "(fallbacks: claude)" — but both entry points took the first available CLI
+    and stopped there. A `codex` timeout produced a dead feature and a message naming a
+    second CLI that was installed, working, and never tried.
+    """
+
+    BOTH = (refine_mod.Cli("codex", ("codex",)), refine_mod.Cli("claude", ("claude",)))
+
+    def _with(self, results):
+        """Patch _invoke to answer per CLI name, and record the order tried."""
+        tried = []
+
+        def fake(cli, prompt, *, timeout, cwd=None, cancel=None):
+            tried.append(cli.name)
+            return results[cli.name]
+
+        return tried, mock.patch.object(refine_mod, "_invoke", fake)
+
+    def test_a_timeout_falls_through_to_the_next_cli(self):
+        tried, patched = self._with({
+            "codex": (None, "codex timed out after 20s"),
+            "claude": ("Use ALTER TABLE.", ""),
+        })
+        with mock.patch.object(refine_mod, "available", lambda: list(self.BOTH)), patched:
+            answer, note = refine_mod.ask("how do I widen a column")
+        self.assertEqual(answer, "Use ALTER TABLE.")
+        self.assertEqual(note, "claude")
+        self.assertEqual(tried, ["codex", "claude"])
+
+    def test_a_working_first_cli_is_not_second_guessed(self):
+        tried, patched = self._with({
+            "codex": ("Use ALTER TABLE.", ""),
+            "claude": ("never asked", ""),
+        })
+        with mock.patch.object(refine_mod, "available", lambda: list(self.BOTH)), patched:
+            answer, note = refine_mod.ask("how do I widen a column")
+        self.assertEqual(note, "codex")
+        self.assertEqual(tried, ["codex"], "it paid for a second CLI it did not need")
+
+    def test_every_failure_is_reported_when_all_of_them_fail(self):
+        tried, patched = self._with({
+            "codex": (None, "codex timed out after 20s"),
+            "claude": (None, "claude exited 1"),
+        })
+        with mock.patch.object(refine_mod, "available", lambda: list(self.BOTH)), patched:
+            answer, note = refine_mod.ask("how do I widen a column")
+        self.assertIsNone(answer)
+        self.assertIn("codex timed out", note)
+        self.assertIn("claude exited 1", note)
+
+    def test_refine_falls_through_too(self):
+        tried, patched = self._with({
+            "codex": (None, "codex failed to start: nope"),
+            "claude": ("Tidied.", ""),
+        })
+        with mock.patch.object(refine_mod, "available", lambda: list(self.BOTH)), patched:
+            revised, note = refine_mod.refine("rambling text", "tidy it")
+        self.assertEqual(revised, "Tidied.")
+        self.assertEqual(tried, ["codex", "claude"])
+
+    def test_pinning_a_cli_is_a_decision_and_is_not_second_guessed(self):
+        tried, patched = self._with({
+            "codex": (None, "codex timed out after 20s"),
+            "claude": ("would have worked", ""),
+        })
+        with mock.patch.object(refine_mod, "available", lambda: list(self.BOTH)), patched:
+            answer, note = refine_mod.ask("q", cli=self.BOTH[0])
+        self.assertIsNone(answer)
+        self.assertEqual(tried, ["codex"], "a pinned CLI must not fall through")
+
+    def test_no_cli_at_all_says_so(self):
+        with mock.patch.object(refine_mod, "available", list):
+            answer, note = refine_mod.ask("q")
+        self.assertIsNone(answer)
+        self.assertIn("no agent CLI", note)
+
+    def test_named_looks_one_up_and_rejects_nonsense(self):
+        self.assertEqual(refine_mod.named("claude").name, "claude")
+        self.assertEqual(refine_mod.named("  CODEX ").name, "codex")
+        self.assertIsNone(refine_mod.named("gpt"))

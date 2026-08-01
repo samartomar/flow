@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .inject import foreground_hwnd, owned_by_flow, take_warnings
 from .lexicon import DEFAULT_PATH as LEXICON_PATH, ensure as ensure_lexicon
+from .refine import available
 from .session import DICTATE, Session, State
 
 
@@ -339,6 +340,29 @@ class Pill(tk.Tk):
                 else "Ask after a pause",
                 command=self.session.toggle_auto_ask,
             )
+        clis = available()
+        if len(clis) > 1:
+            # Offered only when there is a choice to make. Automatic tries them in order,
+            # but a fallback only runs after the first one has failed — which for a
+            # timeout means paying the whole wait first. Anyone who already knows which
+            # CLI is answering today should be able to say so without restarting.
+            picker = tk.Menu(m, tearoff=0)
+            current = getattr(self.session, "cli", None)
+            here = current.name if current is not None else None
+
+            # Plain commands and a text marker rather than radiobuttons: a Tk variable
+            # needs a master and a lifetime, and this menu is rebuilt on every press.
+            def choice(label: str, cli) -> None:
+                name = cli.name if cli is not None else None
+                picker.add_command(
+                    label=label + ("   (current)" if name == here else ""),
+                    command=lambda c=cli: self.session.set_cli(c),
+                )
+
+            choice("Automatic", None)
+            for candidate in clis:
+                choice(candidate.name, candidate)
+            m.add_cascade(label="Agent CLI", menu=picker)
         if getattr(self.session, "speaker", None) is not None:
             m.add_command(
                 label="Mute replies" if not self.session.muted else "Speak replies",

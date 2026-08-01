@@ -56,6 +56,28 @@ converse mode shell out to a CLI you have already authenticated. Nothing leaves 
 machine — see [`flow/profile.py`](flow/profile.py), which has no code that could send
 anything anywhere.
 
+### When a CLI is slow or stuck
+
+`codex` is tried first and `claude` is the fallback — and the fallback is real: if the
+first one fails to start, exits non-zero, returns nothing, or **times out**, the next one
+gets the same prompt. A CLI that answers *badly* has still answered, so that case is left
+to the output guards rather than paying for a second call.
+
+The cost of a fallback is the first one's whole timeout before the second even starts, so
+if you already know which CLI is answering today, pin it:
+
+```bash
+uv run flow --cli claude
+```
+
+or pick it mid-session from **Agent CLI** in the right-click menu — the current choice is
+marked, and **Automatic** puts the fallback back. A pinned CLI is a decision and is never
+second-guessed, so it does not fall through.
+
+`--cli-timeout SEC` raises the 20 s budget. It was chosen when a call measured 5.7–7.3 s;
+`codex` now measures 6.6–8.5 s here for a one-word answer, so a long question can breach
+it.
+
 ## Install
 
 ```bash
@@ -138,6 +160,8 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--no-speak` | never read converse-mode replies aloud |
 | `--voice X` | voice for spoken replies: a name, part of one, or `male`/`female` |
 | `--no-auto-ask` | in converse mode, wait for the Ask button instead of a pause |
+| `--cli NAME` | pin the agent CLI (`codex` or `claude`) instead of trying each in turn |
+| `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
 
 If capture cannot start — no microphone, device held exclusively by another app, a bad
 `--device` index — the pill stays slate and the reason appears in a red bubble. It will

@@ -428,6 +428,9 @@ class TestTheMenuOffersIt(unittest.TestCase):
             def add_separator(self):
                 pass
 
+            def add_cascade(self, label="", menu=None, **kw):
+                pass
+
             def tk_popup(self, *a):
                 pass
 
