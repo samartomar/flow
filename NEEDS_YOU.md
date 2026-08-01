@@ -1,96 +1,17 @@
 # NEEDS_YOU — things only you can do
 
-Updated 2026-08-01 after your review session. Done and gone from this file: live_check
-(first run — capture/gate/latency/target pass, commands 7/11, follow-ups are plan
-items 13–14), P1 artifact profiles (commit `50c2068`), the late-warning drain
-(commit `6008cfd`), and P4's rewrite (executed — see the one command below).
-
-## One command, now
-
-~~The force-push~~ — **done, verified: origin/main carries the rewritten history and
-the voices are off the remote.** Two measurement commits (live runs 2 and 3) are
-ahead; a normal push carries them whenever you like:
-
-```bash
-git push
-```
+Updated 2026-08-01, end of the decision session. **Every decision that was open this
+morning is closed or parked on named evidence** — eleven entries in Decided below, two
+parked with numeric bars, and LOOP_PLAN carries round three (items 15–23, specs
+complete) ready for a fresh loop run. Done and gone from this file: the force-push and
+the follow-up push (origin/main now carries the rewritten history, both measurement
+commits, and this session's decisions), live_check's first run, P1 artifact profiles
+(`50c2068`), the late-warning drain (`6008cfd`), the README catch-up, and the full
+text of decided entries — their reasoning lives in Decided and in the LOOP_PLAN specs.
 
 ## Decisions still open
 
-- [ ] **Auto-ask default.** Stays ON (your choice persists in the profile now). Feedback
-  recommended manual-by-default; flipping it is product feel, and diag.jsonl will soon
-  show how often the countdown fires prematurely for you.
-- [ ] **Converse mode has no working context — and `docs/product.md` specified it that
-  way.** (2026-08-01, surfaced while deciding the provider badge.) Named at the desk:
-  you switch to converse to discuss the thing you are building, and the answers come back
-  generic, because the CLI is never told what you are building. Checked — the seam is
-  built and unwired: `refine_cwd` threads `Session.__init__` → `session.py:1434`
-  `ask(question, cwd=self._refine_cwd, …)` → `refine._invoke(cwd=cwd)`, and
-  `flow/__main__.py` never sets it. It is `None`, so both CLIs inherit whatever directory
-  Flow was launched from. Not to be confused with `CONTEXT_CHARS` (1500): that is Flow's
-  *own* conversation thread, which works — it disambiguates a follow-up and knows nothing
-  about your repo.
-  This is not a loop bug, it is a definition gap: product.md's converse scenario asks
-  *"what's the cleanest way to debounce a resize handler in React?"* — a context-free
-  question — so P9 was written for exactly the generic conversation that turns out not to
-  be the one you want. Yours to decide is **which directory**, and they differ by an order
-  of magnitude in cost:
-  - Flow's launch directory — one line in `__main__.py`, and wrong every time you start
-    from a shortcut;
-  - a `--cwd` flag plus a menu entry — explicit and correct, one more thing to set, and
-    it goes stale the moment you change projects without telling it;
-  - the directory behind the window Send is aimed at — `inject.resolve()` already names
-    the process (`WindowsTerminal.exe` in all three live runs), but a terminal's *current*
-    directory is not readable from a window handle without per-shell tricks.
-  The product question underneath the plumbing: is converse mode a general assistant, or a
-  pair for the work in front of you? P9 says the first and you want the second.
-  **Deferred by the owner, 2026-08-01, to be picked up cold.** Not blocked on evidence —
-  blocked on wanting a scoping session rather than one exchange, because the honest answer
-  probably changes P9 in `docs/product.md` before it changes a line in `__main__.py`.
-- [ ] **Model revision pinning.** The trace records revisions; pinning properly needs a
-  table covering every model the benchmarks name, plus a policy for a cache holding a
-  different revision. Until then runs drift and say so.
-- [ ] **Selfdrive flake watch.** One sighting of 63/64 on a live-ASR check
-  (`capitalize sameer`), four green runs since. If it recurs, the Rules' 64/64 gate
-  needs a policy (rerun-once vs quarantine that check).
-- [ ] **A sanity gate before garbled CLI escalations?** Live run 3 measured it: 2 of 33
-  spoken commands decoded to nonsense ("Make it a drop a drop.") and routed `semantic`
-  — in the app that is a ~7 s CLI call applying a garbled instruction to your draft,
-  the failure mode the original feedback ranked highest-impact. Undo covers it, but a
-  gate — refuse escalation when the instruction's content words appear in neither the
-  draft nor the command vocabulary — would trade a rare wrong rewrite for a rare
-  refused command. Which rarity you would rather live with is product feel. **The
-  fixtures landed** (plan item 14, commit `3152bde`): both utterances are pinned in
-  `tests/test_live_replay.py` as routing `semantic/` today, so whichever way you decide,
-  the test says which rows move.
-
-- [ ] **Three live-sheet misses are pinned as fixtures, not fixed** (2026-08-01, plan
-  item 14). Each needs something the loop is not allowed to decide alone:
-  - **"delete the bit about the standard"** (runs 1 and 3). Not the missing article —
-    run 3 said it *with* the article and still missed, and there is a test proving the
-    article changes nothing either way. "standard" scores **0.667** against the draft's
-    "standup", under `MATCH_THRESHOLD` 0.82. Lowering it is a re-measurement, not a
-    tweak: 0.82 was swept against 354 false-span candidates, and 0.75 takes corpus
-    false spans from 4 to 19.
-  - **"follow and mention the roleback plan"** (run 1). "roleback" was never the
-    problem — 0.938 against "rollback". The missing "up" was. Admitting bare "follow"
-    into `_FOLLOWUP` would route "follow the steps in the README" as a follow-up, which
-    is a precision trade you should make, not me.
-  - **"Insert before release nodes"** (run 3) lost the word being inserted, so there is
-    no "insert X before Y" left to match at all; "nodes" would have reached "notes" at
-    0.900. No grammar recovers a word the decoder never produced — this is decode-time
-    command bias, i.e. the constrained re-decode already sketched as Phase 3.
-
-- [ ] **Should Flow apply what it *inferred*, not just what you declared?**
-  (2026-08-01, raised by plan item 13.) Every "change X to Y" you speak is already
-  counted in `profile.json`, and after two sightings the right-hand side becomes a
-  hotword — selfdrive watches `sameer -> Samir` do exactly that. Item 13 makes a pair
-  *you typed* a substitution on the decoder's output, on the grounds that declaring a
-  confusion is stronger evidence than hinting at one. The open question is whether an
-  inferred pair should ever be promoted the same way, and after how many sightings. It
-  is not symmetric: a declared pair is a sentence you wrote, an inferred one is a guess
-  from a word-level diff, and promoting it would silently rewrite words you never asked
-  to have rewritten. Deliberately not implemented.
+(none — see Decided below, and the two evidence-parked entries further down)
 
 ## At the desk
 
@@ -113,13 +34,14 @@ git push
   What should move, if the fixes are real: **item 4** ("lowercase release notes")
   should now hold whichever way Whisper spells it, and **item 9** ("make it a proper
   prompt") should reach `semantic/polish` even when the noun comes back as "brown".
-  What will not move without you: items 5, 7 and 10 (see the fixture entry above).
+  If plan item 20's measurement admits `follow and`, **item 10** joins the predictions.
+  What will not move without you: items 5 and 7 — theirs is Phase 3 (see Decided).
   And with `semir -> Samir` in `~/.flow/lexicon.txt` — right-click → **Open settings
   folder** writes the file — item 2 should stop escalating. **Checked 2026-08-01:
   `~/.flow/lexicon.txt` does not exist**, so that third prediction is not testable until
   the menu entry has been used once and the arrow line typed. `profile.json` also holds
-  `"pairs": {}` — no confusion pair has ever been learned from your speech, which is the
-  standing evidence base the "inferred vs declared" decision below argues over.
+  `"pairs": {}` — no confusion pair has ever been learned from your speech, the fact the
+  inferred-pairs decision (Decided below) was made on.
 
   Per-item stability is the number that means something; a single run cannot show
   whether a change helped, which is what `--takes` is for.
@@ -130,29 +52,22 @@ git push
 - [ ] **Consent scope:** `docs/recording-kit.md` — one paragraph telling volunteers
   where recordings are stored (a private folder; a private repo's *history* no
   longer; keep it true).
-
+- [ ] **The wake experiment** — run it the next time a spoken reply plays, with the
+  predictions written down first so it is a measurement, not an impression. Prediction:
+  while the reply plays *and for roughly its own duration again after the audio ends*,
+  nothing spoken wakes Flow — shouting included, by design (the audio is discarded as
+  presumed echo, and the discard is not level-based; `WORDS_PER_SEC` = 1.5 is
+  deliberately half the measured rate, so estimated deafness runs ~2× the audio). The
+  test is when the level bars respond to your voice again: almost immediately after the
+  audio stops → the estimate is fine, nothing to fix; a dead stretch about as long as
+  the reply itself → the 2× estimate is confirmed, and the fix to spec is ending
+  deafness when the SAPI child actually exits. Separate case, by design not defect:
+  every fresh launch starts disarmed (`arm=False`), so the first Ctrl+Alt+Space of a
+  session is a choice — if *that* is the annoyance, an arm-on-launch preference is a
+  cheap separate decision.
 - [x] **README is behind the lexicon file** — done in the review session, commit
   `Catch the README up…`, plus a fifth stale spot the entry missed: the storage table
-  still said the volunteer recordings were tracked. (Original entry below for the
-  record.)
-  (2026-08-01, mechanical, ~10 minutes).
-  Plan item 13 (commit `ea8d2bb`) gave `~/.flow/lexicon.txt` a second kind of line and
-  Flow a reason to write it. `docs/architecture.md` was synced in that commit; the
-  Rules scope a commit to the item's named files, so `README.md` was not. Four places
-  now describe less than the file does:
-  - line 111 — the sample startup output still says "create … to bias names and
-    jargon"; the app now prints "right-click > Open settings folder, or create …, to
-    add names and corrections".
-  - line 521 — "one term per line, `#` for comments" needs the arrow form beside it:
-    `wrong -> right`, whole words, left side case-insensitive, right side verbatim,
-    and that it biases nothing.
-  - line 562 — the writes table says "you, by hand … does not exist until you create
-    it — creating it *is* the opt-in". Flow now writes it once, from the menu, if it
-    is missing; the template is comments only, so creating it is still not the opt-in
-    (typing a line that is not a comment is).
-  - line 610 — the module map's one-liner for `lexicon.py`.
-  Nothing here is a decision — it is out of the loop's commit scope, not out of its
-  competence, so hand it straight back if you would rather not do it by hand.
+  still said the volunteer recordings were tracked.
 
 ## Parked — the evidence these wait on does not exist yet (2026-08-01)
 
@@ -217,3 +132,184 @@ seconds is the wrong instrument for the case that matters most.
 Recorded honestly: the owner said transparency was wanted but that no moment of real
 confusion had ever occurred, so this buys a value rather than repairs a failure — which
 is why it is bounded at a string change and not a redesign. Spec'd as LOOP_PLAN item 15.
+
+### 2026-08-01 — Garbled CLI escalations: no gate. The draft becomes editable instead
+
+**The gate as this file specified it is not built.** "Refuse escalation when the
+instruction's content words appear in neither the draft nor the command vocabulary"
+describes almost every legitimate free-form rewrite — "make it more formal", "add a
+bulleted summary", "turn this into a bug report" — because an instruction about words not
+yet in the draft is what *makes* it semantic rather than local. It would sit on
+`session.py:1091`, the free-form branch (polish is dispatched at 1082 and never reaches
+it), so it refuses that whole class or it refuses nothing. It is also not decisive on its
+own two examples: item 14 already measured "drop" at **0.60** against "prompt", between
+"problem" (0.62) and "proper" (0.67), and concluded that no bar admits the mis-hearings
+without admitting the real words.
+
+**Two numbers in the old entry were wrong about the owner, not about the code.** The 6%
+rate (2 of 33) comes from a sheet where 1 of 11 items is semantic; the owner reports
+semantic rewriting is the *main* reason they use Flow, so that rate is measured on the
+wrong population and does not describe their exposure. And the recovery loop the gate
+assumed — "a refusal just means say it again" — is the loop that does not close: with a
+heavy L2 accent the retry hits the same decoder, which is why the owner ends up
+correcting after Send instead.
+
+**What replaces it: click-to-edit.** With an editable draft, a garbled instruction is a
+two-word keyboard fix instead of an unwinnable retry, and a mangled draft is repairable
+without noticing in time to reach undo. It touches none of the routing the owner depends
+on. Spec'd as LOOP_PLAN item 17.
+
+**Kept from the gate work, as instrument only:** LOOP_PLAN item 16 wires
+`asr.take_confidence()` — the worst `avg_logprob` of the kept segments, already
+calibrated per speaker (P8; this profile reads −0.193) — through to the router and into
+the trace. Today it is computed on every decode and read only by `calibrate.py` and
+`scripts/guardrail_bench.py`; the router never sees it. **No behaviour changes.** It
+exists so this decision can be re-opened on the owner's real distribution instead of on a
+33-utterance sheet, and because confidence-per-route is the field that would make a gate
+designable at all.
+
+**Recorded because it belongs in the record:** the owner's account of these failures was
+"I have to train myself more, I have a heavy accent." `docs/product.md` makes the heavy
+accent the design centre — P1 sets per-accent WER ≤ 12% as a floor and P3 sets ≥ 95%
+command recognition. The three live runs scored **55%, 73%, 55%**. The speaker adapting
+to Flow is Flow missing its own written requirement, and no decision here is built on the
+speaker changing.
+
+### 2026-08-01 — Auto-ask default: stays ON, with a numbered reopen
+
+Kept ON because the case against it is thin by the owner's own account ("very
+occasionally" fires mid-thought, said with low confidence and little converse use), and
+because the owner's actual complaint runs the other way — the friction named at the desk
+was a *missing* hands-free step (the spoken send trigger, now an open entry), not an
+excess one. The control Feedback's manual-by-default wanted has shipped since it was
+written: countdown on the Ask chip, held by speech, cancellable, OFF persisted
+(`2787b2a`). **Reopens if**, once `~/.flow/diag.jsonl` exists, more than **~1 in 10**
+auto-fires is cancelled or immediately corrected — derivable from state transitions and
+timestamps already in the trace, no new instrument. P2 (adaptive timeout) stays parked
+and is the proper fix for the 4 s constant, whose pause measurement came from
+sheet-reading, not composition. No code follows; the default is already ON and Rule 4
+already freezes it.
+
+### 2026-08-01 — Selfdrive flake: rerun-once codified, with a same-check tripwire
+
+One sighting of 63/64 (`capitalize sameer`, item 2's run, 64/64 on rerun, four green runs
+since) becomes written policy in Rule 2: one automatic rerun, both scores and the failing
+check's name in the Evidence line, a failed rerun blocks per Rule 8, and the *same* check
+flaking in two different runs — even rerun-green — becomes a NEEDS_YOU quarantine-or-fix
+entry rather than more noise. The mechanism supports it: the owner's room carries only
+constant fan noise, which is stationary and already inside the calibrated floor, so the
+flip lives in the decoder — `capitalize sameer` is marginal by design and `asr.py`'s
+temperature fallback samples when `avg_logprob` crosses −1.0. **Declined alongside:** a
+manual quiet-room/fan-noise selector the owner offered — it would be a guessed duplicate
+of the measurement `--calibrate` already takes, aimed at the gate when the variance is in
+the decode, and §9's no-settings-dialog stance exists to keep exactly this knob out.
+Kept from the offer: if the tripwire fires, first check whether the flaking runs followed
+sustained CPU load — the fan ramps under a hot suite, and calibration measured the idle
+room. Accepted cost: a real intermittent regression in one live-ASR check gets one free
+pass per run, bounded by the rerun and the tripwire.
+
+### 2026-08-01 — Model revision pinning: declined again; benchmark provenance replaces it
+
+Benchmarks run on this machine only, so the HF cache is already a pin — nothing
+re-downloads unless it is cleared, and the upstream conversions have been frozen for
+years, so a pin table plus an offline-mismatch policy would be bought against a
+roughly-never event. Item 10's decline stands for the same reason it gave: `--model`
+accepts any name, and a table covering only the defaults misses exactly the runs that
+motivate it. **What was wrong in the old entry:** "runs drift and say so" is only true
+of the app — identity recording went to the diag trace, and **no bench script records a
+revision at all** (checked 2026-08-01: zero mentions across `scripts/`), while §9 tracks
+`.bench/` results precisely because a measurement cannot be re-taken. So the tracked
+measurements carry no provenance, and the reopen condition for pinning is not currently
+checkable. LOOP_PLAN item 18 closes that: every bench output gains an identity block.
+**Reopens if** a recorded hash ever changes between runs on this machine, or benchmarks
+start running on a second machine.
+
+### 2026-08-01 — Inferred pairs: never silent — offered for one-tap declaration instead
+
+Silent promotion stays out for the reason the open entry gave: an inferred pair is a
+guess from a word-level diff, `profile.json` still reads `"pairs": {}` so inference
+quality on this voice is unmeasured, and auto-applying it would rewrite words nobody
+asked to change. What changed is the other half: the owner states the hand-edited
+`lexicon.txt` path will not be used without UI ("unless it is exposed to UI right click
+or dedicated settings page i will not be able to use it") — a forecast rather than
+experience, since item 13 shipped the same morning, but a forecast from the product's
+only user, and it contradicts §9's recorded claim that "the whole gap was that nobody
+could find it." So: a pair seen `PROMOTE_AFTER` = 2 times surfaces in the right-click
+menu as a one-tap offer that writes the arrow line into `lexicon.txt` on the owner's
+behalf. A tap on a shown pair is a declaration — the declared/inferred boundary
+survives; only the typing does not. A dedicated settings page stays refused (§9's
+reasoning stands; the owner named right-click as an acceptable form). Costs accepted:
+Flow gains its first write *into* the user's file (bounded: append one line, on an
+explicit tap, never edit or remove), wrong offers are possible until inference quality
+is measured (a per-pair "never" is part of the spec), and the modal menu grows.
+Spec'd as LOOP_PLAN item 19.
+
+### 2026-08-01 — The three pinned misses: one conditional admission, two named for Phase 3
+
+**"follow and mention the roleback plan":** the elision pattern `follow (up)? and` — never
+bare "follow" — is admitted to `_FOLLOWUP` *only if* command_bench measures it at zero
+cost: real-utterance misroutes stay 0/580, adversarial stays ≤5/20, recall stays 100%.
+Pre-authorized by the owner (follow-ups confirmed as real usage: "yes i use that word"),
+so the loop measures and either admits or reports the hits back here — no grammar change
+on a failed measurement. Spec'd as LOOP_PLAN item 20.
+**"delete the bit about the standard":** `MATCH_THRESHOLD` stays 0.82, permanently. The
+sweep already priced the alternative — 0.75 buys this one recovery by taking corpus false
+spans from 4 to 19 — and a 5× false-span multiplier is the product deciding to guess.
+**"Insert before release nodes":** no grammar recovers a word the decoder never produced.
+Both remaining fixtures are explicitly *not* grammar work: they are the acceptance tests
+for the Phase 3 constrained re-decode, whenever that is proposed — written here so the
+proposal inherits its success criteria instead of inventing them.
+
+### 2026-08-01 — A reply can become the draft: chip + spoken command, replace, flips to dictate
+
+Found in the owner's first ordinary session and decided the same day: `send()` hands
+over the draft, a refined prompt lives in the reply, and no verb connected them —
+while `docs/product.md` P9 promises one in its own scenario ("turn that last answer
+into a code comment"). The owner chose **both** forms: a chip on the rendered reply and
+a spoken command, whole-utterance only, admitted through the same zero-false-hit
+corpus gate as item 20. Sub-choices closed by recommendation: **replace, never append**
+(the draft is empty in the main loop — `send()` cleared it to ask — and undo plus a
+note cover the rest; append waits for real demand); **take flips to dictate** (staying
+in converse makes the next Send re-ask the answer — the exact which-button-sends-where
+confusion the owner reported, rebuilt); and two guards carried from earlier decisions —
+**take does not arm the auto-ask countdown** (a taken draft is not a settled utterance;
+without this, converse auto-asks your own answer back 4 s after you take it) and
+**take stops an in-progress read-aloud**. Spec'd as LOOP_PLAN item 21.
+
+### 2026-08-01 — The spoken send trigger: two configurable words, whole-utterance, refusals inherited
+
+All three cold questions answered. Two trigger words, both the owner's to choose and
+both stored as additive `profile.json` fields with shipped defaults — **chosen
+2026-08-01: "boom" for Send, "enter boom" for Send-then-Enter.** One presses Send, the
+other presses Send-then-Enter so a terminal prompt actually submits. The owner's word
+order degrades safely: whole-utterance matching means a decode that loses a word from
+"enter boom" yields "enter" (nothing) or "boom" (paste without submit) — both fall away
+from execution, never toward it. Whole-utterance-only
+confirmed by the owner as natural ("gate opens, word, gate closes") — embedded
+mid-sentence stays dictation, which is what makes false fires structurally rare. The
+empty-draft case decided itself: `send()` already refuses with "nothing to send", and
+the trigger inherits every refusal Send has — including invariant 10's target
+revalidation, which the Enter keystroke rides behind. The physics boundary recorded
+earlier stands: no spoken word interrupts a playing reply, ever (invariant 6, no AEC).
+Honest wrinkle, recorded not hidden: the owner has said they will not hand-edit files,
+and the trigger words live in `profile.json` — defaults must therefore work out of the
+box, and re-wording them is the one step that still needs an editor. Spec'd as
+LOOP_PLAN item 22.
+
+### 2026-08-01 — P9 decided from use: converse is a prompt workshop, grounded in a workspace setting
+
+The scoping session this waited for happened at the desk instead: the owner tried
+general conversation and it failed on its own merits — the CLI answered that it has no
+internet access, and hallucinated. So P9's "ChatGPT Voice mode against the CLI" is the
+stale half, and converse mode becomes what the owner named: **dedicated prompt
+refinement, nothing more** — discuss and refine the prompt in conversation, take the
+result (item 21), send it (item 22). Grounding: an **explicit workspace setting** (e.g.
+`D:\dev\products\syntegris`) — the owner chose the explicit-path option over launch-dir
+and over reading the target window's directory. Its cost, argued once and accepted: a
+workspace set once goes stale silently when the project changes; the mitigation is
+visibility, not magic — the converse-mode note and the startup line name the workspace
+every time, so a wrong grounding is on screen. The owner's own words for why grounding
+matters: "so prompt are grounded as well … and we also know what we are sending
+properly." Spec'd as LOOP_PLAN item 23, which includes the P9 rewrite in
+`docs/product.md` — the build follows the definition, and the definition follows the
+evidence.

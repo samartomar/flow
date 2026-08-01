@@ -1,5 +1,46 @@
 # LOOP_PLAN — autonomous backlog from the Feedback.md review (2026-08-01)
 
+## ROUND THREE — the current queue. Everything above the Rules is history; this block is
+## the state. (Written 2026-08-01, owner's decision session.)
+
+**Nine items are queued: 15 through 23, none started.** Items 0–14 are done — their
+entries below are the record, not work. The two closing summaries beneath this block
+describe rounds one and two and are *both* superseded by this queue: the loop is NOT
+finished until items 15–23 are each done, blocked, or deferred, and only then is the
+round-three closing summary written — prepended here at the top, the same convention
+rounds one and two used.
+
+The queue, in execution order (top to bottom, one item per iteration, as always):
+
+| # | One line | Gates beyond the suite |
+|---|---|---|
+| 15 | Converse marker text names the resolved CLI | — |
+| 16 | Decode confidence recorded per route — no behaviour | [selfdrive] |
+| 17 | The draft becomes keyboard-editable (stage one) | [send-live], stop-condition on invariant 10 |
+| 18 | Bench outputs gain a model-identity block | one real `command_bench.py` run |
+| 19 | Inferred pairs offered in the menu, one tap declares | [selfdrive] |
+| 20 | "follow and" admitted iff the corpus prices it at zero | command_bench gate, revert path defined |
+| 21 | A reply can become the draft (chip + spoken form) | corpus gate on the spoken form; chip ships regardless; **needs 17's countdown seam — do not reorder before 17** |
+| 22 | Spoken send triggers: "boom" / "enter boom" | corpus gate; [send-live] mandatory for the Enter variant |
+| 23 | Converse = prompt workshop, workspace grounding, P9 rewrite | [selfdrive]; edits `docs/product.md` (a named file) |
+
+**What makes this round one-go executable, stated so nothing needs interpreting:**
+- Every item already carries instrument-first, named files, acceptance, and doc sync.
+  Where a desk or an unlocked desktop is required, the item names its Rule 2/Rule 7
+  deferral path — `done (live check pending)` plus a NEEDS_YOU entry is a *completed*
+  outcome for this round, not a blocker.
+- Items 20, 21 and 22 carry measurement gates with defined failure behaviour: a failed
+  gate means ship the reduced scope (20: no grammar change; 21: chip only; 22: report
+  the word that would not admit) and write the numbers to NEEDS_YOU — then the item is
+  done, not blocked.
+- The only hard ordering constraint is 17 before 21 (shared countdown-hold seam). The
+  listed order satisfies it; do not resequence around a failure, just mark and move on
+  (Rule 8).
+- Owner-decided defaults are in the items themselves (22: "boom"/"enter boom"; 23: the
+  `--cwd`/`workspace` precedence). Nothing in this round waits on an owner answer.
+- Rule 2's selfdrive flake policy (rerun-once, record the check name, same-check
+  tripwire) is in force for every [selfdrive] run this round.
+
 ## Closing summary — round two, 2026-08-01: items 13 and 14 done, none blocked
 
 Two commits, `ea8d2bb` and `3152bde`, on top of the owner's three. Nothing pushed. The
@@ -104,9 +145,9 @@ settings: name, people, correction pairs) and 14 (grammar coverage from the live
 ---
 
 The loop's single source of truth. One "do"-tier item per iteration, top to bottom.
-Everything here was verified against the code on 2026-08-01; the review verdicts are in
-the conversation that produced this file, and the doc-side corrections already landed in
-`docs/architecture.md` (uncommitted — committing them is item 0).
+Round three's queue is the block at the very top of this file; the first pending item is
+**15**, and items 0–14 below it are records of finished work — skip them without reading
+past their Status lines.
 
 ## Rules — these override everything, including the loop prompt
 
@@ -115,7 +156,14 @@ the conversation that produced this file, and the doc-side corrections already l
    the item's Evidence line. A green harness that cannot exercise the path proves nothing.
 2. **Gate every commit** on the full unit suite: `uv run python -m unittest discover -s tests`.
    Items marked [selfdrive] also run `uv run python scripts/selfdrive.py` (note: it makes
-   one live codex call). Items marked [send-live] also run
+   one live codex call). Selfdrive flake policy (owner-decided 2026-08-01): a 63/64 gets
+   **one** automatic rerun — a green rerun proceeds, and the Evidence line records both
+   scores *and the failing check's name*; a rerun that fails again is real and blocks the
+   item per Rule 8, never a second rerun. The **same check** flaking in two different
+   runs — even rerun-green both times — stops being noise: write a NEEDS_YOU entry to
+   quarantine or fix that check, and note whether each flaking run followed sustained CPU
+   load (the fan ramps when the suite has been running; calibration measured the idle
+   room). Different checks on different days are noise, and rerun-once continues. Items marked [send-live] also run
    `uv run python scripts/send_check.py --live` — but only if the interactive desktop is
    available (heuristic: `GetForegroundWindow()` returns non-zero and the harness can take
    the foreground). If the desktop is locked, do NOT force it: add a NEEDS_YOU.md entry to
@@ -127,8 +175,14 @@ the conversation that produced this file, and the doc-side corrections already l
    trailer. Never `git add -A`/`-u`, never push, never amend/rebase/reset, never commit
    LOOP_PLAN.md, NEEDS_YOU.md, or Feedback.md.
 4. **Scope is frozen.** Only the items below. No product-behavior changes beyond them: the
-   auto-ask default stays ON, `AUTO_ASK_SEC` stays 4.0, `ASK_SENTENCES` default stays 3,
-   no new runtime dependencies (R16: exactly three), no UI redesign. Anything tempting
+   auto-ask default stays ON (owner-confirmed 2026-08-01, with a diag-based reopen bar in
+   NEEDS_YOU), `AUTO_ASK_SEC` stays 4.0, `ASK_SENTENCES` default stays 3, no new runtime
+   dependencies (R16: exactly three), no UI redesign. Round-three precision, so this rule
+   cannot be read against its own queue: items 15–23 *are* the scope, and the bounded UI
+   they name — marker text (15), the editable draft swap (17), the reply chip (21), the
+   menu offers (19) — is in scope; "no UI redesign" forbids layout, geometry, or
+   interaction overhauls *beyond what an item names*, not the items themselves. Item 23's
+   `docs/product.md` edit is likewise a named file, not a scope breach. Anything tempting
    beyond this list becomes a NEEDS_YOU.md proposal, not a change.
 5. **Never touch** `.bench/recorded/**`, git history, remotes, or `~/.flow/` of the real
    user beyond what the app itself writes (tests use temp paths, as they already do).
@@ -709,7 +763,308 @@ pill already carries a standing converse marker and only its *text* is at issue.
   description gains the marker's second job.
 - Status: (not started)
 
-## Backlog — "prepare" tier (proposals only; append each to NEEDS_YOU.md, change no behavior)
+### 16. Decoder confidence reaches the router and the trace — instrument only
+Owner-decided 2026-08-01 (NEEDS_YOU "Garbled CLI escalations"). `asr.take_confidence()`
+returns the worst `avg_logprob` among the last decode's kept segments, calibrated against
+this speaker's own clean-speech baseline (P8, `clean.confidence_floor`). It is consumed by
+`flow/calibrate.py` and `scripts/guardrail_bench.py` and by nothing on the live path: the
+router decides between a local edit and a ~7 s CLI call without ever seeing how well the
+decoder heard the sentence it is routing. **This item changes no behaviour.** It exists so
+the gate that was declined can be re-decided on a real distribution.
+- Files: `flow/session.py`, `flow/diag.py`, tests (`tests/test_diag.py`,
+  `tests/test_session.py`).
+- Instrument first: a test asserting that today a session routing an utterance emits no
+  confidence anywhere — not on the route event, not in the trace — with a fake
+  transcriber whose `take_confidence()` returns a known value that must therefore go
+  nowhere. Then invert. A second check that a transcriber *without* the method (the
+  fakes in `test_session.py` predate it) does not crash the route path — `getattr`, the
+  way `Mic.dropped` is already read.
+- Fix shape: drain the confidence alongside the text where the decode result is consumed
+  and carry it onto the route record. `diag.py` gains a numeric field on the route event;
+  it is a float, so it passes the token regex, but **add it to `FIELDS` explicitly** — the
+  allow-list is the load-bearing half of the redaction guard and a field that arrives
+  without being named there is the failure mode item 9 was built to prevent. Nothing reads
+  the value to make a decision.
+- Acceptance: suite green. The sentinel test in `test_diag.py` still passes — a confidence
+  number is not content, and the test that proves the guard bites (deliberate leak) must
+  still fail when made to leak.
+- Doc sync: §9's `diag.jsonl` row lists the field; §5 notes that the confidence the drop
+  filter uses is now also recorded per route.
+- Status: (not started)
+
+### 17. The draft can be edited by hand
+Owner-decided 2026-08-01, in place of the sanity gate (NEEDS_YOU "Garbled CLI
+escalations"). Today the only way to repair a mis-heard command is to say it again, into
+the same decoder that mis-heard it — an unwinnable loop for the speaker this product is
+designed for, and the reason the owner reports correcting text *after* Send. The live
+sheet scored 55/73/55% against P3's ≥ 95%, so the escape hatch is not an edge case.
+- Files: `flow/ui.py` (`Bubble`), `flow/session.py`, tests.
+- Instrument first: a test asserting there is today no path by which a keystroke reaches
+  `Draft`, and that `Draft.revision` is therefore unchanged by anything but speech and
+  CLI results. Then invert: an edit applied through the new path bumps `revision`, lands
+  on the undo stack, and a rewrite that was in flight across that edit is **discarded**
+  by the existing invariant-11 check rather than overwriting it.
+- Fix shape: the bubble's draft text becomes editable in place. Two things make this
+  smaller than it looks and both are already true — **write through `Draft.set()`**, which
+  calls `_remember()` and so bumps `revision` and pushes undo for free (`session.py:277`);
+  and leave the router alone entirely, since a hand edit is not an utterance.
+  Two things make it harder than it looks and neither may be skipped:
+  1. **Invariant 10.** Flow's windows are deliberately outside the activation chain so a
+     paste can never land on Flow itself. Taking keyboard focus into the bubble runs
+     directly at that. Prove with a test that `inject.resolve()` still refuses a target
+     resolving to Flow's own process *while the editor has focus*; if focus cannot be
+     taken without weakening that refusal, **stop and write a NEEDS_YOU entry** rather
+     than relaxing the invariant — Rule 8, first strike.
+  2. **The microphone.** Typing while the mic is open appends whatever the room says to
+     the text being typed. Suspend capture while the editor holds focus and say so, in
+     the `_pump_warnings` idiom; a silently deaf microphone is the failure mode
+     invariant 4 exists to forbid.
+  3. **The auto-ask countdown.** The editor commits once, on close — so while the owner
+     types, the session sees a settled draft and (per 2) guaranteed silence, and the
+     converse countdown runs to zero against a draft that is half-edited. Speech holds
+     the countdown; focus in the editor must hold it the same way, released on commit or
+     cancel. A test drives converse mode, opens the editor, winds past `AUTO_ASK_SEC`,
+     and asserts nothing was sent — without this the item ships a premature-fire class
+     worse than the one the auto-ask decision just accepted, and the decided ~1-in-10
+     reopen bar would be measuring the editor's bug, not the constant.
+- Acceptance: suite green; [send-live] 18/18 if the desktop is unlocked, because this
+  item touches focus and `send_check.py` is the only harness that can see focus really
+  move. A NEEDS_YOU desk entry otherwise, per Rule 2.
+- Doc sync: §7 gains the editor and its focus story; invariant 4's microphone half gains
+  the deliberate-suspension case (said, therefore not silent); §2's pipeline shows the
+  hand-edit path entering `Draft` beside the router.
+- Status: (not started)
+
+### 18. Benchmark results name the model bits that produced them
+Owner-decided 2026-08-01 (NEEDS_YOU "Model revision pinning" — declined again; this
+replaces it). §9 tracks `.bench/` results because "a measurement taken at a moment
+cannot be re-taken", yet no bench script records which model revision produced its
+numbers — item 10's identity recording reaches only the app's diag trace, which on this
+machine does not exist. Until identity is in the results, the pinning decision's reopen
+condition (a hash that changed between runs) cannot even be checked.
+- Files: the bench writers in `scripts/` (`command_bench.py`, `accent_bench.py`,
+  `lexicon_bench.py`, `guardrail_bench.py`, `live_check.py` — confirm the list by
+  grepping for json writers rather than trusting this line), `flow/diag.py` (expose the
+  HF-revision resolver as an importable function instead of duplicating it), tests.
+- Instrument first: a test asserting today's outputs carry no `identity` key; then
+  invert — each output gains one top-level `identity` block: model name → revision hash
+  for every tier the run loaded, `faster-whisper`/`ctranslate2` versions, and the date.
+- **The trap, named:** item 14 verified `command_bench.py` by byte-identical comparison
+  of consecutive outputs, and an identity block with a date breaks that idiom. Keep
+  identity under one top-level key so before/after comparisons diff everything *except*
+  it, and say so in a comment where the block is written — the next person to re-run
+  item 14's verification must not conclude the grammar changed because the date did.
+- Acceptance: suite green; one real `command_bench.py` run (the cheapest — no audio)
+  shows `base.en 3d3d5dee…`-style values resolving on this machine; the run's non-identity
+  content is line-identical to the previous `.bench/accent/command-bench.json`.
+- Doc sync: §9's `.bench` row gains the provenance sentence; the Verification section's
+  identity paragraph extends from "recorded at app startup" to "and in every bench
+  result".
+- Status: (not started)
+
+### 19. Inferred pairs surface in the menu for one-tap declaration
+Owner-decided 2026-08-01 (NEEDS_YOU "Inferred pairs"). Never silent: an inferred pair is
+a guess from a word-level diff and `profile.json` has yet to learn a single real one, so
+nothing self-promotes. But the owner will not hand-edit `lexicon.txt` ("unless it is
+exposed to UI right click … i will not be able to use it"), so consent has to cost one
+tap: a pair the profile has seen `PROMOTE_AFTER` = 2 times appears in the right-click
+menu — "semir → Samir — add correction?" — and the tap writes the arrow line into the
+lexicon. A tap on a shown pair is a declaration; the declared/inferred boundary survives,
+only the typing does not.
+- Files: `flow/ui.py` (menu), `flow/profile.py` (a dismissed-pairs set, additive, schema
+  stays 1 per the `voice` precedent), `flow/lexicon.py` (an append-one-line writer),
+  tests (`tests/test_lexicon.py`, `tests/test_profile.py`, a menu test in the
+  `_pump_warnings` idiom).
+- Instrument first: today no seam exists — assert the absence at import, item 13 style.
+  Then: a pair at 2 sightings yields a menu offer; at 1 sighting it does not; a tapped
+  offer appends exactly one `wrong -> right` line and the rest of the file is
+  byte-identical (the test writes a lexicon with comments and terms first, then diffs);
+  a tapped pair stops being offered because the substitution now exists; a "never"-ed
+  pair is persisted in the profile and is not offered again across a reload; the 65th
+  entry is refused with a note (`MAX_TERMS` = 64 is shared, §8, and a silent drop past
+  the cap is the library-truncation failure the cap exists to prevent).
+- **Contract changes, named, both in the same commit's doc sync:**
+  1. §9 says `lexicon.txt` is "otherwise read-only to the app" — no longer true. New
+     contract, stated in §9 and in the template's comments: Flow appends one line, only
+     on an explicit tap in the menu, and never edits or removes a line. The mtime-based
+     re-read already picks the new pair up on the next decode; a test asserts that.
+  2. §9's "the whole gap was that nobody could find it" is contradicted by the owner and
+     comes out; the corrected sentence says finding it was half the gap.
+- **The menu is a modal loop** (§8, invariant 4): it already costs a measured ~16 s
+  stall at worst and one mic-overflow note. Bound the offers shown (3 at most, most
+  recent first) so the menu does not grow with the profile; the full list has no other
+  UI on purpose — this is not a settings page, and building one stays refused.
+- Acceptance: suite green; [selfdrive] 64/64 (its learning check drives the same
+  `PROMOTE_AFTER` counter this item reads — prove the hotword promotion it asserts is
+  untouched).
+- Doc sync: §9 lexicon row rewritten per the contract changes; §8 `PROMOTE_AFTER` row
+  gains its second consumer; §1 menu description.
+- Status: (not started)
+
+### 20. Admit "follow and" as a follow-up — only if the corpus prices it at zero
+Owner-decided 2026-08-01 (NEEDS_YOU "Three pinned misses"), conditional and
+pre-authorized. Run 1's "follow and mention the roleback plan" routed `append/` because
+the decoder dropped the unstressed "up" before "and" — "roleback" itself scored 0.938
+and was never the problem. Bare "follow" stays out: "follow the steps in the README" is
+dictation and must remain so. The candidate is the elision shape only — "follow"
+directly followed by "and" (optional comma), alongside the existing "follow up" forms,
+the way `_LOWER` carries `lower\s?case` as a spelling variant rather than a table entry.
+- Files: `flow/edits.py` (`_FOLLOWUP`), `tests/test_edits.py`,
+  `tests/test_live_replay.py` (one pinned row moves). `scripts/command_bench.py` is the
+  instrument and is not modified.
+- **Measure before touching the grammar** — this is the owner's admission gate, not a
+  regression check after the fact: run `command_bench.py` with the change staged and
+  require real-utterance misroutes **0/580**, adversarial **≤5/20**, corruption-class
+  recall **100%**, threshold sweep unchanged. Anything else: revert, write the failing
+  rows and their counts to NEEDS_YOU, and stop — the owner admits patterns on numbers,
+  not on plausibility. (Item 14's byte-identical idiom does not apply here: if the
+  corpus contains genuine "follow and" follow-ups, those rows *should* move; what must
+  not move is anything that is not one.)
+- Instrument first, the usual shape: "follow and mention the rollback plan" asserts
+  `append/` today, `followup/` after; "follow the steps in the README" asserts `append/`
+  both before and after, in the same test class so the boundary is one diff apart; the
+  live_replay row for run 1 item 10 updates its now-column, which is the point of that
+  file.
+- Acceptance: suite green; the command_bench gate above, with its numbers in the
+  Evidence line; [selfdrive] 64/64 (the routing tables changed; item 14 set the
+  precedent).
+- Doc sync: §6 gains the elision note with run 1's numbers beside the noun-snap
+  paragraph it will sit next to.
+- Status: (not started)
+
+### 21. A reply can become the draft — the verb P9 promised
+Owner-decided 2026-08-01 (NEEDS_YOU "A reply cannot become the draft"). The owner's
+prompt-workshop loop — discuss in converse, refine, then send the good version to the
+terminal — dead-ends because `send()` hands over the draft and the refined prompt is in
+the reply. P9's own scenario promises the connection ("turn that last answer into a code
+comment" and paste it); this builds it. Chip **and** spoken command; replace, never
+append; taking the reply flips to dictate.
+- Files: `flow/session.py` (`take_reply()`), `flow/ui.py` (chip on the bubble while a
+  reply is rendered, gated the way `can_rescue` gates "Was a command"), `flow/edits.py`
+  (spoken forms), tests (`tests/test_converse.py`, `tests/test_edits.py`, new checks in
+  the bubble-chip idiom).
+- Instrument first: assert the absence (no `take_reply`, no chip spec, no route), item 13
+  style. Then, each its own check:
+  1. take with an empty draft sets the draft to the reply text verbatim, through
+     `Draft.set()` — the revision moves and undo holds the empty state;
+  2. take with a non-empty draft replaces it, the note names what was displaced, and one
+     undo restores it;
+  3. **take flips `mode` to DICTATE** and the note says Send now pastes — staying in
+     converse would make the next Send re-ask the answer, which is the confusion this
+     item exists to remove;
+  4. **take does not arm the auto-ask countdown**: wind past `AUTO_ASK_SEC` after a take
+     with no new speech — nothing is sent. A taken draft is not a settled utterance;
+     without this guard the trap is converse auto-asking the owner's own answer back at
+     the CLI. Same class as item 17's editor hold — if 17 landed first, use its seam;
+  5. take while the reply is being read aloud stops the speech (the existing interrupt
+     path) — reaching for the text is "I have what I need";
+  6. the chip exists only while a reply is on screen; no reply, no chip.
+- Spoken forms, item 20's discipline exactly: an exact small set — "use that answer",
+  "use that reply" — whole-utterance only ("use that answer in the summary" is prose and
+  must stay dictation). Measure against command_bench before admitting: 0/580 new hits
+  on real utterances, adversarial ≤5/20, recall 100%; a failed gate ships the chip alone
+  and writes the numbers to NEEDS_YOU. The chip is the floor either way — it cannot be
+  mis-decoded.
+- Bounds, stated: a reply can be `ASK_ARTIFACT_MAX_CHARS` = 12 000; taking one as the
+  draft is legitimate (the artifact was the deliverable). `refine.MAX_CHARS` = 2000
+  still applies if the owner then *rewrites* it — the existing tail-note already says
+  so, and no new truncation is added here.
+- Acceptance: suite green; [selfdrive] 64/64 if the spoken form is admitted (routing
+  changed), skippable if the gate shipped chip-only; the command_bench numbers in the
+  Evidence line either way.
+- Doc sync: §2's loop gains the take step between reply and Send; P9's row in the §1
+  cross-reference notes the promised verb now exists; invariant 5 review — take is not
+  a paste, so "nothing is pasted without an explicit Send" survives untouched, and the
+  mode-flip note is the visible seam.
+- Status: (not started)
+
+### 22. Two spoken send triggers — a word for Send, a word for Send-then-Enter
+Owner-decided 2026-08-01 (NEEDS_YOU "Spoken send trigger", all three questions
+answered). The last keyboard step in the workshop loop (item 21 takes the reply, this
+sends it) becomes voice: one configurable word presses Send, a second presses Send and
+then submits with Enter. First feature to run at R5 and P7 directly — the safety comes
+from inheriting Send's existing refusals, not from new machinery.
+- Files: `flow/edits.py` (trigger route), `flow/session.py`, `flow/inject.py` (the
+  Enter keystroke), `flow/profile.py` (two additive fields, schema stays 1),
+  `flow/ui.py` only if the note needs a home it lacks, tests.
+- Instrument first: assert the absence; then, each its own check:
+  1. the trigger word as the **entire utterance** routes `send_trigger/` (plain) or
+     `send_trigger/enter`; the same word embedded in a longer utterance is dictation —
+     both directions in one test class, one diff apart;
+  2. the trigger invokes the same `send()` the chip does: empty draft → the existing
+     "nothing to send" note and **no paste, no Enter**; in-flight ask/refine → the
+     existing refusal notes; target revalidation failure → refusal, and the Enter is
+     never sent when the paste was not;
+  3. the Enter variant sends Enter **after** the bracketed paste completes, to the
+     validated target only — under `brackets_paste`, the payload stays inert and the
+     single Enter is the submit, which is P7's "deliberate execution" done deliberately;
+  4. in converse mode the enter suffix is meaningless (nothing is pasted) — plain and
+     enter variants both behave as Ask, with a note saying so once;
+  5. profile: absent fields → shipped defaults; stored words win; `--no-profile` still
+     has working defaults. Defaults must work out of the box — the owner will not
+     hand-edit `profile.json`, and a feature that needs an editor before first use is
+     dead on arrival for its own requester.
+- Word admission gate, item 20's discipline: each default word as a whole utterance
+  against command_bench — 0/580 new hits, adversarial ≤5/20, recall 100%. **Defaults
+  chosen by the owner 2026-08-01: `"boom"` (Send) and `"enter boom"` (Send+Enter).**
+  The order is the safe one and the code comment should say so: whole-utterance
+  matching means a decode that loses a word from "enter boom" yields "enter" (no
+  trigger) or "boom" (paste without submit) — degradation falls away from execution.
+  Known risk, recorded: "boom" is a short plosive and may decode as "bhoom" or nothing
+  for the anchor accents; the lexicon's arrow lines repair a consistent bend
+  (`bhoom -> boom`), the template should say so beside the correction examples, and if
+  the word will not decode at the desk the fallback is renaming the default in code on
+  a NEEDS_YOU report — not asking the owner to edit `profile.json`.
+- Acceptance: suite green; [selfdrive] 64/64 (routing changed); **[send-live]
+  mandatory for the Enter variant** — a keystroke into a real terminal is the one thing
+  a unit fake cannot vouch for; if the desktop is locked, the item is `done (live check
+  pending)` per Rule 2 and the NEEDS_YOU desk entry says exactly what to run.
+- Doc sync: §7 gains the trigger paragraph and the Enter-after-paste ordering; §6 the
+  route; invariant 5's wording review — a spoken trigger is an explicit Send, and the
+  sentence should say so before somebody reads "explicit" as "clicked"; §9 profile row
+  gains the two fields.
+- Status: (not started)
+
+### 23. Converse mode is a prompt workshop, grounded in a workspace — and P9 says so
+Owner-decided 2026-08-01 (NEEDS_YOU "P9 decided from use"). General conversation failed
+at the desk on its own merits (no internet, hallucinations); the owner's definition —
+"predefined skills to help write better prompt … discuss and refine prompts only
+nothing more" — becomes the product's. Three parts, one item, because each is small and
+they only mean something together.
+- Files: `docs/product.md` (P9 rewrite — named deliberately; Rule 6's architecture sync
+  still applies on top), `flow/__main__.py`, `flow/profile.py` (additive `workspace`
+  field), `flow/session.py` (ask framing), tests.
+- Part 1, the wiring that was always missing: `refine_cwd` gets a value. Precedence
+  matches `--voice`: `--cwd PATH` flag wins, else the profile's `workspace`, else
+  today's `None`. Startup says which ("workshop: D:\dev\products\syntegris" or
+  "workshop: not set — Ask runs without a project"). A stored path that no longer
+  exists: say so and run without it — a startup that refuses over a stale setting is
+  worse than an ungrounded ask.
+- Part 2, the framing: `_start_ask` wraps the outgoing question in the workshop
+  preamble — the CLI is helping refine a prompt for an agentic coding CLI, the
+  workspace is X, discuss and refine only. The preamble is a module constant with a
+  test asserting the draft text and workspace path both appear in what `_invoke`
+  receives, and that `CONTEXT_CHARS` thread context still rides along (a workshop with
+  amnesia between turns is not a workshop). The mode-switch note names the workspace —
+  the visibility that pays for the stale-path risk the owner accepted.
+- Part 3, the definition: P9's row rewritten around the workshop — the React-question
+  scenario goes, the refine-take-send loop (items 21/22) becomes the acceptance
+  narrative, and the half-duplex caveat survives untouched. P5 gains one sentence
+  distinguishing polish (one-shot, in place) from the workshop (conversational).
+- Instrument first: today `ask()` receives the raw draft and `cwd=None` — assert both,
+  then invert both. The stale-path case has its own check.
+- Acceptance: suite green; [selfdrive] 64/64 (ask path changed). The felt half —
+  whether grounded answers are actually less generic — is a desk observation, not a
+  unit assertion: NEEDS_YOU gets the entry ("ask the same question about your real repo
+  with and without the workspace set; keep the transcript").
+- Doc sync: §1's converse row, §9 profile row (`workspace`), the "What leaves the
+  machine" paragraph — the preamble now leaves too, and the sentence must say so.
+- Status: (not started)
+
+## Backlog — "prepare" tier — COMPLETED in round one; nothing here for round three
+(The four proposals below were appended to NEEDS_YOU.md on 2026-08-01 and have since
+been decided or parked there: P1 executed as `50c2068`, P2 parked on diag evidence, P3
+deliberately waiting, P4 executed — history rewritten. Do not re-append them.)
 
 All four are written up in NEEDS_YOU.md under "Proposals from the plan's prepare tier",
 2026-08-01. No behaviour changed. P3 and P4 carry facts checked today rather than assumed:
@@ -733,4 +1088,7 @@ which is already on `origin/main`.
 
 ## Closing summary
 
-(The loop writes this when everything above is done, blocked, or deferred.)
+(Round three's closing summary is PREPENDED at the top of this file when items 15–23
+are each done, blocked, or deferred — the same place rounds one and two put theirs.
+Nothing is written here; this heading survives only so a diff against old revisions
+anchors cleanly.)
