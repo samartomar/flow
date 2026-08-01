@@ -59,6 +59,14 @@ class Profile:
         self.speech_db: float | None = None
         self.confidence: float | None = None
         self.calibrated_at: float | None = None
+        #: The microphone the numbers above were measured through. A calibration is a
+        #: measurement of a room *via a device* — the room that broke the shipped gate
+        #: read −96.7 dB on a good USB mic, and the same room through a laptop array
+        #: reads nothing like it — so the floor, the margin and the confidence baseline
+        #: all belong to one microphone. Kept so a swap can be pointed out, never so it
+        #: can be refused. Additive: an older profile loads with None and is simply not
+        #: compared against anything.
+        self.calibrated_device: str | None = None
         #: P9: which voice reads the replies. A name, not an index — the engine's own
         #: identifier, so a voice added or removed between sessions cannot silently
         #: shift the choice onto a different one. No schema bump: every read here has a
@@ -92,6 +100,7 @@ class Profile:
         self.speech_db = raw.get("speech_db")
         self.confidence = raw.get("confidence")
         self.calibrated_at = raw.get("calibrated_at")
+        self.calibrated_device = raw.get("calibrated_device")
         # `bool(None)` is False, so a key that was never written — or written as null by
         # an older Flow — would read as a deliberate "off". Absent means the default.
         stored = raw.get("auto_ask")
@@ -108,6 +117,7 @@ class Profile:
             "speech_db": self.speech_db,
             "confidence": self.confidence,
             "calibrated_at": self.calibrated_at,
+            "calibrated_device": self.calibrated_device,
             "voice": self.voice,
             "auto_ask": self.auto_ask,
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
@@ -131,12 +141,17 @@ class Profile:
         return self.floor_db is not None and self.speech_db is not None
 
     def record_calibration(
-        self, floor_db: float, speech_db: float, confidence: float | None
+        self,
+        floor_db: float,
+        speech_db: float,
+        confidence: float | None,
+        device: str | None = None,
     ) -> None:
         self.floor_db = round(floor_db, 1)
         self.speech_db = round(speech_db, 1)
         self.confidence = round(confidence, 3) if confidence is not None else None
         self.calibrated_at = time.time()
+        self.calibrated_device = device or None
 
     def margin_db(self, default: float = 10.0) -> float:
         """How far above the floor speech has to rise before the gate opens.

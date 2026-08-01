@@ -126,6 +126,32 @@ class Mic:
         """
         return self._stream is not None and bool(self._stream.active)
 
+    @property
+    def device_name(self) -> str:
+        """Which input device this is, by name, or "" when it cannot be named.
+
+        By name and never by index: indexes are assigned in enumeration order and shift
+        when anything is plugged in, so a stored index would quietly come to mean a
+        different microphone — which is the exact confusion the profile records this to
+        catch. Asks the open stream first, because `device=None` means "whatever the
+        system default is" and the answer to that changes between sessions.
+
+        Never raises. This is decoration on an advisory note, and PortAudio will happily
+        refuse to describe a device that is being unplugged as we ask.
+
+        The name is whatever the host API gives, truncation included — MME caps device
+        names at 31 characters, so the local mic reports as "OBSBOT Tiny 3 Lite
+        Microphone (" with the bracket left open. Compared, not parsed, so a stable
+        truncation is as good as a full name.
+        """
+        try:
+            index = self._stream.device if self._stream is not None else self._device
+            if index is None:
+                index = sd.default.device[0]
+            return str(sd.query_devices(index)["name"])
+        except Exception:
+            return ""
+
     def restart(self) -> None:
         self.stop()
         self.start()

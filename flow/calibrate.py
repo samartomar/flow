@@ -205,7 +205,13 @@ def run(mic: Mic, profile, asr=None, seconds: float = LISTEN_SEC, log=print) -> 
         log("not usable — needs at least "
             f"{MIN_SPEECH_SEC:.0f}s of speech and {MIN_QUIET_SEC:.0f}s of quiet")
         return False
-    profile.record_calibration(result.floor_db, result.speech_db, result.confidence)
+    # Recorded with the numbers because it is part of them: they describe this room
+    # through this microphone. `getattr` because `measure` takes anything that can
+    # `drain()`, and the benchmarks feed it recordings.
+    profile.record_calibration(
+        result.floor_db, result.speech_db, result.confidence,
+        device=getattr(mic, "device_name", "") or None,
+    )
     profile.save()
     log(f"gate margin set to {profile.margin_db():.1f} dB; saved to {profile.path}")
     return True

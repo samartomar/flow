@@ -539,3 +539,177 @@ class TestTheAutoAskChoiceIsRemembered(unittest.TestCase):
         p = tmp_profile()
         p.save()
         self.assertEqual(json.loads(p.path.read_text(encoding="utf-8"))["schema"], 1)
+
+
+class NamedMic:
+    """A mic that knows what it is, and can come back as a different one.
+
+    `becomes` is the unplug: the health check finds the stream dead, reopens it, and
+    what it reopens onto is whatever the system now calls the default input.
+    """
+
+    def __init__(self, name: str = "USB Condenser") -> None:
+        self.device_name = name
+        self.level_db = -70.0
+        self.restarts = 0
+        self.becomes: str | None = None
+        self._active = True
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def restart(self) -> None:
+        self.restarts += 1
+        self._active = True
+        if self.becomes is not None:
+            self.device_name = self.becomes
+
+    def drain(self):
+        return []
+
+
+class TestCalibrationRemembersItsMicrophone(unittest.TestCase):
+    """A calibration measures a room *through a device*, and said so nowhere.
+
+    Floor, margin and this speaker's confidence baseline all move with the microphone:
+    the room that broke the shipped gate read −96.7 dB on a good USB mic, and a laptop's
+    built-in array in the same room does not read anything like that. Applying one
+    device's numbers to another applies numbers that describe nothing, and until now
+    swapping microphones produced no sign of it at all.
+
+    Advisory, deliberately. A stored calibration is still better than the shipped
+    default, and refusing it because a device name changed would punish someone for
+    plugging in a headset.
+    """
+
+    def _session(self, profile, mic):
+        from flow.session import Session
+
+        class NoAsr:
+            def load(self, final=None): ...
+
+            def text(self, a, *, final=False, hotwords=""):
+                return ""
+
+        s = Session(asr=NoAsr(), mic=mic, profile=profile)
+        self.addCleanup(s.close)
+        return s
+
+    def _calibrated(self, device="USB Condenser"):
+        p = tmp_profile()
+        p.record_calibration(-96.7, -50.0, -0.41, device=device)
+        return p
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def test_a_fresh_profile_names_no_device(self):
+        self.assertIsNone(tmp_profile().calibrated_device)
+
+    def test_the_device_round_trips(self):
+        p = self._calibrated()
+        p.save()
+        self.assertEqual(Profile(p.path).calibrated_device, "USB Condenser")
+
+    def test_a_profile_written_before_this_existed_still_loads(self):
+        p = self._calibrated()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        del raw["calibrated_device"]
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        again = Profile(p.path)
+        self.assertTrue(again.calibrated, "the rest of the calibration was lost")
+        self.assertIsNone(again.calibrated_device)
+
+    def test_the_same_microphone_says_nothing(self):
+        s = self._session(self._calibrated(), NamedMic("USB Condenser"))
+        s.start()
+        self.assertNotIn("calibrat", self.notes(s))
+
+    def test_a_different_microphone_is_pointed_out(self):
+        s = self._session(self._calibrated(), NamedMic("Laptop Array"))
+        s.start()
+        note = self.notes(s)
+        self.assertIn("USB Condenser", note)
+        self.assertIn("Laptop Array", note)
+
+    def test_the_calibration_is_still_applied(self):
+        # Advisory only: the numbers are still better than the shipped defaults.
+        from flow.calibrate import apply
+
+        p = self._calibrated()
+        s = self._session(p, NamedMic("Laptop Array"))
+        s.start()
+        self.assertTrue(apply(p, s.gate))
+        self.assertEqual(s.gate.floor_db, -96.7)
+
+    def test_it_is_said_once_and_not_every_health_tick(self):
+        s = self._session(self._calibrated(), NamedMic("Laptop Array"))
+        s.start()
+        s.events()
+        for _ in range(20):
+            s.tick()
+        self.assertNotIn("calibrat", self.notes(s))
+
+    def test_a_restart_onto_a_different_device_is_pointed_out(self):
+        from flow import session as session_mod
+
+        mic = NamedMic("USB Condenser")
+        mic.becomes = "Laptop Array"
+        s = self._session(self._calibrated(), mic)
+        s.start()
+        s.events()
+        mic._active = False  # the USB mic was unplugged mid-session
+        with mock.patch.object(session_mod, "MIC_CHECK_SEC", 0.0):
+            s.tick()
+        self.assertEqual(mic.restarts, 1, "the health check never reopened it")
+        self.assertIn("Laptop Array", self.notes(s))
+
+    def test_an_uncalibrated_profile_says_nothing(self):
+        s = self._session(tmp_profile(), NamedMic("Laptop Array"))
+        s.start()
+        self.assertNotIn("calibrat", self.notes(s))
+
+    def test_a_profile_calibrated_before_devices_were_recorded_says_nothing(self):
+        # Nothing to compare against is not evidence of a mismatch.
+        s = self._session(self._calibrated(device=None), NamedMic("Laptop Array"))
+        s.start()
+        self.assertNotIn("calibrat", self.notes(s))
+
+    def test_a_mic_that_cannot_name_itself_says_nothing(self):
+        mic = NamedMic("")
+        s = self._session(self._calibrated(), mic)
+        s.start()
+        self.assertNotIn("calibrat", self.notes(s))
+
+    def test_calibrating_records_the_microphone_it_measured(self):
+        from flow.calibrate import run
+
+        p = tmp_profile()
+        mic = ReplayMic(room_and_voice(-96.7, -45.0))
+        mic.device_name = "USB Condenser"
+        self.assertTrue(run(mic, p, seconds=0.0, log=lambda *_a: None))
+        self.assertEqual(p.calibrated_device, "USB Condenser")
+
+    def test_a_mic_the_platform_will_not_name_stores_nothing(self):
+        from flow.calibrate import run
+
+        p = tmp_profile()
+        self.assertTrue(run(ReplayMic(room_and_voice(-96.7, -45.0)), p,
+                            seconds=0.0, log=lambda *_a: None))
+        self.assertIsNone(p.calibrated_device)
+
+
+class TestTheMicCanNameItself(unittest.TestCase):
+    def test_an_impossible_device_index_is_reported_as_unknown(self):
+        # By name and never by index: indexes are assigned in enumeration order and
+        # move when something is plugged in, so a stored index would come to mean a
+        # different microphone — the exact confusion this exists to catch.
+        from flow.audio import Mic
+
+        self.assertEqual(Mic(device=99_999).device_name, "")

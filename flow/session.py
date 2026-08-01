@@ -398,6 +398,9 @@ class Session:
         #: fresh counter with it, and is the number the diagnostics trace wants.
         self.mic_dropped = 0
         self._last_mic_dropped = getattr(self.mic, "dropped", 0)
+        #: The device a mismatch has already been reported for, so a mic that keeps
+        #: being reopened does not say the same thing every five seconds.
+        self._noted_device: str | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -412,8 +415,36 @@ class Session:
         self.mic.start()
         self._mic_started = True
         self._last_activity = time.perf_counter()
+        self._check_calibrated_device()
         threading.Thread(target=self._preload, daemon=True, name="preload").start()
         self._set_state(State.IDLE)
+
+    def _check_calibrated_device(self) -> None:
+        """Say when this is not the microphone the profile was measured through.
+
+        A calibration is a measurement of a room *via a device*: the floor, the derived
+        margin and this speaker's confidence baseline all move with the microphone. The
+        room that broke the shipped gate read −96.7 dB on a good USB mic, and the same
+        room through a laptop array does not read anything like that — so a swap leaves
+        the gate tuned to a device that is no longer there, and nothing said so.
+
+        Advisory, and only that. The stored numbers still beat the shipped defaults for
+        the same room, and discarding a calibration because a device name changed would
+        punish somebody for plugging in a headset. Silent when either side is unnamed:
+        nothing to compare is not evidence of a mismatch.
+        """
+        if self.profile is None or not getattr(self.profile, "calibrated", False):
+            return
+        want = getattr(self.profile, "calibrated_device", None)
+        have = getattr(self.mic, "device_name", "")
+        if not want or not have or want == have or have == self._noted_device:
+            return
+        self._noted_device = have
+        self._emit(
+            "note",
+            f"this is {have!r}; the calibration was measured on {want!r} — "
+            "run flow --calibrate to redo it for this microphone",
+        )
 
     def _preload(self) -> None:
         try:
@@ -615,6 +646,11 @@ class Session:
                     self.mic.restart()
                 except Exception as exc:
                     self._emit("error", f"could not reopen the mic: {exc}")
+                else:
+                    # A device that went away is often replaced by a different one —
+                    # the USB mic is unplugged and the laptop array takes over — and
+                    # the reopened stream is calibrated for neither.
+                    self._check_calibrated_device()
 
         idle = now - self._last_activity
         if (
