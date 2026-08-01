@@ -108,7 +108,7 @@ refine CLI: codex
   (fallbacks: claude)
 models: base.en for partials, small.en for finals
 profile: room -96.5 dB, margin 18.0 dB, 2 learned pairs
-lexicon: none - create C:\Users\you\.flow\lexicon.txt to bias names and jargon
+lexicon: none - right-click > Open settings folder, or create C:\Users\you\.flow\lexicon.txt, to add names and corrections
 speech: on, voice Microsoft Susan (9 installed; --voice, or the right-click menu, to change)
 mode: DICTATE - Send pastes into the focused window (--converse, or ctrl+alt+M, to ask instead)
 hotkey  toggle   ctrl+alt+space
@@ -520,7 +520,11 @@ Two sources bias it back:
 
 **`~/.flow/lexicon.txt`** — one term per line, `#` for comments, re-read whenever it
 changes so a name added mid-session lands on the next utterance. Capped at 64 whole terms
-(the library silently truncates mid-term at 223 tokens).
+(the library silently truncates mid-term at 223 tokens). A second kind of line,
+`wrong -> right`, is for the word the recogniser keeps getting wrong *despite* the
+biasing: it rewrites the decoder's output directly — whole words, left side
+case-insensitive, right side verbatim — and biases nothing, because a correction you
+had to declare is one biasing already failed on.
 
 **What Flow learned from you** — a spoken correction is a confusion pair you labelled
 yourself: the model wrote X, you wanted Y. Say the same fix **twice** and Y joins the
@@ -559,10 +563,10 @@ cannot establish "this is never dictation".
 
 | Path | Written by | Contents |
 |---|---|---|
-| `~/.flow/lexicon.txt` | you, by hand | one term per line. Does not exist until you create it — creating it *is* the opt-in |
+| `~/.flow/lexicon.txt` | you, by hand — and once by Flow, if you use the menu's **Open settings folder** while it is missing | terms to bias toward, and `wrong -> right` corrections to apply. The written template is comments only, so the opt-in is typing a line that is not a comment |
 | `~/.flow/profile.json` | `--calibrate`, and Send | measured room/voice/confidence, learned confusion pairs, misroute signatures. Plain JSON, readable and deletable by hand |
 | `~/.cache/huggingface/hub/` | first decode | the models. `base.en` 141 MiB, `small.en` 464 MiB |
-| `.bench/` | `scripts/` | benchmark audio, results and volunteer recordings. **Tracked**, except for the downloadable corpora — see below |
+| `.bench/` | `scripts/` | benchmark audio, results and manifests. **Tracked**, except the downloadable corpora and the volunteer recordings — a recording is a person, so those live outside the repo and out of its history; `.bench/README.md` says where |
 
 Deleting `~/.flow/profile.json` forgets every inference and nothing else. Nothing here is
 ever uploaded.
@@ -607,7 +611,7 @@ flow/
   audio.py     mic capture and the speech gate (RMS, adaptive floor, pre-roll)
   calibrate.py first-run measurement of this room and this voice (P8)
   profile.py   what Flow learned about one person, stored locally (P8/P4)
-  lexicon.py   the user's own terms, re-read on change, merged with what was learned
+  lexicon.py   the user's own terms and declared corrections, re-read on change
   thread.py    what has already been sent, bounded (P6)
   speak.py     spoken replies through one long-lived System.Speech host (P9)
   ui.py        the pill and the draft bubble (tkinter), DPI-aware
