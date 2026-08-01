@@ -62,6 +62,7 @@ FIELDS = frozenset({
     "ms",         # a duration
     "provider",   # codex | claude
     "chars",      # a length, never the thing measured
+    "confidence",  # how well the decoder heard: worst avg_logprob, or null for unknown
     "sent",       # a length: how much of an over-long input the CLI was given
     "n",          # a count
     "dropped",    # microphone blocks lost, cumulative

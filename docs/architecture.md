@@ -362,6 +362,16 @@ ever *relax* the bar. Shortness is deliberately **not** a signal: a spoken corre
 short, so dropping on length preferentially deletes commands from the people whose speech
 scores worst on `no_speech_prob`, which is exactly the user Flow is for.
 
+The same `avg_logprob` this filter reads — the worst among the segments a decode kept,
+drained by `take_confidence()` — is now also written onto every **route** record in the
+trace. Nothing reads it to decide anything. It is there because the router picks between
+a local edit and a ~7 s CLI call without ever having seen how well the sentence was
+heard, and the live sheet turned 2 of 33 spoken commands into garbled semantic
+instructions; a gate on this number was declined for want of a real distribution, and
+this is where that distribution comes from. `null` means the decoder reported nothing and
+must never be read as a good score — it is written rather than omitted so the gaps can be
+counted too.
+
 ## 6. Routing
 
 `edits.plan(utterance, draft)` decides what a spoken utterance means. The draft is a required
@@ -554,7 +564,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. Otherwise read-only to the app; re-read by mtime on every decode |
 | `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, and whether auto-ask is on. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
-| `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters and error *categories*. Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
+| `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, and — on each route — how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not |
 
 Send is the commit point for the profile: rare, user-initiated, and the moment a session's

@@ -195,7 +195,7 @@ class DecodeWorker:
             self._rescues.append((audio, hotwords))
             self._cv.notify()
 
-    def results(self) -> list[tuple[str, str, float]]:
+    def results(self) -> list[tuple[str, str, float, float | None]]:
         with self._cv:
             out = list(self._out)
             self._out.clear()
@@ -250,10 +250,19 @@ class DecodeWorker:
             except Exception as exc:  # a decode failure must not kill the thread
                 text, kind = f"{type(exc).__name__}: {exc}", "error"
             elapsed = time.perf_counter() - started
+            # Drained here, beside the text it belongs to, and unconditionally.
+            # `take_confidence` clears as it reads, and this thread does not wait for
+            # the UI thread: read later and the number would belong to whichever decode
+            # happened next. Left undrained after an error it would belong to nothing at
+            # all and still be there for the following utterance. `getattr` because
+            # every fake transcriber in the tests predates the method — the way
+            # `Mic.dropped` is read.
+            take = getattr(self._asr, "take_confidence", None)
+            confidence = take() if callable(take) else None
             with self._cv:
                 self._busy = False
                 self.timings.append((kind, elapsed))
-                self._out.append((kind, text, elapsed))
+                self._out.append((kind, text, elapsed, confidence))
 
 
 @dataclass
@@ -853,7 +862,7 @@ class Session:
         self._decoded_sec = 0.0
 
     def _pump_decodes(self) -> None:
-        for kind, text, elapsed in self.worker.results():
+        for kind, text, elapsed, confidence in self.worker.results():
             self.diag.write("decode", route=kind, ms=round(elapsed * 1000))
             if kind == "error":
                 self._emit("error", text)
@@ -865,7 +874,7 @@ class Session:
             elif kind == "rescue":
                 self._finish_rescue(text)
             elif text:
-                self._route(text)
+                self._route(text, confidence)
             else:
                 # The utterance decoded to nothing — silence, noise, or a hallucination
                 # that clean.py rejected. Without this the state machine stays on
@@ -874,8 +883,17 @@ class Session:
 
     # -- routing -----------------------------------------------------------
 
-    def _route(self, utterance: str) -> None:
-        """Decide what a completed utterance means, given whether a draft is held."""
+    def _route(self, utterance: str, confidence: float | None = None) -> None:
+        """Decide what a completed utterance means, given whether a draft is held.
+
+        `confidence` is recorded and nothing else. The router has always chosen between
+        a local edit and a ~7 s CLI call without knowing how well the decoder heard the
+        sentence it was choosing about — and the live sheet turned 2 of 33 spoken
+        commands into garbled semantic instructions. A gate on this number was declined
+        for want of a real distribution to set it from; this is where that distribution
+        comes from. Default None so the callers that are not a decode (a replay, a test,
+        a rescue) do not have to invent a reading.
+        """
         # Consumed here, before any early return, and expired by age. The chip is
         # pressed *for the utterance the user is about to say*; leaving it set when
         # that utterance takes another path meant it silently applied to a later,
@@ -888,7 +906,15 @@ class Session:
         # what the first version did, and it left the commonest route of all — the
         # first sentence into an empty draft — recorded nowhere.
         def trace(kind: str) -> None:
-            self.diag.write("route", route=kind, chars=len(utterance))
+            # Rounded: `avg_logprob` arrives with a dozen decimals and the fourth of
+            # them cannot separate a decode that was heard from one that was guessed.
+            # Only a real number is rounded, and anything else is passed on untouched
+            # to be refused by the writer — `round()` on a string raises, and this runs
+            # on the UI thread inside the router, where a diagnostics line that can
+            # raise takes the commonest path in the app down with it.
+            score = (round(confidence, 3) if isinstance(confidence, (int, float))
+                     else confidence)
+            self.diag.write("route", route=kind, chars=len(utterance), confidence=score)
 
         # The two thread verbs are the only commands that mean anything with an empty
         # draft — which is precisely the state Send leaves behind.

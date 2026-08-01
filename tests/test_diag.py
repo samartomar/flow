@@ -12,6 +12,7 @@ unbounded queue, one file away.
 
 import json
 import sys
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -42,6 +43,29 @@ class SentinelAsr:
     def text(self, audio, *, final=False, hotwords="") -> str:
         self.calls += 1
         return f"{SENTINEL} the deploy failed" if final else SENTINEL
+
+
+class ConfidentAsr(SentinelAsr):
+    """A transcriber that reports how well it heard, shaped like the real one.
+
+    The reading is produced *by a decode* and drained by the reader, so a fake that
+    simply returned a constant would not catch a caller reading it at the wrong moment.
+    """
+
+    def __init__(self, score: float | None = -0.87) -> None:
+        super().__init__()
+        self.score = score
+        self._pending = score
+        self.drained = 0
+
+    def text(self, audio, *, final=False, hotwords="") -> str:
+        self._pending = self.score
+        return super().text(audio, final=final, hotwords=hotwords)
+
+    def take_confidence(self):
+        self.drained += 1
+        out, self._pending = self._pending, None
+        return out
 
 
 class SentinelMic:
@@ -98,7 +122,9 @@ class TestTheWordsCannotGetIn(Temp):
     def drive(self) -> str:
         """Run one sentinel through every path a session has, and return the file."""
         diag = Diag(self.path)
-        asr, mic = SentinelAsr(), SentinelMic()
+        # A transcriber that reports a confidence, so the sweep exercises the field
+        # added for it rather than walking past a `None`.
+        asr, mic = ConfidentAsr(), SentinelMic()
         s = Session(asr=asr, mic=mic, diag=diag, speaker=SentinelSpeaker())
         s.start()
 
@@ -167,6 +193,80 @@ class TestTheWordsCannotGetIn(Temp):
         self.drive()
         for record in self.lines():
             self.assertNotIn(REFUSED, record.values(), f"a value was refused: {record}")
+
+
+class TestHowWellItHeardReachesTheTrace(Temp):
+    """Instrument only — nothing reads this to make a decision.
+
+    `take_confidence()` has existed since the guardrail work and is consumed by
+    `calibrate.py` and `guardrail_bench.py`; on the live path the router chose between a
+    local edit and a ~7 s CLI call without ever seeing it. The gate that would have used
+    it was declined for want of a real distribution, which is the thing this produces.
+    """
+
+    def spoken_route(self, asr) -> list[dict]:
+        """Mic → decode → route, so what is asserted is the whole chain."""
+        mic = SentinelMic()
+        s = Session(asr=asr, mic=mic, diag=Diag(self.path))
+        s.start()
+        for _ in range(8):
+            mic._blocks.append(LOUD)
+        s.tick()
+        for _ in range(20):
+            mic._blocks.append(np.zeros(BLOCK, dtype=np.float32))
+        s.wait_idle(timeout=5.0)
+        s.close()
+        return [r for r in self.lines() if r["kind"] == "route"]
+
+    def test_the_route_record_carries_it(self):
+        records = self.spoken_route(ConfidentAsr())
+        self.assertEqual(len(records), 1)
+        self.assertIn("confidence", records[0], "the router's own record does not say")
+        self.assertEqual(records[0]["confidence"], -0.87)
+
+    def test_the_field_is_named_on_the_allow_list(self):
+        # The allow-list is the load-bearing half of the guard. A numeric value passes
+        # the token regex on its own, so a field arriving unnamed would be written
+        # anyway — which is the exact failure item 9 was built to prevent.
+        self.assertIn("confidence", FIELDS)
+
+    def test_a_transcriber_that_cannot_say_does_not_break_the_route(self):
+        # Every fake in `test_session.py` predates the method, and so does any
+        # Transcriber somebody swaps in. Unknown is a legitimate answer.
+        records = self.spoken_route(SentinelAsr())
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0].get("confidence"))
+
+    def test_a_decode_that_reported_nothing_records_unknown_not_confident(self):
+        # None must never be read as a good score. It is written as null rather than
+        # omitted so the distribution this exists to produce can count the gaps.
+        records = self.spoken_route(ConfidentAsr(score=None))
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0]["confidence"])
+
+    def test_the_worker_drains_it_beside_the_text_it_belongs_to(self):
+        # Draining in the pump instead would read whatever the *next* decode left
+        # behind: `take_confidence` clears as it reads, and the decode thread does not
+        # wait for the UI thread.
+        from flow.session import DecodeWorker
+
+        asr = ConfidentAsr()
+        w = DecodeWorker(asr)
+        w.submit_final(LOUD)
+        deadline = time.perf_counter() + 5.0
+        out: list = []
+        while not out and time.perf_counter() < deadline:
+            out = w.results()
+        w.close()
+        self.assertEqual([(k, c) for k, _t, _ms, c in out], [("final", -0.87)])
+        self.assertEqual(asr.drained, 1)
+
+    def test_a_confidence_that_is_not_a_number_is_refused_not_written(self):
+        # The belt under the allow-list. A Transcriber returning text here would be a
+        # defect in that class, and the trace has to survive one.
+        d = Diag(self.path)
+        d.write("route", route="local", confidence="I heard every word of that")
+        self.assertEqual(self.lines()[0]["confidence"], REFUSED)
 
 
 class TestTheGuard(Temp):

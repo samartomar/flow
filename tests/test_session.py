@@ -207,8 +207,21 @@ class TestDecodeScheduling(unittest.TestCase):
         w.close()
         # Losing a final would lose the user's words, so these are a FIFO.
         self.assertEqual(len(results), 6)
-        self.assertEqual([t for _k, t, _s in results],
+        self.assertEqual([t for _k, t, _s, _c in results],
                          [f"final:{i}" for i in range(6)])
+
+    def test_a_transcriber_with_no_confidence_to_report_still_decodes(self):
+        # `SlowTranscriber`, like every other fake here, predates `take_confidence`.
+        # A worker that assumed the method would take the whole decode path down for
+        # anyone who swapped in their own Transcriber.
+        w = DecodeWorker(SlowTranscriber(delay=0.0))
+        w.submit_final(np.full(8, 3.0, dtype=np.float32))
+        deadline = time.perf_counter() + 5.0
+        out: list = []
+        while not out and time.perf_counter() < deadline:
+            out = w.results()
+        w.close()
+        self.assertEqual([(k, c) for k, _t, _s, c in out], [("final", None)])
 
 
 if __name__ == "__main__":
