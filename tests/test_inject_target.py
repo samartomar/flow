@@ -111,21 +111,22 @@ class TestPrepare(unittest.TestCase):
 class TestResolve(unittest.TestCase):
     """Which window a paste is aimed at, given what the caller tracked."""
 
-    def _resolve(self, live, tracked=None, windows=None):
+    def _resolve(self, live, tracked=None, windows=None, live_hwnd=0x11):
         """`live` is what the OS reports; `windows` maps hwnd -> Target."""
-        table = {0x11: live, **(windows or {})}
-        with mock.patch("flow.inject.foreground_hwnd", return_value=0x11), \
+        table = {live_hwnd: live, **(windows or {})}
+        with mock.patch("flow.inject.foreground_hwnd", return_value=live_hwnd), \
              mock.patch("flow.inject.classify", side_effect=lambda h: table.get(h, UNKNOWN)):
             return resolve(tracked)
 
     def test_with_nothing_tracked_it_is_whatever_has_the_foreground(self):
         self.assertIs(self._resolve(EDITOR), EDITOR)
 
-    def test_the_tracked_window_wins_over_the_foreground(self):
-        # The whole fix in one assertion: the caller polled this 30 ms before the click,
-        # and that is a better answer than the one available afterwards.
-        got = self._resolve(EDITOR, tracked=0x22, windows={0x22: CMD})
+    def test_the_tracked_window_is_what_gets_classified(self):
+        # The caller polled this 30 ms before the click and the window still holds the
+        # foreground, so its own classification is the one P7 acts on.
+        got = self._resolve(CMD, tracked=0x11, windows={0x11: CMD})
         self.assertIs(got, CMD)
+        self.assertFalse(got.stale)
 
     def test_flow_in_the_foreground_is_a_refusal_whatever_was_tracked(self):
         # If Flow really has the focus, the Ctrl-V lands on Flow no matter what the
@@ -134,10 +135,80 @@ class TestResolve(unittest.TestCase):
         self.assertTrue(got.is_flow)
 
     def test_no_foreground_at_all_falls_back_to_the_tracked_window(self):
+        # Refusing here would be refusing on the *absence* of evidence. `0` means the
+        # OS would not say, not that somebody else is holding it.
         with mock.patch("flow.inject.foreground_hwnd", return_value=0), \
              mock.patch("flow.inject.classify",
                         side_effect=lambda h: CMD if h == 0x22 else UNKNOWN):
-            self.assertIs(resolve(0x22), CMD)
+            got = resolve(0x22)
+        self.assertIs(got, CMD)
+        self.assertFalse(got.stale)
+
+
+class TestTheTargetIsRevalidatedAtPasteTime(unittest.TestCase):
+    """A third window taking the foreground between the poll and the click.
+
+    `resolve()` refused when *Flow* held the foreground and trusted the caller for
+    everything else, so anything else that took focus in those 30 ms — a notification,
+    a switcher, an installer finishing — received the draft. And received it prepared
+    for a different window: the newline strip that is P7's one guarantee was decided
+    against a terminal the keystroke was never going to reach.
+
+    The caller's window is now a claim to check rather than an answer to trust. It is
+    still the thing that makes Send aimable; what it aims at is confirmed at the last
+    moment it can be.
+    """
+
+    def _resolve(self, live, tracked, live_hwnd=0x33):
+        table = {live_hwnd: live, 0x22: CMD}
+        with mock.patch("flow.inject.foreground_hwnd", return_value=live_hwnd), \
+             mock.patch("flow.inject.classify",
+                        side_effect=lambda h: table.get(h, UNKNOWN)):
+            return resolve(tracked)
+
+    def test_a_third_window_holding_the_foreground_is_a_refusal(self):
+        got = self._resolve(EDITOR, tracked=0x22)
+        self.assertTrue(got.stale, "the paste would have gone to the wrong window")
+
+    def test_the_refusal_names_what_actually_has_the_focus(self):
+        # So the note can say where the words would have gone, not just that they did
+        # not go where they were meant to.
+        self.assertEqual(self._resolve(EDITOR, tracked=0x22).process, "Code.exe")
+
+    def test_paste_refuses_and_says_the_target_changed(self):
+        take_warnings()
+        with mock.patch("flow.inject.foreground_hwnd", return_value=0x33), \
+             mock.patch("flow.inject.classify",
+                        side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
+             mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+             mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
+             mock.patch("flow.inject._send", return_value=1) as sent:
+            from flow.inject import paste
+
+            ok = paste("deploy it\n", hwnd=0x22, restore_clipboard=False)
+        warnings = take_warnings()
+        self.assertFalse(ok)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("target window changed", warnings[0])
+        # A refusal that still wrote the clipboard and typed Ctrl-V would be the same
+        # defect with a message attached — the same thing invariant 10 already demands.
+        put.assert_not_called()
+        sent.assert_not_called()
+
+    def test_the_paste_still_happens_when_the_window_stayed_put(self):
+        take_warnings()
+        with mock.patch("flow.inject.foreground_hwnd", return_value=0x22), \
+             mock.patch("flow.inject.classify",
+                        side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
+             mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+             mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
+             mock.patch("flow.inject._send", return_value=1):
+            from flow.inject import paste
+
+            ok = paste("deploy it\n", hwnd=0x22, restore_clipboard=False)
+        self.assertTrue(ok)
+        self.assertEqual(put.call_args.args[0], "deploy it")
+        self.assertEqual(take_warnings(), [])
 
 
 class TestPasteUsesTheTarget(unittest.TestCase):
@@ -181,7 +252,7 @@ class TestPasteUsesTheTarget(unittest.TestCase):
         classified Flow's own window — not a terminal — so the newline survived.
         """
         take_warnings()
-        with mock.patch("flow.inject.foreground_hwnd", return_value=0x11), \
+        with mock.patch("flow.inject.foreground_hwnd", return_value=0x22), \
              mock.patch("flow.inject.classify",
                         side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
              mock.patch("flow.inject.get_clipboard_text", return_value=None), \

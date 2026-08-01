@@ -173,6 +173,15 @@ def paste(text: str, *, hwnd: int | None = None, restore_clipboard: bool = True)
             "not pasted: Flow had the focus, not the window you were aiming at"
         )
         return False
+    if target.stale:
+        # Same refusal, one window over: something took the foreground between the poll
+        # and the click, so the Ctrl-V would land there — carrying a payload prepared
+        # for the window the user was actually aiming at.
+        _WARNINGS.append(
+            "not pasted: the target window changed before Send"
+            + (f" - {target.process} has the focus now" if target.process else "")
+        )
+        return False
 
     payload, warning = prepare(text, target)
     if warning:
@@ -245,13 +254,18 @@ class Target:
     """What is about to be pasted into, and what that means for the payload."""
 
     def __init__(
-        self, window_class: str = "", process: str = "", is_flow: bool = False
+        self, window_class: str = "", process: str = "", is_flow: bool = False,
+        stale: bool = False,
     ) -> None:
         self.window_class = window_class
         self.process = process
         #: This window belongs to Flow. Decided by process id rather than by name,
         #: because Flow is a `python.exe` like any other and the target might be too.
         self.is_flow = is_flow
+        #: The caller named a window and a different one holds the foreground now, so
+        #: this describes who would actually receive the keystroke rather than who was
+        #: aimed at. Like `is_flow`, a refusal rather than a target.
+        self.stale = stale
 
     @property
     def is_terminal(self) -> bool:
@@ -266,7 +280,8 @@ class Target:
 
     def __repr__(self) -> str:
         return (f"Target(class={self.window_class!r}, process={self.process!r}"
-                + (", flow" if self.is_flow else "") + ")")
+                + (", flow" if self.is_flow else "")
+                + (", stale" if self.stale else "") + ")")
 
 
 def _pid_of(hwnd) -> int:
@@ -339,17 +354,27 @@ def resolve(hwnd: int | None = None) -> Target:
     Flow, no belief of the caller's can make the paste land anywhere else. It is checked
     first and it is a refusal, not a target.
 
-    Otherwise the **caller's window wins**, and that is the fix rather than a nicety.
-    `GetForegroundWindow()` at paste time is a question asked after the click that
-    started the Send, and for the whole life of this app the answer was Flow's own
+    The **caller's window** is what gets classified, and that is the fix rather than a
+    nicety. `GetForegroundWindow()` at paste time is a question asked after the click
+    that started the Send, and for the whole life of this app the answer was Flow's own
     window — so `prepare()` classified a Tk canvas, decided it was not a terminal, and
     skipped the newline strip that is P7's one guarantee. The caller polls the same
-    question 30 ms earlier and keeps the last answer that was not Flow, which is the
-    only version of it worth acting on.
+    question 30 ms earlier and keeps the last answer that was not Flow.
+
+    But it is a claim to check, not an answer to trust. Flow was the only foreground
+    this refused for; anything else that took focus in those 30 ms — a notification, a
+    switcher, an installer finishing — got the keystroke, prepared for a window it was
+    never going to reach. So a live foreground that is neither Flow nor the window the
+    caller named is the third refusal. A foreground of `0` is not: that is the OS
+    declining to say, and refusing on the absence of evidence would break the hotkey
+    path for no gain.
     """
-    live = classify(foreground_hwnd())
+    live_hwnd = foreground_hwnd()
+    live = classify(live_hwnd)
     if live.is_flow or not hwnd:
         return live
+    if live_hwnd and live_hwnd != hwnd:
+        return Target(live.window_class, live.process, stale=True)
     return classify(hwnd)
 
 

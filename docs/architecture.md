@@ -414,6 +414,13 @@ Three things now hold, and they are independent on purpose:
    That is what fixes the *classification*, independently of where the keystroke goes.
 3. **A target that resolves to Flow is refused**, with a reason, because a Ctrl-V into
    Flow's own canvas does nothing whatever the caller believes. See invariant 10.
+4. **And so is a target that moved.** The named window is a claim, checked against the
+   live foreground at paste time. Flow used to be the only foreground worth refusing
+   for; anything else that took focus inside those 30 ms — a notification, a switcher,
+   an installer finishing — received the keystroke, carrying a payload prepared for the
+   window it was aimed at rather than the one it reached. A foreground of `0` is
+   deliberately not a refusal: that is the OS declining to answer, not evidence that
+   somebody else is holding it.
 
 The one guarantee: a draft ending in a newline never reaches a shell with that newline
 attached, because that does not paste, it *runs*. Interior newlines are explicitly not a
@@ -525,12 +532,16 @@ policy here; it is enforced by absence.
    from `tkinter` and `ctypes` precisely so that list does not grow.
 9. **`decode_options()` is the only place decode parameters live**, so the benchmarks measure
    the build that ships.
-10. **Flow does not paste into itself.** Its own windows are out of the activation chain, the
-    window a paste is aimed at is chosen before the click rather than after it, and a target
-    that still resolves to Flow's own process is refused with a reason. This is new because
-    it had never held: the Ctrl-V went to a Tk canvas, which ignores it, and `paste()`
-    returned True — a failure with no symptom anywhere, which is why it survived every
-    harness in the list below.
+10. **Flow pastes into the window it was aimed at, or into nothing.** Its own windows are
+    out of the activation chain, the window a paste is aimed at is chosen before the click
+    rather than after it, and both ways of that going wrong are refused with a reason: a
+    target that still resolves to Flow's own process, and a live foreground that is neither
+    Flow nor the window the caller named. The first half is new because it had never held:
+    the Ctrl-V went to a Tk canvas, which ignores it, and `paste()` returned True — a
+    failure with no symptom anywhere, which is why it survived every harness in the list
+    below. The second is why "aimed at" is the promise rather than "aimed at, probably":
+    the caller polls 30 ms before the click, and 30 ms is long enough for something else
+    to take the foreground.
 11. **An old result never overwrites newer intent.** Every CLI call carries an operation
     id and the `Draft.revision` it was computed from. A rewrite whose draft moved during
     the ~7 s it took is discarded with a note saying so, rather than deleting whatever was
@@ -553,16 +564,17 @@ narrowed to stay true while these are open; each is queued work.
 1. **The provider is named only at startup.** The console diagnostics say which CLI will
    answer and the notes say which one did, but nothing on the pill says — before the
    fact — that Ask goes to `codex` and off the machine.
-2. **The paste target is revalidated only against Flow.** `resolve()` refuses when Flow
-   itself holds the foreground; a third window that took focus between the poll and the
-   click still receives the Ctrl-V. And the clipboard restore writes back unconditionally
-   after 0.6 s — `GetClipboardSequenceNumber` is the check it should make first.
+2. **The clipboard restore writes back unconditionally.** 0.6 s after a paste the previous
+   text goes back whatever happened in between, so anything the user copied in that window
+   is overwritten — `GetClipboardSequenceNumber` is the check it should make first. A
+   non-text clipboard (an image, files) is never captured in the first place and therefore
+   never restored, which is a smaller loss but the same silence.
 
 ## 11. Testing layers
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (473 tests, ~9 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (477 tests, ~9 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
