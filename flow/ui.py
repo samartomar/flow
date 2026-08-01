@@ -223,6 +223,10 @@ class Pill(tk.Tk):
             self.bubble.hide()
 
     def _clear(self) -> None:
+        # Clear is the cheapest "stop" the user has, and with the microphone gated while
+        # Flow talks it is one of the few ways left to cut a reply short. Doing that
+        # first means one press does the obvious thing whichever is in progress.
+        self.session.stop_speaking()
         self.session.draft.clear()
         self.bubble.hide()
 
@@ -271,6 +275,10 @@ class Pill(tk.Tk):
             self.session.tick()
             self.levels.append(self._norm(self.session.level_db))
         else:
+            # Still collect what the CLI owes us. Disarming used to strand an answer
+            # that was already on its way — the pill went quiet and nothing ever
+            # arrived, because the code that collects a reply sat behind this check.
+            self.session.pump_results()
             self.levels.append(0.0)
 
         for ev in self.session.events():
@@ -573,10 +581,20 @@ class Bubble(tk.Toplevel):
     def _was_a_command(self) -> None:
         self.pill.session.rescue_last_append()
 
+    # Both chips toggle. Pressing one used to be a one-way door until it timed out 30 s
+    # later, so a mis-click meant every utterance in the next half minute was forced
+    # down the wrong path with no way to take it back — which reads exactly like the app
+    # being "locked to refine".
     def _refine(self) -> None:
-        self.pill.session.force_next = "edit"
-        self.note("listening for an instruction…")
+        self.note(self._arm_next("edit", "listening for an instruction…"))
 
     def _continue(self) -> None:
-        self.pill.session.force_next = "append"
-        self.note("listening to continue…")
+        self.note(self._arm_next("append", "listening to continue…"))
+
+    def _arm_next(self, mode: str, armed_note: str) -> str:
+        session = self.pill.session
+        if session.force_next == mode:
+            session.force_next = None
+            return "back to deciding for itself"
+        session.force_next = mode
+        return armed_note

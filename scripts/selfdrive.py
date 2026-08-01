@@ -237,6 +237,16 @@ def scenario_converse(report) -> None:
     spoken: list[str] = []
 
     class Recorder:
+        """Records what was spoken, and models `speaking` because the session gates the
+        microphone on it — a fake without it drives a Flow that can still hear itself.
+
+        Deliberately goes quiet immediately: the harness feeds audio far faster than an
+        engine speaks, and a fake that stayed "speaking" would swallow the follow-up
+        this scenario is here to test.
+        """
+
+        speaking = False
+
         def say(self, text: str) -> bool:
             spoken.append(text)
             return True

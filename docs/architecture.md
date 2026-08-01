@@ -61,7 +61,7 @@ every literal correction away from it.
 
 ## 2. Threads
 
-Nine things run concurrently. Getting this wrong is the main way to break the app, so it
+Ten things run concurrently. Getting this wrong is the main way to break the app, so it
 is written down.
 
 | Thread | Started by | Does | Rules |
@@ -74,7 +74,8 @@ is written down.
 | `refine` | per semantic rewrite | one `subprocess.run` | Result handed back under `_refine_lock` |
 | `ask` | per converse question | one `subprocess.run` | Result handed back under `_ask_lock` |
 | clipboard restore | per paste | sleeps 0.6 s, puts the old clipboard back | Lets the target app read the clipboard first |
-| speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking |
+| `speech` watcher | each `Speaker.say()` | polls the host until it reports `Ready`, then clears `speaking` | Best-effort only. The ceiling that actually bounds `speaking` is enforced by the reader, so a wedged host cannot leave Flow deaf |
+| speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking, and the state protocol needs it responsive |
 
 Locks: `WhisperTranscriber._lock` (model dict + drop log + confidence), one
 `WhisperTranscriber._locks[tier]` per tier held across a model build, `DecodeWorker._cv`,
@@ -92,12 +93,22 @@ in the headless harnesses. No UI framework is imported in `session.py`.
 ```python
 def tick(self):
     self._pump_audio()     # drain mic, run the gate, submit partials/finals
+    self.pump_results()    # everything not waiting on the microphone
+    self._pump_health()    # device liveness, idle model unload (R8)
+
+def pump_results(self):
     self._pump_decodes()   # take decode results, route them
     self._pump_drops()     # surface what the filter rejected (P2)
     self._pump_refine()    # collect a finished CLI rewrite
     self._pump_ask()       # collect a finished CLI answer
-    self._pump_health()    # device liveness, idle model unload (R8)
 ```
+
+**The split is not cosmetic.** The UI drives the pump only while it is capturing, so
+folding the CLI collectors into the audio path meant a disarmed pill lost whatever was in
+flight: an answer came back onto `_ask_result` and stayed there forever, because the only
+code that reads it sat behind the armed check. A question you have already asked does not
+depend on still listening — and disarming while waiting is the obvious thing to do, all
+the more so now that Flow goes deaf while it reads a reply aloud.
 
 `Session.events()` drains what happened. The UI never reads session internals; it reacts to
 the event stream.
@@ -256,7 +267,8 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `PARTIAL_MIN_GROWTH_SEC` | 0.7 s | Paired with the worker-idle check, this is what bounds partial latency |
 | `IDLE_UNLOAD_SEC` | 300 s | Release the models, keep the mic. Releasing the mic would leave the app unable to hear its own wake-up |
 | `MIC_CHECK_SEC` | 5 s | A dead PortAudio stream stops delivering blocks without raising anywhere the session can see |
-| `FORCE_NEXT_TTL_SEC` | 30 s | A Refine/Continue chip means "the next thing I say"; after this long the next thing someone says is a different thought |
+| `FORCE_NEXT_TTL_SEC` | 30 s | A Refine/Continue chip means "the next thing I say"; after this long the next thing someone says is a different thought. The chips also toggle, because a one-way door that lasts 30 s reads as the app being stuck |
+| `speak.WORDS_PER_SEC` | 1.5 | Half the measured rate (a 15-word sentence took 4.9 s at rate 1), so the derived ceiling on `speaking` is generous. It gates the microphone, and a latched value would leave Flow permanently deaf — far worse than leaking a little echo |
 | `BLOCK` | 1024 (64 ms) | Fine enough for a responsive level meter |
 | `PREROLL_BLOCKS` | 4 (256 ms) | A gate can only open after hearing something loud, so the quiet head of that word is already gone — the unaspirated stop, the soft fricative. Without it "delete" becomes "leet". Measured: gating without pre-roll deletes 2.6% of the audio; any pre-roll from 128 ms up returns WER to the ungated level |
 | `FLOOR_MIN_DB` | −100.0 | It was −70, and a quiet room with a good USB mic measures **−96.7 dB** — the floor could never descend to meet it, so the gate never opened at all |
@@ -302,11 +314,16 @@ policy here; it is enforced by absence.
 4. **Nothing is dropped silently.** A rejected segment becomes a `drop` event with its
    evidence; a destructive edit reports the words it removed; the undo stack still holds them.
 5. **Nothing sends itself.** Stopping speech produces a held draft. Send is always explicit.
-6. **Everything is bounded.** Mic queue, undo history, drop log, decode timings, thread turns,
+   A Send that refuses says why — a button that does nothing reads as broken.
+6. **Flow does not listen to itself.** While a reply is playing the microphone is not
+   evidence. There is no echo cancellation and there is not going to be one (R16), so
+   converse mode is half-duplex and interrupting is an explicit action. A VAD does not
+   solve this: the speakers genuinely are producing speech, and a detector will say so.
+7. **Everything is bounded.** Mic queue, undo history, drop log, decode timings, thread turns,
    lexicon terms, profile pairs, CLI input. A long session must cost what a short one costs.
-7. **Three declared dependencies.** GUI, hotkeys, injection, DPI awareness and speech all come
+8. **Three declared dependencies.** GUI, hotkeys, injection, DPI awareness and speech all come
    from `tkinter` and `ctypes` precisely so that list does not grow.
-8. **`decode_options()` is the only place decode parameters live**, so the benchmarks measure
+9. **`decode_options()` is the only place decode parameters live**, so the benchmarks measure
    the build that ships.
 
 ## 10. Testing layers
@@ -335,6 +352,8 @@ Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8:
 | hotkeys | `flow.hotkey.DEFAULT_BINDINGS` | 4 actions, 1–3 fallbacks each |
 | agent CLI | `flow.refine.available()` | `codex`, then `claude` |
 | speech | `flow.speak.Speaker().available` | `True` |
+| speech state | `Speaker.say()` then poll `speaking` | `True` at t=0.00 s (gated before the first phoneme), cleared by the watcher at 7.7 s for a 23-word sentence, and cleared immediately when the host is killed |
+| echo guard | same scenario with and without the guard | without: the draft gains text transcribed from the reply playing through the speakers. With: nothing, and 50 blocks counted as discarded |
 | install | `uv run python scripts/slim.py` | 243.9 MB venv, 28 distributions |
 | models | HuggingFace cache blob sizes | `base.en` 147.8 MB, `small.en` 486.1 MB |
 

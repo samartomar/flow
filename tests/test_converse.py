@@ -6,6 +6,7 @@ answer costs the user nothing, and that the second question inherits the first.
 """
 
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -48,16 +49,26 @@ class FakeAsr:
 
 
 class FakeSpeaker:
+    """Models the real contract, `speaking` included.
+
+    That flag is not decoration: the microphone is gated on it, so a fake without it
+    tests a session that can still hear itself — which is the defect these tests exist
+    to pin.
+    """
+
     def __init__(self) -> None:
         self.said = []
         self.stops = 0
+        self.speaking = False
 
     def say(self, text: str) -> bool:
         self.said.append(text)
+        self.speaking = True
         return True
 
     def stop(self) -> None:
         self.stops += 1
+        self.speaking = False
 
 
 def session(**kw) -> Session:
@@ -183,17 +194,6 @@ class TestSpokenReplies(unittest.TestCase):
             s.wait_idle(timeout=5.0)
         self.assertEqual(sp.said, [])
 
-    def test_speaking_again_cuts_the_reply_off(self):
-        # Talking over the answer means the user is done listening — and the mic is
-        # picking up the speaker anyway.
-        sp = FakeSpeaker()
-        s = session(speaker=sp)
-        s.start()
-        for _ in range(6):
-            s.mic._blocks.append(LOUD)
-        s.tick()
-        self.assertGreaterEqual(sp.stops, 1)
-
     def test_a_session_without_a_speaker_stays_silent_and_does_not_crash(self):
         s = session()
         s.toggle_mode()
@@ -202,6 +202,139 @@ class TestSpokenReplies(unittest.TestCase):
             s.send()
             s.wait_idle(timeout=5.0)
         self.assertEqual(s.reply, "Use ALTER TABLE.")
+
+
+class TestFlowDoesNotHearItself(unittest.TestCase):
+    """The defect the first live converse session produced.
+
+    The reply "Yes, we can hear you." played out of the speakers, the microphone heard
+    it, the gate opened on Flow's own voice, `speaker.stop()` cut the answer off
+    mid-sentence, and the fragment decoded to "Yes." and was appended to the draft. The
+    next question carried a word the user never said.
+
+    There is no echo cancellation here and there is not going to be one (R16), so the
+    guarantee is half-duplex: while Flow is talking, the microphone is not evidence.
+    """
+
+    def test_the_microphone_is_ignored_while_a_reply_plays(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.start()
+        sp.say("Yes, we can hear you.")  # the engine is now producing sound
+        for _ in range(30):
+            s.mic._blocks.append(LOUD)
+        s.tick()
+        self.assertFalse(s.gate.speaking, "the gate opened on Flow's own voice")
+        self.assertEqual(s.draft.text, "", "Flow transcribed itself into the draft")
+        self.assertGreater(s.echo_blocks, 0, "the guard did not run at all")
+
+    def test_a_reply_is_not_cut_off_by_its_own_sound(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.start()
+        sp.say("Yes, we can hear you.")
+        for _ in range(30):
+            s.mic._blocks.append(LOUD)
+        s.tick()
+        self.assertEqual(sp.stops, 0, "the answer stopped itself")
+        self.assertTrue(sp.speaking, "the answer was cut short")
+
+    def test_the_microphone_reopens_once_the_reply_ends(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.start()
+        sp.say("Yes, we can hear you.")
+        for _ in range(6):
+            s.mic._blocks.append(LOUD)
+        s.tick()
+        sp.speaking = False  # the engine went back to Ready
+        for _ in range(6):
+            s.mic._blocks.append(LOUD)
+        s.tick()
+        self.assertTrue(s.gate.speaking, "the mic never came back after the reply")
+
+    def test_stopping_speech_is_an_explicit_action(self):
+        # Acoustic barge-in is gone by design, so the deliberate stops have to work.
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        sp.say("a long answer")
+        self.assertTrue(s.stop_speaking())
+        self.assertEqual(sp.stops, 1)
+        self.assertFalse(s.stop_speaking(), "reported stopping nothing")
+
+    def test_pausing_stops_a_reply(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.start()
+        sp.say("a long answer")
+        s.pause()
+        self.assertFalse(sp.speaking)
+
+
+class TestTheAnswerArrivesEvenIfNobodyIsListening(unittest.TestCase):
+    """A question already with the CLI does not depend on still capturing.
+
+    `_pump_ask` used to run only inside `tick()`, and the UI only ticks while armed —
+    so disarming while waiting stranded the answer on `_ask_result` for good. Disarming
+    mid-wait is the natural thing to do, and more so now that Flow goes deaf while it
+    reads a reply aloud.
+    """
+
+    def test_pump_results_delivers_a_reply_with_no_audio_pump(self):
+        s = session()
+        s.toggle_mode()
+        s.draft.set("how do I widen a column")
+        with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
+            s.send()
+            for _ in range(200):
+                s.pump_results()  # never tick(); the mic is not being read at all
+                if s.reply:
+                    break
+                time.sleep(0.01)
+        self.assertEqual(s.reply, "Use ALTER TABLE.")
+        self.assertIn("reply", [e.kind for e in s.events()])
+
+    def test_asking_survives_the_user_talking(self):
+        # Speaking while a question is out used to overwrite ASKING with LISTENING, so
+        # the violet "still thinking" state vanished exactly when it was wanted.
+        s = session()
+        s.start()
+        s.toggle_mode()
+        s.draft.set("how do I widen a column")
+        with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
+            s.send()
+            self.assertIs(s.state, State.ASKING)
+            for _ in range(6):
+                s.mic._blocks.append(LOUD)
+            s._pump_audio()
+            self.assertIs(s.state, State.ASKING)
+
+
+class TestSendSaysWhenItRefuses(unittest.TestCase):
+    """A button that does nothing when pressed reads as broken, and was reported as
+    exactly that. Every refusal is now spoken aloud in the note line."""
+
+    def _notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def test_an_empty_draft_says_so(self):
+        s = session()
+        s.events()
+        self.assertEqual(s.send(), "")
+        self.assertIn("nothing to send", self._notes(s))
+
+    def test_a_second_ask_while_one_is_in_flight_says_so(self):
+        s = session()
+        s.toggle_mode()
+        s.draft.set("first question")
+        with mock.patch("flow.session.ask", return_value=("answer", "codex")):
+            s.send()
+            self.assertIs(s.state, State.ASKING)
+            s.events()
+            s.draft.set("second question")
+            self.assertEqual(s.send(), "")
+            self.assertIn("still waiting", self._notes(s))
+        self.assertEqual(s.draft.text, "second question", "the draft was eaten")
 
 
 class TestCorrectionLoopStillApplies(unittest.TestCase):

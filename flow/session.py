@@ -289,6 +289,10 @@ class Session:
         #: Runtime mute, separate from `speaker` being absent — one is a capability,
         #: the other is a preference, and the UI has to be able to change the second.
         self.muted = False
+        #: How many microphone blocks were discarded because Flow was talking. Counted
+        #: rather than logged: it is the one number that says whether the half-duplex
+        #: guard is doing anything, and a per-block note would drown the bubble.
+        self.echo_blocks = 0
         #: P8. What Flow has measured and learned about this person, on this machine.
         #: None disables learning entirely — the tests and the benchmarks pass None so
         #: a harness run never writes to the user's real profile.
@@ -340,7 +344,19 @@ class Session:
         """
         self.mic.stop()
         self._mic_started = False
+        # Disarming is one of the ways to say "enough" to a reply in progress. Since the
+        # microphone is gated while Flow talks, an answer cannot be interrupted by
+        # talking over it any more, so every deliberate stop has to actually stop it.
+        self.stop_speaking()
         self._set_state(State.IDLE)
+
+    def stop_speaking(self) -> bool:
+        """Cut off a reply that is being read aloud. True if there was one."""
+        if self.speaker is None or not self.speaker.speaking:
+            return False
+        self.speaker.stop()
+        self._emit("note", "stopped reading the answer")
+        return True
 
     def close(self) -> None:
         self.mic.stop()
@@ -378,11 +394,24 @@ class Session:
 
     def tick(self) -> None:
         self._pump_audio()
+        self.pump_results()
+        self._pump_health()
+
+    def pump_results(self) -> None:
+        """Everything that is waiting on something other than the microphone.
+
+        Split out of `tick()` because the caller drives the pump only while it is
+        capturing, and that quietly made a disarmed pill lose whatever was in flight: a
+        question already with the CLI came back onto `_ask_result` and stayed there,
+        because the only code that collects it ran behind the microphone check. The
+        answer to a question you already asked does not depend on still listening, and
+        disarming while waiting is the natural thing to do — especially now that Flow
+        goes deaf while it reads a reply aloud.
+        """
         self._pump_decodes()
         self._pump_drops()
         self._pump_refine()
         self._pump_ask()
-        self._pump_health()
 
     def _pump_drops(self) -> None:
         """Surface what the filter rejected (P2).
@@ -426,21 +455,48 @@ class Session:
         return len(self._utter) * BLOCK / SAMPLE_RATE
 
     def _pump_audio(self) -> None:
-        for block in self.mic.drain():
+        blocks = self.mic.drain()
+
+        # P9: while an answer is playing, the microphone is hearing the speakers, not
+        # the user — and there is no echo cancellation here to tell those apart (a real
+        # AEC is a dependency, and R16 does not have room for one).
+        #
+        # Feeding it anyway is what broke converse mode in the first live session. The
+        # reply "Yes, we can hear you." played, the gate opened on Flow's own voice,
+        # `speaker.stop()` cut the answer off mid-sentence, and the captured fragment
+        # decoded to "Yes." and was appended to the draft — so the next question sent to
+        # the CLI carried a word the user never said, and the conversation looked like
+        # it had silently reverted to dictation.
+        #
+        # Half-duplex is the honest fix: hear the user, or talk, not both. Interrupting
+        # is an explicit action now (clear, disarm, or mute) rather than a guess about
+        # whose voice just arrived.
+        if self.speaker is not None and self.speaker.speaking:
+            if self._utter:
+                # Speech already in flight when the answer began is genuinely the
+                # user's. Commit it rather than dropping it on the floor.
+                self._finalise()
+            # Reset rather than leave it half-open: the pre-roll must not keep a tail of
+            # Flow's own voice to prepend to whatever the user says next.
+            self.gate.reset()
+            self.echo_blocks += len(blocks)
+            return
+
+        for block in blocks:
             started, stopped = self.gate.push(block)
             if self.gate.speaking:
                 if started:
                     # The gate could only open once it heard something loud, so the
                     # quiet head of that very word is already behind us. Take it back.
                     self._utter.extend(self.gate.take_preroll())
-                    # P9: the user talking over the answer means they are done with
-                    # it. Speech that keeps going while they speak is also speech the
-                    # microphone is picking up.
-                    if self.speaker is not None:
-                        self.speaker.stop()
                 self._utter.append(block)
                 self._last_activity = time.perf_counter()
-                if self.state is not State.REFINING:
+                # Neither of the two CLI states may be overwritten here. REFINING was
+                # always excluded; ASKING was not, so speaking while a question was out
+                # turned the pill green, and the answer landing then set IDLE — the
+                # violet "still thinking" state vanished the moment the user said
+                # anything, which is precisely when they most want to see it.
+                if self.state not in (State.REFINING, State.ASKING):
                     self._set_state(State.LISTENING)
                 # Risk 7: never let one utterance cross Whisper's 30 s mel window,
                 # past which decode cost stops being flat.
@@ -812,7 +868,19 @@ class Session:
         mode the text goes to the CLI instead and the caller gets "" — there is nothing
         to paste, and returning the text anyway would paste the question into whatever
         window happened to have focus.
+
+        Both refusals below say so out loud. Send is a button, and a button that does
+        nothing when pressed reads as broken — which is exactly how it was reported.
         """
+        if not self.draft.text.strip():
+            self._emit("note", "nothing to send - the draft is empty")
+            return ""
+        if self.state is State.ASKING:
+            self._emit("note", "still waiting on the last answer")
+            return ""
+        if self.state is State.REFINING:
+            self._emit("note", "still rewriting - one moment")
+            return ""
         text = self.draft.clear()
         self.thread.add(text)
         # P8: send is the natural commit point — rare, user-initiated, and the moment

@@ -320,8 +320,9 @@ is a prompt either way.
   open, so a crashed or upgraded CLI cannot take the conversation with it.
 - **Answers are asked to be short** — at most three sentences of plain prose — because the
   reply is read on a floating bubble and spoken aloud, and neither survives an essay.
-- **Speaking over the answer stops it.** The user talking again is exactly the signal that
-  they are done listening.
+- **Flow goes deaf while it talks.** The microphone is ignored for as long as a reply is
+  playing, because it is hearing the speakers and there is no echo cancellation to tell
+  that from your voice. See [Interrupting a reply](#interrupting-a-reply).
 - **Failure is non-destructive.** An absent, slow or broken CLI degrades converse mode to
   dictate mode rather than losing what was said.
 
@@ -334,6 +335,30 @@ Speech goes through `System.Speech` in one long-lived PowerShell host, not a sub
 reply. That is not an optimisation: a subprocess that has already been launched cannot be
 told to stop talking, and PowerShell costs ~700 ms of startup before the first phoneme.
 Nothing is installed and nothing leaves the machine.
+
+### Interrupting a reply
+
+Flow will not listen while it is speaking, and that is deliberate. Without it, the
+microphone picks up the reply, the speech gate opens on Flow's own voice, and the words it
+just spoke are transcribed into your next question — which is exactly what happened the
+first time anyone used converse mode for real: the reply *"Yes, we can hear you."* played,
+and `Yes.` appeared in the draft.
+
+Separating your voice from the speakers needs acoustic echo cancellation, not a better
+voice detector — a VAD, Silero included, would confidently report "this is speech", because
+it is. AEC means a dependency, and R16 has no room for one. So the guarantee is half-duplex:
+**listen, or talk, not both.**
+
+Three ways to cut a reply short, all explicit:
+
+| Action | Effect |
+|---|---|
+| `ctrl+alt+esc`, or the **Clear draft** menu item | stops the reply, then clears the draft |
+| Click the pill to disarm | stops the reply and stops capturing |
+| Right-click → **Mute replies** | stops it and stays silent from then on |
+
+If you use headphones there is no echo to suppress, but Flow cannot tell — the behaviour
+is the same either way.
 
 ## Calibration (P8)
 
@@ -533,6 +558,14 @@ started; the wheel is the unit of distribution today.
 - **Accuracy on your own voice is still unmeasured.** The per-accent numbers in
   [docs/roadmap.md](docs/roadmap.md) come from recordings of other people, and the SAPI
   numbers are synthesised. Try `scripts/listen.py` or `scripts/live_check.py`.
+- **Voice corrections have to be phrased as commands, and that is a real limitation.**
+  *"delete the bit about the standup"* works; *"I feel that it should not contain the
+  summary from the stand-up"* is appended to your draft as text. The first recording from
+  an Indian-L1 speaker phrased **every** correction the second way, and **0 of 10** were
+  recognised — against 7 of 12 local edits for a speaker who read the prompts as written.
+  The cause is register rather than accent, and it is unfixed. Until it is, **Refine**
+  forces the next utterance to be treated as an instruction. See
+  [docs/roadmap.md](docs/roadmap.md#the-first-anchor-group-recording-and-what-it-found-2026-08-01).
 - **A personal lexicon cuts both ways.** `~/.flow/lexicon.txt` biases decoding toward your
   names and jargon. Measured on EdAcc with `small.en`: it recovers **27-34%** of the rare
   words the model otherwise missed *when they are actually spoken*, and makes WER
@@ -576,19 +609,19 @@ Verified on this machine while writing this document:
 
 Recorded in [PROGRESS.md](PROGRESS.md) from earlier runs, not re-measured here:
 
-| | |
-|---|---|
-| Cold start | ~1.4 s (0.40 s import + 0.98 s model load) |
-| Decode, 1 s of audio | 0.75 s |
-| Decode, 8 s of audio | 0.91 s — nearly flat, because Whisper pads to one 30 s window |
-| Partial decode, worst of 6 accents, 1-8 s of speech | 0.79-1.07 s (R4 budget 1.5 s) |
-| Final decode, `small.en`, full 10-20 s utterance | 3.65 s median, 4.87 s worst |
-| Semantic rewrite via `codex` | ~5.7 s, ~19.7 k tokens |
-| Prompt polish | 5.3 s median, 15/15 detail tokens retained, 0/5 preambles |
-| Converse round trip | 10.4 s first answer, 7.8 s follow-up |
-| Long session, warm baseline | RSS −3.6 MB over 6.5 min; decode latency +3 ms (+0.3%) |
-| Resident memory | 181 MB one tier, 450 MB both, 100 MB after idle unload |
-| Calibration on this machine | room −96.5 dB, voice −39.9 dB, gap 56.6 dB, confidence −0.193 |
+|                                                     |                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| Cold start                                          | ~1.4 s (0.40 s import + 0.98 s model load)                    |
+| Decode, 1 s of audio                                | 0.75 s                                                        |
+| Decode, 8 s of audio                                | 0.91 s — nearly flat, because Whisper pads to one 30 s window |
+| Partial decode, worst of 6 accents, 1-8 s of speech | 0.79-1.07 s (R4 budget 1.5 s)                                 |
+| Final decode, `small.en`, full 10-20 s utterance    | 3.65 s median, 4.87 s worst                                   |
+| Semantic rewrite via `codex`                        | ~5.7 s, ~19.7 k tokens                                        |
+| Prompt polish                                       | 5.3 s median, 15/15 detail tokens retained, 0/5 preambles     |
+| Converse round trip                                 | 10.4 s first answer, 7.8 s follow-up                          |
+| Long session, warm baseline                         | RSS −3.6 MB over 6.5 min; decode latency +3 ms (+0.3%)        |
+| Resident memory                                     | 181 MB one tier, 450 MB both, 100 MB after idle unload        |
+| Calibration on this machine                         | room −96.5 dB, voice −39.9 dB, gap 56.6 dB, confidence −0.193 |
 
 Accuracy numbers are deliberately absent from this table: the only ones measured on this
 machine come from synthesised speech, where WER was 0.000, and that says more about the
