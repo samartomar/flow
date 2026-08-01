@@ -432,6 +432,13 @@ class Session:
         #: it guesses wrong, per the "heuristic + explicit override" design in §4.
         self._force_next: str | None = None  # "append" | "edit" | None
         self._force_next_at = 0.0
+        #: True while the draft is open in the bubble's keyboard editor. Three things
+        #: read it: the microphone is suspended, the auto-ask countdown is held, and
+        #: the indicator says which of the two deafnesses this is.
+        self.editing = False
+        #: The draft revision the editor opened on, so a commit can say whether
+        #: anything landed behind it while the user typed.
+        self._edit_revision = 0
         self._last_activity = time.perf_counter()
         self._last_mic_check = time.perf_counter()
         self._mic_started = False
@@ -631,12 +638,14 @@ class Session:
     def hearing(self) -> bool:
         """Whether the microphone counts as evidence right now.
 
-        False exactly while a reply is playing — which is when `_pump_audio` drains the
-        device and throws every block away. The distinction is not decoration: "busy,
-        still listening" and "busy, and deaf" are different promises to the user, and
-        only the second one means *stop talking*.
+        False exactly while `_pump_audio` drains the device and throws every block away:
+        a reply is playing, or the draft is being edited by hand. The distinction is not
+        decoration — "busy, still listening" and "busy, and deaf" are different promises
+        to the user, and only the second one means *stop talking*.
         """
-        return not (self.speaker is not None and self.speaker.speaking)
+        return not (
+            (self.speaker is not None and self.speaker.speaking) or self.editing
+        )
 
     @property
     def level_db(self) -> float:
@@ -666,6 +675,11 @@ class Session:
         model load is checked before the decode because a first decode of a tier is a
         model build with a decode behind it, and those differ by about a second.
         """
+        # Before the speaking case, because both are deafnesses and only this one is the
+        # user's own doing: told "not listening" with no reason, somebody typing would
+        # read it as a fault.
+        if self.editing:
+            return Activity("editing - not listening", False)
         if not self.hearing:
             return Activity("speaking - not listening", False)
         if self.state is State.ASKING:
@@ -814,6 +828,16 @@ class Session:
                 self._finalise()
             # Reset rather than leave it half-open: the pre-roll must not keep a tail of
             # Flow's own voice to prepend to whatever the user says next.
+            self.gate.reset()
+            self.echo_blocks += len(blocks)
+            return
+
+        # The same half-duplex bargain, for the other reason someone can be at the
+        # keyboard rather than at the microphone: whatever the room says while the user
+        # types would be appended to the very text they are typing. Announced when it
+        # starts and when it ends (`begin_edit`), because invariant 4 forbids a silent
+        # deafness, not a deliberate one.
+        if self.editing:
             self.gate.reset()
             self.echo_blocks += len(blocks)
             return
@@ -1193,9 +1217,14 @@ class Session:
         """Whether a settled converse-mode draft is counting down to being asked.
 
         Every clause is a way the draft is not finished with: a CLI call is holding it,
-        the gate is open, audio is waiting to be decoded, a decode is running, or the
+        the gate is open, audio is waiting to be decoded, a decode is running, the
         previous answer is still playing — during which the microphone is gated, so
-        silence proves nothing about the user.
+        silence proves nothing about the user — or somebody is typing into it.
+
+        The editor is the sharpest of them and the reason the clause is not a `state`
+        check either. It commits once, on close, so while it is open the session sees a
+        settled draft *and* guaranteed silence: exactly the two conditions this reads as
+        "finished", against a sentence that is half-typed.
 
         The two CLI clauses ask the calls themselves rather than reading `state`. That
         is the whole defect this pins: routing overwrote REFINING with DRAFT, the
@@ -1205,6 +1234,7 @@ class Session:
         return (
             self.auto_ask
             and self.mode == CONVERSE
+            and not self.editing
             and self._refine_op is None
             and self._ask_op is None
             and self._settled_at is not None
@@ -1230,6 +1260,62 @@ class Session:
         """Restart the countdown. The user is still working on this draft."""
         if self._settled_at is not None:
             self._settled_at = time.perf_counter()
+
+    # -- repairing the text by hand ----------------------------------------
+
+    def begin_edit(self) -> str | None:
+        """Take the draft into a keyboard editor. Returns the text to put in it.
+
+        None means the editor was refused and a note says why — the same shape `send()`
+        uses, so a caller that ignores the return value cannot silently open two.
+
+        This exists because the only repair Flow offered was saying it again, into the
+        decoder that got it wrong the first time. For a speaker whose accent is what the
+        decoder is struggling with, that is a loop with no exit, and the live sheet
+        scored 55/73/55% against P3's >= 95%.
+        """
+        if self.editing:
+            self._emit("note", "already editing - finish or cancel that first")
+            return None
+        if self._utter:
+            # Words captured before the editor opened are the user's, exactly as they
+            # are when a reply starts playing. They will land behind the editor and be
+            # displaced by the commit, which `commit_edit` says out loud — and the undo
+            # stack holds words, so displaced is not lost.
+            self._finalise()
+        self.editing = True
+        self._edit_revision = self.draft.revision
+        self.diag.write("edit", ok=True, chars=len(self.draft.text))
+        self._emit("note", "editing - the microphone is off while you type")
+        return self.draft.text
+
+    def commit_edit(self, text: str) -> None:
+        """Close the editor, writing `text` into the draft."""
+        if not self.editing:
+            return
+        self.editing = False
+        moved = self.draft.revision != self._edit_revision
+        if text != self.draft.text:
+            # Through `Draft.set()`, which is what makes this an ordinary draft change:
+            # the revision moves, so a rewrite in flight across the edit is discarded by
+            # the invariant-11 check rather than overwriting what was typed, and the
+            # previous text goes on the undo stack for free.
+            self.draft.set(text)
+            self._emit("note", "edited by hand - listening again"
+                       + (" (what arrived while you typed is one undo back)"
+                          if moved else ""))
+            self._after_draft_change()
+        else:
+            self._emit("note", "listening again - nothing was changed")
+        self.diag.write("edit", ok=True, chars=len(text), route="commit")
+
+    def cancel_edit(self) -> None:
+        """Close the editor and keep the draft exactly as it was."""
+        if not self.editing:
+            return
+        self.editing = False
+        self._emit("note", "editing cancelled - listening again")
+        self.diag.write("edit", ok=False, route="cancel")
 
     @property
     def cli(self):

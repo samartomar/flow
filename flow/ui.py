@@ -755,6 +755,10 @@ class Bubble(tk.Toplevel):
         self._for_activity = False
         #: Which float-up animation is current; older ones stop when this moves.
         self._anim = 0
+        #: The hand editor, while one is open, and the window to give the foreground
+        #: back to when it closes — which is never Flow's own, by `_track_target`.
+        self._editor: tk.Text | None = None
+        self._previous_focus = 0
         self._h = 120
         self.withdraw()
 
@@ -806,6 +810,12 @@ class Bubble(tk.Toplevel):
         self._render()
 
     def show(self, text: str) -> None:
+        if self._editor is not None:
+            # Something landed behind the editor — a decode that was already running, a
+            # rewrite coming back. Redrawing here would move the words under the cursor
+            # mid-keystroke. The commit displaces it and says so, and it is one undo
+            # back; that is the honest order.
+            return
         # The answer stays up while the next question is dictated. It used to be
         # cleared the moment the user spoke again, which meant the reply they had just
         # asked for vanished before they could read it.
@@ -844,6 +854,12 @@ class Bubble(tk.Toplevel):
         self._render()
 
     def hide(self) -> None:
+        # Clear and the cancel hotkey both come through here, and an editor left open
+        # would leave `session.editing` true with the window gone — a microphone that
+        # is off with nothing on screen to say why. Cancelled rather than committed:
+        # the press that got here was somebody stopping, not somebody finishing.
+        if self._editor is not None:
+            self._cancel_edit()
         self._visible = False
         self._text = self._partial = self._note = self._reply = self._sent = ""
         self._for_activity = False
@@ -915,7 +931,12 @@ class Bubble(tk.Toplevel):
             )
             rx1, ry1, rx2, ry2 = c.bbox(rprobe)
             reply_h = ry2 - ry1 + 8
+        # The box gets a floor of its own: a one-line draft measures ~18 px, and a
+        # text box that size is a slot to squint into rather than something to work in.
+        edit_h = max(text_h + 8, 44) if self._editor is not None else 0
         extra = reply_h
+        if edit_h:
+            extra += edit_h - text_h + 8
         if self._sent:
             extra += 16  # the "sent" label above the words
         if self._partial:
@@ -943,7 +964,15 @@ class Bubble(tk.Toplevel):
                 font=("Segoe UI", 8, "bold"), tags="sent",
             )
             y += 16
-        if body:
+        if self._editor is not None:
+            # The box takes the body's slot rather than opening below it, so the words
+            # do not move under the cursor at the moment somebody reaches for them.
+            c.create_window(
+                PAD, y, anchor="nw", window=self._editor,
+                width=BUBBLE_W - 2 * PAD, height=edit_h,
+            )
+            y += edit_h + 6
+        elif body:
             # Muted once it has gone: these are no longer the words being worked on.
             c.create_text(
                 PAD, y, anchor="nw", text=body, fill=MUTED if self._sent else TEXT,
@@ -984,10 +1013,23 @@ class Bubble(tk.Toplevel):
                       self._put_back)]
             self._lay_out(specs)
             return
+        if getattr(self.pill.session, "editing", False):
+            # The whole row, because every other chip acts on a draft that is currently
+            # two things at once — what the session holds and what is in the box. One
+            # decision to make, so one pair of chips to make it with.
+            self._lay_out([
+                ("Done", "Done", self._commit_edit),
+                ("Cancel", "Cancel", self._cancel_edit),
+            ])
+            return
         specs = [
             ("Refine", "Refine", self._refine),
             ("Continue", "Continue", self._continue),
         ]
+        # Only with words on screen: an editor over an empty draft is a text box for
+        # dictating with a keyboard, which is a different product.
+        if self._text:
+            specs.append(("Edit", "Edit", self._edit))
         # Only offered when there is something to re-read. A chip that is always
         # present but usually does nothing teaches people to ignore it.
         if getattr(self.pill.session, "can_rescue", False):
@@ -1140,6 +1182,80 @@ class Bubble(tk.Toplevel):
         # Reaching for any chip means the user is still working on this draft.
         self.pill.session.hold_auto_ask()
         self.pill.session.rescue_last_append()
+
+    # -- repairing the text by hand ----------------------------------------
+
+    def _edit(self) -> None:
+        """Open the draft in a real text box, with the keyboard focus in it.
+
+        This is the one thing in the app that deliberately takes the foreground, and it
+        is allowed to for the same reason the right-click menu is: the click that got us
+        here is the last input event, which is what earns a process the right to call
+        `SetForegroundWindow`. Invariant 10 is unharmed by it and that is not a hope —
+        `inject.resolve()` refuses on a live process-id check against whatever actually
+        has the foreground, so Flow holding it makes the refusal *fire*, which is the
+        correct answer while somebody is typing. `_track_target` keeps the last
+        foreground that was not Flow's own, so the window Send is aimed at survives.
+        """
+        text = self.pill.session.begin_edit()
+        if text is None:
+            return  # refused, and the note says why
+        self._previous_focus = foreground_hwnd()
+        box = self._editor = tk.Text(
+            self, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
+            highlightthickness=1, highlightbackground=self.pill.accent,
+            highlightcolor=self.pill.accent, wrap="word",
+            font=("Segoe UI", 10), undo=True, padx=6, pady=4,
+        )
+        box.insert("1.0", text)
+        # Escape cancels and Ctrl+Enter commits; a bare Enter is a newline, because a
+        # prompt is not a single line and the chips are the discoverable way out anyway.
+        box.bind("<Escape>", lambda _e: (self._cancel_edit(), "break")[1])
+        box.bind("<Control-Return>", lambda _e: (self._commit_edit(), "break")[1])
+        self._render()
+        _user32.SetForegroundWindow(toplevel_hwnd(self))
+        box.focus_force()
+        box.mark_set("insert", "end")
+
+        # Verified, not assumed. `SetForegroundWindow` is *refused* for a process that
+        # does not own the last input event, and it reports that by doing nothing —
+        # which leaves a text box on screen, with a cursor in it, collecting nothing,
+        # while every keystroke goes to whatever really has the focus. Measured: driven
+        # without a click, the editor opened and the word typed into it landed in the
+        # browser behind. Better to close and say so than to swallow somebody's typing.
+        if not owned_by_flow(foreground_hwnd()):
+            self._close_editor()
+            self.pill.session.cancel_edit()
+            self.note("could not open the editor - Windows kept the focus where it was")
+
+    def _close_editor(self) -> str:
+        """Tear the box down and hand the foreground back. Returns what was in it."""
+        box, self._editor = self._editor, None
+        text = ""
+        if box is not None:
+            try:
+                text = box.get("1.0", "end-1c")
+            except tk.TclError:
+                text = ""
+            box.destroy()
+        previous, self._previous_focus = self._previous_focus, 0
+        # Back to whatever had it, which by construction is the window the user was
+        # dictating into — never Flow, because `_track_target` filters those out.
+        if previous:
+            try:
+                _user32.SetForegroundWindow(previous)
+            except OSError:
+                pass
+        return text
+
+    def _commit_edit(self) -> None:
+        self.pill.session.commit_edit(self._close_editor())
+        self._render()
+
+    def _cancel_edit(self) -> None:
+        self._close_editor()
+        self.pill.session.cancel_edit()
+        self._render()
 
     # Both chips toggle. Pressing one used to be a one-way door until it timed out 30 s
     # later, so a mis-click meant every utterance in the next half minute was forced
