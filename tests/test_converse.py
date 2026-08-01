@@ -496,3 +496,65 @@ class TestAutoAsk(unittest.TestCase):
         with mock.patch("flow.session.ask", return_value=("yes", "codex")):
             s.send()
             self.assertIsNone(s.auto_ask_in)
+
+
+class TestTheProviderIsNamedBeforeTheFact(unittest.TestCase):
+    """The notes said which CLI answered; nothing said which one was about to.
+
+    Naming it afterwards is a receipt, not a warning. The moment that matters is the
+    one where somebody switches into converse mode or presses Ask, because that is when
+    the question leaves the machine — and "the CLI" told them neither which service
+    that is nor that it is a service at all.
+    """
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def found(self, name: str):
+        # A real Cli, because `name` is a reserved word in Mock's constructor and a
+        # Mock built with it reports its own repr instead — which the first version of
+        # this test asserted against and passed nothing useful.
+        from flow.refine import Cli
+
+        return [Cli(name, (name,))]
+
+    def test_switching_to_converse_names_the_cli_and_says_it_leaves(self):
+        s = session()
+        with mock.patch("flow.session.available", return_value=self.found("codex")):
+            s.toggle_mode()
+        note = self.notes(s)
+        self.assertIn("codex", note)
+        self.assertIn("leaves this machine", note)
+
+    def test_dictate_mode_makes_no_such_claim(self):
+        # Nothing leaves the machine in dictate mode, so nothing should say it does.
+        s = session()
+        s.toggle_mode()
+        s.events()
+        s.toggle_mode()
+        self.assertNotIn("leaves this machine", self.notes(s))
+
+    def test_an_absent_cli_is_said_plainly_rather_than_named(self):
+        s = session()
+        with mock.patch("flow.session.available", return_value=[]):
+            s.toggle_mode()
+        note = self.notes(s)
+        self.assertIn("no agent CLI", note)
+        self.assertNotIn("leaves this machine", note, "it cannot leave via nothing")
+
+    def test_a_rewrite_names_who_is_about_to_do_it(self):
+        s = session()
+        s.draft.set("widen the column")
+        with mock.patch("flow.session.available", return_value=self.found("claude")), \
+             mock.patch("flow.session.refine", return_value=("x", "claude")):
+            s._start_refine("make it formal")
+            s.wait_idle(timeout=5.0)
+        self.assertIn("refining via claude", self.notes(s))
+
+    def test_a_question_names_who_is_about_to_answer_it(self):
+        s = session()
+        with mock.patch("flow.session.available", return_value=self.found("codex")), \
+             mock.patch("flow.session.ask", return_value=("yes", "codex")):
+            s._start_ask("can you hear me")
+            s.wait_idle(timeout=5.0)
+        self.assertIn("asking codex", self.notes(s))

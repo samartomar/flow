@@ -59,9 +59,10 @@ boundary is this:
 - **The desktop boundary.** Send places the draft on the Windows clipboard, where any
   clipboard manager or cloud-clipboard sync the user runs will also see it.
 
-The startup diagnostics name the CLI that will answer; the notes name the one that did.
-Nothing on the pill yet says, before the fact, that Ask goes off the machine — that gap
-is queued work, listed with the others at the end of §10.
+The startup diagnostics name the CLI that will answer, the notes name the one about to
+be used and the one that did, and switching into converse mode says in words that the
+question leaves the machine. Nothing on the pill *stands* there saying so; whether it
+should is a design question, listed with the other open ones at the end of §10.
 
 | Module | Band | Does |
 |---|---|---|
@@ -586,9 +587,13 @@ policy here; it is enforced by absence.
 Written down so the reference does not claim them early. The wording above is already
 narrowed to stay true while these are open; each is queued work.
 
-1. **The provider is named only at startup.** The console diagnostics say which CLI will
-   answer and the notes say which one did, but nothing on the pill says — before the
-   fact — that Ask goes to `codex` and off the machine.
+1. **The provider is named in words, not on the pill.** Switching to converse mode now
+   says "Ask sends the draft to codex, and the question leaves this machine", and the
+   asking and refining notes name the CLI before it is used rather than after. What is
+   still open is design rather than plumbing: whether the pill itself carries a standing
+   badge — "Converse · codex · networked" — and where. A note is read once; a badge is
+   read every time somebody looks at the window, and which of those this warrants is the
+   owner's taste.
 2. **A warning raised after `paste()` returns arrives late.** The clipboard-restore thread
    records its skip 0.6 s after the Send it belongs to, and every caller drains
    `take_warnings()` immediately — so the line waits in the queue and is shown against the
@@ -600,7 +605,7 @@ narrowed to stay true while these are open; each is queued work.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (542 tests, ~11 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (547 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

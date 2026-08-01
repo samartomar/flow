@@ -41,7 +41,7 @@ from .edits import (
 #: a different word; lower-casing marks it as ordinary prose, which is the one thing not
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
-from .refine import ask, refine, tail_sent
+from .refine import ask, available, refine, tail_sent
 from .thread import Thread
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
@@ -552,6 +552,21 @@ class Session:
             provider=note if ok else None,
             reason=reason or None,
         )
+
+    def _provider(self) -> str:
+        """Which agent CLI will answer, named *before* it is used.
+
+        The notes already said which CLI answered, and the startup diagnostics say which
+        one would — but between those two there was nowhere the app admitted, at the
+        moment somebody is about to press Ask, that the question is leaving the machine.
+        Naming it after the fact is a receipt, not a warning.
+
+        `available()` is two PATH lookups and is only reached from note paths — a mode
+        switch and the start of a CLI call — each of which is already paying for a user
+        action or a process start.
+        """
+        found = available()
+        return found[0].name if found else ""
 
     def _next_op(self) -> int:
         """Identity for one CLI call.
@@ -1206,10 +1221,11 @@ class Session:
         # the whole ~7 s the CLI takes, so the result has to be checked against it.
         revision = self.draft.revision
         self._settle_state()
+        who = self._provider() or "no CLI on PATH"
         self._emit(
             "note",
-            "shaping that into a prompt" if polish
-            else f"refining via CLI: {instruction!r}",
+            f"shaping that into a prompt via {who}" if polish
+            else f"refining via {who}: {instruction!r}",
         )
         before = self.draft.text
         sent = tail_sent(before)
@@ -1318,8 +1334,19 @@ class Session:
         # had not really changed. In converse mode there is no Send anywhere; saying so
         # is free, and the same class of defect as the chip whose label the grammar
         # rejected.
-        self._emit("note", "converse mode - press Ask to put the draft to the CLI"
-                   if self.mode == CONVERSE else "dictate mode - Send pastes")
+        if self.mode == CONVERSE:
+            who = self._provider()
+            # Names the provider and says what that means, in the one sentence somebody
+            # reads when they switch. "the CLI" was true and told nobody anything: the
+            # point is not which executable runs, it is that the words go off the
+            # machine to whatever that executable is signed into.
+            self._emit("note",
+                       f"converse mode - Ask sends the draft to {who}, and the question "
+                       "leaves this machine"
+                       if who else
+                       "converse mode - no agent CLI on PATH, so Ask has nothing to send")
+        else:
+            self._emit("note", "dictate mode - Send pastes into the focused window")
         return self.mode
 
     def send(self) -> str:
@@ -1370,7 +1397,7 @@ class Session:
                         sent=tail_sent(question), mode=self.mode)
         self._cli_started = time.perf_counter()
         self._set_state(State.ASKING)
-        self._emit("note", "asking…")
+        self._emit("note", f"asking {self._provider() or 'nobody — no CLI on PATH'}…")
         sent = tail_sent(question)
         if sent < len(question):
             # Worse than the Refine case and worded to say so: `ask()` sends the tail
