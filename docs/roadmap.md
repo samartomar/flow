@@ -5,6 +5,11 @@ a developer speaking accented English (Spanish, Indian, Russian, Japanese L1). T
 records what the audit found, the measurable targets, and the order of work. It follows
 the project's standing rule: no claim without a number, and check the denominator.
 
+> **This is a dated record, not a description of the current build.** The phase entries
+> are struck through as they ship, and the "where the build stands" figures below are the
+> v0.1 ones the audit started from. For how the shipped app works today, read
+> [architecture.md](architecture.md); for what it does, the [README](../README.md).
+
 ## Where the build stands
 
 The v0.1 loop is real and sound: mic → RMS speech gate → faster-whisper `base.en` int8 →

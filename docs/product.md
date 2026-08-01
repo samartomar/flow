@@ -4,7 +4,7 @@ The build log records how Flow works; nothing in the repo records what it must d
 worth using, or for whom. This document is that definition. [docs/analysis.md](analysis.md)
 holds the original R1–R17 build requirements; the P-numbers here sit above them as the
 product layer. [docs/roadmap.md](roadmap.md) maps the gap between this definition and the
-current build.
+current build, and [docs/architecture.md](architecture.md) describes the build itself.
 
 ## The one-line definition
 

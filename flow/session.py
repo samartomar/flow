@@ -71,7 +71,7 @@ CONVERSE = "converse"
 
 
 class Event(NamedTuple):
-    kind: str  # partial | draft | state | note | error | reply | mode
+    kind: str  # partial | draft | state | note | error | reply | mode | drop
     text: str
 
 

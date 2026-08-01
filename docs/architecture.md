@@ -1,0 +1,344 @@
+# Architecture — how Flow actually runs
+
+The runtime reference. [product.md](product.md) says what Flow is for, [analysis.md](analysis.md)
+records the design decisions and the options rejected, [roadmap.md](roadmap.md) maps the gap
+between the two. This file is the thing you read before changing code: what runs where,
+what talks to what, and which constants have a measurement behind them.
+
+Every constant quoted here was read from the source, and every runtime claim was checked
+against a run — see [Verification](#verification) at the end.
+
+---
+
+## 1. The loop, end to end
+
+```
+  microphone
+      │  float32 mono, 16 kHz, 1024-sample blocks (64 ms)
+      ▼
+  Mic ─────────────── bounded queue, 256 blocks, drops oldest when full
+      │
+      ▼
+  SpeechGate ──────── RMS vs an adaptive noise floor, 800 ms hangover,
+      │               256 ms of pre-roll handed back when it opens
+      ▼
+  utterance buffer ── cut and committed at 24 s, whatever else happens
+      │
+      ├── every ≥0.7 s of new audio, if the worker is free ──▶ partial decode
+      └── on end-of-speech, or at the 24 s cut ──────────────▶ final decode
+      │
+      ▼
+  DecodeWorker ────── one thread. Partials latest-wins, finals FIFO,
+      │               rescues FIFO. A decode failure never kills it.
+      ▼
+  clean.invented_reason ── two signals must agree before anything is dropped;
+      │                    every rejection is kept with its evidence
+      ▼
+  Session._route ──── append | local | semantic | undo | rescue | recall | followup
+      │
+      ├── append ────▶ Draft.append
+      ├── local ─────▶ edits.apply_local          microseconds, no subprocess
+      ├── undo ──────▶ Draft.undo
+      ├── rescue ────▶ re-read the last append as a command
+      ├── recall ────▶ pull the last sent prompt back
+      ├── followup ──▶ mark the draft as a continuation
+      └── semantic ──▶ refine.refine()            agent CLI, ~6 s, off-thread
+      │
+      ▼
+  Draft (text + bounded undo stack)
+      │
+      ▼
+  Send
+      ├── DICTATE  ──▶ inject.paste()   clipboard + SendInput, terminal-aware
+      └── CONVERSE ──▶ refine.ask()     agent CLI, reply rendered + spoken
+                            │
+                            └──▶ Thread (bounded), so the next question has context
+```
+
+The rule that shapes all of it: **the agent CLI is never on the hot path.** A CLI call was
+measured at ~7 s, which is slower than fixing a word by hand, so `edits.py` exists to keep
+every literal correction away from it.
+
+## 2. Threads
+
+Nine things run concurrently. Getting this wrong is the main way to break the app, so it
+is written down.
+
+| Thread | Started by | Does | Rules |
+|---|---|---|---|
+| main / UI | `Pill.mainloop()` | `Pill._tick()` every 30 ms → `Session.tick()` → repaint | **The only thread that may touch Tk.** `_tick` re-schedules itself in a `finally`, so an exception cannot break the chain and leave a dead pill on screen |
+| PortAudio callback | `Mic.start()` | copies each block into the queue, updates the level | No allocation-heavy or blocking work. Never touches the session |
+| `decode` | `DecodeWorker.__init__` | runs the model | Owns the only model calls. Catches every exception and turns it into an `error` result |
+| `preload` | `Session.start()` | warms both tiers | Not awaited — a first run includes a model download, and doing it inline froze the UI on the first click |
+| `hotkeys` | `Hotkeys.start()` | `RegisterHotKey` + `GetMessageW` message loop | `RegisterHotKey` requires the message loop to be on the registering thread. Presses go back through a `queue`, drained on the UI thread |
+| `refine` | per semantic rewrite | one `subprocess.run` | Result handed back under `_refine_lock` |
+| `ask` | per converse question | one `subprocess.run` | Result handed back under `_ask_lock` |
+| clipboard restore | per paste | sleeps 0.6 s, puts the old clipboard back | Lets the target app read the clipboard first |
+| speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking |
+
+Locks: `WhisperTranscriber._lock` (model dict + drop log + confidence), one
+`WhisperTranscriber._locks[tier]` per tier held across a model build, `DecodeWorker._cv`,
+`Session._refine_lock`, `Session._ask_lock`, `Mic._lock`, `Lexicon._lock`, `Speaker._lock`.
+
+The per-tier lock is not decoration: without it the preload thread and the decode worker
+each build a model and one is thrown away. Held *per tier* so preloading `small.en` cannot
+block a partial that only needs `base.en`.
+
+## 3. The pump
+
+`Session.tick()` is a pump the caller drives — `tkinter.after()` in the app, a `while` loop
+in the headless harnesses. No UI framework is imported in `session.py`.
+
+```python
+def tick(self):
+    self._pump_audio()     # drain mic, run the gate, submit partials/finals
+    self._pump_decodes()   # take decode results, route them
+    self._pump_drops()     # surface what the filter rejected (P2)
+    self._pump_refine()    # collect a finished CLI rewrite
+    self._pump_ask()       # collect a finished CLI answer
+    self._pump_health()    # device liveness, idle model unload (R8)
+```
+
+`Session.events()` drains what happened. The UI never reads session internals; it reacts to
+the event stream.
+
+### States
+
+| State | Pill | Meaning |
+|---|---|---|
+| `IDLE` | slate | not capturing, or nothing held |
+| `LISTENING` | green | speech in progress |
+| `DRAFT` | amber | text held, awaiting refine / continue / send |
+| `REFINING` | blue | a CLI rewrite is in flight |
+| `ASKING` | violet | a converse-mode question is with the CLI |
+
+### Events
+
+| Kind | Payload | UI response |
+|---|---|---|
+| `partial` | provisional text | dimmed italic line in the bubble |
+| `draft` | the whole held draft | main bubble text; empty hides it, unless `ASKING` |
+| `state` | new state name | pill colour |
+| `note` | what just happened | small line at the bubble's foot |
+| `error` | what failed | red flash + note; the draft is never lost |
+| `reply` | the CLI's answer | its own colour, plus spoken aloud |
+| `mode` | `dictate` / `converse` | pill badge and chip label (an accompanying `note` is what the user reads) |
+| `drop` | a rejected segment with its evidence | shown as a note — P2 is that a rejection is never *silent* |
+
+## 4. Decoding
+
+Two tiers, because one model cannot serve both paths on this CPU.
+
+| | partials | finals |
+|---|---|---|
+| model | `base.en` | `small.en` |
+| beam | 1 | 5 |
+| temperature ladder | `(0.0,)` — no retries at all | `(0.0, 0.2, 0.4)` — capped |
+| bound by | latency (R4, 1.5 s budget) | accuracy — the draft is held on screen while it runs |
+
+`decode_options()` in [`flow/asr.py`](../flow/asr.py) is the single source both the app and
+the benchmarks decode with; a bench that drifts from the app measures a build nobody runs.
+
+Three settings are deliberately non-default:
+
+- `vad_filter=False` — `SpeechGate` already decided this is speech. This is also why
+  `onnxruntime` is unreachable and `scripts/slim.py` can remove it.
+- `condition_on_previous_text=False` — with context carry-over a long session can fall into
+  repetition loops where the model echoes earlier text forever (R8).
+- `no_speech_threshold=None` and `log_prob_threshold=None` — these turn off faster-whisper's
+  *own* internal segment filter, so Flow has exactly one filter: its own, which records what
+  it drops and why. Retrying a decode merely because the model was unsure was measured to buy
+  nothing across five accent groups and to cost a lot on near-silence (one 5 s noise clip went
+  0.84 s → 3.66 s). Degenerate output still retries, through `compression_ratio_threshold` —
+  that is the case where a hotter sample genuinely helps.
+
+Capping the ladder removes Whisper's own escape from repetition loops, so
+`clean.collapse_repeats()` and `clean.collapse_phrase_repeats()` break them deterministically
+instead.
+
+### The drop filter
+
+`clean.invented_reason()` returns which rule rejected a segment, or `None` to keep it.
+**Two independent signals must agree before anything is discarded**, because dropping a real
+word is worse than admitting a rare invented one — the user can delete a stray word but
+cannot recover one they were never shown.
+
+```
+no_speech_prob ≤ 0.6                         → keep
+no_speech_prob > 0.6  and  whole utterance is a known filler   → "filler"
+no_speech_prob > 0.6  and  avg_logprob < confidence_floor      → "unconfident"
+otherwise                                     → keep
+```
+
+`confidence_floor(baseline)` is `min(-0.8, baseline - 0.5)` — `min`, so calibration can only
+ever *relax* the bar. Shortness is deliberately **not** a signal: a spoken correction *is*
+short, so dropping on length preferentially deletes commands from the people whose speech
+scores worst on `no_speech_prob`, which is exactly the user Flow is for.
+
+## 5. Routing
+
+`edits.plan(utterance, draft)` decides what a spoken utterance means. The draft is a required
+argument, not decoration: *"Delete key handling is broken"* is dictation and *"delete key
+handling"* is an instruction, and nothing in the words separates them — what separates them
+is whether the target text exists in the draft.
+
+Two passes. The utterance is read as spoken; only if that produces no local edit is it
+re-read with a snapped verb, and **that reading is accepted only when it yields a local edit
+whose target is really in the draft.** So a guess can promote a mis-heard command and can
+never demote dictation into an edit.
+
+| Plan kind | Trigger | Cost |
+|---|---|---|
+| `rescue` | "that was a command / an instruction / an edit" | re-read, ~2 s if it needs the audio |
+| `recall` | "bring back my last prompt" | instant |
+| `followup` | "follow up", "also", "one more thing" (+ optional rest) | instant |
+| `undo` | "scratch that", "undo", "never mind", "forget that", "strike that" | instant |
+| `local` | a literal correction whose target is in the draft | microseconds |
+| `semantic` | a rewrite verb, or `op="polish"` | ~6 s, agent CLI |
+| `append` | everything else | instant |
+
+Local operations: `replace`, `replace_all`, `delete`, `delete_last`, `delete_range`,
+`insert_before`, `insert_after`, `capitalize`, `upper`, `lower`, `break`.
+
+Three mechanisms make the grammar survive an accent:
+
+**Lead-in absorption.** Every pattern takes a repeatable prefix of hesitation *and*
+politeness — `no`, `sorry`, `wait`, `actually`, `can you`, `could you please`, `just`, `let's`.
+Politeness was the missing half: those forms were being appended into the draft verbatim.
+
+**Verb snapping.** Edit distance (bounded at one), adjacent transposition, suffix stripping
+(`deleting` → `delete`), and an explicit table of observed mis-hearings (`the lead` → delete,
+`stop` → swap, `leplace` → replace). Only applied to utterances of ≤ 6 words after the
+lead-in, because every command in the inventory is five words or fewer and a guess about a
+long utterance is a guess about a sentence.
+
+**Phonetic target matching.** `phonetic.find_span()` — vendored Double Metaphone blended with
+spelling, threshold `MATCH_THRESHOLD = 0.82`, searching word windows sized around the
+target's own word count ±1, because a mis-transcription moves word boundaries as readily as
+letters. Both the router's `in_draft()` and every span operation in `apply_local()` go
+through it.
+
+`plan()` also marks `escalated=True` when the shape was a correction but the target was
+nowhere in the draft. That is likelier a mis-hearing than a request for judgement, so it
+earns one biased re-decode (`edits.command_bias()`: every trigger verb plus the draft's own
+long words, capped at 48 terms) before any CLI call.
+
+## 6. Send
+
+### Dictate
+
+`inject.paste()` classifies the focused window **before** it touches the clipboard — window
+class or process name, via ctypes — then `prepare()` decides what is safe to send.
+
+The one guarantee: a draft ending in a newline never reaches a shell with that newline
+attached, because that does not paste, it *runs*. Interior newlines are explicitly not a
+guarantee and are reported rather than rewritten; silently reflowing someone's text to make
+it safe is worse than telling them.
+
+### Converse
+
+`Session.send()` returns `""` in converse mode by construction, so the question can never be
+pasted into whatever window happened to have focus. The draft goes to `refine.ask()` with the
+thread tail *minus the current turn* — passing the current one would ask the CLI not to answer
+the thing it was just asked.
+
+`ask()` is deliberately not `refine()`. `refine()` guards hard against the model returning
+anything longer than what it was given, because commentary pasted into a draft is a defect.
+An answer *is* commentary, so that guard would reject every correct result.
+
+## 7. Constants, and what is behind them
+
+Only the ones with a measurement or a failure behind them. Everything else is in the source.
+
+| Constant | Value | Why |
+|---|---|---|
+| `MAX_UTTERANCE_SEC` | 24.0 s | Whisper pads to one 30 s mel window, so cost is flat below it and climbs past it. Cut before the boundary keeps latency constant in a long session |
+| `PARTIAL_MIN_GROWTH_SEC` | 0.7 s | Paired with the worker-idle check, this is what bounds partial latency |
+| `IDLE_UNLOAD_SEC` | 300 s | Release the models, keep the mic. Releasing the mic would leave the app unable to hear its own wake-up |
+| `MIC_CHECK_SEC` | 5 s | A dead PortAudio stream stops delivering blocks without raising anywhere the session can see |
+| `FORCE_NEXT_TTL_SEC` | 30 s | A Refine/Continue chip means "the next thing I say"; after this long the next thing someone says is a different thought |
+| `BLOCK` | 1024 (64 ms) | Fine enough for a responsive level meter |
+| `PREROLL_BLOCKS` | 4 (256 ms) | A gate can only open after hearing something loud, so the quiet head of that word is already gone — the unaspirated stop, the soft fricative. Without it "delete" becomes "leet". Measured: gating without pre-roll deletes 2.6% of the audio; any pre-roll from 128 ms up returns WER to the ungated level |
+| `FLOOR_MIN_DB` | −100.0 | It was −70, and a quiet room with a good USB mic measures **−96.7 dB** — the floor could never descend to meet it, so the gate never opened at all |
+| `FLOOR_MAX_DB` | −25.0 | So no input can make the gate deaf |
+| `NO_SPEECH_MAX` | 0.6 | Sits clear of a genuine short fragment (0.099 measured) and below an outright hallucination (0.691) |
+| `LOW_CONFIDENCE` | −0.8 | The shipped absolute bar, and the reason `CONFIDENCE_MARGIN` exists |
+| `CONFIDENCE_MARGIN` | −0.5 | The distance between the US control's −0.29 median and the shipped −0.8, so a calibrated typical speaker keeps exactly the behaviour they had |
+| `MATCH_THRESHOLD` | 0.82 | Swept, not chosen: 10/10 real mis-transcription pairs recovered at 4 false spans in 354; stricter costs three recoveries and buys nothing until 0.90 |
+| `SNAP_MAX_WORDS` | 6 | Without it, suffix-stripping turned sentence-opening gerunds into commands — "Deleting a branch does not delete the history" became a delete |
+| `refine.MAX_CHARS` | 2000 | Never hand the CLI an unbounded draft (R11). Past this only the tail is sent, cut on a sentence boundary |
+| `refine.TIMEOUT_SEC` | 20 s | Measurement put a normal call at 5.7–7.3 s, so the 6 s first sketched would have killed healthy calls |
+| `ASK_SENTENCES` | 3 | The shortest that can carry an answer plus its caveat |
+| `ASK_MAX_CHARS` | 4000 | The bubble has to render it |
+| `Thread.MAX_TURNS` / `MAX_CHARS` | 20 / 20 000 | R8. Measured: 5000 sends of a realistic prompt settle at 20 turns, 1640 chars |
+| `CONTEXT_CHARS` | 1500 | What a CLI rewrite may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |
+| `Lexicon.MAX_TERMS` | 64 | The library truncates its prompt at 223 tokens *silently, mid-term*, which would bias toward a fragment |
+| `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern |
+| `Draft.MAX_HISTORY` / `MAX_HISTORY_CHARS` | 30 / 200 000 | 30 snapshots of a very long draft is where undo quietly becomes megabytes |
+
+## 8. What is written to disk
+
+| Path | When | What |
+|---|---|---|
+| `~/.flow/lexicon.txt` | never by Flow | the user's own terms. Read-only to the app; re-read by mtime on every decode |
+| `~/.flow/profile.json` | `--calibrate`, and every Send | schema 1. Room, voice, this speaker's confidence, learned confusion pairs, misroute signatures. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
+| `~/.cache/huggingface/hub/` | first decode of each tier | the models |
+| `.bench/` | `scripts/` only | generated audio and results, git-ignored |
+
+Send is the commit point for the profile: rare, user-initiated, and the moment a session's
+corrections have proved themselves by surviving to a handoff.
+
+There is no code in `profile.py` that could send anything anywhere. R9 is not enforced by
+policy here; it is enforced by absence.
+
+## 9. Invariants worth not breaking
+
+1. **Tk is touched from one thread.** Hotkeys, decodes, refines and asks all hand results
+   back through a queue or a lock and are drained on the UI thread.
+2. **The CLI is never on the correction path.** Only `semantic` plans and converse questions
+   start a subprocess.
+3. **Failure is non-destructive.** Every CLI path returns `(None, reason)` and the caller
+   keeps the pre-edit draft. A rescue that fails puts the words back exactly where they were.
+4. **Nothing is dropped silently.** A rejected segment becomes a `drop` event with its
+   evidence; a destructive edit reports the words it removed; the undo stack still holds them.
+5. **Nothing sends itself.** Stopping speech produces a held draft. Send is always explicit.
+6. **Everything is bounded.** Mic queue, undo history, drop log, decode timings, thread turns,
+   lexicon terms, profile pairs, CLI input. A long session must cost what a short one costs.
+7. **Three declared dependencies.** GUI, hotkeys, injection, DPI awareness and speech all come
+   from `tkinter` and `ctypes` precisely so that list does not grow.
+8. **`decode_options()` is the only place decode parameters live**, so the benchmarks measure
+   the build that ships.
+
+## 10. Testing layers
+
+| Layer | Harness | What it can and cannot see |
+|---|---|---|
+| units | `tests/` (381 tests, ~4 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring |
+| one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
+| whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 29 checks, including converse against the live CLI. Cannot see accent — SAPI is a US-English synthesiser |
+| a person | `scripts/live_check.py` | the only thing that can answer P1 and P3. Needs recordings that do not exist yet |
+
+The self-drive layer exists because three consecutive sessions each found a defect by hand
+that no layer-specific harness could have caught: a chip whose label the grammar rejected, a
+mode with no way to turn the voice on, and a window that placed itself off the screen.
+
+## Verification
+
+Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8:
+
+| Check | Command | Result |
+|---|---|---|
+| unit tests | `uv run python -m unittest discover -s tests` | **381 passed**, 4.2 s |
+| end-to-end | `uv run python scripts/selfdrive.py` | **29/29 checks passed**, including a live `codex` converse round trip and a spoken reply |
+| flags | `uv run python -m flow --help` | 13 flags, matching the README table |
+| build | `uv build`, then install the wheel into a fresh venv | wheel + sdist built; `flow --help` runs from a clean install. `hatchling` stays out of the runtime venv, so R16 holds |
+| hotkeys | `flow.hotkey.DEFAULT_BINDINGS` | 4 actions, 1–3 fallbacks each |
+| agent CLI | `flow.refine.available()` | `codex`, then `claude` |
+| speech | `flow.speak.Speaker().available` | `True` |
+| install | `uv run python scripts/slim.py` | 243.9 MB venv, 28 distributions |
+| models | HuggingFace cache blob sizes | `base.en` 147.8 MB, `small.en` 486.1 MB |
+
+Constants were read from source rather than from memory. Numbers attributed to earlier runs
+(WER, soak drift, CLI latency) are quoted from [../PROGRESS.md](../PROGRESS.md) and
+[roadmap.md](roadmap.md) and were **not** re-measured here; they are labelled as recorded
+wherever they appear.

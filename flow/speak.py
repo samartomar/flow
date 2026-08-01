@@ -13,8 +13,13 @@ stop talking. Keeping one process alive and writing commands to its stdin makes 
 reply interruptible, which matters because the user speaking again is exactly the
 signal that they are done listening.
 
-Off by default. Converse mode is fully usable in silence, and a voice that starts
-talking unbidden in a shared office is a worse first impression than no voice at all.
+**Built unless refused (`--no-speak`), not only when asked for.** This was off by
+default at first, on the argument that a voice starting unbidden in a shared office is a
+worse first impression than no voice at all. That is true of dictate mode and wrong
+about converse mode, where the user has explicitly asked for a conversation — and it
+made the feature unreachable by the route people actually take, since someone who finds
+converse mode with ctrl+alt+M mid-session cannot go back and add a launch flag.
+Entering converse mode is the opt-in; `Session.muted` is the runtime toggle.
 """
 
 from __future__ import annotations

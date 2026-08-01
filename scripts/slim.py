@@ -1,7 +1,8 @@
 """Trim ~100 MB of unreachable dependencies out of the venv (R16).
 
 Measured on this machine: a plain `uv sync` venv is **236.8 MB**; after this trim it is
-**137.1 MB**, and the full 69-test suite plus a real decode still pass.
+**137.1 MB**, and the full test suite plus a real decode still pass. (The venv has grown
+with dependency updates since — it reports its own current size when you run this.)
 
 What it removes and why each is genuinely unreachable:
 
