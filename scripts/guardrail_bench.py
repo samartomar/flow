@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.asr import WhisperTranscriber  # noqa: E402
 from flow.clean import LOW_CONFIDENCE  # noqa: E402
+from flow.diag import bench_identity  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench"
 
@@ -158,7 +159,8 @@ def main() -> None:
 
     out = BENCH / "accent" / "guardrail-bench.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"cost": c, "benefit": b}, indent=1), encoding="utf-8")
+    out.write_text(json.dumps({"identity": bench_identity(models=(args.model,)),
+                               "cost": c, "benefit": b}, indent=1), encoding="utf-8")
     print(f"\ndetail -> {out}")
 
 

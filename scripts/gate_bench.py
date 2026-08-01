@@ -37,6 +37,7 @@ from accent_bench import BENCH, load_manifest, load_wav, wer_counts  # noqa: E40
 from flow.asr import decode_options  # noqa: E402
 from flow.audio import BLOCK, SpeechGate  # noqa: E402
 from flow.clean import normalise  # noqa: E402
+from flow.diag import bench_identity  # noqa: E402
 
 SR = 16000
 
@@ -107,7 +108,8 @@ def main() -> None:
         rows[preroll] = {"wer": edits / ref_words, "kept": kept_samples / total_audio}
 
     out = BENCH / f"gate-{name}.json"
-    out.write_text(json.dumps({"model": name, "n": len(entries),
+    out.write_text(json.dumps({"identity": bench_identity(models=(name,)),
+                               "model": name, "n": len(entries),
                                "ungated_wer": ungated_edits / ref_words,
                                "rows": rows}, indent=1), encoding="utf-8")
     print(f"\ndetail -> {out}")

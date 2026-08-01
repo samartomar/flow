@@ -36,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow import SAMPLE_RATE  # noqa: E402
 from flow.audio import BLOCK, Mic, SpeechGate, rms_db  # noqa: E402
+from flow.asr import FINAL_MODEL, PARTIAL_MODEL  # noqa: E402
+from flow.diag import bench_identity  # noqa: E402
 from flow.edits import plan  # noqa: E402
 
 OUT = Path(__file__).resolve().parent.parent / ".bench" / "live"
@@ -387,7 +389,11 @@ def main() -> None:
 
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / "live-check.json"
-    path.write_text(json.dumps(out, indent=1), encoding="utf-8")
+    # Both tiers: live_check runs the app's own transcriber, which loads whichever the
+    # defaults name rather than a model this script chose.
+    path.write_text(
+        json.dumps({"identity": bench_identity(models=(PARTIAL_MODEL, FINAL_MODEL)),
+                    **out}, indent=1), encoding="utf-8")
     print(f"\nwritten -> {path}")
 
 

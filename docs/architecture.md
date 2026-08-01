@@ -593,7 +593,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, and whether auto-ask is on. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, and — on each route — how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
-| `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not |
+| `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the cache revision of each model tier that run loaded -- a number is a measurement *of a build*, and until 2026-08-01 none of these said which |
 
 Send is the commit point for the profile: rare, user-initiated, and the moment a session's
 corrections have proved themselves by surviving to a handoff.
@@ -737,11 +737,32 @@ and `codex --version` / `claude --version`. On this machine that reads: faster-w
 this document are latencies and error rates, and every one of them belongs to a build:
 without this, a result six months old can only be compared to a fresh one by hoping.
 
+**And in every bench result**, since the same day. All nine result writers under
+`scripts/` — `accent_bench`, `asr_bench`, `command_bench`, `gate_bench`,
+`guardrail_bench`, `lexicon_bench`, `live_check`, `polish_check`, `rescue_bench` — put a
+`diag.bench_identity()` block in what they write: the date, the `faster-whisper` and
+`ctranslate2` versions, and the cache revision of every model tier that run loaded.
+Without it the pinning decision below could not even be *reviewed* from the results,
+since its reopen condition is a hash that changed between two runs and no result said
+what its hash was. The two manifest writers (`fetch_accent_data`, `ingest_recordings`)
+are deliberately not on that list: a manifest records which clips exist, which is an
+input rather than a measurement, and no model produced it.
+
+It goes under **one key**, and that matters more than it looks. `command-bench.json` is
+compared byte for byte between two runs to show a grammar change moved nothing, and a
+provenance block containing a date would break that idiom rather than inform it — so a
+comparison drops `identity` and diffs the rest. Re-run on 2026-08-01 with the block in
+place: the non-identity content came back **identical**. Its own `models` block is
+empty, which is the honest answer — that bench loads no model at all, and a revision
+hash for weights it never touched would be a provenance claim that is false.
+
 The model revision is **recorded, not pinned**. `WhisperModel(...)` does accept a
 `revision`, so pinning is available; a complete table to pin *from* is not, because
 `--model` takes any name and the benchmarks use several beyond the two defaults. A pin
 covering only those two would silently not apply to exactly the runs whose reproducibility
-is the point. See NEEDS_YOU.md.
+is the point — measured: of the four names the benchmarks actually use, `base.en`,
+`small.en` and `medium` resolve in this cache and `distil-large-v3` reads `uncached`.
+See NEEDS_YOU.md.
 
 The boundary, loading and invariant corrections dated 2026-08-01 were read from source
 (`refine.py`, `session.py`, `asr.py`, `inject.py`), not re-measured. One number moved
@@ -751,6 +772,7 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 
 | Check | Command | Result |
 |---|---|---|
+| bench provenance | `uv run python scripts/command_bench.py`, twice | the `identity` block resolves here (faster-whisper 1.2.1, ctranslate2 4.8.1, date) and the non-identity content of two consecutive runs is **identical**, so item 14's byte-for-byte idiom survives the addition |
 | unit tests ↻ | `uv run python -m unittest discover -s tests` | **661 passed**, 13.4 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
 | command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by the 2026-08-01 grammar additions, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |

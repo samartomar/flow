@@ -39,6 +39,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flow.asr import decode_options  # noqa: E402
+from flow.diag import bench_identity  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench"
 ACCENT = BENCH / "accent"
@@ -340,6 +341,7 @@ def main() -> None:
         except json.JSONDecodeError:
             merged = {}
     merged.update(results)
+    merged["identity"] = bench_identity(models=tuple(results))
     out.write_text(json.dumps(merged, indent=1), encoding="utf-8")
     print(f"\ndetail -> {out}")
 

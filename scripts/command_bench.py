@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from flow.diag import bench_identity  # noqa: E402
 from flow.edits import _ALIASES, _plan_exact, plan, snap  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench" / "accent"
@@ -276,7 +277,8 @@ def main() -> None:
         rec = recorded()
         out = BENCH / "command-bench-recorded.json"
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+        out.write_text(json.dumps({"identity": bench_identity(), **rec}, indent=1),
+                       encoding="utf-8")
         print(f"\ndetail -> {out}")
         return
 
@@ -287,8 +289,13 @@ def main() -> None:
     sp = spans()
     esc = escalations()
     out = BENCH / "command-bench.json" if BENCH.exists() else Path("command-bench.json")
+    # Provenance under one key, deliberately. This file is the one a grammar change is
+    # verified against by diffing two consecutive runs byte for byte, and the block below
+    # contains a date: whoever repeats that verification must drop "identity" and compare
+    # the rest, not conclude the grammar moved because the day did.
     out.write_text(
-        json.dumps({"recall": r, "adversarial": a, "precision": p, "spans": sp,
+        json.dumps({"identity": bench_identity(),
+                    "recall": r, "adversarial": a, "precision": p, "spans": sp,
                     "escalations": esc}, indent=1),
         encoding="utf-8",
     )

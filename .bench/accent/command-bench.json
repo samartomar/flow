@@ -1,4 +1,10 @@
 {
+ "identity": {
+  "date": "2026-08-01",
+  "faster-whisper": "1.2.1",
+  "ctranslate2": "4.8.1",
+  "models": {}
+ },
  "recall": {
   "clean": {
    "n": 14,

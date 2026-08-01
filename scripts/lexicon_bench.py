@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from accent_bench import BENCH, load_manifest, load_wav, norm_words, wer_counts  # noqa: E402
 from flow.asr import decode_options  # noqa: E402
 from flow.clean import normalise  # noqa: E402
+from flow.diag import bench_identity  # noqa: E402
 from flow.lexicon import MAX_TERMS, parse  # noqa: E402
 
 #: A word in fewer references than this counts as rare — the kind of thing a personal
@@ -212,7 +213,8 @@ def main() -> None:
           f"({recovered / max(1, targets):.1%}), over {clips_with_targets} clips "
           f"that had any missing rare word")
     out = BENCH / f"lexicon-{name.replace('/', '_')}.json"
-    out.write_text(json.dumps({"model": name, "stats": stats, "targets": targets,
+    out.write_text(json.dumps({"identity": bench_identity(models=(name,)),
+                               "model": name, "stats": stats, "targets": targets,
                                "recovered": recovered, "detail": detail}, indent=1),
                    encoding="utf-8")
     print(f"detail -> {out}")

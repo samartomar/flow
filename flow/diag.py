@@ -288,3 +288,42 @@ def record_identity(diag, models=()) -> None:
             diag.write("identity", component=component, version=version)
     except Exception:
         pass
+
+
+#: The single key a bench result puts its provenance under.
+#:
+#: One key, and that is the whole design. Item 14 verified a grammar change by showing
+#: two consecutive `command_bench.py` outputs were byte-identical — an idiom that a
+#: block containing a date destroys if the block is spread through the payload. Under
+#: one key a comparison drops that key and still means what it meant, which is why the
+#: next person to re-run that verification must not conclude the grammar moved because
+#: the date did.
+BENCH_KEY = "identity"
+
+
+def bench_identity(models=(), clis=()) -> dict:
+    """What produced a measurement, as one block for a result file.
+
+    The same question `identity()` answers for the app's trace, in the shape a `.bench`
+    result wants and without the parts it does not: no OS build, no numpy, and no CLI
+    version unless the bench actually used one — each of those costs a process start,
+    and most benches never touch a CLI at all.
+
+    Records the model revisions rather than pinning them, for the reason
+    `model_revision` gives: there is no complete table to pin from. What this does buy
+    is that the pinning decision's own reopen condition — a hash that changed between
+    two runs — becomes checkable from the results, which it was not while the identity
+    lived only in a trace file that does not exist on this machine.
+    """
+    import importlib.metadata as md
+
+    block: dict = {"date": time.strftime("%Y-%m-%d")}
+    for name in ("faster-whisper", "ctranslate2"):
+        try:
+            block[name] = md.version(name)
+        except Exception:
+            block[name] = "absent"
+    block["models"] = {name: model_revision(name) or "uncached" for name in models}
+    if clis:
+        block["clis"] = {name: _cli_version(name) or "absent" for name in clis}
+    return block

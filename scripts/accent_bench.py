@@ -80,6 +80,7 @@ from flow.clean import (  # noqa: E402
     normalise,
 )
 from flow.clean import _FILLER_ONLY as FILLER_ONLY  # noqa: E402
+from flow.diag import bench_identity  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench" / "accent"
 SR = 16000
@@ -361,7 +362,8 @@ def bench_model(
 
     out = BENCH / f"results-{name.replace('/', '_')}{slice_tag}.json"
     out.write_text(
-        json.dumps({"model": name, "groups": groups, "clips": clips}, indent=1),
+        json.dumps({"identity": bench_identity(models=(name,)),
+                    "model": name, "groups": groups, "clips": clips}, indent=1),
         encoding="utf-8",
     )
     print(f"detail -> {out}")

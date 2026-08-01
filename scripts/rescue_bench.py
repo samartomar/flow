@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from asr_bench import load_wav, median, to_16k  # noqa: E402
 from flow.asr import decode_options  # noqa: E402
 from flow.clean import normalise  # noqa: E402
+from flow.diag import bench_identity  # noqa: E402
 from flow.edits import command_bias, plan  # noqa: E402
 
 BENCH = Path(__file__).resolve().parent.parent / ".bench" / "commands"
@@ -149,7 +150,8 @@ def main() -> None:
                        "rescue_s": median(rescue_times) if rescue_times else None}
 
     out = BENCH / f"rescue-{name}.json"
-    out.write_text(json.dumps({"model": name, "rows": rows}, indent=1), encoding="utf-8")
+    out.write_text(json.dumps({"identity": bench_identity(models=(name,)),
+                               "model": name, "rows": rows}, indent=1), encoding="utf-8")
     print(f"\ndetail -> {out}")
 
 

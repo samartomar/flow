@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from flow.diag import bench_identity  # noqa: E402
 from flow.refine import CANDIDATES, available, refine  # noqa: E402
 
 OUT = Path(__file__).resolve().parent.parent / ".bench" / "polish.json"
@@ -213,7 +214,10 @@ def main() -> None:
     print(f"growth:                 median x{sorted(ratios)[len(ratios) // 2]:.1f}")
     print(f"preamble:               {preambles}/{len(times)}")
 
-    OUT.write_text(json.dumps({"cli": cli.name, "records": records}, indent=1),
+    # The only bench whose subject is the CLI rather than a model, so it is the only
+    # one that pays a process start to name one.
+    OUT.write_text(json.dumps({"identity": bench_identity(clis=(cli.name,)),
+                               "cli": cli.name, "records": records}, indent=1),
                    encoding="utf-8")
     print()
     print(f"before/after for a human to judge -> {OUT}")
