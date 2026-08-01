@@ -1,14 +1,95 @@
 # LOOP_PLAN — autonomous backlog from the Feedback.md review (2026-08-01)
 
-## ROUND THREE — the current queue. Everything above the Rules is history; this block is
-## the state. (Written 2026-08-01, owner's decision session.)
+## Closing summary — round three, 2026-08-01: items 15–23 all done, none blocked
 
-**Nine items are queued: 15 through 23, none started.** Items 0–14 are done — their
-entries below are the record, not work. The two closing summaries beneath this block
-describe rounds one and two and are *both* superseded by this queue: the loop is NOT
-finished until items 15–23 are each done, blocked, or deferred, and only then is the
-round-three closing summary written — prepended here at the top, the same convention
-rounds one and two used.
+Nine commits, `d1d2b51`..`6585464`, on top of the owner's `94ad4bd`. Nothing pushed. The
+unit suite went **623 → 766 tests** (12.9 s → 13.5 s, and the architecture doc's two
+stale count rows — both still reading 616 when this round began — were re-read to match).
+`scripts/selfdrive.py` finished 64/64 on all six items that named it.
+`scripts/send_check.py --live` finished 18/18 on both items that named it, run on an
+unlocked desktop rather than deferred.
+
+| # | Commit | What it did |
+|---|---|---|
+| 15 | `d1d2b51` | The pill was already drawing a converse marker; only its text was at issue. It reads `codex` or `claude` now — the pin included |
+| 16 | `74dfa11` | The router chose between a local edit and a ~7 s CLI call without ever seeing how well the decoder heard the sentence. Recorded per route; nothing reads it |
+| 17 | `ee52646` | The only repair for a mis-heard command was to say it again into the decoder that mis-heard it. The draft is editable by hand |
+| 18 | `da7cbd1` | A number in `.bench/` belongs to a build, and none of them said which. All nine result writers carry an identity block |
+| 19 | `57e4060` | A pair Flow has inferred twice is offered in the menu; one tap writes the arrow line. Nothing self-promotes |
+| 20 | `4a0a7fe` | "follow and" — the elided particle — admitted after the corpus priced it at zero |
+| 21 | `39a86fc` | P9 promised that a reply could become the draft and nothing built it. Chip and spoken verb |
+| 22 | `126ecc3` | Send got a spoken word, and Send-then-Enter a second one, with the degradation order as the safety argument |
+| 23 | `6585464` | Converse mode is a prompt workshop, grounded in a workspace — and P9 says so |
+
+**The three measurement gates all passed, so no reduced scope shipped.** Item 20's
+`follow and`, item 21's spoken `use that answer`, and item 22's `boom`/`enter boom` were
+each priced on `command_bench.py` *before* the grammar was kept: 0/580 misroutes on real
+utterances, adversarial 5/20, corruption-class recall 100% on all six classes, threshold
+sweep identical — every time. In all four runs the entire non-identity output came back
+byte-identical, which is a stronger result than "the numbers held": the corpus contains
+none of these forms, so they cost literally nothing. Item 22's words were also asked of
+the corpus directly — **0 of 580 real utterances fire either trigger**, and the single one
+containing the substring ("…MAYBE ENTERING THERE BECAUSE…") does not.
+
+**Two things were measured live rather than deferred**, because a green unit suite could
+not have seen either. Item 17's editor was driven through a real `Pill` with a real
+`SendInput` mouse click and real `KEYEVENTF_UNICODE` keystrokes: 15/15, and `resolve()`
+returned `Target(class='TkTopLevel', process='python.exe', flow)` with `paste()` refusing
+while the editor held the focus — invariant 10 firing rather than lapsing, which is the
+stop-condition answered with a measurement. Item 22's Enter was driven into a real
+console twice: without the submit the pasted line sits on the prompt unrun, with it the
+same line ran. 2/2.
+
+**Five defects came from distrusting a green check**, which is the part worth keeping:
+- Item 15's first version called `available()` from `_draw` — **10.2 ms, 34% of a 30 ms
+  frame**, on every frame. `Session._provider`'s own docstring had warned about exactly
+  that, and I walked into it anyway.
+- Item 16's rounding raised `TypeError` on a non-numeric reading, inside `_route`, on the
+  UI thread — a diagnostics line that can take the commonest path in the app down.
+- Item 17's live run found `SetForegroundWindow` being *refused* and reporting it by
+  doing nothing: the box opened with a cursor in it and the word typed into it **landed
+  in the browser behind**.
+- Item 22 found `_route` calling `plan()` **twice** with only the first given the stored
+  trigger words, so a renamed trigger sent the shipped word into `_escalate` — a ~7 s CLI
+  call on an empty instruction.
+- Item 23's framing was discarded for exactly the long prompts it mattered for:
+  `_split_tail` walks its cut *forward* to a sentence boundary, so a 5 000-character
+  question with no punctuation reached the CLI as two sentences of instructions and none
+  of the prompt.
+
+**And six times a check was wrong rather than the code** — recorded because the habit of
+assuming the assertion is right is how a suite becomes decorative. Item 19's "unwritable
+path" was a path `ensure()` correctly creates; item 21's countdown check forced
+`_settled_at` and so bypassed the guard instead of testing it; item 22's converse check
+assumed an op was normalised and its refusal checks drained the event queue once when the
+notes arrive a frame later; item 23 searched for `P9` and found the new cross-reference
+inside P5, and demanded the word "React" be absent when keeping it in the *record* is the
+point.
+
+**Nothing is blocked and nothing was deferred.** Item 19's contract changes are both
+made: `lexicon.txt` is no longer "read-only to the app" (Flow appends one line, on an
+explicit tap, and never edits or removes one), and "the whole gap was that nobody could
+find it" is corrected to *half* the gap, quoting the owner. Item 20's replay fixtures
+forced three derived assertions to be re-stated rather than nudged, and the moved-rows
+set is now a table that will not accept a new entry without a reason beside it.
+
+**What waits in NEEDS_YOU.md:** two new desk entries — whether a grounded answer is
+actually less generic than an ungrounded one (item 23's felt half, with both commands and
+what to look for), and the `follow and` prediction now joining the `--takes 3` sheet. Plus
+one found-while-building note: `Session._provider()` ignores the pinned CLI, so after
+**Agent CLI → claude** the notes still say "asking codex…" while the marker beside them
+says `claude`. One line, in a file no item this round named.
+
+---
+
+## ROUND THREE — the queue this summary closes. Everything below the Rules is the record.
+## (Written 2026-08-01, owner's decision session.)
+
+**All nine are done: 15 through 23, none blocked, none deferred.** The summary above is
+the round-three closing summary this block asked for, prepended at the top the same way
+rounds one and two did it. Each item's own Status and Evidence lines below carry the
+before/after numbers. What follows in this block is the queue as it was written, kept
+because the plan for a round is worth reading against what the round actually did.
 
 The queue, in execution order (top to bottom, one item per iteration, as always):
 
@@ -761,7 +842,28 @@ pill already carries a standing converse marker and only its *text* is at issue.
 - Doc sync: §10's remaining gap is closed and the gaps section becomes empty — say so
   rather than deleting the heading, since "no gaps" is a claim worth dating. §1's pill
   description gains the marker's second job.
-- Status: (not started)
+- Status: done — commit d1d2b51, 2026-08-01
+- Evidence: new `TestTheConverseMarkerNamesItsCli` in `tests/test_indicator.py`, 8 checks.
+  **Before:** 3 failed / 5 passed — the marker read `'ASK'` with a `refine.Cli` named
+  `codex`, again with one named `claude`, and again with `claude` *pinned* through
+  `set_cli`. The 3 passes are the controls a constant satisfies (no CLI → `ASK`, an
+  over-long name → `ASK`, dictate → nothing drawn), which is why both directions are
+  asserted. **After:** 8/8; full suite 623 → **631 tests, OK, 13.6 s**.
+  Distrusting the green: the bound check passed *before* the fix, so it was re-run with
+  `MARKER_MAX` widened to 20 — it fails, so it bites at the seam it claims to.
+  **A measurement changed the shape of the fix.** The first version called
+  `available()` from `_draw`, which runs every 30 ms. `Session._provider`'s docstring
+  says `available()` is cheap *because only note paths reach it*; measured here it is
+  **10.2 ms** — 34% of a frame, two PATH walks across every `PATHEXT` entry. It is now
+  resolved once and again on menu open (the one place a newly-installed CLI can be
+  selected, and a press already pays for the walk), pinned by a check that 60 frames
+  cost one lookup.
+  The pin is honoured, which `_provider()` does not do — recorded in NEEDS_YOU under
+  "Found while building", since `flow/session.py` is not one of this item's named files.
+  Not claimed: the visual fit. It is on NEEDS_YOU's desk list, where it already was.
+  Doc: §10's gaps section now says there are none, dated, with the closed entry's story
+  kept; §1's pill paragraph gains the marker's second job and the once-not-per-frame
+  lookup with its number.
 
 ### 16. Decoder confidence reaches the router and the trace — instrument only
 Owner-decided 2026-08-01 (NEEDS_YOU "Garbled CLI escalations"). `asr.take_confidence()`
@@ -790,7 +892,37 @@ the gate that was declined can be re-decided on a real distribution.
   still fail when made to leak.
 - Doc sync: §9's `diag.jsonl` row lists the field; §5 notes that the confidence the drop
   filter uses is now also recorded per route.
-- Status: (not started)
+- Status: done — commit 74dfa11, 2026-08-01
+- Evidence: new `TestHowWellItHeardReachesTheTrace` in `tests/test_diag.py`, 6 checks,
+  plus one in `tests/test_session.py`. **Before:** 5 failed / 1 passed — the `route`
+  record was `{'kind':'route','route':'append','chars':40}` with no `confidence`,
+  `'confidence' not found in FIELDS`, and `DecodeWorker.results()` returned three-tuples
+  (`not enough values to unpack`). The pass is the control (a transcriber without the
+  method). **After:** 6/6; full suite 631 → **638 tests, OK, 13.8 s**;
+  `scripts/selfdrive.py` **64/64**.
+  Drained on the decode thread beside the text it belongs to, not in the pump:
+  `take_confidence` clears as it reads and the decode thread does not wait for the UI
+  thread, so a later read would attach one utterance's score to the next. Drained
+  unconditionally, errors included, so a reading nobody collected cannot be handed to
+  the following sentence.
+  **Two findings from the checks, not the design.** (1) The first rounding raised
+  `TypeError: type str doesn't define __round__` on a non-numeric reading — inside
+  `_route`, on the UI thread, where a diagnostics line that can raise takes the
+  commonest path in the app down with it. Only a real number is rounded now; anything
+  else is passed on to be refused, which is `diag.py`'s own design. (2) The deliberate
+  leak (item 9's idiom) bites in **two different places, one each**: a whole utterance
+  as the confidence is caught by `test_nothing_was_quietly_refused_either` (it has
+  spaces, so `_safe` refuses it), a single token by
+  `test_the_sentinel_never_reaches_the_file` (it passes the regex and is written).
+  Neither check alone covers both shapes. `SentinelAsr` had no `take_confidence`, so
+  the sweep would have walked past the new field entirely; the drive now uses a
+  transcriber that reports one, produced by a decode and drained by the reader like
+  the real one.
+  Collateral, predicted by item 9's precedent and no more than that: one line of
+  `tests/test_session.py` widened for the tuple, plus a new check there that a
+  transcriber without the method still decodes.
+  Doc: §5 gains the paragraph on what the number is for and why `null` is written
+  rather than omitted; §9's `diag.jsonl` row lists the field.
 
 ### 17. The draft can be edited by hand
 Owner-decided 2026-08-01, in place of the sanity gate (NEEDS_YOU "Garbled CLI
@@ -833,7 +965,39 @@ sheet scored 55/73/55% against P3's ≥ 95%, so the escape hatch is not an edge 
 - Doc sync: §7 gains the editor and its focus story; invariant 4's microphone half gains
   the deliberate-suspension case (said, therefore not silent); §2's pipeline shows the
   hand-edit path entering `Draft` beside the router.
-- Status: (not started)
+- Status: done — commit ee52646, 2026-08-01
+- Evidence: new `tests/test_editor.py`, 23 checks. **Before:** 18 errored / 3 passed —
+  `'Session' object has no attribute 'begin_edit'`, and no `commit_edit`, `cancel_edit`,
+  `editing` or chip anywhere. **The 3 passes are the invariant-10 checks, and that is the
+  finding**: the refusal already held in the arrangement the editor would create, before
+  the editor existed, because it was never a property of `WS_EX_NOACTIVATE` — `resolve()`
+  compares process ids against whatever has the foreground *now*, so Flow holding it makes
+  the refusal fire rather than lapse. The stop-condition is answered, not dodged.
+  **After:** 23/23; full suite 638 → **661 tests, OK, 13.3 s**; `scripts/send_check.py
+  --live` **18/18** on an unlocked desktop.
+  **Driven for real, because a green unit suite here proves the session logic and nothing
+  about a keyboard.** A scratchpad driver (no repo file) built a real `Pill`, clicked the
+  Edit chip with a real `SendInput` mouse click, typed with `KEYEVENTF_UNICODE`, and
+  clicked Done: **15/15** — the editor takes the foreground, `resolve()` returns
+  `Target(class='TkTopLevel', process='python.exe', flow)`, `paste()` refuses with "not
+  pasted: Flow had the focus", `paste_target` is unchanged at 6357950 across the whole
+  edit, the typed text reaches the draft, one undo restores `deploy the roleback plan`,
+  and the foreground returns to the browser.
+  **The live run found a hazard the design missed.** `SetForegroundWindow` is *refused*
+  for a process that does not own the last input event, and it reports that by doing
+  nothing: driven without a click, the box opened with a cursor in it and the word typed
+  into it **landed in the browser behind**. The foreground is read back now and an editor
+  that did not get it closes itself and says why — two checks, and the first version of
+  the live driver is what produced the evidence.
+  Beyond the three named hazards, and needed: `Bubble.show()` returns early while the box
+  is open (a decode landing behind it would move the words under the cursor), and
+  `hide()` cancels an open editor (Clear and the cancel hotkey both route through it, and
+  an editor left open is a microphone that is off with nothing on screen to say why).
+  Doc: §2's pipeline shows the hand-edit path entering `Draft` beside the router; §7 gains
+  "The one window that deliberately takes the focus" with all three measurements;
+  invariant 4 gains the two deliberate deafnesses; §11 gains a `tests/test_editor.py` row;
+  the unit-layer row and the Verification row, both stale at 616 since before this round,
+  re-read to 661.
 
 ### 18. Benchmark results name the model bits that produced them
 Owner-decided 2026-08-01 (NEEDS_YOU "Model revision pinning" — declined again; this
@@ -860,7 +1024,38 @@ condition (a hash that changed between runs) cannot even be checked.
 - Doc sync: §9's `.bench` row gains the provenance sentence; the Verification section's
   identity paragraph extends from "recorded at app startup" to "and in every bench
   result".
-- Status: (not started)
+- Status: done — commit da7cbd1, 2026-08-01
+- Evidence: new `tests/test_bench_identity.py`, 10 checks. **Before:** the module could
+  not import at all (`cannot import name 'BENCH_KEY' from 'flow.diag'`), and behind that
+  19 failures — none of the writers carried provenance and the shipped
+  `command-bench.json` had no `identity` key. **After:** 10/10; full suite 661 → **671
+  tests, OK, 14.2 s**.
+  **The item was right to say "confirm the list by grepping rather than trusting this
+  line" — the list was short.** `gate_bench.py`, `rescue_bench.py`, `asr_bench.py` and
+  `polish_check.py` also write results and were all missing from it: **nine** writers,
+  not five. `fetch_accent_data.py` and `ingest_recordings.py` are deliberately excluded
+  and a test records why — a manifest says which clips exist, which is an input, and no
+  model produced it. A third check fails if a *new* json writer appears that is neither.
+  **The gate passed.** `scripts/command_bench.py` re-run for real and the non-identity
+  content is **identical** to the previous file. Its own `models` block is `{}` — the
+  honest answer, not a gap: that bench loads no model, and a hash for weights it never
+  touched would be a false provenance claim. A test pins that too. The resolver does
+  work here, checked against every name the benches use: `base.en 3d3d5dee`, `small.en
+  d1d751a5`, `medium 08e178d4`, `distil-large-v3 uncached`.
+  The trap the item named is handled at the write site it applies to: a comment in
+  `command_bench.py` tells whoever repeats item 14's byte-identical verification to drop
+  `identity` and compare the rest.
+  Only `command_bench` could be re-run inside one iteration — the other eight need audio,
+  models or a person — so their *files* stay provenance-less until somebody re-runs them.
+  That is a fact about the files; the checks pin the writers, which is what this item
+  could change.
+  Distrusting the green: the block was stripped from `guardrail_bench.py` and the suite
+  re-run — exactly one check failed, naming that script.
+  `polish_check.py` is the one bench whose subject is the CLI rather than a model, and
+  the only one that pays a process start to name one (`bench_identity(clis=…)`).
+  Doc: §9's `.bench` row gains the provenance sentence; the Verification identity
+  paragraph extends to "and in every bench result" with the one-key reasoning and the
+  four measured revisions; a `bench provenance` row added to the Verification table.
 
 ### 19. Inferred pairs surface in the menu for one-tap declaration
 Owner-decided 2026-08-01 (NEEDS_YOU "Inferred pairs"). Never silent: an inferred pair is
@@ -899,7 +1094,36 @@ only the typing does not.
   untouched).
 - Doc sync: §9 lexicon row rewritten per the contract changes; §8 `PROMOTE_AFTER` row
   gains its second consumer; §1 menu description.
-- Status: (not started)
+- Status: done — commit 57e4060, 2026-08-01
+- Evidence: new `tests/test_offers.py`, 23 checks. **Before:** the module could not
+  import — `cannot import name 'append_pair' from 'flow.lexicon'` — and behind that no
+  `offered_pairs` and no `dismiss_pair`. **After:** 23/23; full suite 671 → **694 tests,
+  OK, 13.1 s**; `scripts/selfdrive.py` **64/64**, its learning check still recording
+  `{'sameer -> Samir': 2}` and promoting it to the hotword `['Samir']` — which is the
+  point of running it, since `PROMOTE_AFTER` now has a second consumer.
+  All six of the item's named checks are there, plus the byte-identical one it asked
+  for: the test writes a lexicon with comments and terms, taps, and asserts the original
+  comes back byte for byte with exactly `semir -> Samir\n` after it.
+  **Two things the suite found, not the design.** (1) `_offer_pairs` runs from a
+  right-click binding and *not* from `_tick`, so `_tick`'s catch cannot reach it — an
+  exception there takes out the menu, which is how somebody reaches Quit. Guarded, with
+  the reason written where the guard is. (2) Two existing menu tests broke because their
+  `session` was a bare `mock.Mock`, so `session.profile` was a Mock and `Path(Mock)`
+  recursed; both now pass `profile=None`, which is also the `--no-profile` case the
+  feature has to survive and now has its own check.
+  One test of mine was wrong about the code rather than the reverse: `ensure()`
+  deliberately creates parent directories, so a deep path succeeds. Replaced with a
+  genuinely unwritable path (a file where a directory must be) and a second check
+  recording *why* the deep path is a success.
+  Distrusting the green: `append_pair` was replaced with a rewrite producing an identical
+  *parse*. Four checks bit, the byte comparison among them — so the promise that is only
+  visible in bytes is actually guarded.
+  Doc: both named contract changes made — §9's lexicon row states the append-only
+  contract (one line, only on a tap, never an edit or a removal), and "the whole gap was
+  that nobody could find it" is replaced by "finding it was **half** the gap", quoting
+  the owner; §8's `PROMOTE_AFTER` row names its second consumer and the distinction
+  between biasing and rewriting; `TEMPLATE` says the same contract in the file itself,
+  where the person reading it is the one it affects.
 
 ### 20. Admit "follow and" as a follow-up — only if the corpus prices it at zero
 Owner-decided 2026-08-01 (NEEDS_YOU "Three pinned misses"), conditional and
@@ -930,7 +1154,32 @@ the way `_LOWER` carries `lower\s?case` as a spelling variant rather than a tabl
   precedent).
 - Doc sync: §6 gains the elision note with run 1's numbers beside the noun-snap
   paragraph it will sit next to.
-- Status: (not started)
+- Status: done — commit 4a0a7fe, 2026-08-01. **Gate PASSED; the pattern is admitted.**
+- Evidence: new `TestTheFollowUpParticleCanBeElided` in `tests/test_edits.py`, 6 checks.
+  **Before:** 3 failed / 3 passed — `'append/' != 'followup/'` on "follow and mention the
+  rollback plan", its payload `''` against the spelled form's `'and mention the rollback
+  plan'`, and the comma form the same. The 3 passes are the boundary controls that had to
+  *stay* passing, which is why both directions sit in one class one diff apart.
+  **After:** 6/6; full suite 694 → **701 tests, OK, 13.4 s**; `scripts/selfdrive.py`
+  **64/64**.
+  **The gate, run with the change staged and before anything was decided** — all four
+  conditions: real-utterance misroutes **0/580** (exact and snapped), adversarial
+  **5/20**, corruption-class recall **100%** on all six classes (14/14, 112/112, 14/14,
+  14/14, 14/14, 12/12), threshold sweep **identical row for row**. Beyond the four, the
+  whole non-identity output came back **identical**: the corpus contains no "follow and"
+  utterance at all, so nothing moved in either direction. That is a stronger result than
+  "the numbers held" — it is the pattern costing literally nothing on 580 real
+  utterances, which is what the owner's condition asked for.
+  **The replay fixtures bit, which is what they are for.** Three derived assertions had
+  to be re-stated rather than nudged: the moved-rows set is now a `MOVED` table carrying
+  a reason per entry (plus a check that every entry has one, so the next row to move has
+  to be argued for); per-run gains are `[9, 9, 6]`; and items 3, 4, **10** and 11 now
+  hold across all three takes. The comment on run 1 item 10 is rewritten rather than
+  deleted — it argued the row should stay pinned, and *why that argument no longer holds*
+  is worth more than its absence.
+  Doc: §6 gains the elision paragraph beside the noun-snap one, with run 1's numbers and
+  the full gate result; the Verification `command grammar` row says the bench was run as
+  the admission gate rather than as a check afterwards.
 
 ### 21. A reply can become the draft — the verb P9 promised
 Owner-decided 2026-08-01 (NEEDS_YOU "A reply cannot become the draft"). The owner's
@@ -976,7 +1225,33 @@ append; taking the reply flips to dictate.
   cross-reference notes the promised verb now exists; invariant 5 review — take is not
   a paste, so "nothing is pasted without an explicit Send" survives untouched, and the
   mode-flip note is the visible seam.
-- Status: (not started)
+- Status: done — commit 39a86fc, 2026-08-01. **Gate PASSED; chip *and* spoken form ship.**
+- Evidence: new `TestTheReplyCanBecomeTheDraft` in `tests/test_converse.py` (9 checks),
+  `TestTakingTheAnswerCanBeSpoken` in `tests/test_edits.py` (4), `TestTheUseThisChip` in
+  `tests/test_editor.py` (6). **Before:** all 8 converse checks errored — `'Session'
+  object has no attribute 'take_reply'` — and 6 of the spoken-form assertions failed
+  (`'append/' != 'take/'`). **After:** 19/19 across the three; full suite 701 → **720
+  tests, OK, 13.8 s**; `scripts/selfdrive.py` **64/64**.
+  All six of the item's numbered checks are there, plus three the design forced: an
+  empty-reply refusal, a 12 000-character artifact taken whole, and the complement to
+  the countdown guard.
+  **The spoken-form gate passed** — 0/580 new hits on real utterances, adversarial
+  **5/20**, corruption-class recall **100%** on all six, and the whole non-identity
+  output identical to before. So the reduced scope was not needed: chip *and* verb.
+  **The countdown guard is stronger than the item specified.** Item 17 held the
+  countdown; this removes what it counts from (`_settled_at = None`, and deliberately
+  *not* `_after_draft_change()`), so there is no clock to run down rather than a clock
+  on hold. A second check proves the guard is not a freeze: speaking afterwards settles
+  the draft the ordinary way and the countdown is the user's again.
+  **One check caught my own test, not the code.** It forced `_settled_at` to a past
+  time to simulate the elapsed pause — which bypasses the guard rather than testing it,
+  since the guard *is* `_settled_at` being None. Rewritten to assert what is true.
+  Distrusting the green: adding `_after_draft_change()` to the take makes exactly that
+  one check fail.
+  Doc: §2's loop gains the take arrow and a paragraph on why it replaces rather than
+  appends; §6 gains a thread-verbs paragraph covering all three and the pricing;
+  invariant 5 is reviewed in place — a take moves text within Flow, reaches no other
+  window, and flips to dictate so the following Send is the ordinary explicit one.
 
 ### 22. Two spoken send triggers — a word for Send, a word for Send-then-Enter
 Owner-decided 2026-08-01 (NEEDS_YOU "Spoken send trigger", all three questions
@@ -1023,7 +1298,40 @@ from inheriting Send's existing refusals, not from new machinery.
   route; invariant 5's wording review — a spoken trigger is an explicit Send, and the
   sentence should say so before somebody reads "explicit" as "clicked"; §9 profile row
   gains the two fields.
-- Status: (not started)
+- Status: done — commit 126ecc3, 2026-08-01. **Gate PASSED; both words ship. Live check
+  run, not deferred.**
+- Evidence: new `tests/test_triggers.py`, 23 checks. **Before:** the module could not
+  import — `cannot import name 'SEND_ENTER_WORD' from 'flow.edits'`. **After:** 23/23;
+  full suite 720 → **745 tests, OK, 13.1 s**; `scripts/selfdrive.py` **64/64**;
+  `scripts/send_check.py --live` **18/18** on an unlocked desktop.
+  **The Enter itself was measured, since the item calls [send-live] mandatory for it and
+  `send_check.py` does not exercise it** (and is not a named file). A scratchpad harness
+  opened a real console and pasted `echo landed> marker` twice: **without** the submit
+  the line sits on the prompt and no marker appears — P7's newline strip, unchanged —
+  and **with** it, the same line ran. 2/2. That is the one thing a unit fake cannot
+  vouch for, and it is a measurement rather than a deferral.
+  **The word gate passed, asked of the words directly rather than of an aggregate.**
+  `command_bench` came back identical bar its date (0/580, adversarial 5/20, recall 100%
+  on all six), and beyond that: of the 580 real EdAcc utterances **none fires either
+  trigger**, and the single one containing the substring at all — "…MAYBE ENTERING THERE
+  BECAUSE…" — does not. Both facts are now checks.
+  All five of the item's numbered checks are there. The refusals are asserted at the
+  layer they actually live in: a `Pressed` fixture drives `Pill._send` with a recording
+  handler, because a check that stopped at the session would assert an event was
+  emitted, not that a paste was refused.
+  **A defect the checks found, not the design.** `_route` calls `plan()` **twice**, and
+  only the first was given the stored words — so with a renamed trigger the shipped word
+  came back as a `send_trigger` nothing handled, fell into `_escalate`, and started a
+  ~7 s CLI call on an *empty instruction*. Both calls pass them now, and the branch that
+  would have swallowed it stays, saying why.
+  Two of my own expectations were wrong rather than the code: the converse check assumed
+  the op was normalised (it is not — `send()` returning "" is what makes the submit
+  unreachable, and one place deciding is better than two), and the refusal checks drained
+  the event queue once when `send()`'s own notes arrive on the following frame.
+  Doc: §7 gains a "Send, spoken" section with the inheritance, the whole-utterance
+  measurement, the degradation ordering and the console result; §6 gains the route note
+  including the double-`plan()` defect; invariant 5 says "explicit" means *asked for*,
+  not *clicked*; §9's profile row lists both fields.
 
 ### 23. Converse mode is a prompt workshop, grounded in a workspace — and P9 says so
 Owner-decided 2026-08-01 (NEEDS_YOU "P9 decided from use"). General conversation failed
@@ -1059,7 +1367,62 @@ they only mean something together.
   with and without the workspace set; keep the transcript").
 - Doc sync: §1's converse row, §9 profile row (`workspace`), the "What leaves the
   machine" paragraph — the preamble now leaves too, and the sentence must say so.
-- Status: (not started)
+- Status: done — commit 6585464, 2026-08-01
+- Evidence: new `tests/test_workshop.py`, 21 checks. **Before:** the module could not
+  import — no `resolve_workspace`, no `WORKSHOP`. **After:** 21/21; full suite 745 →
+  **766 tests, OK, 13.5 s**; `scripts/selfdrive.py` **64/64**.
+  All three parts landed. Precedence is a *test* rather than a reading, unlike item 7's
+  `__main__` caveat: `resolve_workspace(flag, profile)` lives in `flow/profile.py` and
+  `__main__` calls it, so flag-over-profile-over-nothing, the stale path and the
+  no-profile case are all asserted. Verified against the real profile too — `--cwd
+  D:\dev\flow` resolves, `D:\dev\gone-away` reports "no longer exists" and runs without
+  it, and the shipped profile stores nothing, so today's startup says "workshop: not
+  set". `--cwd` is in `--help`.
+  **A defect the checks found, and the sharpest of the round.** The framing was first
+  placed at the *head* of the question, and `ask()` keeps the *tail* of an over-long
+  input — so the workspace was discarded for exactly the long prompts a workshop is
+  most likely to handle. Moving it to the tail was not enough: `_split_tail` walks the
+  cut *forward to a sentence boundary*, and a 5 000-character question with no
+  punctuation had its first boundary inside the framing, so the CLI received **two
+  sentences of instructions and none of the prompt**. Fixed by construction — the framed
+  string is cut to fit inside `MAX_CHARS` before being handed over, making the split a
+  no-op — and the check that found it is now a fixture.
+  Three of my own assertions were wrong rather than the code: two searched for `P9` and
+  found the new cross-reference *inside P5* instead of the row (both anchor on `| P9 |`
+  now), and one demanded the word "React" be absent when keeping it is the point — the
+  scenario goes, the record of why it went stays. One existing check in
+  `test_converse.py` asserted the exact string reaching `ask()` and now asserts the
+  draft goes first and whole, which is what it was always about.
+  NEEDS_YOU: the felt half is a desk entry with the exact two commands and what to look
+  for — whether a grounded answer names real files and conventions, or is the same
+  generic advice with a path in it.
+  Doc: product.md's P9 rewritten around the workshop and the workspace, P5 gains the
+  one-shot-versus-conversational sentence, and the closing scenario is replaced by the
+  refine-take-send loop *plus a paragraph saying what it used to be and why it changed*;
+  architecture §6 gains the workshop paragraph with the truncation story, §1's module
+  row and §9's profile row name the workspace, and "What leaves the machine" now says
+  plainly that a filesystem path leaves with the words.
+
+### 24. The notes obey the pin the marker already honours
+Found while building item 15 (2026-08-01, NEEDS_YOU "Found while building") — the one
+line round three could not commit because no item named `session.py` for it.
+`Session._provider()` returns `available()[0].name`, but `_start_refine` and
+`_start_ask` actually run `self._cli` — so after **Agent CLI → claude** in the menu the
+notes say "asking codex…" while claude answers, and item 15's marker now visibly
+disagrees with the notes drawn beside it. The fix is one line: read the pin first,
+exactly as `Pill._marker` does.
+- Files: `flow/session.py`, `tests/test_converse.py`.
+- Instrument first: with two fake CLIs resolvable and claude pinned, assert today's
+  wrong notes — the converse-mode note and the asking note both name codex — then
+  invert: all three provider-naming notes (mode switch, asking, refining) name the
+  pinned CLI. Unpinned still falls back to `available()[0]`, and a pin naming a CLI
+  that is not installed keeps whatever `_provider()` honestly does today for that case
+  — assert the current behaviour rather than inventing new behaviour in a note-fix.
+- Acceptance: suite green; [selfdrive] 64/64 (ask-path notes changed — item 11's
+  precedent, and Rule 2's flake policy applies).
+- Doc sync: §10's provider-gap closure sentence gains "and the words obey the pin";
+  nothing else moved.
+- Status: (not started — the only pending item; runnable as a single-item round)
 
 ## Backlog — "prepare" tier — COMPLETED in round one; nothing here for round three
 (The four proposals below were appended to NEEDS_YOU.md on 2026-08-01 and have since

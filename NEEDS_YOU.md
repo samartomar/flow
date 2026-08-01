@@ -13,6 +13,19 @@ text of decided entries — their reasoning lives in Decided and in the LOOP_PLA
 
 (none — see Decided below, and the two evidence-parked entries further down)
 
+## Found while building, out of the item's scope
+
+- **`Session._provider()` ignores the pin** (`flow/session.py:589`). It returns
+  `available()[0].name`, but `_start_refine` and `_start_ask` pass `cli=self._cli` — so
+  after **Agent CLI → claude** in the menu, the notes still say "asking codex…" and
+  "converse mode - Ask sends the draft to codex" while `claude` is the one that answers.
+  Item 15's marker takes the pin into account and is therefore now *disagreeing with the
+  notes beside it*, which is the visible symptom. The fix is one line — read the pin
+  first, exactly as `Pill._marker` does — but `session.py` is not among item 15's named
+  files and Rule 3 scopes the commit, so it is here rather than in it. The four items
+  that could have carried it (17, 21, 22, 23) are all committed, so it is now
+  **LOOP_PLAN item 24** — the only pending item, a one-liner plus its tests.
+
 ## At the desk
 
 - [ ] **Record more L1 anchor groups** per `docs/recording-kit.md` — two groups exist,
@@ -34,7 +47,10 @@ text of decided entries — their reasoning lives in Decided and in the LOOP_PLA
   What should move, if the fixes are real: **item 4** ("lowercase release notes")
   should now hold whichever way Whisper spells it, and **item 9** ("make it a proper
   prompt") should reach `semantic/polish` even when the noun comes back as "brown".
-  If plan item 20's measurement admits `follow and`, **item 10** joins the predictions.
+  **Item 10 has joined the predictions**: plan item 20's gate passed on 2026-08-01 —
+  `follow and` is admitted, priced at 0/580 misroutes with the whole `command_bench`
+  output identical bar its date, so run 1's "follow and mention the roleback plan"
+  should now route as a follow-up. Bare "follow" is still dictation, deliberately.
   What will not move without you: items 5 and 7 — theirs is Phase 3 (see Decided).
   And with `semir -> Samir` in `~/.flow/lexicon.txt` — right-click → **Open settings
   folder** writes the file — item 2 should stop escalating. **Checked 2026-08-01:
@@ -45,6 +61,24 @@ text of decided entries — their reasoning lives in Decided and in the LOOP_PLA
 
   Per-item stability is the number that means something; a single run cannot show
   whether a change helped, which is what `--takes` is for.
+- [ ] **Is a grounded answer actually less generic?** The felt half of item 23, and the
+  one thing no unit test can settle. Ask the *same* question about your real repo twice,
+  once with the workspace set and once without, and keep both transcripts:
+
+  ```bash
+  uv run python -m flow --converse --cwd D:\dev\products\syntegris
+  ```
+
+  Then the same again with no `--cwd`. Startup names which it got either way ("workshop:
+  …" / "workshop: not set"), so there is no ambiguity about what you measured. What to
+  look for: whether the grounded answer names real files, real conventions and real
+  constraints from that project, or whether it is the same generic advice with a path
+  mentioned in it. If it is the latter, the preamble is the thing to change, not the
+  setting — the workspace reaches the CLI as text, and `codex`/`claude` decide for
+  themselves whether to go and look. Worth recording either way, because the stale-path
+  risk you accepted is only worth accepting if the grounding buys something.
+  To make it permanent afterwards, `workspace` is a field in `profile.json` — or say the
+  word and it becomes a menu entry, since you will not hand-edit it.
 - [ ] **Eyeball the converse marker** once LOOP_PLAN item 15 lands: arm converse mode and
   look at the pill. The unit test can only prove the string is right and ≤6 characters;
   whether `codex` at 6 pt collides with the bottom of a tall level bar (bars run y 8–32,
