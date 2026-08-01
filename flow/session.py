@@ -78,6 +78,13 @@ FORCE_NEXT_TTL_SEC = 30.0
 #: holds it — which is what "still correctable until it fires" has to mean.
 AUTO_ASK_SEC = 4.0
 
+#: What `level_db` reports while the microphone is not evidence.
+#:
+#: Below any real room — a quiet room with a good USB mic measures −96.7 dB — so every
+#: meter maps it to silence without needing to know why. A number rather than `None`
+#: because a second type for a common state is a second thing every caller can forget.
+DEAF_DB = -120.0
+
 
 class State(str, Enum):
     IDLE = "idle"  # not capturing
@@ -101,6 +108,23 @@ CONVERSE = "converse"
 class Event(NamedTuple):
     kind: str  # partial | draft | state | note | error | reply | mode | drop
     text: str
+
+
+class Activity(NamedTuple):
+    """What Flow is doing right now, when the user is waiting on it.
+
+    One value, read every frame, rather than an event: a wait has no edges to emit — it
+    is a condition that holds for a while — and a UI that had to reconstruct "still
+    working" from a start event and an end event would show a stale indicator the first
+    time one of those events was missed.
+
+    `waiting` marks the indeterminate ones. Those get the animated dots, because the
+    honest thing to show for a wait of unknown length is motion, not a progress bar that
+    has to invent a denominator.
+    """
+
+    label: str
+    waiting: bool
 
 
 class DecodeWorker:
@@ -419,9 +443,58 @@ class Session:
             self._emit("state", state.value)
 
     @property
+    def hearing(self) -> bool:
+        """Whether the microphone counts as evidence right now.
+
+        False exactly while a reply is playing — which is when `_pump_audio` drains the
+        device and throws every block away. The distinction is not decoration: "busy,
+        still listening" and "busy, and deaf" are different promises to the user, and
+        only the second one means *stop talking*.
+        """
+        return not (self.speaker is not None and self.speaker.speaking)
+
+    @property
     def level_db(self) -> float:
-        """Live input level, for the waveform display (R13)."""
+        """Live input level, for the waveform display (R13).
+
+        Floored while Flow is talking, and that is a defect fix rather than a nicety.
+        `Mic._level` is written by the PortAudio callback, which knows nothing about the
+        echo guard; during a spoken reply it tracks Flow's own voice coming back through
+        the speakers. Measured: with the guard discarding all 30 blocks of a reply, the
+        meter still read 83% of full scale — eighteen bars dancing to prove Flow was
+        listening at the one moment it was guaranteed not to be.
+        """
+        if not self.hearing:
+            return DEAF_DB
         return self.mic.level_db
+
+    @property
+    def activity(self) -> Activity | None:
+        """The one honest answer to "what is Flow doing right now".
+
+        `None` when there is nothing to wait for. Listening, a held draft and idle are
+        already said by the pill's colour, by the level bars and by the countdown on the
+        Ask button, and an indicator that is always on is an indicator nobody reads.
+
+        Ordered by what the user most needs to know. Speaking is first because it is the
+        only one of these that means "stop talking" rather than "wait a moment"; the
+        model load is checked before the decode because a first decode of a tier is a
+        model build with a decode behind it, and those differ by about a second.
+        """
+        if not self.hearing:
+            return Activity("speaking - not listening", False)
+        if self.state is State.ASKING:
+            return Activity("asking", True)
+        if self.state is State.REFINING:
+            return Activity("refining", True)
+        if getattr(self.asr, "loading", False):
+            return Activity("loading the model", True)
+        # Only once the gate has closed. While it is open the user is mid-sentence and
+        # the partial decoder is running continuously, so this would be lit permanently
+        # and would say nothing; the bars are what carries that moment.
+        if self.worker.busy and not self.gate.speaking:
+            return Activity("decoding", True)
+        return None
 
     # -- the pump ----------------------------------------------------------
 

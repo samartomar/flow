@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flow import SAMPLE_RATE  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
 from flow.session import (  # noqa: E402
-    AUTO_ASK_SEC, CONVERSE, DICTATE, Session, State,
+    AUTO_ASK_SEC, CONVERSE, DEAF_DB, DICTATE, Session, State,
 )
 
 CACHE = Path(__file__).resolve().parent.parent / ".bench" / "selfdrive"
@@ -469,19 +469,29 @@ def scenario_window(report) -> None:
 #: reporting exit 0. The real app only ever has one root, so this is a property of the
 #: harness rather than of the product, and the fix belongs here.
 def scenario_chips(report) -> None:
-    """Actually press the buttons.
+    """Actually press the buttons, and read what the pill is claiming while you do.
 
     Every other harness reaches past the UI and calls `session.send()` directly, so the
     chips were bound in `ui.py` and clicked by nothing at all — the one part of the app
     a user touches first. This clicks them where they are drawn, through Tk, so a chip
     that is mislabelled, unbound, or off the edge of the bubble fails here.
+
+    The second half reads the indicator and the level meter the same way: off the
+    canvas, in each state, because a UI that only claims to work is not worth much. The
+    meter is the reason: it was driven straight from `Mic._level`, which the PortAudio
+    callback writes on every block regardless of whether anything reads them — so while
+    Flow talked, the echo guard discarded every block and eighteen bars went on dancing
+    to Flow's own voice.
     """
     from unittest import mock
 
     from flow.ui import Pill
 
     class Dead:
-        level_db = -70.0
+        #: Loud, and it stays loud. That is not a convenience: a real microphone keeps
+        #: reporting the room — the reply coming out of the speakers included — whether
+        #: or not the session is reading its blocks.
+        level_db = -20.0
 
         def start(self) -> None: ...
 
@@ -497,10 +507,58 @@ def scenario_chips(report) -> None:
             return []
 
     class NoAsr:
+        #: Both settable, so the two waits that have no other way to be held open — a
+        #: decode in flight and a model being built — can be observed rather than
+        #: inferred.
+        loading = False
+        hold = False
+
         def load(self, final=None) -> None: ...
 
         def text(self, a, *, final=False, hotwords="") -> str:
+            while self.hold:
+                time.sleep(0.005)
             return ""
+
+    class Talker:
+        """A speech engine whose `speaking` the harness controls.
+
+        Goes quiet the instant it is asked to speak, for the same reason the recorder
+        in `scenario_converse` does: this runs far faster than an engine talks, and a
+        fake that stayed speaking would gate the microphone — and hold off the auto-ask
+        countdown — for the rest of the scenario. The one place the deaf state is under
+        test raises the flag by hand, which is the honest way to hold a state open.
+        """
+
+        speaking = False
+
+        def say(self, text: str) -> bool:
+            return True
+
+        def stop(self) -> None:
+            self.speaking = False
+
+    def indicator(pill) -> str:
+        """What the indicator says, read off the canvas — the way a user reads it.
+
+        Empty when the bubble is withdrawn. A hidden Tk window keeps its last drawing,
+        and reading that back would let a frame nobody can see pass for a live one —
+        which is how the first draft of these checks reported an indicator that had been
+        off screen for seconds.
+        """
+        if not pill.bubble._visible:
+            return ""
+        found = pill.bubble.canvas.find_withtag("indicator")
+        return pill.bubble.canvas.itemcget(found[0], "text") if found else ""
+
+    def settle(pill, check, timeout: float = 5.0) -> bool:
+        deadline = time.perf_counter() + timeout
+        while time.perf_counter() < deadline:
+            pill.update()
+            if check():
+                return True
+            time.sleep(0.01)
+        return False
 
     def click(pill, label) -> bool:
         """Press the chip where it is actually drawn. False if there is no such chip."""
@@ -513,7 +571,8 @@ def scenario_chips(report) -> None:
         return True
 
     pasted: list[str] = []
-    session = Session(asr=NoAsr(), mic=Dead(), profile=None)
+    asr, talker = NoAsr(), Talker()
+    session = Session(asr=asr, mic=Dead(), speaker=talker, profile=None)
     pill = Pill(session, on_send=pasted.append, hotkeys=None)
     try:
         session.toggle_mode()
@@ -590,7 +649,69 @@ def scenario_chips(report) -> None:
                    session.state is State.ASKING, session.state.value)
             report("nothing was pasted by the pause", pasted == ["some words"],
                    str(pasted))
+            # Painted without pumping: `_frame` would collect the answer on its way
+            # past and the state under test would be gone before it was read.
+            pill.bubble.tick_activity()
+            report("the wait for an answer says so", indicator(pill) == "asking",
+                   indicator(pill))
+            settle(pill, lambda: session.state is not State.ASKING)
+
+        # -- what Flow is doing, in each state it can be waiting in ------------
+        #
+        # Armed directly rather than through _toggle: the click path opens a real
+        # microphone, and what is under test is the meter, not the device.
+        session.draft.clear()
+        session.toggle_mode()          # back to dictate, so no countdown is running
+        pill.armed = True
+        pill._frame()
+
+        pill._frame()
+        report("a live microphone moves the bars", any(pill.levels),
+               f"peak {max(pill.levels):.2f}")
+        report("and says nothing it does not need to", indicator(pill) == "",
+               indicator(pill))
+
+        talker.speaking = True
+        pill._frame()
+        report("a reply playing says it is not listening",
+               "not listening" in indicator(pill), indicator(pill))
+        report("the bars go flat in the same frame", not any(pill.levels),
+               f"peak {max(pill.levels):.2f}")
+        report("and the level the meter reads is silence",
+               session.level_db == DEAF_DB, f"{session.level_db:.0f} dB")
+        talker.stop()
+
+        asr.loading = True
+        pill._frame()
+        report("a model build is named as one",
+               indicator(pill) == "loading the model", indicator(pill))
+        asr.loading = False
+
+        asr.hold = True
+        session.worker.submit_final(np.zeros(BLOCK, dtype=np.float32))
+        settle(pill, lambda: session.worker.busy)
+        pill._frame()
+        report("a decode in flight is visible", indicator(pill) == "decoding",
+               indicator(pill))
+        asr.hold = False
+        settle(pill, lambda: not session.worker.busy)
+        # `busy` goes false while the result is still queued for the next pump, and that
+        # pump sets the state itself. Let it land before staging another state on top.
+        for _ in range(3):
+            pill._frame()
+
+        session._set_state(State.REFINING)
+        pill._frame()
+        report("a CLI rewrite is visible", indicator(pill) == "refining",
+               indicator(pill))
+
+        session._set_state(State.IDLE)
+        for _ in range(3):
+            pill._frame()
+        report("and the indicator goes away when the waiting does",
+               indicator(pill) == "", indicator(pill) or "gone")
     finally:
+        pill.armed = False
         pill.destroy()
 
 

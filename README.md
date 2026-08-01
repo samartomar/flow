@@ -174,7 +174,34 @@ The pill's colour is the state:
 In converse mode the pill also carries a small **ASK** badge, because "there was no spoken
 reply" and "I was never in converse mode" otherwise look identical.
 
-The bubble rises above the pill whenever there is something to show, and carries chips:
+The eighteen bars are the answer to "am I being heard". They move with your voice while
+Flow is listening and drop to a **flat line** the moment it stops listening — which
+happens exactly once, while a converse-mode reply is playing, because there is no echo
+cancellation here and Flow cannot tell your voice from its own coming back through the
+speakers. A flat line, not an empty box: the meter is still running, it just has nothing
+honest to report.
+
+The bubble rises above the pill whenever there is something to show. Above the buttons it
+carries **one line saying what Flow is doing**, with three marching dots when the wait has
+no knowable length:
+
+| Indicator | What is happening | Can it hear you? |
+|---|---|---|
+| — (bars moving) | listening | yes |
+| ⋯ `loading the model` | first decode of a tier, about a second | yes |
+| ⋯ `decoding` | you stopped talking and the model is working | yes |
+| — (`Ask 4s` on the button) | draft held, counting down to the question | yes |
+| ⋯ `refining` | the agent CLI is rewriting the draft, about 6 s | yes |
+| ⋯ `asking` | the agent CLI is answering, about 8–10 s | yes |
+| ▬ `speaking - not listening` | the reply is playing | **no** |
+
+Only the last one means *stop talking*; the rest mean *wait a moment*. That is why it is
+drawn as a flat line rather than dots, and why the bars on the pill go flat at the same
+instant — the same fact, in the two places you are already looking. If a wait starts when
+there is nothing else on screen, the bubble comes up to carry it and goes away again when
+the wait ends.
+
+The chips:
 
 | Chip | What it does |
 |---|---|
@@ -323,9 +350,11 @@ is a prompt either way.
   reply is read on a floating bubble and spoken aloud, and neither survives an essay.
 - **A pause sends the question.** Stop talking for 4 seconds and the draft goes on its
   own — see [Asking without pressing anything](#asking-without-pressing-anything).
-- **Flow goes deaf while it talks.** The microphone is ignored for as long as a reply is
-  playing, because it is hearing the speakers and there is no echo cancellation to tell
-  that from your voice. See [Interrupting a reply](#interrupting-a-reply).
+- **Flow goes deaf while it talks, and says so.** The microphone is ignored for as long as
+  a reply is playing, because it is hearing the speakers and there is no echo cancellation
+  to tell that from your voice. The pill's bars go flat and the bubble says
+  `speaking - not listening`, so the one state where talking is wasted breath is the one
+  state that announces itself. See [Interrupting a reply](#interrupting-a-reply).
 - **Failure is non-destructive.** An absent, slow or broken CLI degrades converse mode to
   dictate mode rather than losing what was said.
 
@@ -552,7 +581,8 @@ of which every layer-specific harness had missed.
 | `inject_check.py` | clipboard and paste-target classification, without side effects |
 | `fetch_accent_data.py` | pull per-accent evaluation slices into `.bench/` |
 | `ingest_recordings.py` | turn a volunteer's phone recording into scored clips (P3) |
-| `tk_probe.py` / `ui_probe.py` | the window attributes the pill depends on; render it |
+| `tk_probe.py` | the window attributes the pill depends on |
+| `ui_probe.py` | render the pill and bubble against a fake session that walks every state — `--hold STATE` pins one, `--bare` drops the draft |
 | `slim.py` | trim the unreachable dependencies |
 
 Benchmark scripts download additional models (`small`, `medium`, `distil-large-v3`) into

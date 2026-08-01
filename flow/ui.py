@@ -13,6 +13,7 @@ was written: overrideredirect, -topmost, -alpha, -transparentcolor, -toolwindow.
 from __future__ import annotations
 
 import ctypes
+import time
 import tkinter as tk
 import traceback
 from collections import deque
@@ -104,6 +105,15 @@ DB_FLOOR, DB_CEIL = -58.0, -12.0  # level range mapped onto bar height
 
 BUBBLE_W = 380
 PAD = 14
+
+#: How long each dot of the indeterminate-wait animation holds.
+#:
+#: Three dots at this cadence is a 1.2 s cycle — visibly alive without being a strobe,
+#: and slow enough that the bubble repaints about 2.5 times a second instead of the 33
+#: it would take to redraw every frame of the 30 ms pump. The bubble renders on events
+#: and a wait has no events, so the frame is computed and compared before anything is
+#: drawn; same discipline as the auto-ask countdown, for the same reason.
+DOT_SEC = 0.4
 
 
 def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
@@ -279,7 +289,10 @@ class Pill(tk.Tk):
 
         if self.armed:
             self.session.tick()
-            self.levels.append(self._norm(self.session.level_db))
+            if getattr(self.session, "hearing", True):
+                self.levels.append(self._norm(self.session.level_db))
+            else:
+                self._flatten()
         else:
             # Still collect what the CLI owes us. Disarming used to strand an answer
             # that was already on its way — the pill went quiet and nothing ever
@@ -315,9 +328,21 @@ class Pill(tk.Tk):
                 self.bubble.note(ev.text)
 
         self.bubble.tick_countdown()
+        self.bubble.tick_activity()
         if self._flash:
             self._flash -= 1
         self._draw()
+
+    def _flatten(self) -> None:
+        """Drop the meter to a flat line in one frame.
+
+        `Session.level_db` already reports silence while Flow is talking, so appending
+        it would get here eventually — but "eventually" is eighteen frames, and for over
+        half a second the meter would still be sliding Flow's own voice out to the left
+        while claiming to hear someone. A lie with a decay curve is still a lie.
+        """
+        for i in range(BARS):
+            self.levels[i] = 0.0
 
     @staticmethod
     def _norm(db: float) -> float:
@@ -389,6 +414,15 @@ class Bubble(tk.Toplevel):
         #: Last auto-ask second painted, so the countdown repaints once a second
         #: rather than on every frame.
         self._countdown: int | None = None
+        #: The indicator, and the exact frame of it last painted. Compared before any
+        #: repaint, for the same reason `_countdown` is.
+        self._act = None  # session.Activity | None
+        self._frame_key: str | None = None
+        self._dot = 0
+        #: True when the bubble is on screen *only* to carry the indicator, so a wait
+        #: that ends with nothing to show takes its window away again rather than
+        #: leaving an empty card behind.
+        self._for_activity = False
         #: Which float-up animation is current; older ones stop when this moves.
         self._anim = 0
         self._h = 120
@@ -405,6 +439,7 @@ class Bubble(tk.Toplevel):
         self._text, self._partial = "", ""
         if text:
             self._reply = text
+        self._for_activity = False
         if not self._visible:
             self._visible = True
             self.deiconify()
@@ -416,6 +451,7 @@ class Bubble(tk.Toplevel):
         # cleared the moment the user spoke again, which meant the reply they had just
         # asked for vanished before they could read it.
         self._text, self._partial = text, ""
+        self._for_activity = False
         self._render()
         if not self._visible:
             self._visible = True
@@ -426,6 +462,7 @@ class Bubble(tk.Toplevel):
         # Partials are dimmed: they contain hallucinated fragments on mid-word
         # boundaries, so "not final yet" has to be visible.
         self._partial = text
+        self._for_activity = False
         if not self._visible:
             self._visible = True
             self.deiconify()
@@ -440,6 +477,7 @@ class Bubble(tk.Toplevel):
     def surface(self, msg: str) -> None:
         """Show a note even with no draft — used for errors, which must be seen."""
         self._note = msg
+        self._for_activity = False
         if not self._visible:
             self._visible = True
             self.deiconify()
@@ -449,6 +487,7 @@ class Bubble(tk.Toplevel):
     def hide(self) -> None:
         self._visible = False
         self._text = self._partial = self._note = self._reply = ""
+        self._for_activity = False
         self.withdraw()
 
     # -- geometry ----------------------------------------------------------
@@ -518,6 +557,8 @@ class Bubble(tk.Toplevel):
         extra = reply_h
         if self._partial:
             extra += 34
+        if self._act is not None:
+            extra += 20
         if self._note:
             extra += 18
         self._h = max(96, text_h + extra + 74)
@@ -545,6 +586,11 @@ class Bubble(tk.Toplevel):
                 font=("Segoe UI", 9, "italic"), width=BUBBLE_W - 2 * PAD,
             )
             y += 28
+        if self._act is not None:
+            # In the flow of the text rather than pinned to the foot: it belongs to what
+            # is being waited on, and the note below is about what already happened.
+            self._indicator(y)
+            y += 20
         if self._note:
             c.create_text(
                 PAD, self._h - 52, anchor="nw", text=self._note, fill=MUTED,
@@ -613,6 +659,70 @@ class Bubble(tk.Toplevel):
         self._countdown = shown
         if self._visible:
             self._render()
+
+    def tick_activity(self) -> None:
+        """Say what Flow is doing, animate it, and repaint only when that changes.
+
+        Same discipline as `tick_countdown`, and the same reason: a wait has no events,
+        so the frame that *would* be drawn is built and compared first. At `DOT_SEC`
+        that is 2.5 repaints a second rather than 33.
+
+        A wait with nothing else on screen brings the bubble up — the invisible states
+        are exactly the ones with no draft to hang a note on — and takes it away again
+        when it ends, so the model load at the start of a session does not leave an
+        empty card sitting over the user's work.
+        """
+        act = getattr(self.pill.session, "activity", None)
+        dot = int(time.perf_counter() / DOT_SEC) % 3 if act and act.waiting else 0
+        key = None if act is None else f"{act.label}/{dot}"
+        if key == self._frame_key:
+            return
+        self._frame_key, self._act, self._dot = key, act, dot
+
+        surfacing = act is not None and not self._visible
+        if surfacing:
+            self._for_activity = True
+            self._visible = True
+            self.deiconify()
+        elif act is None and self._for_activity and not (
+            self._text or self._partial or self._reply or self._note
+        ):
+            self.hide()
+            return
+        if self._visible:
+            self._render()
+        if surfacing:
+            # After the render, not before: `_float_up` repositions against `self._h`,
+            # which is what the render computes. Animating first moves the window to a
+            # height it does not have yet and the rise starts with a jump.
+            self._float_up()
+
+    def _indicator(self, y: int) -> None:
+        """The one row that says what Flow is doing, and whether it can still hear.
+
+        Three marching dots for the indeterminate waits — the honest shape for a wait
+        whose length nobody knows, where a progress bar would have to invent a
+        denominator. A flat line instead when the answer is "not listening", because
+        that is exactly what the pill's level bars are doing at the same moment: the
+        same fact, drawn the same way, in the two places the user is looking.
+        """
+        c = self.canvas
+        x = PAD
+        if self._act.waiting:
+            for i in range(3):
+                lit = i == self._dot
+                r = 3.0 if lit else 2.0
+                cx, cy = x + 4 + i * 10, y + 8
+                c.create_oval(
+                    cx - r, cy - r, cx + r, cy + r,
+                    fill=self.pill.accent if lit else CHIP, outline="", tags="waiting",
+                )
+        else:
+            c.create_line(x, y + 8, x + 24, y + 8, fill=MUTED, width=2, tags="waiting")
+        c.create_text(
+            x + 34, y, anchor="nw", text=self._act.label, fill=MUTED,
+            font=("Segoe UI", 9), tags="indicator",
+        )
 
     def _was_a_command(self) -> None:
         # Reaching for any chip means the user is still working on this draft.

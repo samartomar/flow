@@ -178,6 +178,11 @@ class WhisperTranscriber:
         # Session.start() and the decode worker calling text() lazily. Without a lock
         # both build a model and one is thrown away, so each tier gets its own.
         self._locks = {False: threading.Lock(), True: threading.Lock()}
+        #: Which tiers are being built right now. A first decode of a tier is a model
+        #: load and not a slow decode, and those are a second apart in cost — so the UI
+        #: has to be able to say which one the user is waiting on rather than showing
+        #: the same indicator for both.
+        self._loading: set[bool] = set()
         #: Recent rejections, newest last. Written on the decode thread and drained on
         #: the UI thread, so it is a deque with a maxlen rather than a growing list.
         self._drops: deque[Drop] = deque(maxlen=DROP_HISTORY)
@@ -215,11 +220,21 @@ class WhisperTranscriber:
                     continue
                 from faster_whisper import WhisperModel
 
-                model = WhisperModel(
-                    self._names[tier], device="cpu", compute_type=self._compute_type
-                )
                 with self._lock:
-                    self._models[tier] = model
+                    self._loading.add(tier)
+                try:
+                    model = WhisperModel(
+                        self._names[tier], device="cpu",
+                        compute_type=self._compute_type,
+                    )
+                    with self._lock:
+                        self._models[tier] = model
+                finally:
+                    # Cleared after the model is published, not before, so there is no
+                    # frame in which a tier is neither loading nor loaded and the UI
+                    # reports the wait as an ordinary decode.
+                    with self._lock:
+                        self._loading.discard(tier)
 
     def take_confidence(self) -> float | None:
         """The worst `avg_logprob` among the segments the last decode kept.
@@ -247,6 +262,17 @@ class WhisperTranscriber:
         and it must fire while either model is still holding memory."""
         with self._lock:
             return any(m is not None for m in self._models.values())
+
+    @property
+    def loading(self) -> bool:
+        """True while a tier is being built, so the UI can name that wait.
+
+        Measured at roughly a second per tier on a warm cache, and the whole download on
+        a cold one. Both are indistinguishable from a slow decode without this, which is
+        why the first utterance of a session used to look like the app had hung.
+        """
+        with self._lock:
+            return bool(self._loading)
 
     @property
     def names(self) -> tuple[str, str]:

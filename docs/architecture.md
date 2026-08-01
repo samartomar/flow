@@ -114,7 +114,7 @@ is written down.
 | Thread | Started by | Does | Rules |
 |---|---|---|---|
 | main / UI | `Pill.mainloop()` | `Pill._tick()` every 30 ms → `Session.tick()` → repaint | **The only thread that may touch Tk.** `_tick` re-schedules itself in a `finally`, so an exception cannot break the chain and leave a dead pill on screen |
-| PortAudio callback | `Mic.start()` | copies each block into the queue, updates the level | No allocation-heavy or blocking work. Never touches the session |
+| PortAudio callback | `Mic.start()` | copies each block into the queue, updates the level | No allocation-heavy or blocking work. Never touches the session — which is exactly why `Mic.level_db` is not what the meter draws: it reports the room whether or not anything is reading the blocks. `Session.level_db` is the honest one |
 | `decode` | `DecodeWorker.__init__` | runs the model | Owns the only model calls. Catches every exception and turns it into an `error` result |
 | `preload` | `Session.start()` | warms both tiers | Not awaited — a first run includes a model download, and doing it inline froze the UI on the first click |
 | `hotkeys` | `Hotkeys.start()` | `RegisterHotKey` + `GetMessageW` message loop | `RegisterHotKey` requires the message loop to be on the registering thread. Presses go back through a `queue`, drained on the UI thread |
@@ -162,13 +162,52 @@ the event stream.
 
 ### States
 
-| State | Pill | Meaning |
+| State | Pill | Indicator | Bars | Meaning |
+|---|---|---|---|---|
+| `IDLE` | slate | — | live | not capturing, or nothing held |
+| `LISTENING` | green | — | live | speech in progress |
+| `DRAFT` | amber | — (`Ask 4s` on the button) | live | text held, awaiting refine / continue / send |
+| `REFINING` | blue | ⋯ `refining` | live | a CLI rewrite is in flight, ~6 s |
+| `ASKING` | violet | ⋯ `asking` | live | a converse-mode question is with the CLI, ~8–10 s |
+
+### What Flow is doing, and whether it can hear
+
+`State` is not the whole answer. Three of the things the user waits on are not states at
+all — a model build, a decode, and a reply playing — and before this they were invisible,
+or worse. `Session.activity` is the one place that answers "what is Flow doing right now",
+read every frame by the UI:
+
+| Condition | Indicator | `hearing` |
 |---|---|---|
-| `IDLE` | slate | not capturing, or nothing held |
-| `LISTENING` | green | speech in progress |
-| `DRAFT` | amber | text held, awaiting refine / continue / send |
-| `REFINING` | blue | a CLI rewrite is in flight |
-| `ASKING` | violet | a converse-mode question is with the CLI |
+| `speaker.speaking` | ▬ `speaking - not listening` | **False** |
+| `state is ASKING` | ⋯ `asking` | True |
+| `state is REFINING` | ⋯ `refining` | True |
+| `asr.loading` | ⋯ `loading the model` | True |
+| `worker.busy and not gate.speaking` | ⋯ `decoding` | True |
+| otherwise | — | True |
+
+Checked in that order. Speaking wins because it is the only one that means *stop talking*
+rather than *wait a moment*, and a model build is named before the decode it is holding up
+because those differ by about a second.
+
+Three points that are load-bearing rather than stylistic:
+
+**It is a polled property, not an event.** A wait has no edges — it is a condition that
+holds for a while — and a UI reconstructing "still working" from a start event and an end
+event shows a stale indicator the first time one of those is missed.
+
+**Dots for the indeterminate ones, a flat line for the deaf one.** Three marching dots is
+the honest shape for a wait of unknown length, where a progress bar has to invent a
+denominator. The flat line is the same mark the pill's level bars make at the same moment:
+one fact, drawn the same way, in the two places the user is already looking.
+
+**`decoding` is suppressed while the gate is open.** Partials run continuously during
+speech, so it would be lit permanently and would say nothing; the bars carry that moment.
+
+**`Session.level_db` is floored to `DEAF_DB` while `hearing` is false.** `Mic._level` is
+written by the PortAudio callback, which knows nothing about the echo guard, so during a
+spoken reply it tracks Flow's own voice coming back through the speakers — see the
+[Verification](#verification) row for what that measured.
 
 ### Events
 
@@ -344,6 +383,8 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `MIC_CHECK_SEC` | 5 s | A dead PortAudio stream stops delivering blocks without raising anywhere the session can see |
 | `FORCE_NEXT_TTL_SEC` | 30 s | A Refine/Continue chip means "the next thing I say"; after this long the next thing someone says is a different thought. The chips also toggle, because a one-way door that lasts 30 s reads as the app being stuck |
 | `AUTO_ASK_SEC` | 4 s | Converse mode only. Measured: the pauses a speaker leaves between separate spoken items run 1.4–3.3 s (median 2.5 s) on the one recording where every item was located, and each gap also contains a spoken item number, so real silence is shorter — under ~3.3 s fires mid-thought. R5 still holds where it matters: pasting into a window is irreversible and stays manual, asking is not |
+| `ui.DOT_SEC` | 0.4 s | One dot of the indeterminate-wait animation. The bubble renders on events and a wait has no events, so the frame is computed and compared before anything is drawn — at this cadence that is ~2.5 repaints a second instead of the 33 that redrawing every pump would cost. Same discipline as the auto-ask countdown |
+| `DEAF_DB` | −120.0 | What `level_db` reports while the microphone is not evidence. Below any real room — a quiet room with a good USB mic measures −96.7 dB — so every meter maps it to silence without having to know why |
 | `speak.WORDS_PER_SEC` | 1.5 | Half the measured rate (a 15-word sentence took 4.9 s at rate 1), so the derived ceiling on `speaking` is generous. It gates the microphone, and a latched value would leave Flow permanently deaf — far worse than leaking a little echo |
 | `BLOCK` | 1024 (64 ms) | Fine enough for a responsive level meter |
 | `PREROLL_BLOCKS` | 4 (256 ms) | A gate can only open after hearing something loud, so the quiet head of that word is already gone — the unaspirated stop, the soft fricative. Without it "delete" becomes "leet". Measured: gating without pre-roll deletes 2.6% of the audio; any pre-roll from 128 ms up returns WER to the ungated level |
@@ -391,10 +432,13 @@ policy here; it is enforced by absence.
    evidence; a destructive edit reports the words it removed; the undo stack still holds them.
 5. **Nothing sends itself.** Stopping speech produces a held draft. Send is always explicit.
    A Send that refuses says why — a button that does nothing reads as broken.
-6. **Flow does not listen to itself.** While a reply is playing the microphone is not
-   evidence. There is no echo cancellation and there is not going to be one (R16), so
-   converse mode is half-duplex and interrupting is an explicit action. A VAD does not
-   solve this: the speakers genuinely are producing speech, and a detector will say so.
+6. **Flow does not listen to itself, and does not claim to.** While a reply is playing the
+   microphone is not evidence. There is no echo cancellation and there is not going to be
+   one (R16), so converse mode is half-duplex and interrupting is an explicit action. A VAD
+   does not solve this: the speakers genuinely are producing speech, and a detector will say
+   so. The second half of that sentence is the newer half — the guard was discarding audio
+   correctly while the level meter animated to the discarded blocks, so the app told the
+   truth about what it did and lied about what it heard.
 7. **Everything is bounded.** Mic queue, undo history, drop log, decode timings, thread turns,
    lexicon terms, profile pairs, CLI input. A long session must cost what a short one costs.
 8. **Three declared dependencies.** GUI, hotkeys, injection, DPI awareness and speech all come
@@ -406,23 +450,31 @@ policy here; it is enforced by absence.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (381 tests, ~4 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring |
+| units | `tests/` (427 tests, ~3 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
-| whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 29 checks, including converse against the live CLI. Cannot see accent — SAPI is a US-English synthesiser |
+| whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 53 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser |
+| looking at it | `scripts/ui_probe.py` | renders the pill and bubble against a fake session that walks every state, so there is something to screenshot without a microphone, a model or a person. `--hold STATE` pins one; `--bare` drops the draft, which is the case the indicator exists for |
 | a person | `scripts/live_check.py` | the only thing that can answer P1 and P3. Needs recordings that do not exist yet |
 
 The self-drive layer exists because three consecutive sessions each found a defect by hand
 that no layer-specific harness could have caught: a chip whose label the grammar rejected, a
-mode with no way to turn the voice on, and a window that placed itself off the screen.
+mode with no way to turn the voice on, and a window that placed itself off the screen. The
+level meter is the fourth of that kind and the reason `ui_probe.py` is listed as a layer
+rather than a convenience: every automated layer passed while the bars animated to Flow's
+own voice, because no assertion anywhere read what the pill was actually drawing.
 
 ## Verification
 
-Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8:
+Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8. The four rows
+marked **↻** were re-measured on 2026-08-01 when the indicator was added; the rest are as
+recorded on the 31st and were not re-run.
 
 | Check | Command | Result |
 |---|---|---|
-| unit tests | `uv run python -m unittest discover -s tests` | **381 passed**, 4.2 s |
-| end-to-end | `uv run python scripts/selfdrive.py` | **29/29 checks passed**, including a live `codex` converse round trip and a spoken reply |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **427 passed**, 3.0 s |
+| end-to-end ↻ | `uv run python scripts/selfdrive.py` | **53/53 checks passed**, including a live `codex` converse round trip and a spoken reply |
+| the level meter ↻ | drive a session with `speaker.speaking` true and a loud mic | before: 30 blocks discarded by the echo guard and the meter still at **83% of full scale**. After: 30 discarded, meter at **0%**, `level_db` −120 dB |
+| the indicator ↻ | `scripts/ui_probe.py --hold STATE`, screenshotted | every state in the table above renders its own row; the pill's bars and the bubble's flat line agree in the speaking state |
 | flags | `uv run python -m flow --help` | 13 flags, matching the README table |
 | build | `uv build`, then install the wheel into a fresh venv | wheel + sdist built; `flow --help` runs from a clean install. `hatchling` stays out of the runtime venv, so R16 holds |
 | hotkeys | `flow.hotkey.DEFAULT_BINDINGS` | 4 actions, 1–3 fallbacks each |
