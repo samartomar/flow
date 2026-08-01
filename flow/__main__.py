@@ -183,7 +183,8 @@ def main(argv: list[str] | None = None) -> int:
     # that: nothing on screen or in the log distinguished them.
     if args.converse:
         session.toggle_mode()
-        say("mode: CONVERSE - Send asks the agent CLI and the reply appears in Flow")
+        say("mode: CONVERSE - the Ask button puts the draft to the agent CLI "
+            "and the reply appears in Flow")
     else:
         say("mode: DICTATE - Send pastes into the focused window "
             "(--converse, or ctrl+alt+M, to ask instead)")

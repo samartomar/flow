@@ -873,7 +873,13 @@ class Session:
         """
         self.mode = CONVERSE if self.mode == DICTATE else DICTATE
         self._emit("mode", self.mode)
-        self._emit("note", "converse mode - Send asks the CLI"
+        # Named after the button that is actually on screen. This used to say "Send asks
+        # the CLI" while the chip renamed itself to "Ask", so the app announced one verb
+        # and displayed another — and the first person to read both concluded the mode
+        # had not really changed. In converse mode there is no Send anywhere; saying so
+        # is free, and the same class of defect as the chip whose label the grammar
+        # rejected.
+        self._emit("note", "converse mode - press Ask to put the draft to the CLI"
                    if self.mode == CONVERSE else "dictate mode - Send pastes")
         return self.mode
 

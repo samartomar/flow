@@ -466,7 +466,111 @@ def scenario_window(report) -> None:
 #: process before stdout flushed and took every result line with it while still
 #: reporting exit 0. The real app only ever has one root, so this is a property of the
 #: harness rather than of the product, and the fix belongs here.
-TK_SCENARIOS = {"asking_ui", "window"}
+def scenario_chips(report) -> None:
+    """Actually press the buttons.
+
+    Every other harness reaches past the UI and calls `session.send()` directly, so the
+    chips were bound in `ui.py` and clicked by nothing at all — the one part of the app
+    a user touches first. This clicks them where they are drawn, through Tk, so a chip
+    that is mislabelled, unbound, or off the edge of the bubble fails here.
+    """
+    from unittest import mock
+
+    from flow.ui import Pill
+
+    class Dead:
+        level_db = -70.0
+
+        def start(self) -> None: ...
+
+        def stop(self) -> None: ...
+
+        @property
+        def active(self) -> bool:
+            return True
+
+        def restart(self) -> None: ...
+
+        def drain(self) -> list:
+            return []
+
+    class NoAsr:
+        def load(self, final=None) -> None: ...
+
+        def text(self, a, *, final=False, hotwords="") -> str:
+            return ""
+
+    def click(pill, label) -> bool:
+        """Press the chip where it is actually drawn. False if there is no such chip."""
+        canvas = pill.bubble.canvas
+        if not canvas.find_withtag(f"chip-{label}"):
+            return False
+        x1, y1, x2, y2 = canvas.bbox(f"chip-{label}")
+        canvas.event_generate("<Button-1>", x=int((x1 + x2) / 2), y=int((y1 + y2) / 2))
+        pill.update()
+        return True
+
+    pasted: list[str] = []
+    session = Session(asr=NoAsr(), mic=Dead(), profile=None)
+    pill = Pill(session, on_send=pasted.append, hotkeys=None)
+    try:
+        session.toggle_mode()
+        session.draft.set("can you hear me")
+        pill.bubble.show(session.draft.text)
+        pill.update()
+
+        report("converse mode offers Ask, not Send",
+               bool(pill.bubble.canvas.find_withtag("chip-Ask"))
+               and not pill.bubble.canvas.find_withtag("chip-Send"),
+               f"mode={session.mode}")
+
+        # The bubble is 380 px wide and the chips are laid out left to right; a chip
+        # that runs off the end is drawn but unreachable.
+        edges = []
+        for label in ("Refine", "Continue", "Ask"):
+            if pill.bubble.canvas.find_withtag(f"chip-{label}"):
+                edges.append(pill.bubble.canvas.bbox(f"chip-{label}")[2])
+        report("every chip is inside the bubble", edges and max(edges) <= 380,
+               f"rightmost edge {max(edges) if edges else '?'} of 380")
+
+        with mock.patch("flow.session.ask",
+                        return_value=("Yes, I can hear you.", "codex")):
+            report("the Ask chip was clickable", click(pill, "Ask"))
+            report("clicking Ask put the question to the CLI",
+                   session.state is State.ASKING, session.state.value)
+            report("clicking Ask pasted nothing", pasted == [], str(pasted))
+            deadline = time.perf_counter() + 20.0
+            while time.perf_counter() < deadline and not session.reply:
+                session.pump_results()
+                pill.update()
+            report("the answer came back", session.reply == "Yes, I can hear you.",
+                   session.reply)
+
+        session.draft.set("some words")
+        pill.bubble.show(session.draft.text)
+        pill.update()
+        click(pill, "Refine")
+        report("the Refine chip arms the next utterance",
+               session.force_next == "edit", str(session.force_next))
+        click(pill, "Refine")
+        report("pressing it again disarms it", session.force_next is None,
+               str(session.force_next))
+
+        session.toggle_mode()
+        pill.bubble.show(session.draft.text)
+        pill.update()
+        report("dictate mode offers Send, not Ask",
+               bool(pill.bubble.canvas.find_withtag("chip-Send"))
+               and not pill.bubble.canvas.find_withtag("chip-Ask"),
+               f"mode={session.mode}")
+        click(pill, "Send")
+        report("clicking Send handed the draft over", pasted == ["some words"],
+               str(pasted))
+    finally:
+        pill.destroy()
+
+
+TK_SCENARIOS = {"asking_ui", "window", "chips"}
 
 SCENARIOS = {
     "dictate": scenario_dictate,
@@ -477,6 +581,7 @@ SCENARIOS = {
     "converse": scenario_converse,
     "followup": scenario_followup,
     "asking_ui": scenario_asking_ui,
+    "chips": scenario_chips,
     "calibrate": scenario_calibrate,
     "learning": scenario_learning,
     "window": scenario_window,
