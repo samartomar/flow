@@ -144,7 +144,7 @@ is written down.
 | `hotkeys` | `Hotkeys.start()` | `RegisterHotKey` + `GetMessageW` message loop | `RegisterHotKey` requires the message loop to be on the registering thread. Presses go back through a `queue`, drained on the UI thread |
 | `refine` | per semantic rewrite | one `refine._invoke` | Result handed back under `_refine_lock`, tagged with its operation id and the draft revision it was computed from. Watches `Session._cancel` while it waits, so `close()` does not have to |
 | `ask` | per converse question | one `refine._invoke` | Result handed back under `_ask_lock`, tagged with its operation id. Same cancellation |
-| clipboard restore | per paste | sleeps 0.6 s, puts the old clipboard back | Lets the target app read the clipboard first |
+| `clipboard-restore` | per paste | sleeps `RESTORE_DELAY_SEC`, puts the old clipboard back | Lets the target app read the clipboard first, then checks `GetClipboardSequenceNumber` against the reading taken when Flow's own text landed — a changed counter means the user copied something in that pause and the old text is not written back. The one thread that appends to `take_warnings()` from off the UI thread, which is why that queue is locked |
 | `speech` watcher | each `Speaker.say()` | polls the host until it reports `Ready`, then clears `speaking` | Best-effort only. The ceiling that actually bounds `speaking` is enforced by the reader, so a wedged host cannot leave Flow deaf |
 | speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking, and the state protocol needs it responsive |
 
@@ -422,6 +422,16 @@ Three things now hold, and they are independent on purpose:
    deliberately not a refusal: that is the OS declining to answer, not evidence that
    somebody else is holding it.
 
+The clipboard is borrowed, not taken. Flow writes the payload, sends Ctrl-V, waits
+`RESTORE_DELAY_SEC` for the target to read it, and puts the previous text back — but only
+if `GetClipboardSequenceNumber` still reads what it read when Flow's own text landed.
+0.6 s is long enough to copy something; it is one keystroke, and the reason the pause
+exists at all is that people are doing things. The unconditional write that used to
+follow was not a restore, it was Flow deleting what the user had just copied and putting
+back what they had copied before. A counter of `0` means the OS declined to answer and is
+not treated as evidence either way. **Known limit:** only text is captured, so a clipboard
+holding an image or a file list is emptied by the paste and never restored.
+
 The one guarantee: a draft ending in a newline never reaches a shell with that newline
 attached, because that does not paste, it *runs*. Interior newlines are explicitly not a
 guarantee and are reported rather than rewritten; silently reflowing someone's text to make
@@ -564,17 +574,18 @@ narrowed to stay true while these are open; each is queued work.
 1. **The provider is named only at startup.** The console diagnostics say which CLI will
    answer and the notes say which one did, but nothing on the pill says — before the
    fact — that Ask goes to `codex` and off the machine.
-2. **The clipboard restore writes back unconditionally.** 0.6 s after a paste the previous
-   text goes back whatever happened in between, so anything the user copied in that window
-   is overwritten — `GetClipboardSequenceNumber` is the check it should make first. A
-   non-text clipboard (an image, files) is never captured in the first place and therefore
-   never restored, which is a smaller loss but the same silence.
+2. **A warning raised after `paste()` returns arrives late.** The clipboard-restore thread
+   records its skip 0.6 s after the Send it belongs to, and every caller drains
+   `take_warnings()` immediately — so the line waits in the queue and is shown against the
+   *next* paste. The queue is thread-safe, so nothing is lost; it is attributed wrongly.
+   The fix is a per-frame drain in the UI, which is a different file than the one that
+   found this.
 
 ## 11. Testing layers
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (477 tests, ~9 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (484 tests, ~9 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

@@ -37,6 +37,8 @@ user32.GetClipboardData.argtypes = [wintypes.UINT]
 user32.GetClipboardData.restype = wintypes.HANDLE
 user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
 user32.SetClipboardData.restype = wintypes.HANDLE
+user32.GetClipboardSequenceNumber.argtypes = []
+user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
 
 kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
 kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
@@ -133,16 +135,47 @@ def set_clipboard_text(text: str) -> bool:
         user32.CloseClipboard()
 
 
+def clipboard_sequence() -> int:
+    """Windows' clipboard change counter, or 0 if it will not say. Never raises.
+
+    The only way to ask "does the clipboard still hold what Flow put there" without
+    reading the contents — which would not answer it anyway, since the user could have
+    copied the same text, and reading costs an `OpenClipboard` that can fail.
+    """
+    try:
+        return int(user32.GetClipboardSequenceNumber())
+    except OSError:
+        return 0
+
+
+#: How long the target app gets to read the clipboard before Flow hands it back. The
+#: paste is asynchronous — `SendInput` queues a keystroke, it does not wait for the app
+#: to process it — so restoring immediately would put the old text back before the new
+#: text had been read.
+RESTORE_DELAY_SEC = 0.6
+
 #: Warnings raised by the last paste, drained by the UI. A module-level queue rather
 #: than a return value because `paste` already returns success, and a caller that
 #: ignores the warning must still see it — the whole point is that the user is told.
+#:
+#: Locked because the restore runs on its own thread, `RESTORE_DELAY_SEC` after `paste`
+#: has returned. `list.append` is atomic, but `take_warnings` copies and then clears,
+#: and a line appended between those two statements would be dropped without trace —
+#: which is the one thing a warning queue may not do.
 _WARNINGS: list[str] = []
+_WARNINGS_LOCK = threading.Lock()
+
+
+def _warn(line: str) -> None:
+    with _WARNINGS_LOCK:
+        _WARNINGS.append(line)
 
 
 def take_warnings() -> list[str]:
-    out = list(_WARNINGS)
-    _WARNINGS.clear()
-    return out
+    with _WARNINGS_LOCK:
+        out = list(_WARNINGS)
+        _WARNINGS.clear()
+        return out
 
 
 def paste(text: str, *, hwnd: int | None = None, restore_clipboard: bool = True) -> bool:
@@ -169,15 +202,13 @@ def paste(text: str, *, hwnd: int | None = None, restore_clipboard: bool = True)
         # took the foreground after all, so the Ctrl-V is going to land on a Tk canvas
         # whatever this function believes — and that is a defect to report, not a paste
         # to attempt. This is exactly the state that used to return True.
-        _WARNINGS.append(
-            "not pasted: Flow had the focus, not the window you were aiming at"
-        )
+        _warn("not pasted: Flow had the focus, not the window you were aiming at")
         return False
     if target.stale:
         # Same refusal, one window over: something took the foreground between the poll
         # and the click, so the Ctrl-V would land there — carrying a payload prepared
         # for the window the user was actually aiming at.
-        _WARNINGS.append(
+        _warn(
             "not pasted: the target window changed before Send"
             + (f" - {target.process} has the focus now" if target.process else "")
         )
@@ -185,22 +216,40 @@ def paste(text: str, *, hwnd: int | None = None, restore_clipboard: bool = True)
 
     payload, warning = prepare(text, target)
     if warning:
-        _WARNINGS.append(warning)
+        _warn(warning)
 
+    # Text only, and that is a real limit rather than an oversight: a clipboard holding
+    # an image or a file list reads as None here, so there is nothing to put back — and
+    # `set_clipboard_text` empties it on the way in, so what was there is gone rather
+    # than restored. Capturing arbitrary formats means enumerating and copying every one
+    # of them, which is a great deal of ctypes for a path that ends with Flow owning a
+    # copy of the user's screenshot.
     previous = get_clipboard_text() if restore_clipboard else None
     if not set_clipboard_text(payload):
-        _WARNINGS.append("not pasted: could not take the clipboard")
+        _warn("not pasted: could not take the clipboard")
         return False
+    # Stamped the moment Flow's own text lands, so anything that moves the counter from
+    # here on is somebody else.
+    stamp = clipboard_sequence()
 
     _send(_key(VK_CONTROL), _key(VK_V), _key(VK_V, up=True), _key(VK_CONTROL, up=True))
 
     if previous is not None:
         def restore() -> None:
-            # Let the target app read the clipboard before handing it back.
-            time.sleep(0.6)
+            time.sleep(RESTORE_DELAY_SEC)
+            now = clipboard_sequence()
+            if stamp and now and now != stamp:
+                # Somebody copied something during that pause. Putting the old text
+                # back now would not be a restore — it would be Flow deleting a thing
+                # the user did *after* the paste, which is the one clipboard write
+                # nobody could explain. A zero on either reading means the counter was
+                # unavailable, not that nothing happened, so it is not taken as proof.
+                _warn("kept what you copied since - the clipboard Flow borrowed was "
+                      "not put back")
+                return
             set_clipboard_text(previous)
 
-        threading.Thread(target=restore, daemon=True).start()
+        threading.Thread(target=restore, daemon=True, name="clipboard-restore").start()
     return True
 
 

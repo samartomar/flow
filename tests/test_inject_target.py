@@ -12,6 +12,7 @@ a Tk canvas and the guarantee above was never once exercised on the Send chip's 
 """
 
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -23,6 +24,7 @@ from flow.inject import (  # noqa: E402
     TERMINAL_CLASSES,
     TERMINAL_PROCESSES,
     Target,
+    clipboard_sequence,
     prepare,
     resolve,
     take_warnings,
@@ -312,6 +314,91 @@ class TestFlowNeverPastesIntoItself(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(len(warnings), 1)
         self.assertIn("clipboard", warnings[0])
+
+
+class TestTheClipboardIsGivenBackOnlyIfNobodyElseTookIt(unittest.TestCase):
+    """Flow borrows the clipboard for one paste and hands it back 0.6 s later.
+
+    It used to hand it back unconditionally. Six hundred milliseconds is long enough to
+    copy something — it is a keystroke, and the reason the pause exists is that people
+    are doing things — and the write that followed did not restore anything. It deleted
+    what the user had just copied and replaced it with what they had copied before, the
+    one clipboard write nothing on screen could account for.
+    """
+
+    def _paste(self, sequences, previous="what the user had"):
+        """Paste and let the restore run. `sequences` are the counter's readings:
+        the first when Flow's text lands, the second after the pause."""
+        take_warnings()
+        writes: list[str] = []
+        with mock.patch("flow.inject.resolve", return_value=EDITOR), \
+             mock.patch("flow.inject.RESTORE_DELAY_SEC", 0.0), \
+             mock.patch("flow.inject.clipboard_sequence", side_effect=sequences), \
+             mock.patch("flow.inject.get_clipboard_text", return_value=previous), \
+             mock.patch("flow.inject.set_clipboard_text",
+                        side_effect=lambda t: (writes.append(t), True)[1]), \
+             mock.patch("flow.inject._send", return_value=1):
+            from flow.inject import paste
+
+            paste("deploy it", restore_clipboard=True)
+            # The thread is registered by the time `start()` returns, so it is either
+            # here to be joined or already finished. Either way this is not a sleep.
+            for t in threading.enumerate():
+                if t.name == "clipboard-restore":
+                    t.join(5.0)
+        return writes, take_warnings()
+
+    def test_an_untouched_clipboard_is_put_back(self):
+        writes, warnings = self._paste([7, 7])
+        self.assertEqual(writes, ["deploy it", "what the user had"])
+        self.assertEqual(warnings, [])
+
+    def test_something_copied_during_the_pause_is_kept(self):
+        writes, _warnings = self._paste([7, 8])
+        self.assertEqual(writes, ["deploy it"], "the user's newer clipboard was erased")
+
+    def test_and_the_skip_is_said_out_loud(self):
+        _writes, warnings = self._paste([7, 8])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("kept what you copied", warnings[0])
+
+    def test_a_counter_that_will_not_answer_restores_as_before(self):
+        # Zero means the OS declined to say, not that nothing happened. Refusing to
+        # restore on the absence of evidence would lose the clipboard it exists to save.
+        writes, warnings = self._paste([0, 0])
+        self.assertEqual(writes, ["deploy it", "what the user had"])
+        self.assertEqual(warnings, [])
+
+    def test_an_empty_clipboard_starts_no_restore_at_all(self):
+        writes, warnings = self._paste([7, 7], previous=None)
+        self.assertEqual(writes, ["deploy it"])
+        self.assertEqual(warnings, [])
+
+    def test_the_counter_never_raises(self):
+        self.assertIsInstance(clipboard_sequence(), int)
+
+    def test_a_warning_from_the_restore_thread_is_not_lost(self):
+        # `take_warnings` copies and then clears, and the restore appends from another
+        # thread 0.6 s after paste() returned. Without the lock a line landing between
+        # those two statements would vanish.
+        from flow.inject import _warn
+
+        take_warnings()
+        stop = threading.Event()
+
+        def drain() -> None:
+            while not stop.is_set():
+                seen.extend(take_warnings())
+
+        seen: list[str] = []
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
+        for i in range(2000):
+            _warn(f"line {i}")
+        stop.set()
+        reader.join(5.0)
+        seen.extend(take_warnings())
+        self.assertEqual(len(seen), 2000)
 
 
 if __name__ == "__main__":
