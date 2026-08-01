@@ -4,6 +4,7 @@ Three mechanisms, each of which exists because a shipped constant was measured w
 for somebody: the room, the voice, and the words.
 """
 
+import json
 import sys
 import tempfile
 import unittest
@@ -444,3 +445,97 @@ class TestCorrectionsTeachVocabularyOnTheFly(unittest.TestCase):
         p = self._learn([("capitalize sameer", self.DRAFT)] * 2)
         lx = Lexicon(NUL_PATH, learned=p.learned_terms)
         self.assertEqual(lx.hotwords(), "Sameer")
+
+
+class TestTheAutoAskChoiceIsRemembered(unittest.TestCase):
+    """P9's countdown can be switched off, and switching it off lasted until you quit.
+
+    Auto-ask is the one setting in this app that decides whether the user's words leave
+    the machine without a press. Somebody who turns it off has said something about how
+    they want to work, and asking them to say it again every launch is the app not
+    listening — the same argument `set_voice` already makes for saving immediately
+    rather than at the next Send.
+
+    The default stays on. The field is additive and absent reads as on, so nobody who
+    already has a profile gets a preference they never expressed.
+    """
+
+    def _session(self, profile):
+        from flow.session import Session
+
+        class NoAsr:
+            def load(self, final=None): ...
+
+            def text(self, a, *, final=False, hotwords=""):
+                return ""
+
+        class Dead:
+            level_db = -70.0
+
+            def start(self): ...
+
+            def stop(self): ...
+
+            @property
+            def active(self):
+                return True
+
+            def restart(self): ...
+
+            def drain(self):
+                return []
+
+        s = Session(asr=NoAsr(), mic=Dead(), profile=profile)
+        self.addCleanup(s.close)
+        return s
+
+    def test_a_fresh_profile_has_it_on(self):
+        self.assertTrue(tmp_profile().auto_ask)
+
+    def test_a_session_starts_from_what_the_profile_says(self):
+        p = tmp_profile()
+        p.auto_ask = False
+        self.assertFalse(self._session(p).auto_ask)
+
+    def test_a_session_without_a_profile_is_still_on(self):
+        self.assertTrue(self._session(None).auto_ask)
+
+    def test_turning_it_off_is_on_disk_before_the_next_send(self):
+        # Saved through the same path a voice is, and for the same reason: someone who
+        # switches it off and closes the app has still made the choice.
+        p = tmp_profile()
+        self._session(p).toggle_auto_ask()
+        self.assertFalse(Profile(p.path).auto_ask, "the choice did not survive")
+
+    def test_and_turning_it_back_on_is_too(self):
+        p = tmp_profile()
+        p.auto_ask = False
+        s = self._session(p)
+        s.toggle_auto_ask()
+        self.assertTrue(Profile(p.path).auto_ask)
+
+    def test_a_profile_written_before_this_existed_reads_as_on(self):
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        del raw["auto_ask"]
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertTrue(Profile(p.path).auto_ask)
+
+    def test_a_null_reads_as_on_as_well(self):
+        # `bool(None)` is False, which would turn "this key was never written" into a
+        # preference for off — the one reading the default may not have.
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        raw["auto_ask"] = None
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertTrue(Profile(p.path).auto_ask)
+
+    def test_the_schema_did_not_move(self):
+        # Every read has a fallback, so an older Flow ignores a key it does not know and
+        # a newer Flow reads an older file. A bump would throw both of those away, and
+        # with them somebody's calibration.
+        p = tmp_profile()
+        p.save()
+        self.assertEqual(json.loads(p.path.read_text(encoding="utf-8"))["schema"], 1)

@@ -200,7 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     # Stated either way, and unprompted. "There was no spoken reply" and "I was never
     # in converse mode" produce identical symptoms, and the first live user hit exactly
     # that: nothing on screen or in the log distinguished them.
-    session.auto_ask = not args.no_auto_ask
+    # The flag wins over the profile, and the profile over the default — the same order
+    # `--voice` follows. This used to assign unconditionally, so the absence of a flag
+    # overwrote a stored preference and switching auto-ask off never survived a restart.
+    if args.no_auto_ask:
+        session.auto_ask = False
     if args.converse:
         session.toggle_mode()
         say("mode: CONVERSE - the Ask button puts the draft to the agent CLI "

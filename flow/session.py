@@ -368,7 +368,12 @@ class Session:
         self.echo_blocks = 0
         #: P9: let a settled draft go to the CLI on its own after a pause. Converse mode
         #: only — see AUTO_ASK_SEC for why that distinction is the whole argument.
-        self.auto_ask = True
+        #:
+        #: Read from the profile, which defaults it to True, so the shipped behaviour is
+        #: unchanged and a user who switched it off does not have to say so again every
+        #: launch. `getattr` because a profile is optional and the fakes predate the
+        #: field.
+        self.auto_ask = bool(getattr(profile, "auto_ask", True))
         #: When the draft last stopped changing. None means nothing is pending.
         self._settled_at: float | None = None
         #: P8. What Flow has measured and learned about this person, on this machine.
@@ -1069,6 +1074,12 @@ class Session:
 
     def toggle_auto_ask(self) -> bool:
         self.auto_ask = not self.auto_ask
+        # Saved now rather than at the next Send, for the reason `set_voice` gives: this
+        # is a choice about how someone wants to work, and one made just before closing
+        # the app is still a choice.
+        if self.profile is not None:
+            self.profile.auto_ask = self.auto_ask
+            self.profile.save()
         self._emit("note", "auto-ask on - a pause sends the question"
                    if self.auto_ask else "auto-ask off - press Ask when you are ready")
         return self.auto_ask

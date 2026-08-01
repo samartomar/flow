@@ -500,7 +500,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | Path | When | What |
 |---|---|---|
 | `~/.flow/lexicon.txt` | never by Flow | the user's own terms. Read-only to the app; re-read by mtime on every decode |
-| `~/.flow/profile.json` | `--calibrate`, every Send, and choosing a voice | schema 1. Room, voice, this speaker's confidence, learned confusion pairs, misroute signatures, and which installed voice reads the replies (additive — an older profile loads with none). Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
+| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, learned confusion pairs, misroute signatures, which installed voice reads the replies, and whether auto-ask is on. The last two are additive and both read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and the volunteer recordings. **Tracked**, because a result is a measurement taken at a moment and a recording is a person — neither is reproducible by re-running anything. A recording being a person is also a constraint, not only a reason to keep it: the clips ride every clone and push (they are on the private origin today), so this history must never be made public while they are in it, and any open-sourcing starts with moving them out and rewriting history — an owner's decision, never a cleanup script's. The downloadable accent corpora are excluded and their manifests are not; [`.bench/README.md`](../.bench/README.md) is the inventory |
 
@@ -533,8 +533,9 @@ policy here; it is enforced by absence.
    exception to the broader claim this used to make: a settled draft may go to the CLI
    after `AUTO_ASK_SEC`, behind a countdown that sits on the Ask button, is held by
    speech, and can be cancelled or switched off — R5 protects the *irreversible* act, and
-   asking is not one. A Send that refuses says why — a button that does nothing reads as
-   broken.
+   asking is not one. Switching it off is remembered, because a setting that decides
+   whether words leave the machine unpressed is not one to make the user re-state every
+   launch. A Send that refuses says why — a button that does nothing reads as broken.
 6. **Flow does not listen to itself, and does not claim to.** While a reply is playing the
    microphone is not evidence. There is no echo cancellation and there is not going to be
    one (R16), so converse mode is half-duplex and interrupting is an explicit action. A VAD
@@ -591,7 +592,7 @@ narrowed to stay true while these are open; each is queued work.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (501 tests, ~10 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (509 tests, ~10 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
