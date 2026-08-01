@@ -87,7 +87,9 @@ is queued work, listed with the others at the end of §10.
   microphone
       │  float32 mono, 16 kHz, 1024-sample blocks (64 ms)
       ▼
-  Mic ─────────────── bounded queue, 256 blocks, drops oldest when full
+  Mic ─────────────── bounded queue, 256 blocks (~16 s), drops oldest when full
+      │               and says so: Session._pump_overflow turns the growth of
+      │               Mic.dropped into one note naming the audio that went
       │
       ▼
   SpeechGate ──────── RMS vs an adaptive noise floor, 800 ms hangover,
@@ -518,10 +520,14 @@ policy here; it is enforced by absence.
    keeps the pre-edit draft. A rescue that fails puts the words back exactly where they were.
 4. **No words are dropped silently.** A rejected segment becomes a `drop` event with its
    evidence; a destructive edit reports the words it removed; the undo stack still holds
-   them. The microphone queue is the current boundary of this promise: if the UI thread
-   stalls past ~16 s — the right-click menu's modal loop is the one known way — it drops
-   oldest-first and only counts. `Mic.dropped` is read by nothing in the app yet, so that
-   overflow would be silent. Rare is not never; surfacing it is queued work.
+   them; and the microphone queue says so when it overflows, with how much audio went and
+   in units a person can read. That last one used to be the boundary of this promise —
+   `Mic.dropped` counted and nothing in the app read it — and it is the case where the
+   promise mattered most, because reaching it takes a ~16 s stall of the UI thread (the
+   right-click menu's modal loop is the one known way) and the user is by definition not
+   watching the pill while it happens. What is still *not* promised is that the audio
+   comes back: the queue drops oldest-first and those blocks are gone. The undo stack
+   holds words; nothing holds sound.
 5. **Nothing is pasted without an explicit Send.** Stopping speech produces a held draft,
    and text never reaches another window on its own. Converse mode is the one narrow
    exception to the broader claim this used to make: a settled draft may go to the CLI
@@ -585,7 +591,7 @@ narrowed to stay true while these are open; each is queued work.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (484 tests, ~9 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (492 tests, ~9 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

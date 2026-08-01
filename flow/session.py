@@ -388,6 +388,11 @@ class Session:
         self._last_activity = time.perf_counter()
         self._last_mic_check = time.perf_counter()
         self._mic_started = False
+        #: Blocks the microphone queue threw away, as observed by this session. The
+        #: mic's own counter is the source; this one survives a device that brings a
+        #: fresh counter with it, and is the number the diagnostics trace wants.
+        self.mic_dropped = 0
+        self._last_mic_dropped = getattr(self.mic, "dropped", 0)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -593,8 +598,9 @@ class Session:
             self._emit("drop", drop.describe())
 
     def _pump_health(self) -> None:
-        """Long-session upkeep (R8): device liveness and idle model unload."""
+        """Long-session upkeep (R8): overflow, device liveness, idle model unload."""
         now = time.perf_counter()
+        self._pump_overflow()
 
         if now - self._last_mic_check >= MIC_CHECK_SEC:
             self._last_mic_check = now
@@ -615,6 +621,37 @@ class Session:
         ):
             self.asr.unload()
             self._emit("note", f"idle {idle / 60:.0f} min — model unloaded")
+
+    def _pump_overflow(self) -> None:
+        """Say when the microphone queue threw audio away.
+
+        `Mic.dropped` counted and nothing read it, which made the microphone the one
+        hole in "no words are dropped silently": the queue discards its oldest block
+        when full, and the user hears about it never.
+
+        Checked every tick and reported on growth, which cannot become spam even
+        though it sounds like it could. The queue holds 256 blocks, so reaching a drop
+        at all means the reader stalled for ~16 s — and the first tick afterwards
+        drains it, so the next drop is another 16 s of stalling away. Bursts, not a
+        trickle, and the burst is one note.
+
+        `getattr` because `Mic` is injectable and every fake in the tests predates the
+        counter — the same reason `_pump_drops` asks the transcriber that way.
+        """
+        raw = getattr(self.mic, "dropped", 0)
+        if raw > self._last_mic_dropped:
+            lost = raw - self._last_mic_dropped
+            self.mic_dropped += lost
+            seconds = lost * BLOCK / SAMPLE_RATE
+            amount = f"{seconds:.1f} s" if seconds >= 1.0 else f"{seconds * 1000:.0f} ms"
+            self._emit(
+                "note",
+                f"microphone overflowed — about {amount} of audio was lost while the "
+                "UI was held",
+            )
+        # Rebased even when it went backwards: a reopened device brings a fresh counter,
+        # and counting that as recovered audio would be the opposite of the truth.
+        self._last_mic_dropped = raw
 
     def _utter_sec(self) -> float:
         return len(self._utter) * BLOCK / SAMPLE_RATE

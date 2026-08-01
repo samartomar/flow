@@ -129,5 +129,109 @@ class TestDeviceLoss(unittest.TestCase):
         s.close()
 
 
+class CountingMic(StubMic):
+    """A mic that can report having thrown blocks away, the way the real one does."""
+
+    def __init__(self, active: bool = True) -> None:
+        super().__init__(active)
+        self.dropped = 0
+
+
+class TestOverflowIsSurfaced(unittest.TestCase):
+    """The queue drops the oldest block when it is full, and only counted it.
+
+    That counter was read by nothing in the app, so the one case invariant 4 could not
+    cover was the microphone: audio the user spoke went in the bin with no event, no
+    note and no number. It takes a ~16 s stall of the reader to reach — the queue holds
+    256 blocks — and the right-click menu's modal `TrackPopupMenu` loop is the one known
+    way to produce it, which is precisely the case where the user is not watching the
+    pill and cannot tell that anything went.
+    """
+
+    def _session(self):
+        mic = CountingMic()
+        s = Session(asr=TrackingAsr(), mic=mic)
+        s.start()
+        s.events()
+        return s, mic
+
+    def _notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def test_blocks_that_went_missing_are_reported(self):
+        s, mic = self._session()
+        mic.dropped = 5
+        s.tick()
+        self.assertIn("overflow", self._notes(s))
+        s.close()
+
+    def test_the_note_says_how_much_audio_that_was(self):
+        # 5 blocks x 64 ms. A count of blocks means nothing to the person who spoke them.
+        s, mic = self._session()
+        mic.dropped = 5
+        s.tick()
+        self.assertIn("320 ms", self._notes(s))
+        s.close()
+
+    def test_a_long_stall_is_reported_in_seconds(self):
+        # A full queue is 256 blocks, which is the shape this actually arrives in.
+        s, mic = self._session()
+        mic.dropped = 256
+        s.tick()
+        self.assertIn("16.4 s", self._notes(s))
+        s.close()
+
+    def test_a_steady_counter_says_nothing(self):
+        s, mic = self._session()
+        mic.dropped = 5
+        s.tick()
+        s.events()
+        for _ in range(10):
+            s.tick()
+        self.assertEqual(self._notes(s), "", "it repeated itself with nothing to say")
+        s.close()
+
+    def test_a_second_overflow_is_reported_again(self):
+        s, mic = self._session()
+        mic.dropped = 5
+        s.tick()
+        s.events()
+        mic.dropped = 9
+        s.tick()
+        self.assertIn("256 ms", self._notes(s), "only the new loss should be reported")
+        s.close()
+
+    def test_the_session_keeps_a_running_total(self):
+        # For the diagnostics trace: one number for the whole session, not per event.
+        s, mic = self._session()
+        mic.dropped = 5
+        s.tick()
+        mic.dropped = 9
+        s.tick()
+        self.assertEqual(s.mic_dropped, 9)
+        s.close()
+
+    def test_a_counter_that_starts_over_is_not_a_loss(self):
+        # A replaced device brings a fresh counter with it. Going backwards is not
+        # audio arriving; it is a different mic.
+        s, mic = self._session()
+        mic.dropped = 40
+        s.tick()
+        s.events()
+        mic.dropped = 0
+        s.tick()
+        self.assertEqual(self._notes(s), "")
+        self.assertEqual(s.mic_dropped, 40)
+        s.close()
+
+    def test_a_mic_that_cannot_count_is_not_a_crash(self):
+        # Every fake in the suite predates the counter, and Mic is injectable on purpose.
+        s = Session(asr=TrackingAsr(), mic=StubMic())
+        s.start()
+        s.tick()
+        self.assertEqual(s.mic_dropped, 0)
+        s.close()
+
+
 if __name__ == "__main__":
     unittest.main()
