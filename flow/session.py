@@ -29,6 +29,7 @@ from .edits import (
     apply_local,
     command_bias,
     describe_change,
+    is_artifact_request,
     plan,
     removed_text,
 )
@@ -78,6 +79,15 @@ FORCE_NEXT_TTL_SEC = 30.0
 #: countdown sits on the button the entire time so it is never a surprise, and speaking
 #: holds it — which is what "still correctable until it fires" has to mean.
 AUTO_ASK_SEC = 4.0
+
+#: P9 profiles: past either bound, an artifact answer is rendered whole and *spoken* as
+#: a one-line pointer instead of read out. The reason is invariant 6, not politeness:
+#: Flow is deaf for as long as it talks, and a 60-line prompt read at the measured
+#: 1.5 words/s is minutes of deafness with no way back in but clear, disarm or mute.
+#: Three lines / 300 chars is about what a listener can hold of structured content
+#: anyway; a conversational answer is never summarised, whatever its length.
+ARTIFACT_SAY_MAX_LINES = 3
+ARTIFACT_SAY_MAX_CHARS = 300
 
 #: What `level_db` reports while the microphone is not evidence.
 #:
@@ -355,6 +365,10 @@ class Session:
         self._op = 0
         self._refine_op: int | None = None
         self._ask_op: int | None = None
+        #: P9 profiles: whether the ask in flight requested a piece of work. Decided
+        #: when the question leaves (edits.is_artifact_request) and read when the
+        #: answer lands, to choose what the speaker says about it.
+        self._ask_artifact = False
         #: Set once, by `close()`. Every CLI call watches it, so quitting does not
         #: wait out a rewrite nobody will read. Deliberately not touched by `pause()`:
         #: disarming is a way of saying "stop capturing", and an answer to a question
@@ -1393,8 +1407,11 @@ class Session:
     def _start_ask(self, question: str) -> None:
         """P9: put the draft to the CLI off the hot path (R11) and wait for the reply."""
         op = self._ask_op = self._next_op()
+        # Decided from the request, before the answer exists to bias the guess. The
+        # flag outlives the call because the *speaker* needs it when the answer lands.
+        artifact = self._ask_artifact = is_artifact_request(question)
         self.diag.write("ask", op=op, chars=len(question),
-                        sent=tail_sent(question), mode=self.mode)
+                        sent=tail_sent(question), mode=self.mode, artifact=artifact)
         self._cli_started = time.perf_counter()
         self._set_state(State.ASKING)
         self._emit("note", f"asking {self._provider() or 'nobody — no CLI on PATH'}…")
@@ -1415,7 +1432,7 @@ class Session:
 
         def work() -> None:
             result = ask(question, cwd=self._refine_cwd, context=context,
-                         cancel=self._cancel)
+                         cancel=self._cancel, artifact=artifact)
             with self._ask_lock:
                 self._ask_result = (op, result)
 
@@ -1443,7 +1460,14 @@ class Session:
             self.thread.add(f"(reply) {answer}")
             self._emit("reply", answer)
             if self.speaker is not None and not self.muted:
-                self.speaker.say(answer)
+                spoken = answer
+                if self._ask_artifact:
+                    lines = answer.count("\n") + 1
+                    if (lines > ARTIFACT_SAY_MAX_LINES
+                            or len(answer) > ARTIFACT_SAY_MAX_CHARS):
+                        # The work is on screen in full; the voice only points at it.
+                        spoken = f"a {lines}-line answer is on screen"
+                self.speaker.say(spoken)
             self._emit("note", f"answered via {note}")
         # Not IDLE: the microphone was open for the whole wait, so there may be a draft
         # by now — and a rewrite of it may already be out. Reporting nothing held would

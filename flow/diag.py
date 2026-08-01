@@ -71,6 +71,7 @@ FIELDS = frozenset({
     "mode",       # dictate | converse
     "component",  # what a version belongs to: a package, the OS, a model, a CLI
     "version",    # a version string or a revision hash, never a path
+    "artifact",   # whether the ask requested a piece of work rather than an answer
 })
 
 #: Named so that adding one to FIELDS fails loudly. These are the words themselves —

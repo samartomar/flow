@@ -476,6 +476,14 @@ the thing it was just asked.
 anything longer than what it was given, because commentary pasted into a draft is a defect.
 An answer *is* commentary, so that guard would reject every correct result.
 
+An answer is also not the only thing Ask returns. A request for a piece of work — "give
+me a complete reusable prompt", "list all the edge cases we discussed" — gets the
+artifact brief instead of the three-sentence one: no length ceiling, requested structure
+honoured, the wider `ASK_ARTIFACT_MAX_CHARS` render bound. The profile is chosen from
+the request before the CLI is called, and the spoken half changes with it — a long
+artifact is rendered whole and *spoken* as a one-line pointer, because Flow is deaf for
+exactly as long as it talks and a read-aloud prompt would cost minutes of that.
+
 ## 8. Constants, and what is behind them
 
 Only the ones with a measurement or a failure behind them. Everything else is in the source.
@@ -504,7 +512,8 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `SNAP_MAX_WORDS` | 6 | Without it, suffix-stripping turned sentence-opening gerunds into commands — "Deleting a branch does not delete the history" became a delete |
 | `refine.MAX_CHARS` | 2000 | Never hand the CLI an unbounded draft (R11). Past this only the tail is sent, cut on a sentence boundary. A Refine keeps the head verbatim and reattaches it to the result — the CLI rewrites only what it saw, and the rest of the draft is untouched rather than lost. An Ask sends only the tail; the head of an over-long question is simply never seen. Both now say so, in notes worded differently because the two behaviours differ, and the figure is `refine.tail_sent()` rather than the constant — the cut walks to a sentence boundary, so a 6300-character draft sends 1995, not 2000 |
 | `refine.TIMEOUT_SEC` | 20 s | Measurement put a normal call at 5.7–7.3 s, so the 6 s first sketched would have killed healthy calls. Enforced against the process *tree*: measured, a 0.4 s timeout used to return after 1.37 s and leave the CLI's own child running, because killing a launcher leaves the pipe its child inherited open and the read blocks on it |
-| `ASK_SENTENCES` | 3 | The shortest that can carry an answer plus its caveat. Right for a conversational answer, wrong for an artifact: "give me a complete reusable prompt from this conversation" cannot fit in three sentences, and nothing lifts the ceiling today. `ask()` already takes it as a parameter, so the fix is policy, not plumbing — queued work |
+| `ASK_SENTENCES` | 3 | The shortest that can carry an answer plus its caveat. Conversational answers only: a request for a piece of *work* — "give me a complete reusable prompt" — is recognised from the request (`edits.is_artifact_request`, matched on the ask and never guessed from the answer) and briefed without the ceiling, because truncating the deliverable the conversation was for is the product failing at its own point |
+| `ASK_ARTIFACT_MAX_CHARS` | 12 000 | The artifact render bound — a bound, not a brief: the bubble scrolls, and truncating a prompt someone asked for in full is worse than a tall bubble. The spoken half flips instead: past `ARTIFACT_SAY_MAX_LINES` / `ARTIFACT_SAY_MAX_CHARS` the voice says only "a 12-line answer is on screen", because invariant 6 makes a read-aloud artifact minutes of deafness |
 | `ASK_MAX_CHARS` | 4000 | The bubble has to render it |
 | `Thread.MAX_TURNS` / `MAX_CHARS` | 20 / 20 000 | R8. Measured: 5000 sends of a realistic prompt settle at 20 turns, 1640 chars |
 | `CONTEXT_CHARS` | 1500 | What a CLI rewrite may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |

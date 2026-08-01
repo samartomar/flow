@@ -131,6 +131,29 @@ ASK_MAX_CHARS = 4000
 #: Sentences requested. Three is the shortest that can carry an answer plus its caveat.
 ASK_SENTENCES = 3
 
+#: P9 profiles. When the request is for a piece of work — a prompt, a plan, a list —
+#: the three-sentence brief is exactly wrong: it truncates the thing the conversation
+#: was for. This prompt drops the ceiling and honours requested structure instead.
+#: The caller decides which brief applies (edits.is_artifact_request), from the
+#: request, never from the answer.
+_ASK_ARTIFACT_PROMPT = (
+    "The developer speaking to you has asked for a complete piece of work - a prompt, "
+    "a plan, a list, a document. Produce the whole thing.\n"
+    "No length ceiling applies; do not summarise parts away. Honor any structure the "
+    "request names - headings, bullets, a table - and impose none it does not.\n"
+    "Keep every concrete detail from the conversation that the work needs - names, "
+    "versions, file paths, error text - verbatim. Invent nothing that was not said.\n"
+    "Output ONLY the work itself: no preamble, no explanation around it, no code "
+    "fences unless code is the work.\n\n"
+    "REQUEST:\n{text}"
+)
+
+#: The artifact ceiling is a render bound, not a brief: the bubble scrolls, and
+#: truncating a prompt someone asked for in full is worse than a tall bubble. Three
+#: times the conversational cap covers the longest artifact seen in design review
+#: (~60 lines) with room; past it the model is padding, not working.
+ASK_ARTIFACT_MAX_CHARS = 12_000
+
 
 def _split_tail(text: str) -> tuple[str, str]:
     """Return (head_kept_verbatim, tail_to_refine) respecting MAX_CHARS."""
@@ -337,8 +360,15 @@ def ask(
     context: list[str] | None = None,
     sentences: int = ASK_SENTENCES,
     cancel: threading.Event | None = None,
+    artifact: bool = False,
 ) -> tuple[str | None, str]:
     """P9: put a question to the agent CLI and return its answer.
+
+    `artifact=True` swaps the three-sentence conversational brief for the
+    deliverable one: no length ceiling in the prompt, requested structure honoured,
+    and a wider render bound (`ASK_ARTIFACT_MAX_CHARS`). The caller chooses from the
+    *request* — see `edits.is_artifact_request` — because an answer's length cannot
+    reveal which brief it should have been given.
 
     The sibling of `refine`, and deliberately not the same function. `refine` rewrites
     the user's words and guards hard against the model returning anything longer than
@@ -360,7 +390,11 @@ def ask(
         return None, "no agent CLI found on PATH"
 
     _, tail = _split_tail(question)
-    prompt = _ASK_PROMPT.format(text=tail, sentences=sentences)
+    prompt = (
+        _ASK_ARTIFACT_PROMPT.format(text=tail)
+        if artifact
+        else _ASK_PROMPT.format(text=tail, sentences=sentences)
+    )
     if context:
         prior = chr(10).join(f"- {turn}" for turn in context)
         prompt = (
@@ -375,6 +409,7 @@ def ask(
     answer = _clean(out)
     if not answer:
         return None, f"{chosen.name} returned nothing"
-    if len(answer) > ASK_MAX_CHARS:
-        answer = answer[: ASK_MAX_CHARS - 1].rstrip() + "…"
+    cap = ASK_ARTIFACT_MAX_CHARS if artifact else ASK_MAX_CHARS
+    if len(answer) > cap:
+        answer = answer[: cap - 1].rstrip() + "…"
     return answer, chosen.name

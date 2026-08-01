@@ -171,6 +171,33 @@ _POLISH = re.compile(
     re.I,
 )
 
+#: P9. The converse requests that ask for a piece of *work* rather than an answer.
+#: `ASK_SENTENCES` exists to keep a spoken reply carryable, and it is exactly wrong for
+#: "give me a complete reusable prompt" — the request this product exists to serve
+#: cannot fit its own ceiling. The profile is decided here, from the request, never
+#: guessed from the answer's length after the fact.
+#:
+#: A search, not an anchored match like `_POLISH`: the canonical phrasing is "based on
+#: our conversation, give me…", and its preamble is not a lead-in the grammar knows.
+#: The accepted false-positive cost is an essay where three sentences were wanted;
+#: the false negative truncates someone's work, which is worse.
+_ARTIFACT = re.compile(
+    r"\b(?:"
+    r"(?:give|send|show|get) me (?:a|an|the|my) (?:\w+[- ]){0,3}?"
+    r"(?:prompt|list|plan|checklist|template|summary|spec|write[- ]?up|document|"
+    r"breakdown)|"
+    r"(?:write|draft|generate|compose) (?:me )?(?:a|an|the)\b|"
+    r"list (?:all|every|the)\b|"
+    r"as a (?:table|checklist|list|markdown|json|yaml)\b"
+    r")",
+    re.I,
+)
+
+
+def is_artifact_request(utterance: str) -> bool:
+    """Whether a converse-mode question is asking for a deliverable (P9 profiles)."""
+    return bool(_ARTIFACT.search(utterance))
+
 # Verbs that ask for judgement rather than a substitution — these are the only
 # utterances allowed to reach a CLI.
 _SEMANTIC = re.compile(
