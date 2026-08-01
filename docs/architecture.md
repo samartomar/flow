@@ -194,6 +194,11 @@ the event stream.
 | `REFINING` | blue | ⋯ `refining` | live | a CLI rewrite is in flight, ~6 s |
 | `ASKING` | violet | ⋯ `asking` | live | a converse-mode question is with the CLI, ~8–10 s |
 
+The last two are held for the whole call. Routing keeps running while a CLI call is out —
+the microphone never closed — and it used to end every utterance by setting `DRAFT`, which
+took the pill off `REFINING` while the rewrite was still in flight. `ASKING` outranks
+`REFINING` when both are out, matching the order `activity` reads them in.
+
 ### What Flow is doing, and whether it can hear
 
 `State` is not the whole answer. Three of the things the user waits on are not states at
@@ -526,27 +531,26 @@ policy here; it is enforced by absence.
     it had never held: the Ctrl-V went to a Tk canvas, which ignores it, and `paste()`
     returned True — a failure with no symptom anywhere, which is why it survived every
     harness in the list below.
+11. **An old result never overwrites newer intent.** Every CLI call carries an operation
+    id and the `Draft.revision` it was computed from. A rewrite whose draft moved during
+    the ~7 s it took is discarded with a note saying so, rather than deleting whatever was
+    said in the meantime; a result for a call nobody is waiting on is ignored. In-flight
+    work owns the state until it returns, and `send()` and the converse countdown ask the
+    calls themselves rather than reading the pill. A second rewrite is refused while one
+    is out, the way a second Send already was.
 
 ### Gaps that are one fix away from being invariants
 
 Written down so the reference does not claim them early. The wording above is already
 narrowed to stay true while these are open; each is queued work.
 
-1. **A CLI result carries no identity.** `_pump_refine` applies whatever comes back to
-   whatever draft is current — no operation id, no draft revision, no staleness check.
-   Routing keeps running while a rewrite is in flight, and `_after_draft_change` then
-   overwrites REFINING with DRAFT — which re-arms the converse countdown and defeats
-   `send()`'s still-rewriting refusal. The compound case is reachable today: speak during
-   a slow rewrite in converse mode and a stale result can reappear as a fresh draft and
-   be auto-asked with no user action. Undo recovers the words; nothing recalls the
-   question.
-2. **Nothing cancels a CLI call.** The refine and ask threads run `subprocess.run` to
+1. **Nothing cancels a CLI call.** The refine and ask threads run `subprocess.run` to
    completion. Quitting Flow does not terminate the child process tree, and a superseded
    call cannot be abandoned before its timeout.
-3. **The provider is named only at startup.** The console diagnostics say which CLI will
+2. **The provider is named only at startup.** The console diagnostics say which CLI will
    answer and the notes say which one did, but nothing on the pill says — before the
    fact — that Ask goes to `codex` and off the machine.
-4. **The paste target is revalidated only against Flow.** `resolve()` refuses when Flow
+3. **The paste target is revalidated only against Flow.** `resolve()` refuses when Flow
    itself holds the foreground; a third window that took focus between the poll and the
    click still receives the Ctrl-V. And the clipboard restore writes back unconditionally
    after 0.6 s — `GetClipboardSequenceNumber` is the check it should make first.
@@ -555,7 +559,7 @@ narrowed to stay true while these are open; each is queued work.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (437 tests, ~3 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring |
+| units | `tests/` (465 tests, ~3.5 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

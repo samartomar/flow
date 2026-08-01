@@ -250,6 +250,10 @@ class Draft:
     """
 
     text: str = ""
+    #: Bumped on every change. A CLI rewrite costs ~7 s with the microphone open, so
+    #: by the time one comes back the text it was computed from may no longer exist;
+    #: this is how the caller can tell without keeping a copy of it.
+    revision: int = 0
     _history: list[str] = field(default_factory=list)
     MAX_HISTORY = 30
     #: R8: 30 snapshots of a very long draft is the one place undo can quietly become
@@ -257,7 +261,10 @@ class Draft:
     MAX_HISTORY_CHARS = 200_000
 
     def _remember(self) -> None:
+        # Every mutation but `undo` snapshots first, so this is also the one place
+        # that knows the text is about to change. `undo` bumps the revision itself.
         self._history.append(self.text)
+        self.revision += 1
         while len(self._history) > self.MAX_HISTORY or (
             len(self._history) > 1
             and sum(len(h) for h in self._history) > self.MAX_HISTORY_CHARS
@@ -282,6 +289,7 @@ class Draft:
         if not self._history:
             return False
         self.text = self._history.pop()
+        self.revision += 1
         return True
 
     def clear(self) -> str:
@@ -332,8 +340,16 @@ class Session:
         self._decoded_sec = 0.0
         self._events: deque[Event] = deque()
         self._refine_cwd = refine_cwd
-        self._refine_result: tuple[str | None, str] | None = None
+        #: (op, draft revision, result) — see `_next_op`.
+        self._refine_result: tuple[int, int, tuple[str | None, str]] | None = None
         self._refine_lock = threading.Lock()
+        #: Identity for CLI calls, and the id of whichever one is in flight. `state`
+        #: cannot carry this: routing keeps running while a call is out and used to
+        #: overwrite REFINING with DRAFT, after which everything that read the state
+        #: believed no CLI work was happening.
+        self._op = 0
+        self._refine_op: int | None = None
+        self._ask_op: int | None = None
         #: P9: dictate (paste into the focused window) or converse (ask the CLI).
         self.mode = DICTATE
         #: Spoken replies. None means the engine was unavailable or refused.
@@ -354,7 +370,7 @@ class Session:
         #: None disables learning entirely — the tests and the benchmarks pass None so
         #: a harness run never writes to the user's real profile.
         self.profile = profile
-        self._ask_result: tuple[str | None, str] | None = None
+        self._ask_result: tuple[int, tuple[str | None, str]] | None = None
         self._ask_lock = threading.Lock()
         #: The last answer, kept so the UI can re-render it and so a follow-up has
         #: something to refer to.
@@ -441,6 +457,35 @@ class Session:
         if state != self.state:
             self.state = state
             self._emit("state", state.value)
+
+    def _next_op(self) -> int:
+        """Identity for one CLI call.
+
+        Monotonic, so a result can be matched against the intent that asked for it
+        instead of against whatever happens to be current when it lands. What it buys
+        on its own is small — one call of each kind is in flight at a time — and it is
+        what a cancelled call will be recognised by once one can be cancelled.
+        """
+        self._op += 1
+        return self._op
+
+    def _settle_state(self) -> None:
+        """Set the state to what is actually true, with in-flight CLI work winning.
+
+        This used to be an unconditional `DRAFT if draft else IDLE` at the end of every
+        route, so speaking during a rewrite dropped REFINING to DRAFT — and everything
+        that reads `state` believed it: `send()` stopped refusing, and the converse
+        countdown re-armed against a draft the CLI was still holding.
+
+        Asking outranks refining for the same reason `activity` lists it first: it is
+        the one the user is waiting on an answer from.
+        """
+        if self._ask_op is not None:
+            self._set_state(State.ASKING)
+        elif self._refine_op is not None:
+            self._set_state(State.REFINING)
+        else:
+            self._set_state(State.DRAFT if self.draft.text else State.IDLE)
 
     @property
     def hearing(self) -> bool:
@@ -924,7 +969,7 @@ class Session:
         return forced
 
     def _after_draft_change(self) -> None:
-        self._set_state(State.DRAFT if self.draft.text else State.IDLE)
+        self._settle_state()
         # Every route ends here — dictation, a local edit, an undo, a rescue — so this
         # is the one place that knows the draft has stopped moving. A correction
         # restarts the clock, which is what keeps the draft correctable until it fires.
@@ -936,14 +981,21 @@ class Session:
     def _auto_ask_armed(self) -> bool:
         """Whether a settled converse-mode draft is counting down to being asked.
 
-        Every clause is a way the user is still busy: the gate is open, audio is waiting
-        to be decoded, a decode is running, or the previous answer is still playing —
-        during which the microphone is gated, so silence proves nothing about them.
+        Every clause is a way the draft is not finished with: a CLI call is holding it,
+        the gate is open, audio is waiting to be decoded, a decode is running, or the
+        previous answer is still playing — during which the microphone is gated, so
+        silence proves nothing about the user.
+
+        The two CLI clauses ask the calls themselves rather than reading `state`. That
+        is the whole defect this pins: routing overwrote REFINING with DRAFT, the
+        countdown re-armed against a draft a rewrite was still out on, and the question
+        went unrewritten with no press.
         """
         return (
             self.auto_ask
             and self.mode == CONVERSE
-            and self.state is State.DRAFT
+            and self._refine_op is None
+            and self._ask_op is None
             and self._settled_at is not None
             and bool(self.draft.text.strip())
             and not self.gate.speaking
@@ -985,7 +1037,16 @@ class Session:
     # -- semantic refine (off-thread: ~7 s measured) ------------------------
 
     def _start_refine(self, instruction: str, *, polish: bool = False) -> None:
-        self._set_state(State.REFINING)
+        if self._refine_op is not None:
+            # The refusal `send()` already makes, for the same reason. Two rewrites of
+            # one draft race to write it, and the loser's words are the user's.
+            self._emit("note", "still rewriting — say that again when it lands")
+            return
+        op = self._refine_op = self._next_op()
+        # The version this rewrite is an answer about. The draft stays editable for
+        # the whole ~7 s the CLI takes, so the result has to be checked against it.
+        revision = self.draft.revision
+        self._settle_state()
         self._emit(
             "note",
             "shaping that into a prompt" if polish
@@ -1001,18 +1062,28 @@ class Session:
                 context=context,
             )
             with self._refine_lock:
-                self._refine_result = result
+                self._refine_result = (op, revision, result)
 
         threading.Thread(target=work, daemon=True, name="refine").start()
 
     def _pump_refine(self) -> None:
         with self._refine_lock:
-            result, self._refine_result = self._refine_result, None
-        if result is None:
+            pending, self._refine_result = self._refine_result, None
+        if pending is None:
             return
-        revised, note = result
+        op, revision, (revised, note) = pending
+        if op != self._refine_op:
+            # A result for a call nobody is waiting on any more — the same rule as a
+            # rescue nobody asked for: ignore it rather than act on it.
+            return
+        self._refine_op = None
         if revised is None:
             self._emit("error", f"refine failed ({note}) — draft unchanged")
+        elif revision != self.draft.revision:
+            # A rewrite of text that no longer exists. Applying it would delete
+            # whatever was said while the CLI was thinking, and would do it invisibly,
+            # because what replaced the draft reads like a plausible draft.
+            self._emit("note", "discarded a stale rewrite — the draft moved on")
         else:
             self.draft.set(revised)
             self._emit("note", f"refined via {note}")
@@ -1093,10 +1164,12 @@ class Session:
         if not self.draft.text.strip():
             self._emit("note", "nothing to send - the draft is empty")
             return ""
-        if self.state is State.ASKING:
+        # The in-flight calls, not `state`: the state is a display of what is happening
+        # and routing can move it, while these two are the fact itself.
+        if self._ask_op is not None:
             self._emit("note", "still waiting on the last answer")
             return ""
-        if self.state is State.REFINING:
+        if self._refine_op is not None:
             self._emit("note", "still rewriting - one moment")
             return ""
         text = self.draft.clear()
@@ -1120,6 +1193,7 @@ class Session:
 
     def _start_ask(self, question: str) -> None:
         """P9: put the draft to the CLI off the hot path (R11) and wait for the reply."""
+        op = self._ask_op = self._next_op()
         self._set_state(State.ASKING)
         self._emit("note", "asking…")
         # The thread already holds this question (send() added it), so the context is
@@ -1130,16 +1204,19 @@ class Session:
         def work() -> None:
             result = ask(question, cwd=self._refine_cwd, context=context)
             with self._ask_lock:
-                self._ask_result = result
+                self._ask_result = (op, result)
 
         threading.Thread(target=work, daemon=True, name="ask").start()
 
     def _pump_ask(self) -> None:
         with self._ask_lock:
-            result, self._ask_result = self._ask_result, None
-        if result is None:
+            pending, self._ask_result = self._ask_result, None
+        if pending is None:
             return
-        answer, note = result
+        op, (answer, note) = pending
+        if op != self._ask_op:
+            return
+        self._ask_op = None
         if answer is None:
             # Non-destructive by construction: the question is still in the thread, so
             # "say that again" and a retry both still work.
@@ -1154,7 +1231,10 @@ class Session:
             if self.speaker is not None and not self.muted:
                 self.speaker.say(answer)
             self._emit("note", f"answered via {note}")
-        self._set_state(State.IDLE)
+        # Not IDLE: the microphone was open for the whole wait, so there may be a draft
+        # by now — and a rewrite of it may already be out. Reporting nothing held would
+        # also stop the countdown that was running on that draft, silently.
+        self._settle_state()
 
     def wait_idle(self, timeout: float = 30.0) -> bool:
         """Pump until no decode or refine is outstanding. For tests and harnesses."""
@@ -1163,8 +1243,8 @@ class Session:
             self.tick()
             if (
                 not self.worker.busy
-                and self.state is not State.REFINING
-                and self.state is not State.ASKING
+                and self._refine_op is None
+                and self._ask_op is None
                 and not self._utter
             ):
                 return True
