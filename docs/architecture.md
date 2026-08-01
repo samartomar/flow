@@ -23,7 +23,7 @@ flowchart TB
     core["<b>Core</b> — pure python, no model, microseconds<br/>session.py · edits.py · phonetic.py · thread.py"]
     speech["<b>Speech in</b> — lazy, and where the memory is<br/>audio.py · asr.py · clean.py"]
     personal["<b>Personal</b> — plain files under ~/.flow, never sent<br/>calibrate.py · profile.py · lexicon.py"]
-    external["<b>Out of process</b> — nothing leaves the machine<br/>refine.py · speak.py"]
+    external["<b>Out of process</b> — the only band that can reach the network<br/>refine.py · speak.py"]
     surface --> core --> speech
     personal -. "learned terms bias both tiers" .-> speech
     external -. "half-duplex: mic is not evidence while talking" .-> speech
@@ -38,6 +38,30 @@ The three dotted edges are the couplings that are not obvious from the data flow
 the agent CLI is reached only for a rewrite or a question, Flow goes deaf while it talks,
 and what the profile learns is merged into the lexicon at read time — never written into
 the user's own file — so the merged result biases both decoder tiers.
+
+### What leaves the machine
+
+That band used to be labelled "nothing leaves the machine", and the label was wrong. It
+described the *process* boundary — no API key is read, no HTTP client is linked (R9) —
+and read as a *data* boundary, which it is not: `codex` and `claude` are cloud-backed
+CLIs, and starting a local executable is not the same as staying local. The data
+boundary is this:
+
+- **Always local.** Microphone audio, the utterance buffers, the lexicon, the profile,
+  every local edit, and SAPI speech. R9 is enforced by absence — there is no code in
+  those modules that could send anything anywhere.
+- **Sent to the configured agent CLI, and so to its provider.** A Refine sends the
+  draft tail (≤ `refine.MAX_CHARS`) plus the instruction; an Ask sends the question
+  tail plus the thread tail. Assume that text reaches whatever service the CLI is
+  signed into.
+- **Network, but never user content.** The first decode of each tier downloads its
+  model from Hugging Face.
+- **The desktop boundary.** Send places the draft on the Windows clipboard, where any
+  clipboard manager or cloud-clipboard sync the user runs will also see it.
+
+The startup diagnostics name the CLI that will answer; the notes name the one that did.
+Nothing on the pill yet says, before the fact, that Ask goes off the machine — that gap
+is queued work, listed with the others at the end of §10.
 
 | Module | Band | Does |
 |---|---|---|
@@ -258,21 +282,27 @@ instead.
 ```mermaid
 flowchart LR
     s1["Start<br/>0.40 s import<br/>43 MB"]
-    s2["Armed<br/>base.en, 141 MiB<br/>181 MB"]
-    s3["First final<br/>small.en, 464 MiB<br/>450 MB"]
+    s2["Armed<br/>base.en ready first<br/>181 MB"]
+    s3["Preload done<br/>small.en resident too<br/>450 MB"]
     s4["Idle 5 min<br/>both released<br/>100 MB"]
     s1 -->|"click the pill"| s2
-    s2 -->|"an utterance ends"| s3
+    s2 -->|"the preload thread keeps going"| s3
     s3 -->|"no speech, no draft"| s4
-    s4 -. "the mic was never closed, so speech wakes it" .-> s2
+    s4 -. "the mic was never closed, so speech wakes it;<br/>now each tier reloads only when its path runs" .-> s2
     classDef heavy fill:#d6e4ff,stroke:#3b6ea5,color:#12314f
     class s2,s3 heavy
 ```
 
-Each tier loads lazily and independently, which is the point: a session that shows partials
-and never finalises an utterance never pays for `small.en` at all. `Session.start()` spawns
-the preload thread and does **not** await it — a first run includes the download, and doing
-that inline froze the whole UI on the first click with nothing on screen to explain why.
+Arming pays for both tiers, deliberately. `Session.start()` spawns the preload thread and
+does **not** await it — a first run includes the download, and doing that inline froze the
+whole UI on the first click with nothing on screen to explain why — and that thread warms
+`base.en` first, then `small.en`, so the fast tier is ready soonest and the first final is
+a decode rather than a model build. An earlier version of this section claimed a session
+that never finalises an utterance never pays for `small.en`. That is a property of
+`WhisperTranscriber` on its own, not of the app — the preload row in the thread table had
+said "warms both tiers" all along, and the code agrees. Where the lazy per-tier load is
+real is **after** an idle unload: nothing preloads a second time, so a wake-up reloads
+only the tier the next decode actually needs.
 
 The idle unload at `IDLE_UNLOAD_SEC` releases both models and **keeps the microphone open**.
 That is a deliberate narrowing of the original design, which released the mic too: releasing
@@ -431,9 +461,9 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `CONFIDENCE_MARGIN` | −0.5 | The distance between the US control's −0.29 median and the shipped −0.8, so a calibrated typical speaker keeps exactly the behaviour they had |
 | `MATCH_THRESHOLD` | 0.82 | Swept, not chosen: 10/10 real mis-transcription pairs recovered at 4 false spans in 354; stricter costs three recoveries and buys nothing until 0.90 |
 | `SNAP_MAX_WORDS` | 6 | Without it, suffix-stripping turned sentence-opening gerunds into commands — "Deleting a branch does not delete the history" became a delete |
-| `refine.MAX_CHARS` | 2000 | Never hand the CLI an unbounded draft (R11). Past this only the tail is sent, cut on a sentence boundary |
+| `refine.MAX_CHARS` | 2000 | Never hand the CLI an unbounded draft (R11). Past this only the tail is sent, cut on a sentence boundary. A Refine keeps the head verbatim and reattaches it to the result — the CLI rewrites only what it saw, and the rest of the draft is untouched rather than lost. An Ask sends only the tail; the head of an over-long question is simply never seen. Neither path tells the user yet — that note is queued work |
 | `refine.TIMEOUT_SEC` | 20 s | Measurement put a normal call at 5.7–7.3 s, so the 6 s first sketched would have killed healthy calls |
-| `ASK_SENTENCES` | 3 | The shortest that can carry an answer plus its caveat |
+| `ASK_SENTENCES` | 3 | The shortest that can carry an answer plus its caveat. Right for a conversational answer, wrong for an artifact: "give me a complete reusable prompt from this conversation" cannot fit in three sentences, and nothing lifts the ceiling today. `ask()` already takes it as a parameter, so the fix is policy, not plumbing — queued work |
 | `ASK_MAX_CHARS` | 4000 | The bubble has to render it |
 | `Thread.MAX_TURNS` / `MAX_CHARS` | 20 / 20 000 | R8. Measured: 5000 sends of a realistic prompt settle at 20 turns, 1640 chars |
 | `CONTEXT_CHARS` | 1500 | What a CLI rewrite may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |
@@ -448,7 +478,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `~/.flow/lexicon.txt` | never by Flow | the user's own terms. Read-only to the app; re-read by mtime on every decode |
 | `~/.flow/profile.json` | `--calibrate`, every Send, and choosing a voice | schema 1. Room, voice, this speaker's confidence, learned confusion pairs, misroute signatures, and which installed voice reads the replies (additive — an older profile loads with none). Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
-| `.bench/` | `scripts/` only | generated audio, benchmark results and the volunteer recordings. **Tracked**, because a result is a measurement taken at a moment and a recording is a person — neither is reproducible by re-running anything. The downloadable accent corpora are excluded and their manifests are not; [`.bench/README.md`](../.bench/README.md) is the inventory |
+| `.bench/` | `scripts/` only | generated audio, benchmark results and the volunteer recordings. **Tracked**, because a result is a measurement taken at a moment and a recording is a person — neither is reproducible by re-running anything. A recording being a person is also a constraint, not only a reason to keep it: the clips ride every clone and push (they are on the private origin today), so this history must never be made public while they are in it, and any open-sourcing starts with moving them out and rewriting history — an owner's decision, never a cleanup script's. The downloadable accent corpora are excluded and their manifests are not; [`.bench/README.md`](../.bench/README.md) is the inventory |
 
 Send is the commit point for the profile: rare, user-initiated, and the moment a session's
 corrections have proved themselves by surviving to a handoff.
@@ -464,10 +494,19 @@ policy here; it is enforced by absence.
    start a subprocess.
 3. **Failure is non-destructive.** Every CLI path returns `(None, reason)` and the caller
    keeps the pre-edit draft. A rescue that fails puts the words back exactly where they were.
-4. **Nothing is dropped silently.** A rejected segment becomes a `drop` event with its
-   evidence; a destructive edit reports the words it removed; the undo stack still holds them.
-5. **Nothing sends itself.** Stopping speech produces a held draft. Send is always explicit.
-   A Send that refuses says why — a button that does nothing reads as broken.
+4. **No words are dropped silently.** A rejected segment becomes a `drop` event with its
+   evidence; a destructive edit reports the words it removed; the undo stack still holds
+   them. The microphone queue is the current boundary of this promise: if the UI thread
+   stalls past ~16 s — the right-click menu's modal loop is the one known way — it drops
+   oldest-first and only counts. `Mic.dropped` is read by nothing in the app yet, so that
+   overflow would be silent. Rare is not never; surfacing it is queued work.
+5. **Nothing is pasted without an explicit Send.** Stopping speech produces a held draft,
+   and text never reaches another window on its own. Converse mode is the one narrow
+   exception to the broader claim this used to make: a settled draft may go to the CLI
+   after `AUTO_ASK_SEC`, behind a countdown that sits on the Ask button, is held by
+   speech, and can be cancelled or switched off — R5 protects the *irreversible* act, and
+   asking is not one. A Send that refuses says why — a button that does nothing reads as
+   broken.
 6. **Flow does not listen to itself, and does not claim to.** While a reply is playing the
    microphone is not evidence. There is no echo cancellation and there is not going to be
    one (R16), so converse mode is half-duplex and interrupting is an explicit action. A VAD
@@ -488,6 +527,30 @@ policy here; it is enforced by absence.
     returned True — a failure with no symptom anywhere, which is why it survived every
     harness in the list below.
 
+### Gaps that are one fix away from being invariants
+
+Written down so the reference does not claim them early. The wording above is already
+narrowed to stay true while these are open; each is queued work.
+
+1. **A CLI result carries no identity.** `_pump_refine` applies whatever comes back to
+   whatever draft is current — no operation id, no draft revision, no staleness check.
+   Routing keeps running while a rewrite is in flight, and `_after_draft_change` then
+   overwrites REFINING with DRAFT — which re-arms the converse countdown and defeats
+   `send()`'s still-rewriting refusal. The compound case is reachable today: speak during
+   a slow rewrite in converse mode and a stale result can reappear as a fresh draft and
+   be auto-asked with no user action. Undo recovers the words; nothing recalls the
+   question.
+2. **Nothing cancels a CLI call.** The refine and ask threads run `subprocess.run` to
+   completion. Quitting Flow does not terminate the child process tree, and a superseded
+   call cannot be abandoned before its timeout.
+3. **The provider is named only at startup.** The console diagnostics say which CLI will
+   answer and the notes say which one did, but nothing on the pill says — before the
+   fact — that Ask goes to `codex` and off the machine.
+4. **The paste target is revalidated only against Flow.** `resolve()` refuses when Flow
+   itself holds the foreground; a third window that took focus between the poll and the
+   click still receives the Ctrl-V. And the clipboard restore writes back unconditionally
+   after 0.6 s — `GetClipboardSequenceNumber` is the check it should make first.
+
 ## 11. Testing layers
 
 | Layer | Harness | What it can and cannot see |
@@ -497,7 +560,7 @@ policy here; it is enforced by absence.
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
 | looking at it | `scripts/ui_probe.py` | renders the pill and bubble against a fake session that walks every state, so there is something to screenshot without a microphone, a model or a person. `--hold STATE` pins one; `--bare` drops the draft, which is the case the indicator exists for; `--sent` presses Send, which is the only way to see the card that stays behind |
-| a person | `scripts/live_check.py` | the only thing that can answer P1 and P3. Needs recordings that do not exist yet |
+| a person | `scripts/live_check.py` | the only layer that can answer P1 and P3 *live*: a real room, a real microphone, this speaker, this loop. Needs someone at the desk, so it can never run unattended. The recorded layer beside it — `.bench/recorded/`, two speaker groups so far — covers decoding and routing on real voices, but not this live capture path, and two groups is a smoke check, not accent coverage |
 
 The self-drive layer exists because three consecutive sessions each found a defect by hand
 that no layer-specific harness could have caught: a chip whose label the grammar rejected, a
@@ -517,6 +580,12 @@ synthetic Tk event cannot do. A harness that cannot reproduce the defect cannot 
 Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8. The rows marked **↻**
 were re-measured on 2026-08-01 — four when the indicator was added, and the Send rows when
 the paste target was fixed; the rest are as recorded on the 31st and were not re-run.
+
+The boundary, loading and invariant corrections dated 2026-08-01 were read from source
+(`refine.py`, `session.py`, `asr.py`, `inject.py`), not re-measured. One number moved
+stages rather than changing: the 450 MB reading now sits at "preload done" instead of
+"first final", because that is when both models are resident; a fresh soak measurement of
+the arm → preload-done timeline is queued work.
 
 | Check | Command | Result |
 |---|---|---|
