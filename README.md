@@ -2,7 +2,7 @@
 
 Local English dictation with a talk-to-it refine loop, and a voice conversation with the
 agent CLI you already have. Speak, watch the text build, correct it by voice — then paste
-it into whatever has focus, or ask it as a question and hear the answer back.
+it into the window you were working in, or ask it as a question and hear the answer back.
 
 Windows. English only. Three declared dependencies. No API key.
 
@@ -41,7 +41,7 @@ correct it, keep talking to add more, then **Send** (pastes) or **Ask** (convers
 | **Remember the thread** | Send doesn't erase — "follow up" and "bring back my last prompt" both work |
 | **Silence stays silent** | Whisper invents words on silence and noise; those are filtered out, and every rejection is shown |
 | **Adapts to you** | One 60-second calibration measures your room and your voice instead of guessing |
-| **Send** | Pastes into whatever window has focus, without pressing Enter for you |
+| **Send** | Pastes into the window you were working in, without pressing Enter for you |
 
 ## Requirements
 
@@ -115,7 +115,8 @@ hotkey  toggle   ctrl+alt+space
 hotkey  send     ctrl+alt+enter
 hotkey  cancel   ctrl+alt+esc
 hotkey  mode     ctrl+alt+M
-click the pill to arm | right-click for the menu | esc quits
+hotkey  quit     ctrl+alt+Q
+click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 ```
 
 ### Flags
@@ -149,16 +150,29 @@ not show a green pill that is quietly recording nothing.
 | send the draft | `ctrl+alt+enter` | `ctrl+shift+enter` |
 | clear the draft | `ctrl+alt+esc` | `ctrl+shift+esc` |
 | dictate ⇄ converse | `ctrl+alt+M` | `ctrl+shift+M` |
+| quit | `ctrl+alt+Q` | `ctrl+shift+Q` |
 
 Combos already owned by another app fall back automatically, in that order. The startup
 log prints which one actually registered, so a dead shortcut is never a silent mystery;
 if every alternative for an action is taken, that is printed too.
 
+Quit used to be `Esc`, and `Esc` was a Tk key binding on the pill. The pill does not take
+keyboard focus any more — that is what makes Send land in the window you were working in
+— so that binding could never fire again, and a documented shortcut that silently does
+nothing is worse than no shortcut. It is a global hotkey now, like the rest.
+
 ### The pill and the bubble
 
 Right-click the pill for **Send**, **Converse/Dictate mode**, **Mute/Speak replies**
 (only when a speech engine was found), **Clear draft** and **Quit**. Drag it anywhere —
-it stays inside the desktop work area. `Esc` quits.
+it stays inside the desktop work area.
+
+**Neither window ever takes the focus.** Both carry `WS_EX_NOACTIVATE`, so clicking the
+pill, dragging it, or pressing Send leaves the foreground exactly where it was — in the
+editor or terminal you are dictating into. The one exception is the right-click menu,
+which borrows the foreground for as long as it is open and hands it straight back: a
+Windows popup menu only receives input while its owner is in front, and without that it
+posts and never closes.
 
 The pill's colour is the state:
 
@@ -209,10 +223,18 @@ The chips:
 | **Continue** | force the next utterance to be dictation |
 | **Was a command** | re-read the last dictation as an instruction (only shown when there is something to re-read) |
 | **Send** / **Ask** | hand the draft off — pasted in dictate mode, put to the CLI in converse mode |
+| **Put it back** | return the words a Send just took (shown on the sent card, for 4 s) |
 
 Refine and Continue are the escape hatch for when the router guesses wrong. They apply to
 the **next** utterance and expire after 30 seconds, so a chip pressed and then forgotten
 cannot silently reroute an unrelated sentence a minute later.
+
+After a Send in dictate mode the bubble does not vanish. It holds what was just sent for
+four seconds, dimmed, under a **sent** label, with a **Put it back** chip counting down —
+so a Send that went somewhere unexpected costs one click rather than the whole utterance.
+The words are in the thread either way and *"bring back my last prompt"* still works long
+afterwards; the chip is there because a mis-aimed Send and a good one used to leave
+exactly the same empty screen behind.
 
 Partial text is dimmed and italic: partials come from the faster model and can contain
 nonsense at mid-word boundaries, so "not final yet" has to be visible. A converse-mode
@@ -221,10 +243,18 @@ the one confusion converse mode can create that dictate mode cannot.
 
 ## Dictate mode
 
-The default. Send pastes the draft into whatever window has focus, via the clipboard plus
-a synthetic `Ctrl+V`.
+The default. Send pastes the draft into the window you were working in, via the clipboard
+plus a synthetic `Ctrl+V`.
 
-**Flow never presses Enter for you.** The focused window is classified before the
+**The window you were working in**, and not "whatever has focus at the time", which is
+what this used to say and used to do. Pressing Send is a click, and a click can move the
+focus; asking the OS what has focus *after* it is a question with the wrong answer. Flow
+polls the foreground every 30 ms, keeps the last one that was not its own window, and
+hands that to the paste explicitly. If the paste is somehow still aimed at Flow itself,
+it refuses and says so rather than pretending — a Ctrl+V into Flow's own canvas does
+nothing at all, and that is a bug to report, not a paste to attempt.
+
+**Flow never presses Enter for you.** The target window is classified before the
 clipboard is touched — by window class *or* process name — and a draft ending in a newline
 has that newline stripped when the target is a terminal. That is the failure worth
 preventing, because a trailing newline in a shell does not paste, it *runs*.
@@ -235,7 +265,8 @@ ConEmu) hands the whole block to the shell as literal text; one without (`cmd.ex
 `conhost`) runs each line as it arrives. Flow cannot change that from outside — the
 terminal adds the bracket markers itself on `Ctrl+V`, so writing them onto the clipboard
 would produce a second, literal pair in your text. Pasting multiple lines into a terminal
-that does not bracket prints a warning naming the process.
+that does not bracket prints a warning naming the process — in the bubble, on the card
+that holds what was just sent, so it is somewhere you are already looking.
 
 The clipboard is restored about 0.6 s after the paste, so Flow does not permanently own it.
 
@@ -526,7 +557,7 @@ flow/
   inject.py    clipboard + SendInput, and terminal-safe paste (ctypes, P7)
   hotkey.py    RegisterHotKey on its own message-loop thread (ctypes)
 scripts/       benchmarks, probes, the soak test and the self-drive harness
-tests/         381 tests: routing, state machine, filters, phonetics, resilience
+tests/         437 tests: routing, state machine, filters, phonetics, resilience
 docs/          what Flow is for, the roadmap, the analysis, the recording kit
 ```
 
@@ -542,7 +573,7 @@ the event stream and the tuning constants with the measurements behind them.
 uv run python -m unittest discover -s tests
 ```
 
-381 tests, ~4 s, no microphone or model required — the fakes are injectable precisely so
+437 tests, ~3 s, no microphone or model required — the fakes are injectable precisely so
 the routing logic, where the subtle bugs live, can be tested without either.
 
 The end-to-end harness is the one that catches what unit tests cannot:
@@ -553,10 +584,23 @@ uv run python scripts/selfdrive.py
 
 A Windows SAPI voice speaks each utterance to a WAV; the WAV is fed to a real `Session` as
 microphone blocks, through the real gate, the real two-tier decoder, the real router and
-the real apply. 29 checks covering dictation, five correction shapes, undo, rescue, send,
+the real apply. 64 checks covering dictation, five correction shapes, undo, rescue, send,
 converse against the live CLI, a spoken follow-up, the asking-state UI, calibration, the
-learning loop and window placement. It found two real defects on its first outings, both
-of which every layer-specific harness had missed.
+learning loop, window placement and the chips. It found two real defects on its first
+outings, both of which every layer-specific harness had missed.
+
+There is one thing it cannot see, and it is the one that mattered most. It clicks chips
+with `event_generate`, which hands Tk an event without Windows ever being involved — so
+its clicks cannot move the focus, and for the whole life of the project it stayed green
+while a *real* click on Send pasted into nothing at all. That needs a real mouse:
+
+```bash
+uv run python scripts/send_check.py --live
+```
+
+It opens an ordinary window and a console, clicks Send where the chip is actually drawn,
+and reads back what arrived in each. Before the fix: 6 of 12 checks, nothing delivered
+anywhere, and Send reporting success. After: 18 of 18.
 
 ### The scripts
 
@@ -579,10 +623,11 @@ of which every layer-specific harness had missed.
 | `polish_check.py` | does the polish verb keep the facts, and does it fit the budget (P5) |
 | `refine_check.py` | end-to-end check of the CLI refine path |
 | `inject_check.py` | clipboard and paste-target classification, without side effects |
+| `send_check.py` | do the words a pressed Send hands over actually arrive — `--live` opens a window and a console and clicks the chip with the real mouse |
 | `fetch_accent_data.py` | pull per-accent evaluation slices into `.bench/` |
 | `ingest_recordings.py` | turn a volunteer's phone recording into scored clips (P3) |
 | `tk_probe.py` | the window attributes the pill depends on |
-| `ui_probe.py` | render the pill and bubble against a fake session that walks every state — `--hold STATE` pins one, `--bare` drops the draft |
+| `ui_probe.py` | render the pill and bubble against a fake session that walks every state — `--hold STATE` pins one, `--bare` drops the draft, `--sent` presses Send so the card it leaves behind can be looked at |
 | `slim.py` | trim the unreachable dependencies |
 
 Benchmark scripts download additional models (`small`, `medium`, `distil-large-v3`) into

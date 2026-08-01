@@ -416,8 +416,10 @@ def scenario_learning(report) -> None:
 
 
 def scenario_window(report) -> None:
-    """Both windows land wholly inside the desktop work area."""
-    from flow.ui import Pill
+    """Both windows land wholly inside the desktop work area, and take no focus."""
+    import ctypes
+
+    from flow.ui import GWL_EXSTYLE, WS_EX_NOACTIVATE, Pill, toplevel_hwnd
 
     class Dead:
         level_db = -70.0
@@ -457,6 +459,20 @@ def scenario_window(report) -> None:
         inside = (left <= int(bx) and int(bx) + int(bw) <= right
                   and top <= int(by) and int(by) + int(bh) <= bottom)
         report("the bubble is inside the work area", inside, geo)
+
+        # Read off the windows, not off the flag the app set: `SetWindowLongPtr` hands
+        # back the previous style word either way, so "it worked" and "it did nothing"
+        # are the same return value. Read after a float-up, too — Tk writes the extended
+        # style word on every step of that animation to set -alpha.
+        get = getattr(ctypes.windll.user32, "GetWindowLongPtrW", None) \
+            or ctypes.windll.user32.GetWindowLongW
+        get.restype = ctypes.c_ssize_t
+        for name, win in (("pill", pill), ("bubble", pill.bubble)):
+            bits = get(ctypes.c_void_p(toplevel_hwnd(win)),
+                       ctypes.c_int(GWL_EXSTYLE)) & 0xFFFFFFFF
+            report(f"the {name} is out of the activation chain",
+                   bool(bits & WS_EX_NOACTIVATE), f"exstyle {bits:#010x}")
+        report("and the pill knows it", pill.no_activate, str(pill.no_activate))
     finally:
         pill.destroy()
 
@@ -485,7 +501,8 @@ def scenario_chips(report) -> None:
     """
     from unittest import mock
 
-    from flow.ui import Pill
+    from flow.inject import owned_by_flow
+    from flow.ui import Pill, chip_tag, toplevel_hwnd
 
     class Dead:
         #: Loud, and it stays loud. That is not a convenience: a real microphone keeps
@@ -563,17 +580,28 @@ def scenario_chips(report) -> None:
     def click(pill, label) -> bool:
         """Press the chip where it is actually drawn. False if there is no such chip."""
         canvas = pill.bubble.canvas
-        if not canvas.find_withtag(f"chip-{label}"):
+        if not canvas.find_withtag(chip_tag(label)):
             return False
-        x1, y1, x2, y2 = canvas.bbox(f"chip-{label}")
+        x1, y1, x2, y2 = canvas.bbox(chip_tag(label))
         canvas.event_generate("<Button-1>", x=int((x1 + x2) / 2), y=int((y1 + y2) / 2))
         pill.update()
         return True
 
-    pasted: list[str] = []
+    #: (text, target window) per Send. The target is the whole of stage 12: the pill
+    #: has to hand `paste` a window, because `paste` asking for itself asks after the
+    #: click that got it there.
+    sends: list[tuple[str, int | None]] = []
+
+    def record_send(text: str, target: int | None = None) -> str:
+        sends.append((text, target))
+        return ""
+
+    def pasted() -> list[str]:
+        return [text for text, _target in sends]
+
     asr, talker = NoAsr(), Talker()
     session = Session(asr=asr, mic=Dead(), speaker=talker, profile=None)
-    pill = Pill(session, on_send=pasted.append, hotkeys=None)
+    pill = Pill(session, on_send=record_send, hotkeys=None)
     try:
         session.toggle_mode()
         session.draft.set("can you hear me")
@@ -597,15 +625,28 @@ def scenario_chips(report) -> None:
         with mock.patch("flow.session.ask",
                         return_value=("Yes, I can hear you.", "codex")):
             report("the Ask chip was clickable", click(pill, "Ask"))
+            # Either state proves the question went: `ask` is mocked here, so the answer
+            # can be collected by the very pump `click` runs on its way out. Asserting
+            # ASKING alone was a race, and it lost about one run in three.
             report("clicking Ask put the question to the CLI",
-                   session.state is State.ASKING, session.state.value)
-            report("clicking Ask pasted nothing", pasted == [], str(pasted))
+                   session.state is State.ASKING or bool(session.reply),
+                   f"{session.state.value}, reply={session.reply!r}")
+            report("clicking Ask pasted nothing", pasted() == [], str(pasted()))
             deadline = time.perf_counter() + 20.0
             while time.perf_counter() < deadline and not session.reply:
                 session.pump_results()
                 pill.update()
             report("the answer came back", session.reply == "Yes, I can hear you.",
                    session.reply)
+
+        # Drain what that left queued. The wait above calls `pump_results` directly, so
+        # the answer is collected without a frame ever running, and its `reply` event
+        # sits in the queue — where, left alone, it lands on whichever frame comes next
+        # and renders the old answer over whatever is on screen by then. That is a
+        # property of reaching past the UI, not of the UI, but it made every check below
+        # depend on whether a 30 ms timer happened to fire.
+        for _ in range(3):
+            pill._frame()
 
         session.draft.set("some words")
         pill.bubble.show(session.draft.text)
@@ -625,8 +666,45 @@ def scenario_chips(report) -> None:
                and not pill.bubble.canvas.find_withtag("chip-Ask"),
                f"mode={session.mode}")
         click(pill, "Send")
-        report("clicking Send handed the draft over", pasted == ["some words"],
-               str(pasted))
+        report("clicking Send handed the draft over", pasted() == ["some words"],
+               str(pasted()))
+
+        # Where it was aimed. `event_generate` does not move the real foreground, so
+        # this is not the focus-theft measurement — that one needs a real mouse and
+        # lives in `scripts/send_check.py`. What it does check is that the pill picked a
+        # window at all, and that the window is not one of Flow's own: before this,
+        # nothing was passed and `paste` resolved the target itself, at the one moment
+        # the answer was guaranteed to be wrong.
+        target = sends[-1][1]
+        report("Send was aimed at a window",
+               isinstance(target, int) and target != 0, f"target {target!r}")
+        report("and not at one of Flow's own",
+               bool(target) and not owned_by_flow(target)
+               and target not in (toplevel_hwnd(pill), toplevel_hwnd(pill.bubble)),
+               f"target {target if target is None else hex(target)}, "
+               f"pill {toplevel_hwnd(pill):#x}, bubble {toplevel_hwnd(pill.bubble):#x}")
+
+        # R5: the words survive the send long enough to try again. The bubble used to
+        # be withdrawn on the same line that sent them, so a Send that went nowhere and
+        # a Send that worked left exactly the same empty screen behind.
+        for _ in range(5):
+            pill._frame()
+        report("the bubble is still up after Send", pill.bubble._visible,
+               f"sent={pill.bubble._sent!r}")
+        report("it still shows what was sent", pill.bubble._sent == "some words",
+               pill.bubble._sent)
+        found = pill.bubble.canvas.find_withtag(chip_tag("Put it back"))
+        report("and offers a way back to the draft", bool(found), chip_tag("Put it back"))
+        label = pill.bubble.canvas.itemcget(found[1], "text") if found else ""
+        report("whose countdown does not rename its tag",
+               label.startswith("Put it back ") and label.endswith("s"), label)
+        click(pill, "Put it back")
+        pill._frame()
+        report("pressing it puts the words back in the draft",
+               session.draft.text == "some words", session.draft.text)
+        report("and the sent card gives way to them",
+               not pill.bubble._sent and pill.bubble._visible, pill.bubble._text)
+        session.draft.clear()
 
         # P9 auto-ask: the countdown has to be on the button, and it has to fire.
         session.toggle_mode()
@@ -647,8 +725,8 @@ def scenario_chips(report) -> None:
             session.tick()
             report("the pause asked it without a press",
                    session.state is State.ASKING, session.state.value)
-            report("nothing was pasted by the pause", pasted == ["some words"],
-                   str(pasted))
+            report("nothing was pasted by the pause", pasted() == ["some words"],
+                   str(pasted()))
             # Painted without pumping: `_frame` would collect the answer on its way
             # past and the state under test would be gone before it was read.
             pill.bubble.tick_activity()

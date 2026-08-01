@@ -1,4 +1,9 @@
-"""Put the finished draft into whatever app has focus (R1).
+"""Put the finished draft into the app the user was working in (R1).
+
+Not "whatever has focus", which is what this said and what it did, and the difference
+is the whole of stage 12: at the moment Send runs, the click that ran it may already
+have moved the focus. The caller says which window it meant; `resolve()` is where that
+is reconciled with what the OS reports.
 
 Clipboard + Ctrl-V rather than typing the text character by character: pasting is one
 event regardless of length, survives IME and autocomplete, and does not race with the
@@ -140,25 +145,42 @@ def take_warnings() -> list[str]:
     return out
 
 
-def paste(text: str, *, restore_clipboard: bool = True) -> bool:
-    """Place `text` on the clipboard and send Ctrl-V to the focused window.
+def paste(text: str, *, hwnd: int | None = None, restore_clipboard: bool = True) -> bool:
+    """Place `text` on the clipboard and send Ctrl-V to the window it is aimed at.
 
-    Returns False if the clipboard could not be taken — another process can hold it
-    briefly, and silently doing nothing would look like the Send button is broken.
+    `hwnd` is the window the caller believes it is pasting into, and passing one is
+    strongly preferred: see `resolve()` for why asking the OS at this moment is not a
+    question that can be trusted.
+
+    Returns False if the paste was refused or the clipboard could not be taken — another
+    process can hold it briefly, and silently doing nothing would look like the Send
+    button is broken. Every False leaves a line in `take_warnings()` saying which.
 
     Known limitation: an elevated target window will not accept synthetic input from a
     non-elevated process (UIPI). The text is still on the clipboard, so a manual Ctrl-V
     works — which is why the clipboard is written before the keystroke is attempted.
     """
     # P7: the target decides what is safe to send. Classified *before* the clipboard
-    # is touched, because reading the foreground window is what tells us whether the
-    # trailing newline would press Enter in a shell.
-    payload, warning = prepare(text, foreground_target())
+    # is touched, because knowing the target is what tells us whether the trailing
+    # newline would press Enter in a shell.
+    target = resolve(hwnd)
+    if target.is_flow:
+        # Invariant: Flow does not paste into itself. Reaching here means the click
+        # took the foreground after all, so the Ctrl-V is going to land on a Tk canvas
+        # whatever this function believes — and that is a defect to report, not a paste
+        # to attempt. This is exactly the state that used to return True.
+        _WARNINGS.append(
+            "not pasted: Flow had the focus, not the window you were aiming at"
+        )
+        return False
+
+    payload, warning = prepare(text, target)
     if warning:
         _WARNINGS.append(warning)
 
     previous = get_clipboard_text() if restore_clipboard else None
     if not set_clipboard_text(payload):
+        _WARNINGS.append("not pasted: could not take the clipboard")
         return False
 
     _send(_key(VK_CONTROL), _key(VK_V), _key(VK_V, up=True), _key(VK_CONTROL, up=True))
@@ -189,6 +211,8 @@ kernel32.QueryFullProcessImageNameW.argtypes = [
     wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
 ]
 kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+kernel32.GetCurrentProcessId.argtypes = []
+kernel32.GetCurrentProcessId.restype = wintypes.DWORD
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -218,11 +242,16 @@ BRACKETED_PASTE = {
 
 
 class Target:
-    """What has focus, and what that means for pasting into it."""
+    """What is about to be pasted into, and what that means for the payload."""
 
-    def __init__(self, window_class: str = "", process: str = "") -> None:
+    def __init__(
+        self, window_class: str = "", process: str = "", is_flow: bool = False
+    ) -> None:
         self.window_class = window_class
         self.process = process
+        #: This window belongs to Flow. Decided by process id rather than by name,
+        #: because Flow is a `python.exe` like any other and the target might be too.
+        self.is_flow = is_flow
 
     @property
     def is_terminal(self) -> bool:
@@ -236,15 +265,41 @@ class Target:
         return self.process.lower() in BRACKETED_PASTE
 
     def __repr__(self) -> str:
-        return f"Target(class={self.window_class!r}, process={self.process!r})"
+        return (f"Target(class={self.window_class!r}, process={self.process!r}"
+                + (", flow" if self.is_flow else "") + ")")
+
+
+def _pid_of(hwnd) -> int:
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def owned_by_flow(hwnd) -> bool:
+    """True when `hwnd` is one of Flow's own windows.
+
+    By process id, which covers the pill, the bubble and the right-click menu without
+    any of them having to register themselves anywhere.
+    """
+    try:
+        return bool(hwnd) and _pid_of(hwnd) == kernel32.GetCurrentProcessId()
+    except OSError:
+        return False
+
+
+def foreground_hwnd() -> int:
+    """Whatever has the foreground right now, or 0. Never raises."""
+    try:
+        return user32.GetForegroundWindow() or 0
+    except OSError:
+        return 0
 
 
 def _process_name(hwnd) -> str:
-    pid = wintypes.DWORD()
-    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    if not pid.value:
+    pid = _pid_of(hwnd)
+    if not pid:
         return ""
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return ""
     try:
@@ -257,18 +312,45 @@ def _process_name(hwnd) -> str:
         kernel32.CloseHandle(handle)
 
 
-def foreground_target() -> Target:
-    """Classify the focused window. Never raises: an unknown target is treated as
-    ordinary, which is the behaviour Flow had before any of this existed."""
+def classify(hwnd) -> Target:
+    """Classify one window. Never raises: an unknown target is treated as ordinary,
+    which is the behaviour Flow had before any of this existed."""
     try:
-        hwnd = user32.GetForegroundWindow()
         if not hwnd:
             return Target()
         buf = ctypes.create_unicode_buffer(256)
         user32.GetClassNameW(hwnd, buf, 256)
-        return Target(buf.value, _process_name(hwnd))
+        return Target(buf.value, _process_name(hwnd), is_flow=owned_by_flow(hwnd))
     except OSError:
         return Target()
+
+
+def foreground_target() -> Target:
+    """Classify whatever has the foreground."""
+    return classify(foreground_hwnd())
+
+
+def resolve(hwnd: int | None = None) -> Target:
+    """Decide what is being pasted into, given what the caller was aiming at.
+
+    Two windows are consulted and they answer different questions.
+
+    The **live foreground** is who will physically receive the keystroke, so if that is
+    Flow, no belief of the caller's can make the paste land anywhere else. It is checked
+    first and it is a refusal, not a target.
+
+    Otherwise the **caller's window wins**, and that is the fix rather than a nicety.
+    `GetForegroundWindow()` at paste time is a question asked after the click that
+    started the Send, and for the whole life of this app the answer was Flow's own
+    window — so `prepare()` classified a Tk canvas, decided it was not a terminal, and
+    skipped the newline strip that is P7's one guarantee. The caller polls the same
+    question 30 ms earlier and keeps the last answer that was not Flow, which is the
+    only version of it worth acting on.
+    """
+    live = classify(foreground_hwnd())
+    if live.is_flow or not hwnd:
+        return live
+    return classify(hwnd)
 
 
 def prepare(text: str, target: Target) -> tuple[str, str]:

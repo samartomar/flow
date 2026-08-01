@@ -113,7 +113,7 @@ is written down.
 
 | Thread | Started by | Does | Rules |
 |---|---|---|---|
-| main / UI | `Pill.mainloop()` | `Pill._tick()` every 30 ms → `Session.tick()` → repaint | **The only thread that may touch Tk.** `_tick` re-schedules itself in a `finally`, so an exception cannot break the chain and leave a dead pill on screen |
+| main / UI | `Pill.mainloop()` | `Pill._tick()` every 30 ms → poll the foreground → `Session.tick()` → repaint | **The only thread that may touch Tk.** `_tick` re-schedules itself in a `finally`, so an exception cannot break the chain and leave a dead pill on screen. The foreground poll is two user-mode calls and is where `paste_target` comes from — asking at paste time asks after the click. The one thing that stops this thread is the right-click menu, which is a native `TrackPopupMenu` running its own modal loop |
 | PortAudio callback | `Mic.start()` | copies each block into the queue, updates the level | No allocation-heavy or blocking work. Never touches the session — which is exactly why `Mic.level_db` is not what the meter draws: it reports the room whether or not anything is reading the blocks. `Session.level_db` is the honest one |
 | `decode` | `DecodeWorker.__init__` | runs the model | Owns the only model calls. Catches every exception and turns it into an `error` result |
 | `preload` | `Session.start()` | warms both tiers | Not awaited — a first run includes a model download, and doing it inline froze the UI on the first click |
@@ -352,13 +352,47 @@ long words, capped at 48 terms) before any CLI call.
 
 ### Dictate
 
-`inject.paste()` classifies the focused window **before** it touches the clipboard — window
+`inject.paste()` classifies the target window **before** it touches the clipboard — window
 class or process name, via ctypes — then `prepare()` decides what is safe to send.
+
+**Which window is the target is not a question to ask at paste time.** It used to be:
+`paste()` called `GetForegroundWindow()` itself, which runs *after* the click on the Send
+chip. Neither of Flow's toplevels carried `WS_EX_NOACTIVATE` — measured exstyle `0x00080088`
+on both, TOPMOST | TOOLWINDOW | LAYERED — so that click made Flow the foreground window and
+the answer was Flow. Everything downstream then followed from a Tk canvas: the `SendInput`
+Ctrl-V went to a widget that ignores it, `prepare()` decided a canvas is not a terminal and
+skipped the newline strip that is P7's one guarantee, and `paste()` returned True anyway.
+Measured before the fix, with a real mouse click on the chip: nothing arrived in an
+ordinary window, nothing arrived in a console, and Send reported success both times. Not
+one prompt had ever landed this way.
+
+Three things now hold, and they are independent on purpose:
+
+1. **Both toplevels carry `WS_EX_NOACTIVATE`**, applied by `ui._no_activate` after the
+   windows exist and **read back** — `SetWindowLongPtr` returns the previous style word, so
+   a call that did nothing is indistinguishable from one that worked unless you ask again.
+   It has to be set on the `TkTopLevel` parent of `winfo_id()`, not on the `TkChild` it
+   returns; the first version wrote it to the child *and read it back off the child*, and
+   the read-back agreed with itself.
+2. **The caller names the window.** `Pill._tick` polls the foreground every 30 ms and keeps
+   the last one that was not Flow's own, and `Pill._send` passes it to `paste(hwnd=…)`.
+   That is what fixes the *classification*, independently of where the keystroke goes.
+3. **A target that resolves to Flow is refused**, with a reason, because a Ctrl-V into
+   Flow's own canvas does nothing whatever the caller believes. See invariant 10.
 
 The one guarantee: a draft ending in a newline never reaches a shell with that newline
 attached, because that does not paste, it *runs*. Interior newlines are explicitly not a
 guarantee and are reported rather than rewritten; silently reflowing someone's text to make
-it safe is worse than telling them.
+it safe is worse than telling them. Those reports had never been shown to anyone either —
+`inject.take_warnings()` existed, was imported by `__main__`, and was drained by nobody.
+
+### What Send leaves behind
+
+The bubble used to be withdrawn on the same line that sent the draft, so a paste that
+landed and a paste that went nowhere left the same empty screen. It now holds the sent text
+for `ui.SENT_LINGER_SEC` under a `sent` label with a **Put it back** chip, which calls
+`Session.recall()` — the same path the spoken *"bring back my last prompt"* takes. Dictate
+mode only: in converse mode the bubble is already staying up for the answer.
 
 ### Converse
 
@@ -383,6 +417,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `MIC_CHECK_SEC` | 5 s | A dead PortAudio stream stops delivering blocks without raising anywhere the session can see |
 | `FORCE_NEXT_TTL_SEC` | 30 s | A Refine/Continue chip means "the next thing I say"; after this long the next thing someone says is a different thought. The chips also toggle, because a one-way door that lasts 30 s reads as the app being stuck |
 | `AUTO_ASK_SEC` | 4 s | Converse mode only. Measured: the pauses a speaker leaves between separate spoken items run 1.4–3.3 s (median 2.5 s) on the one recording where every item was located, and each gap also contains a spoken item number, so real silence is shorter — under ~3.3 s fires mid-thought. R5 still holds where it matters: pasting into a window is irreversible and stays manual, asking is not |
+| `ui.SENT_LINGER_SEC` | 4 s | How long the bubble holds what a dictate-mode Send just handed over, with the chip that puts it back. Deliberately **not** `AUTO_ASK_SEC`, which is also 4 s and is a different four seconds: that one is how long a settled draft waits before asking itself, this is how long words stay recoverable after they have gone, and either could move without the other. The number it replaces was zero — the bubble was withdrawn on Send, so a Send that went nowhere and a Send that worked left the same empty screen |
 | `ui.DOT_SEC` | 0.4 s | One dot of the indeterminate-wait animation. The bubble renders on events and a wait has no events, so the frame is computed and compared before anything is drawn — at this cadence that is ~2.5 repaints a second instead of the 33 that redrawing every pump would cost. Same discipline as the auto-ask countdown |
 | `DEAF_DB` | −120.0 | What `level_db` reports while the microphone is not evidence. Below any real room — a quiet room with a good USB mic measures −96.7 dB — so every meter maps it to silence without having to know why |
 | `speak.WORDS_PER_SEC` | 1.5 | Half the measured rate (a 15-word sentence took 4.9 s at rate 1), so the derived ceiling on `speaking` is generous. It gates the microphone, and a latched value would leave Flow permanently deaf — far worse than leaking a little echo |
@@ -445,15 +480,22 @@ policy here; it is enforced by absence.
    from `tkinter` and `ctypes` precisely so that list does not grow.
 9. **`decode_options()` is the only place decode parameters live**, so the benchmarks measure
    the build that ships.
+10. **Flow does not paste into itself.** Its own windows are out of the activation chain, the
+    window a paste is aimed at is chosen before the click rather than after it, and a target
+    that still resolves to Flow's own process is refused with a reason. This is new because
+    it had never held: the Ctrl-V went to a Tk canvas, which ignores it, and `paste()`
+    returned True — a failure with no symptom anywhere, which is why it survived every
+    harness in the list below.
 
 ## 11. Testing layers
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (427 tests, ~3 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring |
+| units | `tests/` (437 tests, ~3 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
-| whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 53 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser |
-| looking at it | `scripts/ui_probe.py` | renders the pill and bubble against a fake session that walks every state, so there is something to screenshot without a microphone, a model or a person. `--hold STATE` pins one; `--bare` drops the draft, which is the case the indicator exists for |
+| whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
+| the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
+| looking at it | `scripts/ui_probe.py` | renders the pill and bubble against a fake session that walks every state, so there is something to screenshot without a microphone, a model or a person. `--hold STATE` pins one; `--bare` drops the draft, which is the case the indicator exists for; `--sent` presses Send, which is the only way to see the card that stays behind |
 | a person | `scripts/live_check.py` | the only thing that can answer P1 and P3. Needs recordings that do not exist yet |
 
 The self-drive layer exists because three consecutive sessions each found a defect by hand
@@ -463,21 +505,29 @@ level meter is the fourth of that kind and the reason `ui_probe.py` is listed as
 rather than a convenience: every automated layer passed while the bars animated to Flow's
 own voice, because no assertion anywhere read what the pill was actually drawing.
 
+`send_check.py` is the fifth, and the worst of them. Every layer above it was green for the
+entire life of the project while **no prompt had ever reached a window via the Send chip**,
+because the thing that broke it — a click moving the foreground — is precisely the thing a
+synthetic Tk event cannot do. A harness that cannot reproduce the defect cannot see it, and
+`paste()` returned True, so nothing else could either.
+
 ## Verification
 
-Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8. The four rows
-marked **↻** were re-measured on 2026-08-01 when the indicator was added; the rest are as
-recorded on the 31st and were not re-run.
+Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8. The rows marked **↻**
+were re-measured on 2026-08-01 — four when the indicator was added, and the Send rows when
+the paste target was fixed; the rest are as recorded on the 31st and were not re-run.
 
 | Check | Command | Result |
 |---|---|---|
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **427 passed**, 3.0 s |
-| end-to-end ↻ | `uv run python scripts/selfdrive.py` | **53/53 checks passed**, including a live `codex` converse round trip and a spoken reply |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **437 passed**, 3.3 s |
+| end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
+| **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |
+| the menu and the drag ↻ | same run, `== the pill itself` | The menu opens and dismisses, holds the foreground while it is up and gives it back; the pill tracks the cursor to the pixel. Both measured because both are what `WS_EX_NOACTIVATE` can break — and the first attempt did break the menu outright: it posted and `tk_popup` never returned |
 | the level meter ↻ | drive a session with `speaker.speaking` true and a loud mic | before: 30 blocks discarded by the echo guard and the meter still at **83% of full scale**. After: 30 discarded, meter at **0%**, `level_db` −120 dB |
 | the indicator ↻ | `scripts/ui_probe.py --hold STATE`, screenshotted | every state in the table above renders its own row; the pill's bars and the bubble's flat line agree in the speaking state |
 | flags | `uv run python -m flow --help` | 13 flags, matching the README table |
 | build | `uv build`, then install the wheel into a fresh venv | wheel + sdist built; `flow --help` runs from a clean install. `hatchling` stays out of the runtime venv, so R16 holds |
-| hotkeys | `flow.hotkey.DEFAULT_BINDINGS` | 4 actions, 1–3 fallbacks each |
+| hotkeys ↻ | `flow.hotkey.DEFAULT_BINDINGS` | 5 actions, 1–3 fallbacks each. `quit` is the new one: `Esc` was a Tk binding, and a window that never takes focus can never receive it |
 | agent CLI | `flow.refine.available()` | `codex`, then `claude` |
 | speech | `flow.speak.Speaker().available` | `True` |
 | speech state | `Speaker.say()` then poll `speaking` | `True` at t=0.00 s (gated before the first phoneme), cleared by the watcher at 7.7 s for a 23-word sentence, and cleared immediately when the host is killed |

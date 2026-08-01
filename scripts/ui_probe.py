@@ -8,10 +8,13 @@ converse-mode exchange produces them, so one run shows all of them — including
 that used to be invisible entirely (decoding, model loading) and the one that used to be
 a lie (bars alive while Flow is talking over a gated microphone).
 
-    uv run python scripts/ui_probe.py [seconds] [--hold STATE] [--bare]
+    uv run python scripts/ui_probe.py [seconds] [--hold STATE] [--bare] [--sent]
 
 `--bare` starts with no draft and no note, which is the case the indicator was added
 for: a wait with nothing else on screen, where the bubble has to bring itself up.
+
+`--sent` presses Send after a second, which is the only way to see the card that stays
+behind afterwards — the words that just left, and the chip that puts them back.
 """
 
 import math
@@ -21,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flow.session import Activity, Event, State  # noqa: E402
+from flow.session import DICTATE, Activity, Event, State  # noqa: E402
 from flow.ui import Pill  # noqa: E402
 
 DRAFT = (
@@ -66,6 +69,7 @@ class FakeSession:
         self.draft = FakeDraft("" if bare else DRAFT)
         self.mic = FakeMic()
         self.force_next = None
+        self.mode = DICTATE
         self._hold = hold
         self._events = [] if bare else [
             Event("draft", DRAFT),
@@ -83,6 +87,11 @@ class FakeSession:
 
     def send(self) -> str:
         return self.draft.clear()
+
+    def recall(self) -> None:
+        """What the "Put it back" chip calls. P6, by button."""
+        self.draft.text = DRAFT
+        self._events.append(Event("draft", DRAFT))
 
     # -- the walk ----------------------------------------------------------
 
@@ -132,6 +141,10 @@ def main() -> None:
     seconds = float(argv[0]) if argv else 24.0
     pill = Pill(FakeSession(hold, bare="--bare" in sys.argv))
     pill.armed = True  # skip the click so the meter is live for the screenshot
+    if "--sent" in sys.argv:
+        # Through `_send`, not by calling the bubble directly: what is worth looking at
+        # is the card the real Send path leaves behind, countdown and all.
+        pill.after(1000, pill._send)
     pill.after(int(seconds * 1000), pill.quit_app)
     pill.mainloop()
 

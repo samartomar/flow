@@ -18,6 +18,7 @@ import tkinter as tk
 import traceback
 from collections import deque
 
+from .inject import foreground_hwnd, owned_by_flow
 from .session import DICTATE, Session, State
 
 
@@ -28,6 +29,70 @@ class _RECT(ctypes.Structure):
 
 #: SystemParametersInfo(SPI_GETWORKAREA)
 _SPI_GETWORKAREA = 0x0030
+
+#: Its own handle rather than `ctypes.windll.user32`, which is a process-wide cached
+#: object: declaring `restype` on it would change the signature under `inject.py` too.
+#: Every call below is declared for the reason inject.py spells out — an undeclared
+#: ctypes restype is C `int`, so a 64-bit HWND or style word comes back truncated.
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.GetParent.argtypes = [ctypes.c_void_p]
+_user32.GetParent.restype = ctypes.c_void_p
+_user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+_user32.SetForegroundWindow.restype = ctypes.c_int
+# The Ptr forms exist only on 64-bit; the plain ones are the whole API on 32-bit.
+_get_style = getattr(_user32, "GetWindowLongPtrW", None) or _user32.GetWindowLongW
+_set_style = getattr(_user32, "SetWindowLongPtrW", None) or _user32.SetWindowLongW
+_get_style.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_get_style.restype = ctypes.c_ssize_t
+_set_style.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+_set_style.restype = ctypes.c_ssize_t
+
+GWL_EXSTYLE = -20
+
+#: "This window is not what the user is working in."
+#:
+#: Load-bearing, not cosmetic. Without it a click on the pill makes Flow the foreground
+#: window and the target loses it — and `inject.paste()` then asks the OS what has focus
+#: *after* the theft, so the Ctrl-V lands on a Tk canvas that ignores it. That is why no
+#: prompt had ever arrived via the Send chip. Measured before the fix: both toplevels
+#: carried 0x00080088, which is TOPMOST | TOOLWINDOW | LAYERED and nothing else.
+WS_EX_NOACTIVATE = 0x08000000
+
+
+def toplevel_hwnd(win) -> int:
+    """The window handle Windows knows about, behind a Tk widget. 0 if there is none yet.
+
+    `winfo_id()` is the *child* HWND — class `TkChild`, carrying its own extended styles
+    — so a window style set on it changes nothing anyone can see. The toplevel is its
+    parent, class `TkTopLevel`, and that is what holds -topmost, -toolwindow and -alpha.
+
+    Tk creates that parent lazily, at the first `update_idletasks()`, and until then
+    there is no parent to find. This returns 0 rather than falling back to the child,
+    which is not a nicety: the first version fell back, so the no-activate style was
+    written to the child *and read back off the child*, and the read-back that exists
+    precisely to catch a call that did nothing agreed that it had worked.
+    """
+    return _user32.GetParent(win.winfo_id()) or 0
+
+
+def _no_activate(win) -> bool:
+    """Take `win` out of the activation chain, and report whether it took.
+
+    Read back rather than trusted. `SetWindowLongPtr` returns the *previous* style word,
+    so a call that did nothing and a call that worked hand back the same plausible
+    number, and there is no other way to tell them apart. The one thing this window
+    style has to be is true.
+    """
+    try:
+        # The wrapper has to exist before it can be styled, and this is what creates it.
+        win.update_idletasks()
+        hwnd = toplevel_hwnd(win)
+        if not hwnd:
+            return False
+        _set_style(hwnd, GWL_EXSTYLE, _get_style(hwnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE)
+        return bool(_get_style(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE)
+    except (AttributeError, OSError, tk.TclError):
+        return False
 
 
 def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:
@@ -106,6 +171,18 @@ DB_FLOOR, DB_CEIL = -58.0, -12.0  # level range mapped onto bar height
 BUBBLE_W = 380
 PAD = 14
 
+#: How long the bubble stays up after a dictate-mode Send, holding what was sent.
+#:
+#: Not `session.AUTO_ASK_SEC`, which is also four seconds and is a different four
+#: seconds: that one is how long a settled draft waits before it asks itself, and this
+#: is how long words stay recoverable after they have already gone. Either could move
+#: without the other, so they do not share a constant.
+#:
+#: Long enough to read the first line and reach the chip, short enough to be gone before
+#: the next sentence is spoken. The number this replaces was zero: the bubble vanished
+#: on Send, so a Send that went nowhere looked exactly like one that worked.
+SENT_LINGER_SEC = 4.0
+
 #: How long each dot of the indeterminate-wait animation holds.
 #:
 #: Three dots at this cadence is a 1.2 s cycle — visibly alive without being a strobe,
@@ -114,6 +191,18 @@ PAD = 14
 #: and a wait has no events, so the frame is computed and compared before anything is
 #: drawn; same discipline as the auto-ask countdown, for the same reason.
 DOT_SEC = 0.4
+
+
+def chip_tag(key: str) -> str:
+    """The canvas tag for a chip, from its key.
+
+    Spaces are removed rather than tolerated. Tk parses a `tags` string as a Tcl *list*,
+    so `tags="chip-Put it back"` does not tag one item with one name — it tags it with
+    three, `chip-Put`, `it` and `back`, and every later `find_withtag` and `tag_bind`
+    for the whole name then matches nothing. That is not hypothetical: it is why the
+    "Was a command" chip could be drawn and could not be clicked.
+    """
+    return "chip-" + key.replace(" ", "-")
 
 
 def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
@@ -139,6 +228,11 @@ class Pill(tk.Tk):
         self.levels: deque[float] = deque([0.0] * BARS, maxlen=BARS)
         self.armed = False
         self._flash = 0  # frames remaining of the error flash
+        self._alive = True
+        #: The last window that had the foreground and was not Flow's own — where a
+        #: Send is aimed. Seeded before any of Flow's windows can take it.
+        self.paste_target: int | None = None
+        self._track_target()
 
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -160,9 +254,23 @@ class Pill(tk.Tk):
 
         self.bubble = Bubble(self)
         self._bind_drag()
-        self.canvas.bind("<Button-1>", self._toggle)
+        # add="+", and that is not decoration: `<Button-1>` and `<ButtonPress-1>` are
+        # the same Tk event, so binding this one without it replaced the whole binding
+        # list and threw away the press handler that records where in the pill it was
+        # grabbed. The pill dragged — it just snapped its top-left corner to the cursor
+        # first, every time.
+        self.canvas.bind("<Button-1>", self._toggle, add="+")
         self.canvas.bind("<Button-3>", self._menu)
-        self.bind("<Escape>", lambda _e: self.quit_app())
+        # No <Escape> binding. It used to be here and it could not work once the windows
+        # stopped taking focus — a shortcut that silently does nothing is worse than
+        # none — so quit moved to the hotkey table, which does not need focus at all.
+
+        # Both windows exist now, which is the earliest either has a handle to set a
+        # style on. Reported rather than assumed: see `_no_activate`. Built as a list
+        # first because `all()` over a generator stops at the first False — which would
+        # mean a pill that failed silently took the bubble down with it, unstyled.
+        applied = [_no_activate(win) for win in (self, self.bubble)]
+        self.no_activate = all(applied)
 
         self._draw()
         # Arm after the first frame is painted, so a capture failure has somewhere
@@ -227,16 +335,54 @@ class Pill(tk.Tk):
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
         m.add_command(label="Quit", command=self.quit_app)
-        m.tk_popup(e.x_root, e.y_root)
+
+        # A Tk popup menu on Windows is a native `TrackPopupMenu`, and that runs a modal
+        # loop which only receives input while its owner is the foreground window. With
+        # WS_EX_NOACTIVATE the pill never becomes the foreground by being clicked, and
+        # measured: the menu posted, nothing dismissed it — not Escape, not clicking
+        # elsewhere — and `tk_popup` did not return, taking the UI thread with it.
+        #
+        # So the menu, alone in this app, borrows the foreground and hands it straight
+        # back. It is allowed to: the right-click that got us here is the last input
+        # event, which is what earns a process the right to call SetForegroundWindow —
+        # asking without that click is refused, which is exactly what the first attempt
+        # at this did. The style itself stays on; it does not need lifting.
+        #
+        # Send is unharmed either way. `paste_target` only ever records a window that is
+        # not Flow's own, so a menu passing through the foreground cannot become the
+        # thing a later paste is aimed at.
+        previous = foreground_hwnd()
+        _user32.SetForegroundWindow(toplevel_hwnd(self))
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()  # the documented idiom; harmless, and cheap insurance
+            if previous:
+                _user32.SetForegroundWindow(previous)
 
     def _send(self) -> None:
+        """R5: hand the draft over, and leave it recoverable either way."""
         text = self.session.send()
+        problem = ""
         if text and self.on_send:
-            self.on_send(text)
-        # In converse mode send() returns "" and the answer is still coming, so the
-        # bubble has to stay up to render it.
-        if self.session.mode == DICTATE:
-            self.bubble.hide()
+            # The window is chosen here, on the UI thread, from what was polled before
+            # the click — not inside `paste()` after it. The handler reports back what
+            # went wrong rather than printing it somewhere nobody is looking.
+            problem = self.on_send(text, self.paste_target) or ""
+        if getattr(self.session, "mode", DICTATE) != DICTATE:
+            # Converse: send() returns "" and the answer is still coming, so the bubble
+            # stays up to render it and there is nothing to linger over.
+            return
+        if problem:
+            # Flashed whether the paste failed outright or merely could not be
+            # guaranteed. A terminal that will run each line as it arrives is the
+            # loudest thing Flow can cause, so both deserve to be looked at.
+            self._flash = 40
+            self.bubble.show_sent(text, problem)
+        elif text:
+            self.bubble.show_sent(text)
+        # Nothing else: an empty `text` means send() refused and said why in a note, and
+        # hiding the bubble here is what used to take that explanation off the screen.
 
     def _clear(self) -> None:
         # Clear is the cheapest "stop" the user has, and with the microphone gated while
@@ -247,6 +393,9 @@ class Pill(tk.Tk):
         self.bubble.hide()
 
     def quit_app(self) -> None:
+        # Cleared before anything is torn down, so a `_tick` already in flight does not
+        # re-arm itself against a destroyed interpreter on its way out.
+        self._alive = False
         try:
             if self.hotkeys is not None:
                 self.hotkeys.stop()
@@ -272,9 +421,23 @@ class Pill(tk.Tk):
             self.bubble.surface(f"{type(exc).__name__}: {exc}")
             traceback.print_exc()
         finally:
-            self.after(30, self._tick)
+            if self._alive:
+                self.after(30, self._tick)
+
+    def _track_target(self) -> None:
+        """Remember the last window that had the foreground and was not Flow's own.
+
+        Two cheap user-mode calls per frame, and the reason Send can be aimed at all:
+        by the time `paste()` runs, the click that started it has had its chance to move
+        the foreground. This is the same question asked 30 ms earlier, and filtered.
+        """
+        hwnd = foreground_hwnd()
+        if hwnd and not owned_by_flow(hwnd):
+            self.paste_target = hwnd
 
     def _frame(self) -> None:
+        self._track_target()
+
         # Hotkeys arrive on their own thread; Tk is only ever touched from this one.
         if self.hotkeys is not None:
             for name in self.hotkeys.drain():
@@ -286,6 +449,9 @@ class Pill(tk.Tk):
                     self._clear()
                 elif name == "mode":
                     self.session.toggle_mode()
+                elif name == "quit":
+                    self.quit_app()
+                    return
 
         if self.armed:
             self.session.tick()
@@ -304,13 +470,16 @@ class Pill(tk.Tk):
             if ev.kind == "draft":
                 if ev.text:
                     self.bubble.show(ev.text)
-                elif self.session.state is not State.ASKING:
-                    self.bubble.hide()
-                else:
+                elif self.session.state is State.ASKING:
                     # Asking clears the draft, and hiding here left the user staring
                     # at nothing for the ten seconds the CLI takes. Keep the bubble up
                     # so "asking..." is somewhere to be seen.
                     self.bubble.show_reply("")
+                elif not self.bubble.showing_sent:
+                    self.bubble.hide()
+                # The other way the draft empties is Send, which puts the words on the
+                # sent card in the same breath. Hiding on that event is what used to
+                # take them straight back off the screen.
             elif ev.kind == "partial":
                 self.bubble.show_partial(ev.text)
             elif ev.kind == "error":
@@ -329,6 +498,7 @@ class Pill(tk.Tk):
 
         self.bubble.tick_countdown()
         self.bubble.tick_activity()
+        self.bubble.tick_sent()
         if self._flash:
             self._flash -= 1
         self._draw()
@@ -411,6 +581,13 @@ class Bubble(tk.Toplevel):
         self._note = ""
         self._partial = ""
         self._reply = ""
+        #: What Send just handed over, and when. Held for `SENT_LINGER_SEC` so the words
+        #: are still on screen — and still recoverable — when a Send goes wrong.
+        self._sent = ""
+        self._sent_at = 0.0
+        #: Last linger second painted, so the countdown repaints once a second and not
+        #: 33 times. Same discipline as `_countdown`.
+        self._sent_left: int | None = None
         #: Last auto-ask second painted, so the countdown repaints once a second
         #: rather than on every frame.
         self._countdown: int | None = None
@@ -430,16 +607,45 @@ class Bubble(tk.Toplevel):
 
     # -- content -----------------------------------------------------------
 
+    @property
+    def showing_sent(self) -> bool:
+        """True while the bubble is holding the words Send just handed over."""
+        return bool(self._sent)
+
     def show_reply(self, text: str) -> None:
         """P9: the CLI's answer. Clears the draft area — the question was sent.
 
         An empty `text` means "the question has gone, the answer is still coming":
         keep the bubble up and leave whatever is there, so the wait is visible.
         """
-        self._text, self._partial = "", ""
+        self._text, self._partial, self._sent = "", "", ""
         if text:
             self._reply = text
         self._for_activity = False
+        if not self._visible:
+            self._visible = True
+            self.deiconify()
+            self._float_up()
+        self._render()
+
+    def show_sent(self, text: str, problem: str = "") -> None:
+        """R5/P6: what just left, and a way to get it back.
+
+        The bubble used to be withdrawn the instant Send was pressed, which made the two
+        outcomes identical to look at: a prompt that landed in the editor and a prompt
+        that landed nowhere both ended with an empty screen. Now the words stay put for
+        `SENT_LINGER_SEC` with a chip that returns them to the draft, so a mis-aimed
+        Send costs one click instead of the whole utterance.
+
+        `problem` is what the paste refused with. There is no version of this where the
+        refusal is silent — that is invariant 5 — so it is shown on the same card as the
+        words it failed to deliver.
+        """
+        self._sent, self._sent_at, self._sent_left = text, time.perf_counter(), None
+        self._text = self._partial = ""
+        self._for_activity = False
+        if problem:
+            self._note = problem
         if not self._visible:
             self._visible = True
             self.deiconify()
@@ -450,7 +656,7 @@ class Bubble(tk.Toplevel):
         # The answer stays up while the next question is dictated. It used to be
         # cleared the moment the user spoke again, which meant the reply they had just
         # asked for vanished before they could read it.
-        self._text, self._partial = text, ""
+        self._text, self._partial, self._sent = text, "", ""
         self._for_activity = False
         self._render()
         if not self._visible:
@@ -461,7 +667,7 @@ class Bubble(tk.Toplevel):
     def show_partial(self, text: str) -> None:
         # Partials are dimmed: they contain hallucinated fragments on mid-word
         # boundaries, so "not final yet" has to be visible.
-        self._partial = text
+        self._partial, self._sent = text, ""
         self._for_activity = False
         if not self._visible:
             self._visible = True
@@ -486,7 +692,7 @@ class Bubble(tk.Toplevel):
 
     def hide(self) -> None:
         self._visible = False
-        self._text = self._partial = self._note = self._reply = ""
+        self._text = self._partial = self._note = self._reply = self._sent = ""
         self._for_activity = False
         self.withdraw()
 
@@ -536,7 +742,9 @@ class Bubble(tk.Toplevel):
     def _render(self) -> None:
         c = self.canvas
         accent = self.pill.accent
-        body = self._text
+        # The sent card takes the body slot: it is the same words in the same place,
+        # which is what makes "that went to the wrong window" readable at a glance.
+        body = self._sent or self._text
         c.delete("all")
 
         # Measure first: the window has to be sized to the wrapped text.
@@ -555,6 +763,8 @@ class Bubble(tk.Toplevel):
             rx1, ry1, rx2, ry2 = c.bbox(rprobe)
             reply_h = ry2 - ry1 + 8
         extra = reply_h
+        if self._sent:
+            extra += 16  # the "sent" label above the words
         if self._partial:
             extra += 34
         if self._act is not None:
@@ -574,9 +784,16 @@ class Bubble(tk.Toplevel):
                 font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
             )
             y += reply_h
-        if body:
+        if self._sent:
             c.create_text(
-                PAD, y, anchor="nw", text=body, fill=TEXT,
+                PAD, y, anchor="nw", text="sent", fill=MUTED,
+                font=("Segoe UI", 8, "bold"), tags="sent",
+            )
+            y += 16
+        if body:
+            # Muted once it has gone: these are no longer the words being worked on.
+            c.create_text(
+                PAD, y, anchor="nw", text=body, fill=MUTED if self._sent else TEXT,
                 font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
             )
             y += text_h + 6
@@ -600,12 +817,20 @@ class Bubble(tk.Toplevel):
         self._chips()
 
     def _chips(self) -> None:
-        # (key, label, command). The key is the canvas tag and the label is what is
-        # drawn, and they are separate because the Ask chip carries a countdown: tagging
-        # by the visible text would rename the tag every second, so its click binding
-        # and anything looking for it — the self-drive harness included — would chase a
-        # name that no longer exists.
+        # (key, label, command). The key becomes the canvas tag and the label is what is
+        # drawn, and they are separate because two chips carry a countdown: tagging by
+        # the visible text would rename the tag every second, so the click binding and
+        # anything looking for it — the self-drive harness included — would chase a name
+        # that no longer exists. `chip_tag` is how a key with spaces in it survives.
         c = self.canvas
+        if self._sent:
+            # One thing to offer, because there is one thing left to decide: whether
+            # those words needed to come back. Refine and Continue have nothing to act
+            # on — the draft is empty — and Send has already happened.
+            specs = [("Put it back", f"Put it back {self._linger_left()}s",
+                      self._put_back)]
+            self._lay_out(specs)
+            return
         specs = [
             ("Refine", "Refine", self._refine),
             ("Continue", "Continue", self._continue),
@@ -625,14 +850,18 @@ class Bubble(tk.Toplevel):
             )
         else:
             specs.append(("Send", "Send", self.pill._send))
+        self._lay_out(specs)
 
+    def _lay_out(self, specs) -> None:
+        """Draw a row of chips left to right, tagged by key rather than by label."""
+        c = self.canvas
         x = PAD
         y2 = self._h - PAD
         y1 = y2 - 26
         for key, label, cmd in specs:
             w = 20 + 7 * len(label)
-            primary = key in ("Send", "Ask")
-            tag = f"chip-{key}"
+            primary = key in ("Send", "Ask", "Put it back")
+            tag = chip_tag(key)
             _round_rect(
                 c, x, y1, x + w, y2, 13,
                 fill=self.pill.accent if primary else CHIP, outline="", tags=tag,
@@ -659,6 +888,28 @@ class Bubble(tk.Toplevel):
         self._countdown = shown
         if self._visible:
             self._render()
+
+    def _linger_left(self) -> int:
+        """Whole seconds still on the clock, counting down to 1 and then gone."""
+        return int(max(0.0, SENT_LINGER_SEC - (time.perf_counter() - self._sent_at))) + 1
+
+    def tick_sent(self) -> None:
+        """Run the linger down, repainting only when the digit changes.
+
+        A countdown has no events, so the number that *would* be drawn is computed and
+        compared first — once a second rather than the 33 times a frame-by-frame redraw
+        would cost. Exactly what `tick_countdown` does, for exactly the same reason.
+        """
+        if not self._sent:
+            return
+        if time.perf_counter() - self._sent_at >= SENT_LINGER_SEC:
+            self.hide()
+            return
+        left = self._linger_left()
+        if left == self._sent_left:
+            return
+        self._sent_left = left
+        self._render()
 
     def tick_activity(self) -> None:
         """Say what Flow is doing, animate it, and repaint only when that changes.
@@ -723,6 +974,14 @@ class Bubble(tk.Toplevel):
             x + 34, y, anchor="nw", text=self._act.label, fill=MUTED,
             font=("Segoe UI", 9), tags="indicator",
         )
+
+    def _put_back(self) -> None:
+        """P6: return the words Send took, into the draft they came from.
+
+        The same path "bring back my last prompt" already takes. A second way of doing
+        it would be a second thing to keep working.
+        """
+        self.pill.session.recall()
 
     def _was_a_command(self) -> None:
         # Reaching for any chip means the user is still working on this draft.

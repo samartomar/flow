@@ -211,22 +211,37 @@ def main(argv: list[str] | None = None) -> int:
             say("hotkey thread did not start; continuing without hotkeys")
             hotkeys = None
 
-    def on_send(text: str) -> None:
-        # Converse mode returns "" from send(), so this is dictate-mode only by
-        # construction: the question must never be pasted into the focused window.
+    def on_send(text: str, target: int | None = None) -> str:
+        """Paste the draft into `target`, and return what went wrong, or "".
+
+        Converse mode returns "" from send(), so this is dictate-mode only by
+        construction: the question must never be pasted into the focused window.
+
+        `target` is the window the pill last saw with the foreground that was not Flow's
+        own. Asking the OS here instead — which is what this used to do, one level down
+        — asks after the click that got us here, and the answer was Flow.
+
+        The return value is what the bubble shows. Both halves of that are new: the
+        warnings were collected and never drained by anybody, and a failure went to a
+        stderr nobody is watching while the button reported success.
+        """
         if args.no_paste:
             say(f"\n--- draft ---\n{text}\n")
-        elif not paste(text):
-            # Never fail silently: the user pressed Send and expects something.
-            print(
-                "could not take the clipboard - draft not pasted",
-                file=sys.stderr,
-                flush=True,
-            )
+            return ""
+        ok = paste(text, hwnd=target)
+        problems = take_warnings()
+        if not ok and not problems:
+            problems.append("not pasted, and no reason was recorded")
+        for line in problems:
+            print(line, file=sys.stderr, flush=True)
+        return "; ".join(problems)
 
+    quits = (f"{hotkeys.chosen['quit']} quits"
+             if hotkeys is not None and "quit" in hotkeys.chosen
+             else "quit from the right-click menu")
     say(
         ("listening | " if args.arm else "click the pill to arm | ")
-        + "right-click for the menu | esc quits"
+        + f"right-click for the menu | {quits}"
     )
     Pill(session, on_send=on_send, hotkeys=hotkeys, arm=args.arm).mainloop()
     return 0

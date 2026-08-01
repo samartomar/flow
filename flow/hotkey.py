@@ -127,6 +127,7 @@ def kernel_thread_id() -> int:
 
 VK_BACKSLASH, VK_SEMICOLON = 0xDC, 0xBA
 VK_M = 0x4D  # P9 mode toggle
+VK_Q = 0x51  # quit
 
 #: Ordered alternatives per action. ctrl+alt+space is first because it is the most
 #: natural, but it was already taken on the development machine, so toggle in
@@ -151,5 +152,14 @@ DEFAULT_BINDINGS: dict[str, list[tuple[int, int]]] = {
     "mode": [
         (MOD_CONTROL | MOD_ALT, VK_M),
         (MOD_CONTROL | MOD_SHIFT, VK_M),
+    ],
+    # Quit used to be Escape, bound on the pill itself. Once the windows stopped taking
+    # focus — WS_EX_NOACTIVATE, which is what makes a paste land in the right window —
+    # a Tk key binding could never fire again, and the app went on documenting a
+    # shortcut that did nothing. `RegisterHotKey` does not need focus, so it lives here
+    # now, and if every alternative is taken the startup diagnostics say so.
+    "quit": [
+        (MOD_CONTROL | MOD_ALT, VK_Q),
+        (MOD_CONTROL | MOD_SHIFT, VK_Q),
     ],
 }

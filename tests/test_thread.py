@@ -166,6 +166,22 @@ class TestSessionThread(unittest.TestCase):
         self.assertEqual(s.draft.text, "write the migration")
         s.close()
 
+    def test_recall_by_button_is_the_same_act_as_saying_it(self):
+        """The bubble's "Put it back" chip after a Send calls `Session.recall()`.
+
+        Down the same path as the spoken form on purpose: the chip exists because a
+        Send that lands in the wrong window used to cost the whole utterance, and a
+        second implementation of "put it back" would be a second thing to keep working.
+        """
+        s, mic = run(["write the migration"])
+        mic.utterance()
+        s.wait_idle(timeout=5.0)
+        s.send()
+        self.assertEqual(s.draft.text, "")
+        s.recall()
+        self.assertEqual(s.draft.text, "write the migration")
+        s.close()
+
     def test_recall_never_destroys_what_is_on_screen(self):
         s, mic = run(["first prompt", "second thought", "bring back my last prompt"])
         mic.utterance()
