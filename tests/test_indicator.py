@@ -26,7 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.asr import WhisperTranscriber  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
-from flow.session import DEAF_DB, Session, State  # noqa: E402
+from flow.refine import Cli  # noqa: E402
+from flow.session import CONVERSE, DEAF_DB, DICTATE, Session, State  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 
@@ -300,6 +301,151 @@ class TestTheModelReportsItsOwnLoad(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 asr.load(final=False)
         self.assertFalse(asr.loading)
+
+
+class RecordingCanvas:
+    """Enough of a Tk canvas to catch what `_draw` puts on it, without a window.
+
+    The alternative — a real `Pill` — needs a desktop, and `test_resilience.py` already
+    pays for the one case that genuinely does.
+    """
+
+    def __init__(self) -> None:
+        self.texts: list[tuple[float, float, str]] = []
+
+    def delete(self, *a, **kw) -> None: ...
+
+    def create_polygon(self, *a, **kw) -> None: ...
+
+    def create_oval(self, *a, **kw) -> None: ...
+
+    def create_arc(self, *a, **kw) -> None: ...
+
+    def create_line(self, *a, **kw) -> None: ...
+
+    def create_rectangle(self, *a, **kw) -> None: ...
+
+    def create_text(self, x, y, text="", **kw) -> None:
+        self.texts.append((x, y, text))
+
+
+CODEX = Cli("codex", ("codex", "exec"))
+CLAUDE = Cli("claude", ("claude", "-p"))
+
+
+class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
+    """The mode signal is the marker's presence; its text was spare capacity.
+
+    Real `refine.Cli` instances rather than mocks, because `name` is reserved in Mock's
+    constructor — item 11 shipped `<Mock name='claude.name' id=...>` into a note before
+    a test caught it.
+    """
+
+    @staticmethod
+    def _pill(mode=CONVERSE, pinned=None):
+        import flow.ui as ui
+
+        pill = ui.Pill.__new__(ui.Pill)
+        pill.canvas = RecordingCanvas()
+        pill._flash = 0
+        pill.armed = True
+        pill._clis = None
+        pill.levels = [0.0] * 18
+        pill.session = mock.Mock(mode=mode, state=State.IDLE, cli=pinned)
+        return pill
+
+    @classmethod
+    def _draw(cls, mode=CONVERSE, clis=(CODEX,), pinned=None) -> list[str]:
+        import flow.ui as ui
+
+        pill = cls._pill(mode, pinned)
+        with mock.patch.object(ui, "available", return_value=list(clis)):
+            pill._draw()
+        return [t for _, _, t in pill.canvas.texts]
+
+    def test_the_marker_names_whichever_cli_resolved(self):
+        # Both directions, so a constant cannot pass this by matching one of them.
+        self.assertEqual(self._draw(clis=[CODEX]), ["codex"])
+        self.assertEqual(self._draw(clis=[CLAUDE]), ["claude"])
+
+    def test_a_pinned_cli_wins_over_the_preference_order(self):
+        # `set_cli` exists so a wedged CLI is recoverable without a restart; the marker
+        # would be lying if it kept naming the one the pin took Flow off.
+        self.assertEqual(self._draw(clis=[CODEX, CLAUDE], pinned=CLAUDE), ["claude"])
+
+    def test_with_no_cli_on_path_it_keeps_saying_ask(self):
+        # Naming a provider that is not there is worse than naming the mode.
+        self.assertEqual(self._draw(clis=[]), ["ASK"])
+
+    def test_a_name_too_long_for_the_slot_falls_back_to_the_mode(self):
+        # The baseline sits at y 33 and the level bars run to y 32 from x 40: a wider
+        # token overlaps them. Refusing to draw it is the honest failure — a clipped
+        # name reads as a different CLI.
+        long = Cli("gemini-cli", ("gemini",))
+        self.assertEqual(self._draw(clis=[long]), ["ASK"])
+
+    def test_dictate_mode_still_draws_no_marker_at_all(self):
+        self.assertEqual(self._draw(mode=DICTATE, clis=[CODEX]), [])
+
+    def test_the_marker_keeps_its_place_and_its_size(self):
+        import flow.ui as ui
+
+        pill = self._pill()
+        with mock.patch.object(ui, "available", return_value=[CODEX]):
+            pill._draw()
+        x, y, text = pill.canvas.texts[0]
+        self.assertEqual((x, y), (22, ui.PILL_H - 7), "the slot moved")
+        self.assertEqual(text, "codex")
+
+    def test_the_path_is_walked_once_and_not_per_frame(self):
+        # `available()` measures 10.2 ms on this machine — two PATH walks across every
+        # PATHEXT entry, or 34% of the 30 ms frame `_draw` has to finish inside. The
+        # marker is a name that does not change while the app runs; the lookup behind it
+        # must not be paid 33 times a second for that.
+        import flow.ui as ui
+
+        pill = self._pill()
+        with mock.patch.object(ui, "available", return_value=[CODEX]) as lookup:
+            for _ in range(60):
+                pill._draw()
+        self.assertEqual(lookup.call_count, 1)
+        self.assertEqual([t for _, _, t in pill.canvas.texts][-1], "codex")
+
+    def test_opening_the_menu_re_resolves_what_is_installed(self):
+        # The one place a CLI can appear mid-session and then be selected is the menu,
+        # and it was already paying for a lookup; the marker rides along on that rather
+        # than polling for a change that happens once a year.
+        import tkinter as tk
+
+        import flow.ui as ui
+
+        class FakeMenu:
+            def __init__(self, *a, **kw): ...
+
+            def add_command(self, **kw): ...
+
+            def add_separator(self): ...
+
+            def add_cascade(self, **kw): ...
+
+            def tk_popup(self, *a): ...
+
+            def grab_release(self): ...
+
+        pill = self._pill()
+        pill.session.speaker = None  # skip the voice cascade; not what this pins
+        with mock.patch.object(ui, "available", return_value=[]):
+            pill._draw()
+        self.assertEqual([t for _, _, t in pill.canvas.texts], ["ASK"])
+        with mock.patch.object(ui, "available", return_value=[CODEX, CLAUDE]), \
+                mock.patch.object(tk, "Menu", FakeMenu), \
+                mock.patch.object(ui, "foreground_hwnd", return_value=0), \
+                mock.patch.object(ui, "toplevel_hwnd", return_value=0), \
+                mock.patch.object(ui, "_user32"):
+            pill._menu(mock.Mock(x_root=0, y_root=0))
+        pill.canvas.texts.clear()
+        pill._draw()
+        self.assertEqual([t for _, _, t in pill.canvas.texts], ["codex"])
 
 
 if __name__ == "__main__":

@@ -61,8 +61,12 @@ boundary is this:
 
 The startup diagnostics name the CLI that will answer, the notes name the one about to
 be used and the one that did, and switching into converse mode says in words that the
-question leaves the machine. Nothing on the pill *stands* there saying so; whether it
-should is a design question, listed with the other open ones at the end of §10.
+question leaves the machine. The pill *stands* there saying so too: the converse marker
+under the mic glyph reads `codex` or `claude` — the name of the CLI that would answer,
+pin included — and falls back to `ASK` when none is on PATH, because naming a provider
+that is not there is worse than naming the mode. The PATH lookup behind it happens once
+and again whenever the menu opens, never per frame: `available()` measures 10.2 ms here,
+which is 34% of the 30 ms the UI thread has to draw in.
 
 | Module | Band | Does |
 |---|---|---|
@@ -631,15 +635,16 @@ policy here; it is enforced by absence.
 
 ### Gaps that are one fix away from being invariants
 
-Written down so the reference does not claim them early. One remains, and it is design
-rather than plumbing.
+Written down so the reference does not claim them early. **As of 2026-08-01 there are
+none** — the heading survives because "no gaps" is a claim worth dating, and because the
+next narrowed invariant belongs here rather than in a commit message.
 
-1. **The provider is named in words, not on the pill.** Switching to converse mode now
-   says "Ask sends the draft to codex, and the question leaves this machine", and the
-   asking and refining notes name the CLI before it is used rather than after. What is
-   still open is whether the pill itself carries a standing badge — "Converse · codex ·
-   networked" — and where. A note is read once; a badge is read every time somebody
-   looks at the window, and which of those this warrants is the owner's taste.
+The last entry to leave said the provider was named in words and not on the pill: a note
+is read once, and a badge is read every time somebody looks at the window. It closed
+without a redesign, because the pill was already drawing a standing converse marker and
+only its text was at issue — the slot now reads `codex` or `claude` (§1). What no unit
+test can settle is whether it *looks* right at 6 pt, so that eyeball is on the desk list
+in NEEDS_YOU rather than asserted here.
 
 A second entry used to sit here — a clipboard-restore warning recorded 0.6 s after its
 paste was drained by nobody until the *next* Send, and shown against the wrong one.

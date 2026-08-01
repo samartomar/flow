@@ -241,6 +241,7 @@ class Pill(tk.Tk):
         self.levels: deque[float] = deque([0.0] * BARS, maxlen=BARS)
         self.armed = False
         self._flash = 0  # frames remaining of the error flash
+        self._clis: list | None = None  # PATH lookup, deferred and then kept (`_resolved`)
         self._alive = True
         #: The last window that had the foreground and was not Flow's own — where a
         #: Send is aimed. Seeded before any of Flow's windows can take it.
@@ -340,7 +341,9 @@ class Pill(tk.Tk):
                 else "Ask after a pause",
                 command=self.session.toggle_auto_ask,
             )
-        clis = available()
+        # Also the marker's refresh point: a CLI installed mid-session shows up here,
+        # where a press is already paying for the PATH walk `_resolved` will not repeat.
+        clis = self._clis = available()
         if len(clis) > 1:
             # Offered only when there is a choice to make. Automatic tries them in order,
             # but a fallback only runs after the first one has failed — which for a
@@ -641,6 +644,40 @@ class Pill(tk.Tk):
             return ACCENT[State.IDLE]
         return ACCENT.get(self.session.state, ACCENT[State.IDLE])
 
+    #: What fits beside the level bars. The baseline is at y 33 and the bars run to
+    #: y 32 from x 40, so a wider token overlaps them rather than being clipped —
+    #: `codex` and `claude` are 5 and 6, and anything longer falls back to the mode.
+    MARKER_MAX = 6
+
+    def _resolved(self) -> list:
+        """The agent CLIs on PATH, looked up once.
+
+        `Session._provider` says `available()` is cheap *because it is only reached from
+        note paths*, and this is the caller that breaks that: `_draw` runs every 30 ms.
+        Measured on this machine, `available()` is **10.2 ms** — 34% of a frame, twice a
+        PATH walk across every `PATHEXT` entry. Installing a CLI while Flow is running is
+        rare and already needs a menu press to select; `_menu` re-resolves there, which is
+        a user action paying for its own lookup.
+        """
+        if self._clis is None:
+            self._clis = available()
+        return self._clis
+
+    def _marker(self) -> str:
+        """The CLI that would answer an Ask, or the mode when none would.
+
+        Reads the pin first: `set_cli` is what makes a wedged CLI recoverable without a
+        restart, and a marker still naming the one it was taken off would be the pin's
+        only visible effect being wrong.
+        """
+        pinned = getattr(self.session, "cli", None)
+        found = self._resolved()
+        cli = pinned if pinned is not None else (found[0] if found else None)
+        if cli is None:
+            return "ASK"
+        name = cli.name.lower()
+        return name if len(name) <= self.MARKER_MAX else "ASK"
+
     def _draw(self) -> None:
         c = self.canvas
         c.delete("all")
@@ -657,10 +694,13 @@ class Pill(tk.Tk):
         )
         c.create_line(cx, cy + 6, cx, cy + 10, fill=accent, width=2)
         # P9: which mode Send is in, readable at a glance. Without it, "there was no
-        # spoken reply" and "I was never in converse mode" look identical.
+        # spoken reply" and "I was never in converse mode" look identical. The slot is
+        # drawn either way, so naming the CLI in it costs no pixels — and the note that
+        # says the question leaves the machine only appears at the mode switch, which is
+        # the wrong moment to still be reading it.
         if getattr(self.session, "mode", DICTATE) != DICTATE:
             c.create_text(
-                cx, PILL_H - 7, text="ASK", fill=accent,
+                cx, PILL_H - 7, text=self._marker(), fill=accent,
                 font=("Segoe UI", 6, "bold"),
             )
 
