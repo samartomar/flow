@@ -40,7 +40,7 @@ from .edits import (
 #: a different word; lower-casing marks it as ordinary prose, which is the one thing not
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
-from .refine import ask, refine
+from .refine import ask, refine, tail_sent
 from .thread import Thread
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
@@ -1100,6 +1100,17 @@ class Session:
             else f"refining via CLI: {instruction!r}",
         )
         before = self.draft.text
+        sent = tail_sent(before)
+        if sent < len(before):
+            # R11 caps what the CLI is handed, and from outside the cap looks like the
+            # CLI ignoring most of the request: ask for a long draft to be shortened
+            # and only its ending comes back shorter. The head is reattached verbatim,
+            # so "left as it is" is a promise rather than a hedge.
+            self._emit(
+                "note",
+                f"only the last {sent} characters went to the CLI — "
+                "the text before that is left as it is",
+            )
 
         context = self.thread.tail() if self.following_up else []
 
@@ -1243,6 +1254,16 @@ class Session:
         op = self._ask_op = self._next_op()
         self._set_state(State.ASKING)
         self._emit("note", "asking…")
+        sent = tail_sent(question)
+        if sent < len(question):
+            # Worse than the Refine case and worded to say so: `ask()` sends the tail
+            # and discards the head, so the answer is to a question the user did not
+            # ask. Nothing reattaches anything here.
+            self._emit(
+                "note",
+                f"only the last {sent} characters of the question went — "
+                "the CLI never saw the start of it",
+            )
         # The thread already holds this question (send() added it), so the context is
         # every *earlier* turn — passing the current one would ask the CLI not to
         # answer the thing it was just asked.

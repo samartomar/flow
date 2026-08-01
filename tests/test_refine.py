@@ -1,8 +1,12 @@
-"""Tests for the CLI adapter's guards (R11).
+"""Tests for the CLI adapter's guards (R11), and for saying what they did.
 
 These guards are the reason the agent CLI cannot hurt the user: bounded input, hard
 timeout, and a refusal to paste commentary into their text. All of them only matter in
 failure cases, which is exactly the code least likely to be exercised by hand.
+
+The bound on input is the one the user can *feel* without being told — a long draft is
+refined only at the end, and from outside that looks like the CLI ignoring most of what
+was asked. The last class here is about that being said out loud.
 """
 
 import subprocess
@@ -11,9 +15,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.refine import MAX_CHARS, Cli, _split_tail, refine  # noqa: E402
+from flow.session import Session  # noqa: E402
 
 CLI = Cli("codex", ("codex", "exec"))
 
@@ -108,6 +115,111 @@ class TestGuards(unittest.TestCase):
             out, note = refine("ship it", "make it formal")
         self.assertIsNone(out)
         self.assertIn("no agent CLI", note)
+
+
+class Silent:
+    """No mic, no model. These tests are about what the session *says*."""
+
+    level_db = -60.0
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def restart(self) -> None: ...
+
+    def drain(self) -> list[np.ndarray]:
+        return []
+
+    @property
+    def active(self) -> bool:
+        return True
+
+    def load(self) -> None: ...
+
+    def text(self, audio, *, final=False, hotwords="") -> str:
+        return ""
+
+
+#: Long enough to be cut, and made of sentences so the cut lands on a boundary rather
+#: than at exactly MAX_CHARS — which is what makes the reported number worth checking.
+LONG = "Alpha bravo charlie. " * 300
+
+
+class TestTheBoundOnInputIsVisible(unittest.TestCase):
+    """R11 caps what the CLI is handed, and that used to happen in silence.
+
+    A Refine keeps the head verbatim and reattaches it, so nothing is lost — but "I
+    asked it to shorten this and it only shortened the end" is a defect report waiting
+    to be filed unless the app says which part it sent. An Ask is worse: the head of an
+    over-long question is never sent at all, so the answer is to a question the user did
+    not ask, and nothing anywhere said so.
+    """
+
+    def session(self) -> Session:
+        s = Session(asr=Silent(), mic=Silent())
+        self.addCleanup(s.close)
+        return s
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def refined(self, text: str) -> str:
+        s = self.session()
+        s.draft.set(text)
+        with mock.patch("flow.session.refine", return_value=("REVISED", "codex")):
+            s._start_refine("make it formal")
+        return self.notes(s)
+
+    def asked(self, text: str) -> str:
+        s = self.session()
+        with mock.patch("flow.session.ask", return_value=("answer", "codex")):
+            s._start_ask(text)
+        return self.notes(s)
+
+    def test_a_short_draft_says_nothing_about_length(self):
+        self.assertNotIn("characters", self.refined("ship it on Friday"))
+
+    def test_a_long_draft_says_how_much_of_it_went(self):
+        self.assertIn("characters", self.refined(LONG))
+
+    def test_and_says_the_rest_is_left_alone(self):
+        # The head is reattached verbatim, so this is a promise, not a hedge.
+        self.assertIn("left as it is", self.refined(LONG))
+
+    def test_the_number_is_the_real_cut_not_the_constant(self):
+        # `_split_tail` walks forward to a sentence boundary, so the tail is shorter
+        # than MAX_CHARS. A note quoting 2000 would be a guess dressed as a measurement.
+        note = self.refined(LONG)
+        sent = int(next(w for w in note.replace("—", " ").split() if w.isdigit()))
+        self.assertEqual(sent, len(_split_tail(LONG)[1]))
+        self.assertLess(sent, MAX_CHARS)
+
+    def test_a_short_question_says_nothing_about_length(self):
+        self.assertNotIn("characters", self.asked("how do I widen a column"))
+
+    def test_an_over_long_question_says_the_start_never_went(self):
+        note = self.asked(LONG)
+        self.assertIn("characters", note)
+        self.assertIn("never saw", note)
+
+    def test_the_two_notes_do_not_make_the_same_promise(self):
+        # A Refine keeps what it did not send; an Ask discards it. Saying the same
+        # thing about both would make one of them a lie.
+        self.assertNotIn("left as it is", self.asked(LONG))
+
+
+class TestTailSent(unittest.TestCase):
+    def test_a_short_text_goes_whole(self):
+        from flow.refine import tail_sent
+
+        self.assertEqual(tail_sent("short enough"), len("short enough"))
+
+    def test_a_long_text_reports_only_what_the_cli_sees(self):
+        from flow.refine import tail_sent
+
+        self.assertEqual(tail_sent(LONG), len(_split_tail(LONG)[1]))
+        self.assertLessEqual(tail_sent(LONG), MAX_CHARS)
 
 
 if __name__ == "__main__":

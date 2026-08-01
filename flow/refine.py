@@ -244,6 +244,17 @@ def _invoke(
     return out, ""
 
 
+def tail_sent(text: str) -> int:
+    """How much of `text` a CLI call will actually see, in characters.
+
+    `len(text)` for anything inside `MAX_CHARS`. Asked here rather than computed by the
+    caller because the cut walks forward to a sentence boundary — so the real figure is
+    a little under `MAX_CHARS` and varies with the text, and a note quoting the constant
+    would be a guess dressed as a measurement.
+    """
+    return len(_split_tail(text)[1])
+
+
 def _clean(out: str) -> str:
     """Light defensive tidy. Deliberately not a parser — stdout is already clean."""
     s = out.strip()
