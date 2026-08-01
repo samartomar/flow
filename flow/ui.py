@@ -203,6 +203,12 @@ class Pill(tk.Tk):
             label="Converse mode" if self.session.mode == DICTATE else "Dictate mode",
             command=self.session.toggle_mode,
         )
+        if self.session.mode != DICTATE:
+            m.add_command(
+                label="Ask only when I press it" if self.session.auto_ask
+                else "Ask after a pause",
+                command=self.session.toggle_auto_ask,
+            )
         if getattr(self.session, "speaker", None) is not None:
             m.add_command(
                 label="Mute replies" if not self.session.muted else "Speak replies",
@@ -308,6 +314,7 @@ class Pill(tk.Tk):
                 # recovery affordance itself is Phase 3's rescue chip.
                 self.bubble.note(ev.text)
 
+        self.bubble.tick_countdown()
         if self._flash:
             self._flash -= 1
         self._draw()
@@ -379,6 +386,9 @@ class Bubble(tk.Toplevel):
         self._note = ""
         self._partial = ""
         self._reply = ""
+        #: Last auto-ask second painted, so the countdown repaints once a second
+        #: rather than on every frame.
+        self._countdown: int | None = None
         #: Which float-up animation is current; older ones stop when this moves.
         self._anim = 0
         self._h = 120
@@ -544,41 +554,69 @@ class Bubble(tk.Toplevel):
         self._chips()
 
     def _chips(self) -> None:
+        # (key, label, command). The key is the canvas tag and the label is what is
+        # drawn, and they are separate because the Ask chip carries a countdown: tagging
+        # by the visible text would rename the tag every second, so its click binding
+        # and anything looking for it — the self-drive harness included — would chase a
+        # name that no longer exists.
         c = self.canvas
         specs = [
-            ("Refine", self._refine, "force the next utterance to be an instruction"),
-            ("Continue", self._continue, "force the next utterance to be dictation"),
+            ("Refine", "Refine", self._refine),
+            ("Continue", "Continue", self._continue),
         ]
         # Only offered when there is something to re-read. A chip that is always
         # present but usually does nothing teaches people to ignore it.
         if getattr(self.pill.session, "can_rescue", False):
+            specs.append(("Was a command", "Was a command", self._was_a_command))
+        if getattr(self.pill.session, "mode", DICTATE) != DICTATE:
+            # The countdown lives on the button it is going to press. Anywhere else it
+            # is just a timer running somewhere on screen; here it says which action is
+            # about to happen and how long there is to stop it.
+            left = getattr(self.pill.session, "auto_ask_in", None)
             specs.append(
-                ("Was a command", self._was_a_command,
-                 "re-read the last dictation as an instruction"),
+                ("Ask", "Ask" if left is None else f"Ask {int(left) + 1}s",
+                 self.pill._send)
             )
-        converse = getattr(self.pill.session, "mode", DICTATE) != DICTATE
-        specs.append(
-            ("Ask", self.pill._send, "put this to the agent CLI")
-            if converse
-            else ("Send", self.pill._send, "hand the draft off")
-        )
+        else:
+            specs.append(("Send", "Send", self.pill._send))
+
         x = PAD
         y2 = self._h - PAD
         y1 = y2 - 26
-        for label, cmd, _tip in specs:
+        for key, label, cmd in specs:
             w = 20 + 7 * len(label)
-            fill = self.pill.accent if label in ("Send", "Ask") else CHIP
-            tag = f"chip-{label}"
-            _round_rect(c, x, y1, x + w, y2, 13, fill=fill, outline="", tags=tag)
+            primary = key in ("Send", "Ask")
+            tag = f"chip-{key}"
+            _round_rect(
+                c, x, y1, x + w, y2, 13,
+                fill=self.pill.accent if primary else CHIP, outline="", tags=tag,
+            )
             c.create_text(
                 x + w / 2, (y1 + y2) / 2, text=label,
-                fill=SHELL if label in ("Send", "Ask") else TEXT,
+                fill=SHELL if primary else TEXT,
                 font=("Segoe UI", 9, "bold"), tags=tag,
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
             x += w + 8
 
+    def tick_countdown(self) -> None:
+        """Repaint when the auto-ask number changes, and only then.
+
+        The bubble otherwise renders on events, and a countdown has no events. Redrawing
+        every frame would rebuild the whole canvas 33 times a second for a digit that
+        changes once; comparing the digit first makes it once a second.
+        """
+        left = getattr(self.pill.session, "auto_ask_in", None)
+        shown = None if left is None else int(left) + 1
+        if shown == self._countdown:
+            return
+        self._countdown = shown
+        if self._visible:
+            self._render()
+
     def _was_a_command(self) -> None:
+        # Reaching for any chip means the user is still working on this draft.
+        self.pill.session.hold_auto_ask()
         self.pill.session.rescue_last_append()
 
     # Both chips toggle. Pressing one used to be a one-way door until it timed out 30 s
@@ -593,6 +631,9 @@ class Bubble(tk.Toplevel):
 
     def _arm_next(self, mode: str, armed_note: str) -> str:
         session = self.pill.session
+        # Arming a chip is a statement that something is about to be said, so the
+        # countdown must not run out while the user is drawing breath to say it.
+        session.hold_auto_ask()
         if session.force_next == mode:
             session.force_next = None
             return "back to deciding for itself"

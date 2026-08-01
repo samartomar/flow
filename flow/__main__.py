@@ -27,7 +27,7 @@ from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .hotkey import DEFAULT_BINDINGS, Hotkeys
 from .inject import paste, take_warnings
 from .refine import available
-from .session import Session
+from .session import AUTO_ASK_SEC, Session
 from .ui import Pill
 
 
@@ -89,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--no-speak", action="store_true",
         help="never read converse-mode replies aloud",
+    )
+    ap.add_argument(
+        "--no-auto-ask", action="store_true",
+        help="in converse mode, wait for the Ask button instead of a pause",
     )
     args = ap.parse_args(argv)
 
@@ -181,10 +185,16 @@ def main(argv: list[str] | None = None) -> int:
     # Stated either way, and unprompted. "There was no spoken reply" and "I was never
     # in converse mode" produce identical symptoms, and the first live user hit exactly
     # that: nothing on screen or in the log distinguished them.
+    session.auto_ask = not args.no_auto_ask
     if args.converse:
         session.toggle_mode()
         say("mode: CONVERSE - the Ask button puts the draft to the agent CLI "
             "and the reply appears in Flow")
+        if session.auto_ask:
+            say(f"auto-ask: on - a pause of {AUTO_ASK_SEC:.0f}s sends the question "
+                "(--no-auto-ask to press it yourself)")
+        else:
+            say("auto-ask: off - press Ask when you are ready")
     else:
         say("mode: DICTATE - Send pastes into the focused window "
             "(--converse, or ctrl+alt+M, to ask instead)")

@@ -60,6 +60,24 @@ MIC_CHECK_SEC = 5.0
 #: and after this long the next thing someone says is a different thought.
 FORCE_NEXT_TTL_SEC = 30.0
 
+#: P9. How long a settled draft waits in converse mode before it is asked on its own.
+#:
+#: Converse mode is meant to be a conversation, and product.md states P9's acceptance as
+#: "speak, the reply appears, speak again" — no button in that sentence. But R5 says a
+#: draft is never auto-sent, and R5 is what makes accented ASR survivable: the correction
+#: loop only exists because there is a held draft to correct. The reconciliation is that
+#: R5 protects the *irreversible* act. Pasting into a focused window is irreversible and
+#: stays manual forever; asking a question is not, and its answer is additive.
+#:
+#: Four seconds is a measured floor rather than taste. On the one recording where every
+#: item was located, the pauses a speaker leaves between separate spoken items run
+#: 1.4–3.3 s (median 2.5 s) — and every one of those gaps also contains a spoken item
+#: number, so the pure silence is shorter still. Anything under ~3.3 s therefore fires
+#: while someone is still mid-thought. This clears the longest pause measured, the
+#: countdown sits on the button the entire time so it is never a surprise, and speaking
+#: holds it — which is what "still correctable until it fires" has to mean.
+AUTO_ASK_SEC = 4.0
+
 
 class State(str, Enum):
     IDLE = "idle"  # not capturing
@@ -303,6 +321,11 @@ class Session:
         #: rather than logged: it is the one number that says whether the half-duplex
         #: guard is doing anything, and a per-block note would drown the bubble.
         self.echo_blocks = 0
+        #: P9: let a settled draft go to the CLI on its own after a pause. Converse mode
+        #: only — see AUTO_ASK_SEC for why that distinction is the whole argument.
+        self.auto_ask = True
+        #: When the draft last stopped changing. None means nothing is pending.
+        self._settled_at: float | None = None
         #: P8. What Flow has measured and learned about this person, on this machine.
         #: None disables learning entirely — the tests and the benchmarks pass None so
         #: a harness run never writes to the user's real profile.
@@ -405,6 +428,10 @@ class Session:
     def tick(self) -> None:
         self._pump_audio()
         self.pump_results()
+        # Deliberately in tick() and not in pump_results(): auto-ask needs a live
+        # microphone to mean anything. Disarming is a way of saying "stop", and a pill
+        # the user just switched off must not fire a question a few seconds later.
+        self._pump_auto_ask()
         self._pump_health()
 
     def pump_results(self) -> None:
@@ -816,7 +843,62 @@ class Session:
 
     def _after_draft_change(self) -> None:
         self._set_state(State.DRAFT if self.draft.text else State.IDLE)
+        # Every route ends here — dictation, a local edit, an undo, a rescue — so this
+        # is the one place that knows the draft has stopped moving. A correction
+        # restarts the clock, which is what keeps the draft correctable until it fires.
+        self._settled_at = time.perf_counter() if self.draft.text else None
         self._emit("draft", self.draft.text)
+
+    # -- P9: asking without a button press ---------------------------------
+
+    def _auto_ask_armed(self) -> bool:
+        """Whether a settled converse-mode draft is counting down to being asked.
+
+        Every clause is a way the user is still busy: the gate is open, audio is waiting
+        to be decoded, a decode is running, or the previous answer is still playing —
+        during which the microphone is gated, so silence proves nothing about them.
+        """
+        return (
+            self.auto_ask
+            and self.mode == CONVERSE
+            and self.state is State.DRAFT
+            and self._settled_at is not None
+            and bool(self.draft.text.strip())
+            and not self.gate.speaking
+            and not self._utter
+            and not self.worker.busy
+            and not (self.speaker is not None and self.speaker.speaking)
+        )
+
+    @property
+    def auto_ask_in(self) -> float | None:
+        """Seconds until the draft goes on its own, or None if nothing is counting.
+
+        Read by the UI every frame to put the countdown on the Ask button. A silent
+        timer that sends the user's words is the thing this must never be.
+        """
+        if not self._auto_ask_armed():
+            return None
+        return max(0.0, AUTO_ASK_SEC - (time.perf_counter() - self._settled_at))
+
+    def hold_auto_ask(self) -> None:
+        """Restart the countdown. The user is still working on this draft."""
+        if self._settled_at is not None:
+            self._settled_at = time.perf_counter()
+
+    def toggle_auto_ask(self) -> bool:
+        self.auto_ask = not self.auto_ask
+        self._emit("note", "auto-ask on - a pause sends the question"
+                   if self.auto_ask else "auto-ask off - press Ask when you are ready")
+        return self.auto_ask
+
+    def _pump_auto_ask(self) -> None:
+        if not self._auto_ask_armed():
+            return
+        if time.perf_counter() - self._settled_at < AUTO_ASK_SEC:
+            return
+        self._emit("note", "no more speech - asking")
+        self.send()
 
     # -- semantic refine (off-thread: ~7 s measured) ------------------------
 
@@ -904,6 +986,9 @@ class Session:
             self._emit("note", "still rewriting - one moment")
             return ""
         text = self.draft.clear()
+        # Cleared here rather than in `_after_draft_change`, which send() does not call:
+        # a stale timestamp would leave the countdown armed against an empty draft.
+        self._settled_at = None
         self.thread.add(text)
         # P8: send is the natural commit point — rare, user-initiated, and the moment
         # a session's corrections have proved themselves by surviving to a handoff.

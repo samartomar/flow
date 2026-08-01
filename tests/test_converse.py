@@ -16,7 +16,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
-from flow.session import CONVERSE, DICTATE, Session, State  # noqa: E402
+from flow.session import AUTO_ASK_SEC, CONVERSE, DICTATE, Session, State  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 
@@ -404,3 +404,95 @@ class TestSpeechIsARuntimeChoice(unittest.TestCase):
         s.toggle_speech()
         self._answer(s)
         self.assertEqual(s.reply, "Use ALTER TABLE.")
+
+
+class TestAutoAsk(unittest.TestCase):
+    """P9: converse mode is a conversation, so a settled draft goes on its own.
+
+    product.md states the acceptance as "speak, the reply appears, speak again" — no
+    button in that sentence — while R5 says a draft is never auto-sent. The
+    reconciliation is that R5 protects the *irreversible* act: pasting into a focused
+    window stays manual forever, asking a question does not. So this is converse-only,
+    it is visible the whole time it is counting, and anything the user does resets it.
+    """
+
+    def _armed(self, **kw):
+        s = session(**kw)
+        s.toggle_mode()
+        s.draft.set("can you hear me")
+        s._after_draft_change()
+        s.events()
+        return s
+
+    def _fire(self, s):
+        """Wind the clock past the delay rather than sleeping through it."""
+        s._settled_at -= AUTO_ASK_SEC + 0.1
+        s._pump_auto_ask()
+
+    def test_a_settled_draft_is_asked_without_a_press(self):
+        s = self._armed()
+        with mock.patch("flow.session.ask", return_value=("yes", "codex")) as ask:
+            self._fire(s)
+            self.assertIs(s.state, State.ASKING)
+        self.assertEqual(ask.call_args.args[0], "can you hear me")
+
+    def test_dictate_mode_never_sends_itself(self):
+        # R5 in full force: this one pastes into whatever has focus.
+        s = self._armed()
+        s.toggle_mode()
+        self.assertEqual(s.mode, DICTATE)
+        self._fire(s)
+        self.assertEqual(s.draft.text, "can you hear me")
+
+    def test_it_does_not_fire_while_the_user_is_speaking(self):
+        s = self._armed()
+        s.gate.speaking = True
+        self._fire(s)
+        self.assertEqual(s.draft.text, "can you hear me")
+
+    def test_it_does_not_fire_while_a_reply_is_playing(self):
+        # The mic is gated then, so silence says nothing about the user.
+        sp = FakeSpeaker()
+        s = self._armed(speaker=sp)
+        sp.say("still talking")
+        self._fire(s)
+        self.assertEqual(s.draft.text, "can you hear me")
+
+    def test_a_correction_restarts_the_countdown(self):
+        s = self._armed()
+        s._settled_at -= AUTO_ASK_SEC - 0.5  # nearly out of time
+        s._route("change hear to see")
+        self.assertGreater(s.auto_ask_in, AUTO_ASK_SEC - 0.5,
+                           "editing the draft did not buy any time back")
+
+    def test_reaching_for_a_chip_holds_it(self):
+        s = self._armed()
+        s._settled_at -= AUTO_ASK_SEC - 0.2
+        s.hold_auto_ask()
+        self.assertGreater(s.auto_ask_in, AUTO_ASK_SEC - 0.5)
+
+    def test_the_countdown_is_readable_the_whole_time(self):
+        # A silent timer that sends the user's words is the thing this must never be.
+        s = self._armed()
+        self.assertIsNotNone(s.auto_ask_in)
+        self.assertLessEqual(s.auto_ask_in, AUTO_ASK_SEC)
+        s.auto_ask = False
+        self.assertIsNone(s.auto_ask_in, "nothing should count down when it is off")
+
+    def test_turning_it_off_stops_it_firing(self):
+        s = self._armed()
+        s.auto_ask = False
+        self._fire(s)
+        self.assertEqual(s.draft.text, "can you hear me")
+
+    def test_an_emptied_draft_is_not_counting(self):
+        s = self._armed()
+        s.draft.set("")
+        s._after_draft_change()
+        self.assertIsNone(s.auto_ask_in)
+
+    def test_it_is_not_armed_after_the_question_has_gone(self):
+        s = self._armed()
+        with mock.patch("flow.session.ask", return_value=("yes", "codex")):
+            s.send()
+            self.assertIsNone(s.auto_ask_in)

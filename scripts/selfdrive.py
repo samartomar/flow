@@ -32,7 +32,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow import SAMPLE_RATE  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
-from flow.session import CONVERSE, DICTATE, Session, State  # noqa: E402
+from flow.session import (  # noqa: E402
+    AUTO_ASK_SEC, CONVERSE, DICTATE, Session, State,
+)
 
 CACHE = Path(__file__).resolve().parent.parent / ".bench" / "selfdrive"
 
@@ -566,6 +568,28 @@ def scenario_chips(report) -> None:
         click(pill, "Send")
         report("clicking Send handed the draft over", pasted == ["some words"],
                str(pasted))
+
+        # P9 auto-ask: the countdown has to be on the button, and it has to fire.
+        session.toggle_mode()
+        session.draft.set("what is the time")
+        session._after_draft_change()
+        pill._frame()
+        label = pill.bubble.canvas.itemcget(
+            pill.bubble.canvas.find_withtag("chip-Ask")[1], "text"
+        )
+        report("the Ask button shows the countdown", label.startswith("Ask ")
+               and label.endswith("s"), label)
+        click(pill, "Refine")
+        report("a chip press buys the time back",
+               session.auto_ask_in > AUTO_ASK_SEC - 1.0,
+               f"{session.auto_ask_in:.1f}s left of {AUTO_ASK_SEC:.0f}")
+        with mock.patch("flow.session.ask", return_value=("Half past four.", "codex")):
+            session._settled_at -= AUTO_ASK_SEC + 0.1
+            session.tick()
+            report("the pause asked it without a press",
+                   session.state is State.ASKING, session.state.value)
+            report("nothing was pasted by the pause", pasted == ["some words"],
+                   str(pasted))
     finally:
         pill.destroy()
 

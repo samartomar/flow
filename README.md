@@ -135,6 +135,7 @@ click the pill to arm | right-click for the menu | esc quits
 | `--no-profile` | ignore the stored profile and learn nothing this session |
 | `--converse` | start in converse mode: Send asks the agent CLI instead of pasting ([P9](#converse-mode-p9)) |
 | `--no-speak` | never read converse-mode replies aloud |
+| `--no-auto-ask` | in converse mode, wait for the Ask button instead of a pause |
 
 If capture cannot start — no microphone, device held exclusively by another app, a bad
 `--device` index — the pill stays slate and the reason appears in a red bubble. It will
@@ -320,6 +321,8 @@ is a prompt either way.
   open, so a crashed or upgraded CLI cannot take the conversation with it.
 - **Answers are asked to be short** — at most three sentences of plain prose — because the
   reply is read on a floating bubble and spoken aloud, and neither survives an essay.
+- **A pause sends the question.** Stop talking for 4 seconds and the draft goes on its
+  own — see [Asking without pressing anything](#asking-without-pressing-anything).
 - **Flow goes deaf while it talks.** The microphone is ignored for as long as a reply is
   playing, because it is hearing the speakers and there is no echo cancellation to tell
   that from your voice. See [Interrupting a reply](#interrupting-a-reply).
@@ -335,6 +338,28 @@ Speech goes through `System.Speech` in one long-lived PowerShell host, not a sub
 reply. That is not an optimisation: a subprocess that has already been launched cannot be
 told to stop talking, and PowerShell costs ~700 ms of startup before the first phoneme.
 Nothing is installed and nothing leaves the machine.
+
+### Asking without pressing anything
+
+A conversation where you press a button after every sentence is not a conversation. In
+converse mode a draft that stops changing is put to the CLI on its own after **4 seconds**
+of silence, and the Ask button counts down — `Ask 4s`, `Ask 3s` — so it is never a
+surprise.
+
+**The draft stays correctable the whole time.** Anything you do resets the clock: speaking,
+a correction landing, pressing Refine or Continue. The countdown only runs while the mic is
+live and nothing else is happening — it will not fire while you are talking, while a decode
+is still running, while the previous answer is playing, or after you disarm the pill.
+
+Four seconds is measured rather than chosen. On the one volunteer recording where every
+item was located, the pauses a speaker leaves between separate spoken items run
+**1.4–3.3 s** (median 2.5 s), and each of those gaps also contains a spoken item number, so
+the real silence is shorter still. Anything under ~3.3 s fires while someone is mid-thought.
+
+**Dictate mode never does this.** Pasting into a focused window is irreversible, so it stays
+a deliberate act forever. Asking a question is not, and its answer is additive — that is the
+whole distinction. `--no-auto-ask`, or **Ask only when I press it** in the right-click menu,
+turns it off.
 
 ### Interrupting a reply
 
