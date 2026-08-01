@@ -147,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
         # creating is a plausible cause of "it got worse".
         say(f"lexicon: {n_terms} terms from {lexicon.path}")
     else:
-        say(f"lexicon: none - create {lexicon.path} to bias names and jargon")
+        say("lexicon: none - right-click > Open settings folder, or create "
+            f"{lexicon.path}, to add names and corrections")
 
     # Built unless refused, not only when asked for. Speech used to be a launch flag
     # while the mode it serves is a runtime toggle, so anyone who discovered converse
@@ -286,7 +287,14 @@ def main(argv: list[str] | None = None) -> int:
         ("listening | " if args.arm else "click the pill to arm | ")
         + f"right-click for the menu | {quits}"
     )
-    Pill(session, on_send=on_send, hotkeys=hotkeys, arm=args.arm).mainloop()
+    # `--no-lexicon` points the loader at a path inside the package that must never
+    # exist, so the menu is sent to the real settings folder instead: the profile lives
+    # there either way, and creating a template beside the source is nobody's idea of
+    # settings.
+    Pill(
+        session, on_send=on_send, hotkeys=hotkeys, arm=args.arm,
+        settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
+    ).mainloop()
     return 0
 
 

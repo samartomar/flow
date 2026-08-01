@@ -311,4 +311,8 @@ class WhisperTranscriber:
                 worst = lp if worst is None else min(worst, lp)
         with self._lock:
             self._confidence = worst
-        return normalise(" ".join(kept))
+        # Corrections last, and on the joined text: the router, the undo stack and the
+        # paste all read what this returns, so a name the user has declared has to be
+        # right by here or it is wrong everywhere. After `normalise`, so a declared
+        # phrase matches tidied words rather than decoder markers and double spaces.
+        return self.lexicon.apply(normalise(" ".join(kept)))

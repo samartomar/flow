@@ -13,12 +13,15 @@ was written: overrideredirect, -topmost, -alpha, -transparentcolor, -toolwindow.
 from __future__ import annotations
 
 import ctypes
+import os
 import time
 import tkinter as tk
 import traceback
 from collections import deque
+from pathlib import Path
 
 from .inject import foreground_hwnd, owned_by_flow, take_warnings
+from .lexicon import DEFAULT_PATH as LEXICON_PATH, ensure as ensure_lexicon
 from .session import DICTATE, Session, State
 
 
@@ -217,13 +220,22 @@ def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
 class Pill(tk.Tk):
     """The always-visible control. Click to arm/disarm, drag to move."""
 
-    def __init__(self, session: Session, on_send=None, hotkeys=None, arm=False) -> None:
+    def __init__(
+        self, session: Session, on_send=None, hotkeys=None, arm=False,
+        settings_path=None,
+    ) -> None:
         scale = _dpi_aware()  # before the first Tk window exists, or it has no effect
         super().__init__()
         self.scale = scale
         self.session = session
         self.on_send = on_send
         self.hotkeys = hotkeys
+        #: The lexicon actually in use, so the menu opens the folder Flow is reading
+        #: rather than the default one — `--lexicon elsewhere.txt` would otherwise send
+        #: the user to edit a file nothing loads.
+        self.settings_path = (
+            Path(settings_path) if settings_path is not None else LEXICON_PATH
+        )
         self._arm_on_start = arm
         self.levels: deque[float] = deque([0.0] * BARS, maxlen=BARS)
         self.armed = False
@@ -334,6 +346,7 @@ class Pill(tk.Tk):
             )
             self._voice_menu(m)
         m.add_command(label="Clear draft", command=self._clear)
+        m.add_command(label="Open settings folder", command=self._open_settings)
         m.add_separator()
         m.add_command(label="Quit", command=self.quit_app)
 
@@ -415,6 +428,35 @@ class Pill(tk.Tk):
             self.bubble.show_sent(text)
         # Nothing else: an empty `text` means send() refused and said why in a note, and
         # hiding the bubble here is what used to take that explanation off the screen.
+
+    def _open_settings(self) -> None:
+        """Show the folder Flow reads, with a lexicon file in it to type into.
+
+        A settings *folder*, not a settings dialog. Everything the user can set is
+        already two hand-editable files — the lexicon and profile.json — and the whole
+        gap was that nobody could find them. Explorer is the editor, `os.startfile` is
+        the whole implementation, and R16 keeps its three dependencies.
+
+        The file is written first because an empty folder answers none of the questions
+        that brought someone here; the template's comments are the documentation for a
+        format that is otherwise invisible.
+        """
+        folder = self.settings_path.parent
+        try:
+            created = ensure_lexicon(self.settings_path)
+            os.startfile(folder)
+        except OSError as exc:
+            # A locked profile directory, or a shell with no handler for a folder. Said
+            # on screen: the menu item did nothing visible, and there is no other place
+            # a user would look.
+            self._flash = 12
+            self.bubble.note(f"could not open {folder}: {exc}")
+            return
+        if created:
+            self.bubble.note(
+                f"created {self.settings_path.name} - the comments in it say what "
+                "each kind of line does"
+            )
 
     def _clear(self) -> None:
         # Clear is the cheapest "stop" the user has, and with the microphone gated while

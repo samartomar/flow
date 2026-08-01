@@ -78,7 +78,7 @@ should is a design question, listed with the other open ones at the end of §10.
 | `clean.py` | speech | rejects text the model invented, with the evidence |
 | `calibrate.py` | personal | measures this room and this voice (P8) |
 | `profile.py` | personal | what was measured and learned, as JSON |
-| `lexicon.py` | personal | the user's own terms, re-read on change |
+| `lexicon.py` | personal | the user's own terms to bias toward, and the corrections to apply after decoding; re-read on change |
 | `refine.py` | external | rewrite, polish (P5) and converse ask (P9) |
 | `speak.py` | external | one long-lived SAPI host; owns `speaking`, which gates the mic, and which voice reads the reply |
 
@@ -107,6 +107,10 @@ should is a design question, listed with the other open ones at the end of §10.
       ▼
   clean.invented_reason ── two signals must agree before anything is dropped;
       │                    every rejection is kept with its evidence
+      ▼
+  Lexicon.apply ───── declared "wrong -> right" corrections, whole words, one pass.
+      │               Here because everything downstream — the router, the undo
+      │               stack, the paste — reads what the decode returned
       ▼
   Session._route ──── append | local | semantic | undo | rescue | recall | followup
       │
@@ -517,7 +521,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `ASK_MAX_CHARS` | 4000 | The bubble has to render it |
 | `Thread.MAX_TURNS` / `MAX_CHARS` | 20 / 20 000 | R8. Measured: 5000 sends of a realistic prompt settle at 20 turns, 1640 chars |
 | `CONTEXT_CHARS` | 1500 | What a CLI rewrite may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |
-| `Lexicon.MAX_TERMS` | 64 | The library truncates its prompt at 223 tokens *silently, mid-term*, which would bias toward a fragment |
+| `Lexicon.MAX_TERMS` | 64 | The library truncates its prompt at 223 tokens *silently, mid-term*, which would bias toward a fragment. Terms and corrections share it: one file, one person filling it, and counting them apart would let 64 corrections buy 64 hotwords past the budget |
 | `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern |
 | `Draft.MAX_HISTORY` / `MAX_HISTORY_CHARS` | 30 / 200 000 | 30 snapshots of a very long draft is where undo quietly becomes megabytes |
 
@@ -525,7 +529,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 
 | Path | When | What |
 |---|---|---|
-| `~/.flow/lexicon.txt` | never by Flow | the user's own terms. Read-only to the app; re-read by mtime on every decode |
+| `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. Otherwise read-only to the app; re-read by mtime on every decode |
 | `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, and whether auto-ask is on. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters and error *categories*. Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
@@ -533,6 +537,13 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 
 Send is the commit point for the profile: rare, user-initiated, and the moment a session's
 corrections have proved themselves by surviving to a handoff.
+
+There is no settings dialog, and the two files above are the reason: everything a user can
+set is already hand-editable text, and the whole gap was that nobody could find it. The
+right-click menu's **Open settings folder** writes `lexicon.txt` if it is missing and hands
+the folder to Explorer — `os.startfile`, so R16 keeps its three dependencies. The template's
+comments are the documentation for both files, including the measured cost of biasing, on
+the grounds that the person about to add forty terms is the one who needs that number.
 
 There is no code in `profile.py` that could send anything anywhere. R9 is not enforced by
 policy here; it is enforced by absence.
@@ -621,7 +632,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (547 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (588 tests, ~15 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -671,7 +682,7 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 
 | Check | Command | Result |
 |---|---|---|
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **437 passed**, 3.3 s |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **588 passed**, 14.9 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
 | **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |
 | the menu and the drag ↻ | same run, `== the pill itself` | The menu opens and dismisses, holds the foreground while it is up and gives it back; the pill tracks the cursor to the pixel. Both measured because both are what `WS_EX_NOACTIVATE` can break — and the first attempt did break the menu outright: it posted and `tk_popup` never returned |
