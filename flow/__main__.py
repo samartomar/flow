@@ -88,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
         help="start in converse mode: Send asks the agent CLI instead of pasting (P9)",
     )
     ap.add_argument(
+        "--cwd", metavar="PATH",
+        help="the project converse-mode questions are asked from; overrides the "
+             "profile's stored workspace (P9)",
+    )
+    ap.add_argument(
         "--no-speak", action="store_true",
         help="never read converse-mode replies aloud",
     )
@@ -141,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     say(f"models: {partial_name} for partials, {final_name} for finals")
 
     from .diag import Diag
-    from .profile import Profile
+    from .profile import Profile, resolve_workspace
 
     # Tied to the same flag as the profile, and deliberately: --no-profile means
     # "write nothing about me this session", and a trace is a thing written about
@@ -201,6 +206,12 @@ def main(argv: list[str] | None = None) -> int:
             say(f"speech: on, voice {chosen or 'engine default'} "
                 f"({n} installed; --voice, or the right-click menu, to change)")
 
+    # Said whichever way it resolves, including "not set". The owner accepted that a
+    # stored workspace goes stale silently when a project moves; this line is what they
+    # accepted it in exchange for.
+    workspace, workspace_note = resolve_workspace(args.cwd, profile)
+    say(workspace_note)
+
     session = Session(
         asr=WhisperTranscriber(
             partial_name, final_name, lexicon=lexicon,
@@ -212,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         diag=diag,
         cli=pinned,
         cli_timeout=args.cli_timeout,
+        refine_cwd=workspace,
     )
 
     if args.calibrate:

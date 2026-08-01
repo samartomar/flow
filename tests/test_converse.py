@@ -434,7 +434,11 @@ class TestAutoAsk(unittest.TestCase):
         with mock.patch("flow.session.ask", return_value=("yes", "codex")) as ask:
             self._fire(s)
             self.assertIs(s.state, State.ASKING)
-        self.assertEqual(ask.call_args.args[0], "can you hear me")
+        # The user's words go first and whole; the workshop framing follows them (it
+        # trails deliberately — see `WORKSHOP`). What this pins is that auto-ask sends
+        # the draft as spoken, not a summary or a fragment of it.
+        sent = ask.call_args.args[0]
+        self.assertTrue(sent.startswith("can you hear me"), sent[:80])
 
     def test_dictate_mode_never_sends_itself(self):
         # R5 in full force: this one pastes into whatever has focus.

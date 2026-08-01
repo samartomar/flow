@@ -49,6 +49,29 @@ PROMOTE_AFTER = 2
 SCHEMA = 1
 
 
+def resolve_workspace(flag: str | None, profile) -> tuple[str | None, str]:
+    """(the project to ask from, what to say about it). Never raises, never refuses.
+
+    Precedence matches `--voice`: an explicit flag is a decision, a stored value is a
+    preference, and neither is the ordinary case. Returned with its own sentence because
+    the whole bargain of this setting is that it is *said* — the owner accepted that a
+    workspace goes stale silently when a project moves, on the condition that a wrong
+    grounding is on screen rather than buried in JSON.
+
+    A path that no longer exists is reported and dropped. A startup that refuses over a
+    stale setting is worse than an ungrounded ask: the project moved, and Flow is not the
+    thing that should stop working over it.
+    """
+    stored = getattr(profile, "workspace", None) if profile is not None else None
+    chosen = (flag or stored or "").strip()
+    if not chosen:
+        return None, "workshop: not set - Ask runs without a project"
+    if not Path(chosen).is_dir():
+        return None, (f"workshop: {chosen} no longer exists - "
+                      "Ask runs without a project")
+    return chosen, f"workshop: {chosen}"
+
+
 class Profile:
     """One person's measured settings and learned words.
 
@@ -90,6 +113,15 @@ class Profile:
         #: is dead on arrival for its own requester.
         self.send_word: str = edits.SEND_WORD
         self.send_enter_word: str = edits.SEND_ENTER_WORD
+        #: P9: the project a converse-mode question is asked *from*. `refine_cwd` has
+        #: existed since converse mode did and was never given a value, so every
+        #: question was asked from nowhere. Additive, schema stays 1.
+        #:
+        #: Its cost, argued once and accepted: a workspace set today goes stale silently
+        #: when the project moves. The mitigation is visibility rather than cleverness —
+        #: startup and the mode-switch note both name it, so a wrong grounding is on
+        #: screen rather than in a file.
+        self.workspace: str | None = None
         #: "wrong -> right", counted. Counted rather than listed so a one-off does not
         #: become a permanent bias.
         self.pairs: Counter[str] = Counter()
@@ -128,6 +160,7 @@ class Profile:
         self.send_enter_word = (
             (raw.get("send_enter_word") or "").strip() or edits.SEND_ENTER_WORD
         )
+        self.workspace = raw.get("workspace") or None
         self.pairs = Counter(raw.get("pairs") or {})
         self.misroutes = Counter(raw.get("misroutes") or {})
         self.dismissed = {str(k) for k in (raw.get("dismissed") or [])}
@@ -145,6 +178,7 @@ class Profile:
             "auto_ask": self.auto_ask,
             "send_word": self.send_word,
             "send_enter_word": self.send_enter_word,
+            "workspace": self.workspace,
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's

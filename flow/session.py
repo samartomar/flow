@@ -45,8 +45,31 @@ from .edits import (
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
+from .refine import MAX_CHARS as REFINE_MAX_CHARS
 from .refine import ask, available, refine, tail_sent
 from .thread import Thread
+
+#: P9, as the owner defined it from use: converse mode is a prompt workshop, not a
+#: general assistant. General conversation failed at the desk on its own merits — the
+#: CLI answered that it has no internet access, and hallucinated — so the question this
+#: frames is always the same one: help make this prompt better.
+#:
+#: **Placed after the question, and that is not a style choice.** `refine.ask()` keeps
+#: the *tail* of an over-long input, so anything in front of the text is the first thing
+#: discarded — and it would be discarded for exactly the long prompts a workshop is most
+#: likely to be handling. Trailing framing survives the cut that heading framing does
+#: not, which a test asserts on a question 3 000 characters past `MAX_CHARS`.
+WORKSHOP = (
+    "\n\n---\n"
+    "You are helping a developer refine the prompt above, which they will hand to an "
+    "agentic coding CLI.{workspace}\n"
+    "Discuss and improve the prompt itself: what it leaves ambiguous, what context it "
+    "is missing, what it should say instead. Do not carry out the task it describes."
+)
+
+#: The workspace clause, empty when there is none, so an ungrounded ask does not claim
+#: a project it has not got.
+WORKSHOP_WHERE = "\nWORKSPACE: {path} - assume the prompt will be run there."
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
 #: worker-idle check below, this is what bounds partial latency.
@@ -1583,9 +1606,15 @@ class Session:
             # reads when they switch. "the CLI" was true and told nobody anything: the
             # point is not which executable runs, it is that the words go off the
             # machine to whatever that executable is signed into.
+            # And where it is asked *from*. Naming the workspace on every switch is what
+            # pays for the risk the owner accepted when they chose an explicit path over
+            # a guessed one: a workspace set months ago goes stale silently, so the
+            # mitigation has to be that it is on screen rather than that it is clever.
+            where = (f", grounded in {self._refine_cwd}" if self._refine_cwd
+                     else ", with no project behind it")
             self._emit("note",
                        f"converse mode - Ask sends the draft to {who}, and the question "
-                       "leaves this machine"
+                       f"leaves this machine{where}"
                        if who else
                        "converse mode - no agent CLI on PATH, so Ask has nothing to send")
         else:
@@ -1639,12 +1668,32 @@ class Session:
         # Decided from the request, before the answer exists to bias the guess. The
         # flag outlives the call because the *speaker* needs it when the answer lands.
         artifact = self._ask_artifact = is_artifact_request(question)
+        # Framed here rather than in `refine.ask`, so the notes and the trace stay
+        # measurements of what the *user* said: `question` is their words.
+        #
+        # Cut to fit *before* handing it over, and that is a defect fix rather than
+        # tidiness. `ask()` keeps the tail of an over-long input and walks the cut
+        # forward to a sentence boundary — so with a long question containing no
+        # punctuation, the first boundary it finds is inside the framing, and the cut
+        # takes the whole question and half the preamble with it. Measured exactly that
+        # way: a 5 000-character question arrived at the CLI as two sentences of
+        # instructions and none of the prompt. Keeping the framed string inside
+        # `MAX_CHARS` makes that split a no-op, so the framing is intact by construction
+        # rather than by luck.
+        framing = WORKSHOP.format(
+            workspace=(WORKSHOP_WHERE.format(path=self._refine_cwd)
+                       if self._refine_cwd else "")
+        )
+        budget = max(0, REFINE_MAX_CHARS - len(framing))
+        kept = question if len(question) <= budget else question[-budget:]
+        framed = kept + framing
+
         self.diag.write("ask", op=op, chars=len(question),
-                        sent=tail_sent(question), mode=self.mode, artifact=artifact)
+                        sent=len(kept), mode=self.mode, artifact=artifact)
         self._cli_started = time.perf_counter()
         self._set_state(State.ASKING)
         self._emit("note", f"asking {self._provider() or 'nobody — no CLI on PATH'}…")
-        sent = tail_sent(question)
+        sent = len(kept)
         if sent < len(question):
             # Worse than the Refine case and worded to say so: `ask()` sends the tail
             # and discards the head, so the answer is to a question the user did not
@@ -1660,7 +1709,7 @@ class Session:
         context = self.thread.tail()[:-1]
 
         def work() -> None:
-            result = ask(question, cwd=self._refine_cwd, context=context,
+            result = ask(framed, cwd=self._refine_cwd, context=context,
                          cancel=self._cancel, artifact=artifact,
                          cli=self._cli, timeout=self._cli_timeout)
             with self._ask_lock:

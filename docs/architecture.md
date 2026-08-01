@@ -52,8 +52,11 @@ boundary is this:
   those modules that could send anything anywhere.
 - **Sent to the configured agent CLI, and so to its provider.** A Refine sends the
   draft tail (≤ `refine.MAX_CHARS`) plus the instruction; an Ask sends the question
-  tail plus the thread tail. Assume that text reaches whatever service the CLI is
-  signed into.
+  tail, the thread tail, **and the workshop preamble** — which names the workspace, so
+  a filesystem path leaves the machine along with the words. That is the one piece of
+  non-dictated content Flow adds to an outgoing call, and it is worth stating plainly
+  rather than leaving somebody to find it: a project path can identify an employer, a
+  client or a codebase. Set no workspace and nothing of the kind is sent.
 - **Network, but never user content.** The first decode of each tier downloads its
   model from Hugging Face.
 - **The desktop boundary.** Send places the draft on the Windows clipboard, where any
@@ -83,7 +86,7 @@ which is 34% of the 30 ms the UI thread has to draw in.
 | `calibrate.py` | personal | measures this room and this voice (P8) |
 | `profile.py` | personal | what was measured and learned, as JSON |
 | `lexicon.py` | personal | the user's own terms to bias toward, and the corrections to apply after decoding; re-read on change |
-| `refine.py` | external | rewrite, polish (P5) and converse ask (P9) |
+| `refine.py` | external | rewrite, polish (P5) and the converse ask (P9) — which carries the workshop preamble and the workspace it is grounded in |
 | `speak.py` | external | one long-lived SAPI host; owns `speaking`, which gates the mic, and which voice reads the reply |
 
 ## 2. The loop, end to end
@@ -452,6 +455,29 @@ being admitted, **0/580** misroutes on real utterances (unchanged), adversarial 
 whole result file came back identical apart from its date, because the corpus contains no
 "follow and" utterance at all — which is what "costs nothing" means here.
 
+**Converse mode is a prompt workshop.** `_start_ask` frames every outgoing question
+with `session.WORKSHOP`: the CLI is helping refine a prompt for an agentic coding CLI,
+the workspace is X, discuss and improve the prompt rather than carrying it out. The
+definition came from use rather than from design — general conversation was tried at the
+desk and failed on its own merits (no internet access, and hallucinations), while talking
+a prompt into shape worked. `docs/product.md`'s P9 says so now.
+
+The framing **trails** the question, and is cut to fit before it is handed over. Both are
+defect fixes rather than style. `ask()` keeps the tail of an over-long input *and walks
+the cut forward to a sentence boundary* — so with a long question containing no
+punctuation, the first boundary it finds is inside the framing itself. Measured: a
+5 000-character question arrived at the CLI as two sentences of instructions and none of
+the prompt. Keeping the framed string inside `MAX_CHARS` makes that split a no-op, so the
+framing survives by construction.
+
+The workspace comes from `--cwd`, else the profile's `workspace`, else nothing —
+`profile.resolve_workspace`, precedence matching `--voice`. It is named at startup and
+again on every mode switch, and that visibility is the whole bargain: a workspace set
+today goes stale silently when a project moves, and the mitigation chosen was that a
+wrong grounding is on screen rather than clever. A stored path that no longer exists is
+reported and dropped, because a startup that refuses over a stale setting is worse than
+an ungrounded ask.
+
 **The send triggers.** `send_trigger` is checked first of all and with no draft condition, because it presses a button and a button that works only when the router likes the draft is one that sometimes does nothing. It is also ahead of the snapping passes: a trigger is an exact word by construction, and letting a verb snap *toward* one would be edit distance deciding to execute something. Section 7 has the rest. Note that `plan()` takes the words as an argument -- the session passes the profile's, and `_route` calls `plan()` twice, which is how a renamed trigger briefly turned the shipped word into an unhandled plan that `_escalate` spent a ~7 s CLI call on.
 
 **The thread verbs.** `recall` brings the last sent prompt back, `followup` marks the
@@ -666,7 +692,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | Path | When | What |
 |---|---|---|
 | `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. **The one other thing Flow may write is a single appended `wrong -> right` line, and only on an explicit tap in the right-click menu** (see below): it never edits, reorders, removes or reformats a line, so everything already in the file comes back byte for byte. Re-read by mtime on every decode, which is how a pair added from the menu reaches the very next utterance |
-| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, and the two spoken send triggers (`send_word`, `send_enter_word`). The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
+| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, the two spoken send triggers (`send_word`, `send_enter_word`), and the `workspace` a converse question is asked from. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, and — on each route — how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the cache revision of each model tier that run loaded -- a number is a measurement *of a build*, and until 2026-08-01 none of these said which |
@@ -794,7 +820,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (745 tests, ~13 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (766 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -868,7 +894,7 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 | Check | Command | Result |
 |---|---|---|
 | bench provenance | `uv run python scripts/command_bench.py`, twice | the `identity` block resolves here (faster-whisper 1.2.1, ctranslate2 4.8.1, date) and the non-identity content of two consecutive runs is **identical**, so item 14's byte-for-byte idiom survives the addition |
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **745 passed**, 13.2 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **766 passed**, 13.5 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
 | command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by every 2026-08-01 grammar addition, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row. Run again *before* admitting the `follow and` elision, as the admission gate rather than as a check afterwards — every figure identical, and so was the rest of the file bar its date |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
 | **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |

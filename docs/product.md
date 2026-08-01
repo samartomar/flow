@@ -62,11 +62,11 @@ speech wrong sometimes, and the loop is what makes wrong recoverable instead of 
 | P2 | **Never loses words silently.** A filter or gate may reject audio, but the user can always find out that it happened and recover the text. | False-reject rate < 1% on real accented speech; every dropped segment logged; recovery affordance visible in the UI. |
 | P3 | **Voice corrections work in an accent.** The command grammar tolerates the mis-transcriptions the target accents actually produce, in both the trigger verb and the target words. | ≥ 95% command recognition on the accented command set; command-misheard-as-dictation (silent append) ≈ 0. |
 | P4 | **Knows the developer's vocabulary.** Identifiers, repo names, library names, and the user's own names/terms transcribe correctly because Flow biases recognition toward them. | ≥ 90% accuracy on a personal-lexicon entity test; lexicon grows from the user's own corrections without manual curation. |
-| P5 | **Polishes prompts on request.** "Make this a proper prompt" turns rambling dictation into a crisp, structured prompt via the already-authenticated agent CLI — the R9 path, doing the thing it is best at. | A polish request produces a prompt a reviewer judges stronger than the raw dictation; latency within the existing ~7 s CLI budget; draft never lost on failure. |
+| P5 | **Polishes prompts on request.** "Make this a proper prompt" turns rambling dictation into a crisp, structured prompt via the already-authenticated agent CLI — the R9 path, doing the thing it is best at. One-shot and in place: the draft goes out and a better draft comes back, which is what separates it from P9's workshop, where the prompt is talked about across several turns before anything replaces it. | A polish request produces a prompt a reviewer judges stronger than the raw dictation; latency within the existing ~7 s CLI budget; draft never lost on failure. |
 | P6 | **Conversation continuity.** Sent prompts form a thread, like a ChatGPT conversation — Send does not erase history. The next utterance can be a follow-up; the previous prompt can be recalled, and rewrites can use the thread as context. | After Send, "follow up:" dictation and "bring back my last prompt" both work; the CLI rewrite path can see the thread tail (bounded, local, R11-sized). |
 | P7 | **Safe into a terminal.** Pasting into a terminal must never execute prematurely: multi-line drafts use bracketed paste or trailing-newline suppression per target. | A multi-line draft pasted into a shell arrives whole, unexecuted. |
 | P8 | **Adapts to this user.** The thresholds that decide "was that speech?" are calibrated to this speaker and this microphone, not to the machine Flow was developed on. | A first-run calibration (< 60 s) sets gate and filter parameters per user; the false-reject metric (P2) is measured against the calibrated profile. |
-| P9 | **Conversation mode.** Flow can *be* the AI surface, not just type into one: a draft can be sent to the local agent CLI instead of the focused window, the reply renders in Flow, and the next utterance continues that conversation — ChatGPT Voice mode against the CLI the developer already trusts. | Speak → reply appears in Flow → speak again continues the same CLI conversation; switching between dictate-mode and converse-mode is one action; the correction loop (P3) works on the outgoing prompt in both modes. Optional, later: spoken replies via the OS speech engine (SAPI is ctypes-reachable — R16 holds). |
+| P9 | **The prompt workshop.** Converse mode is where a prompt is *discussed and refined before it is sent* — not a general assistant. Rewritten from use, 2026-08-01: general conversation was tried at the desk and failed on its own merits (the CLI answered that it has no internet access, and hallucinated), while the thing that worked was talking a prompt into shape. So the scope is the owner's own: "discuss and refine prompts only, nothing more". Questions are **grounded in a workspace** — an explicit project path, named at startup and on every mode switch — because a prompt is written to be run somewhere. | The loop is the acceptance test: speak a rough prompt → the CLI's suggestions render in Flow → speak a follow-up, which continues the same conversation → **take the answer as the draft** (one chip, or "use that answer") → **send it** (one word, or one press) into the terminal where the work is. Switching modes is one action; the correction loop (P3) works on the outgoing prompt in both. Spoken replies via the OS speech engine, shipped. Half-duplex is a standing caveat, not a defect: there is no echo cancellation (R16), so Flow hears the user or talks, never both, and interrupting is an explicit action. |
 
 Everything above obeys the standing constraints inherited from the build: local-only and
 key-free (R9), draft-held-never-autosent (R5), instant local corrections (R6/R11),
@@ -99,11 +99,22 @@ in the Claude Code terminal, whole (P7). Claude asks a clarifying question; the 
 speaks the follow-up, which continues the same thread (P6). At no point did they touch
 the keyboard, and at no point did a word vanish without a trace (P2).
 
-Later, away from the IDE, the same developer flips the pill into converse mode (P9) and
-just talks: *"what's the cleanest way to debounce a resize handler in React?"* The answer
-comes back from their own `claude` CLI and renders above the pill; they talk through two
-follow-ups, then say *"turn that last answer into a code comment"* and paste it. That is
-ChatGPT Voice mode with no new account, no API key, and their accent understood.
+Later, with a harder task ahead, the same developer flips the pill into converse mode
+(P9). The note names where they are: *converse mode - Ask sends the draft to codex, and
+the question leaves this machine, grounded in D:\dev\products\syntegris.* They talk a
+rough prompt out loud — *"I need to add audit logging to every write path, but I don't
+want it in the hot loop"* — and the CLI comes back with what the prompt leaves ambiguous:
+which writes, what the log is read by, whether async is acceptable. They answer in
+speech, twice, each turn continuing the same conversation (P6). When the version on
+screen is the one they want, they say *"use that answer"* — it becomes the draft — and
+then *"enter boom"*: it pastes into the Claude Code terminal and runs. No keyboard, no
+new account, no API key, and their accent understood throughout.
+
+That second scenario is the one that changed. It used to be a general question about
+React, and general conversation is precisely what failed when it was finally tried: the
+CLI has no internet access and said so, then hallucinated. What survived the desk was
+narrower and more valuable — a prompt, talked into shape, grounded in a real project, and
+handed to the terminal without touching the keys.
 
 Those two scenarios, executed end-to-end on all four anchor accents, are the definition
 of done.
