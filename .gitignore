@@ -24,5 +24,11 @@ __pycache__/
 # it would mean a dirty worktree after every measurement. Its content is the word
 # "landed".
 .bench/send-check-console.txt
+# The volunteer recordings. Tracked once — they are people, and irreplaceable — and
+# reversed on 2026-08-01: a clip in git rides every clone and push forever, which is
+# the wrong durability for somebody's voice. History was rewritten to take them out.
+# The originals live in D:\dev\flow-recordings\ beside a pre-rewrite bundle, and
+# .bench/README.md says how a fresh clone gets them back.
+.bench/recorded/
 # Editor state, not project content: pane layout and local UI preferences.
 .obsidian/

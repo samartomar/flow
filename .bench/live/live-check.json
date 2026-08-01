@@ -1,0 +1,113 @@
+{
+ "A_capture": {
+  "blocks": 46,
+  "expected": 46.9,
+  "median_db": -96.5,
+  "max_db": -87.5
+ },
+ "B_gate": {
+  "opened": true,
+  "start_s": 1.14,
+  "stop_s": 2.69,
+  "preroll_blocks": 4,
+  "floor_db": -76.6
+ },
+ "C_partial_latency": {
+  "partials": 12,
+  "speech_s": 15.3,
+  "median_s": 0.64,
+  "worst_s": 1.25,
+  "pass": true
+ },
+ "D_commands": {
+  "n": 11,
+  "hit": 7,
+  "rows": [
+   {
+    "item": 1,
+    "hit": true,
+    "text": "Change every Tuesday to Wednesday.",
+    "got": "local/replace_all",
+    "want": "local/replace_all"
+   },
+   {
+    "item": 2,
+    "hit": false,
+    "text": "Change Semir to Samir",
+    "got": "semantic/",
+    "want": "local/replace"
+   },
+   {
+    "item": 3,
+    "hit": true,
+    "text": "Capitalized Sabeer",
+    "got": "local/capitalize",
+    "want": "local/capitalize"
+   },
+   {
+    "item": 4,
+    "hit": true,
+    "text": "lowercase release notes",
+    "got": "local/lower",
+    "want": "local/lower"
+   },
+   {
+    "item": 5,
+    "hit": false,
+    "text": "Delete the bit about standard.",
+    "got": "append/",
+    "want": "local/delete"
+   },
+   {
+    "item": 6,
+    "hit": true,
+    "text": "Delete the last sentence",
+    "got": "local/delete_last",
+    "want": "local/delete_last"
+   },
+   {
+    "item": 7,
+    "hit": true,
+    "text": "Insert draft before release notes",
+    "got": "local/insert_before",
+    "want": "local/insert_before"
+   },
+   {
+    "item": 8,
+    "hit": true,
+    "text": "and do that",
+    "got": "undo/",
+    "want": "undo/"
+   },
+   {
+    "item": 9,
+    "hit": false,
+    "text": "Make it a proper brown.",
+    "got": "semantic/",
+    "want": "semantic/polish"
+   },
+   {
+    "item": 10,
+    "hit": false,
+    "text": "follow and mention the roleback plan",
+    "got": "append/",
+    "want": "followup/"
+   },
+   {
+    "item": 11,
+    "hit": true,
+    "text": "That was a command.",
+    "got": "rescue/",
+    "want": "rescue/"
+   }
+  ]
+ },
+ "E_target": {
+  "window_class": "CASCADIA_HOSTING_WINDOW_CLASS",
+  "process": "WindowsTerminal.exe",
+  "is_terminal": true,
+  "brackets_paste": true,
+  "wrapped": false,
+  "warning": ""
+ }
+}

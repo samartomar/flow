@@ -10,8 +10,12 @@ and the distinction is the whole point of tracking it now:
   before/after comparisons this project runs on need the old one kept.
 - **A recording is a person.** The clips under `recorded/` came from volunteers reading
   the sheet in [docs/recording-kit.md](../docs/recording-kit.md). They are the only
-  material here that answers P1 and P3 at all, they are not on the internet, and if this
-  directory is lost they are lost.
+  material here that answers P1 and P3 at all — and that is exactly why they are **no
+  longer in git** (2026-08-01, history rewritten): a tracked clip rides every clone and
+  push forever, and durability for a voice should not mean distribution. The originals
+  live in `D:\dev\flow-recordings\` with a pre-rewrite bundle beside them. On any
+  machine that needs them, copy that `recorded/` folder back into `.bench/` —
+  `.gitignore` keeps it out of the index either way.
 - **Generated audio is cheap to keep and slow to remake.** The SAPI WAVs under
   `selfdrive/` and `commands/` are regenerated on demand, but only if missing, and a
   cold self-drive run spends minutes in PowerShell synthesising them one at a time.
@@ -26,9 +30,10 @@ categories are not, and both are in `.gitignore` with the reason next to them.
 | `accent/results-*.json` | 2.7 MB | per-accent WER runs, one file per model/config. The `-shipped` / `-proposed` pairs are the A/B comparisons behind the tuning decisions |
 | `accent/manifest-*.jsonl` | 166 KB | which corpus clip is which — clip id, group, speaker, reference text. **Keep these even though the audio is not kept**: they are what makes a re-fetched corpus line up with a result measured months earlier |
 | `accent/{command,gate,guardrail,lexicon,prefix}-*.json` | 30 KB | the smaller single-question benchmarks |
-| `recorded/inbox/` | 19 MB | volunteer recordings exactly as their phones produced them, never converted. The originals |
-| `recorded/indian/`, `recorded/us-control/` | 12 MB | those recordings cut into scored per-item clips by `scripts/ingest_recordings.py` |
-| `recorded/manifest-recorded.jsonl` | 7 KB | one row per clip: file, group, speaker, sheet item, operation, intent, and what was actually said |
+| `recorded/inbox/` | 19 MB | **untracked** — volunteer recordings exactly as their phones produced them, never converted. The originals; they live in `D:\dev\flow-recordings\` |
+| `recorded/indian/`, `recorded/us-control/` | 12 MB | **untracked** — those recordings cut into scored per-item clips by `scripts/ingest_recordings.py` |
+| `recorded/manifest-recorded.jsonl` | 7 KB | **untracked** — one row per clip: file, group, speaker, sheet item, operation, intent, and what was actually said. Untracked with the clips because it names the people |
+| `live/live-check.json` | 1 KB | what `scripts/live_check.py` measured with a person at a real microphone — first run 2026-08-01 |
 | `commands/` | 2.4 MB | synthesised command audio for `command_bench.py`, plus its results |
 | `selfdrive/` | 2.2 MB | the SAPI WAVs `selfdrive.py` speaks, cached by utterance name, plus the throwaway profiles two scenarios write |
 | `*.wav`, `*.txt` at the top | 6 MB | room/fan/speech fixtures for the gate and calibration benchmarks, and the short/medium/long latency fixtures |
@@ -71,4 +76,4 @@ impossible. If a generated fixture is deleted, the harness that owns it makes it
 | `commands/*.wav` | `uv run python scripts/command_bench.py` |
 | top-level `*.wav` | `uv run python scripts/gate_bench.py`, `asr_bench.py` |
 | `recorded/<group>/*.wav` | `uv run python scripts/ingest_recordings.py`, from `recorded/inbox/` |
-| `recorded/inbox/*` | **nothing.** Ask someone to record the sheet again |
+| `recorded/inbox/*` | **nothing** remakes a person. Copy from `D:\dev\flow-recordings\recorded\inbox\` — and if that is lost too, ask someone to record the sheet again |
