@@ -403,3 +403,31 @@ class TestTheClipboardIsGivenBackOnlyIfNobodyElseTookIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLateWarningsReachTheBubble(unittest.TestCase):
+    """A warning raised after `paste()` returns must not wait for the next Send.
+
+    The clipboard-restore thread records its skip 0.6 s after the paste it belongs
+    to, and every caller drains `take_warnings()` on the line after the paste — so
+    the line used to sit in the queue and be shown against the *following* paste.
+    The fix is a per-frame drain on the UI thread; this pins the drain itself.
+    """
+
+    def test_a_late_warning_is_drained_by_the_next_frame(self):
+        from unittest import mock as _mock
+
+        import flow.ui as ui
+        from flow import inject as _inject
+
+        pill = ui.Pill.__new__(ui.Pill)  # the method under test needs no Tk window
+        pill.bubble = _mock.Mock()
+        pill._flash = 0
+        with _inject._WARNINGS_LOCK:
+            _inject._WARNINGS.append("clipboard left alone - you copied during restore")
+        pill._pump_warnings()
+        pill.bubble.note.assert_called_once()
+        self.assertTrue(pill._flash, "a warning deserves the same flash an error gets")
+        pill.bubble.note.reset_mock()
+        pill._pump_warnings()
+        pill.bubble.note.assert_not_called()

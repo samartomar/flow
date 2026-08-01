@@ -602,22 +602,20 @@ policy here; it is enforced by absence.
 
 ### Gaps that are one fix away from being invariants
 
-Written down so the reference does not claim them early. The wording above is already
-narrowed to stay true while these are open; each is queued work.
+Written down so the reference does not claim them early. One remains, and it is design
+rather than plumbing.
 
 1. **The provider is named in words, not on the pill.** Switching to converse mode now
    says "Ask sends the draft to codex, and the question leaves this machine", and the
    asking and refining notes name the CLI before it is used rather than after. What is
-   still open is design rather than plumbing: whether the pill itself carries a standing
-   badge — "Converse · codex · networked" — and where. A note is read once; a badge is
-   read every time somebody looks at the window, and which of those this warrants is the
-   owner's taste.
-2. **A warning raised after `paste()` returns arrives late.** The clipboard-restore thread
-   records its skip 0.6 s after the Send it belongs to, and every caller drains
-   `take_warnings()` immediately — so the line waits in the queue and is shown against the
-   *next* paste. The queue is thread-safe, so nothing is lost; it is attributed wrongly.
-   The fix is a per-frame drain in the UI, which is a different file than the one that
-   found this.
+   still open is whether the pill itself carries a standing badge — "Converse · codex ·
+   networked" — and where. A note is read once; a badge is read every time somebody
+   looks at the window, and which of those this warrants is the owner's taste.
+
+A second entry used to sit here — a clipboard-restore warning recorded 0.6 s after its
+paste was drained by nobody until the *next* Send, and shown against the wrong one.
+`Pill._pump_warnings` now drains the queue every frame, so a late line lands while the
+card for its own Send is still on screen.
 
 ## 11. Testing layers
 

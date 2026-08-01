@@ -18,7 +18,7 @@ import tkinter as tk
 import traceback
 from collections import deque
 
-from .inject import foreground_hwnd, owned_by_flow
+from .inject import foreground_hwnd, owned_by_flow, take_warnings
 from .session import DICTATE, Session, State
 
 
@@ -498,6 +498,7 @@ class Pill(tk.Tk):
             self.session.pump_results()
             self.levels.append(0.0)
 
+        self._pump_warnings()
         for ev in self.session.events():
             if ev.kind == "draft":
                 if ev.text:
@@ -534,6 +535,20 @@ class Pill(tk.Tk):
         if self._flash:
             self._flash -= 1
         self._draw()
+
+    def _pump_warnings(self) -> None:
+        """Surface inject warnings that arrived since the last frame.
+
+        `on_send` drains the synchronous ones and puts them on the sent card, where
+        they belong to the Send that raised them. This drain exists for the one that
+        cannot be there: the clipboard-restore thread records its skip 0.6 s after
+        `paste()` returned, and before this it sat in the queue until the *next* Send
+        drained it — shown, but against the wrong paste. Per-frame, the line lands
+        while the card for its own Send is still on screen.
+        """
+        for line in take_warnings():
+            self._flash = 12
+            self.bubble.note(line)
 
     def _flatten(self) -> None:
         """Drop the meter to a flat line in one frame.
