@@ -32,6 +32,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Sequence
 
+from . import edits
+
 DEFAULT_PATH = Path.home() / ".flow" / "profile.json"
 
 #: Bounded like everything else in this project (R8). A profile is a summary, not a log:
@@ -80,6 +82,14 @@ class Profile:
         #: on, so an existing profile does not acquire a preference nobody expressed;
         #: same no-bump reasoning as `voice`.
         self.auto_ask: bool = True
+        #: R5/P7: the words that press Send, and Send-then-Enter. Additive, schema stays
+        #: 1, and a blank reads as absent rather than as "off" — `""` would match nothing
+        #: and disable the feature silently, which is the `auto_ask` null trap one field
+        #: over. **The defaults have to work out of the box**: the owner has said they
+        #: will not hand-edit this file, so a feature needing an editor before first use
+        #: is dead on arrival for its own requester.
+        self.send_word: str = edits.SEND_WORD
+        self.send_enter_word: str = edits.SEND_ENTER_WORD
         #: "wrong -> right", counted. Counted rather than listed so a one-off does not
         #: become a permanent bias.
         self.pairs: Counter[str] = Counter()
@@ -112,6 +122,12 @@ class Profile:
         stored = raw.get("auto_ask")
         self.auto_ask = True if stored is None else bool(stored)
         self.voice = raw.get("voice")
+        # `or` rather than a presence check: absent, null and blank all mean "use the
+        # shipped word", because none of them is somebody choosing silence.
+        self.send_word = (raw.get("send_word") or "").strip() or edits.SEND_WORD
+        self.send_enter_word = (
+            (raw.get("send_enter_word") or "").strip() or edits.SEND_ENTER_WORD
+        )
         self.pairs = Counter(raw.get("pairs") or {})
         self.misroutes = Counter(raw.get("misroutes") or {})
         self.dismissed = {str(k) for k in (raw.get("dismissed") or [])}
@@ -127,6 +143,8 @@ class Profile:
             "calibrated_device": self.calibrated_device,
             "voice": self.voice,
             "auto_ask": self.auto_ask,
+            "send_word": self.send_word,
+            "send_enter_word": self.send_enter_word,
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's

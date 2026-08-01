@@ -25,6 +25,8 @@ from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
 from .diag import Diag, NullDiag
 from .edits import (
+    SEND_ENTER_WORD,
+    SEND_WORD,
     added_text,
     apply_local,
     command_bias,
@@ -942,7 +944,21 @@ class Session:
 
         # The two thread verbs are the only commands that mean anything with an empty
         # draft — which is precisely the state Send leaves behind.
-        thread_plan = plan(utterance, self.draft.text)
+        thread_plan = plan(utterance, self.draft.text, self.send_words)
+        if thread_plan.kind == "send_trigger":
+            # Asked for, not done here. In dictate mode the paste belongs to the UI
+            # thread, which is the only place that knows which window Send is aimed at —
+            # so the trigger presses the same button the chip does, down to the refusals,
+            # rather than growing a second Send that would have to be kept in step.
+            trace("send_trigger")
+            if thread_plan.op == "enter" and self.mode == CONVERSE:
+                # Converse pastes nothing, so there is nothing for an Enter to submit.
+                # Said rather than silently ignored: a suffix that sometimes does
+                # something and sometimes does not, with no signal either way, is how a
+                # user learns to distrust the one that does.
+                self._emit("note", "converse mode - asking; nothing to submit here")
+            self._emit("send", thread_plan.op)
+            return
         if thread_plan.kind == "recall":
             trace("recall")
             self._recall()
@@ -972,7 +988,11 @@ class Session:
             self._after_draft_change()
             return
 
-        p = plan(utterance, self.draft.text)
+        # The same triggers as the thread pass above. Two `plan()` calls with different
+        # arguments is how a renamed trigger word turned "boom" into a `send_trigger`
+        # here that nothing handled, and `_escalate` then started a ~7 s CLI call on an
+        # empty instruction.
+        p = plan(utterance, self.draft.text, self.send_words)
         trace(p.kind)
         if forced == "edit" and p.kind == "append":
             # The user explicitly said "this is an instruction", so honour that over
@@ -1022,6 +1042,13 @@ class Session:
                 # silently no-op, which would read as the app ignoring the user.
                 self._start_refine(utterance)
                 return
+        elif p.kind == "send_trigger":
+            # Unreachable via the pass above, which returns on it — kept because
+            # `_escalate` is the `else` here, and a trigger arriving in it would spend
+            # ~7 s of CLI on an empty instruction. That is not hypothetical: it is what
+            # the second `plan()` call did while it was still using the default words.
+            self._emit("send", p.op)
+            return
         else:
             self._escalate(p)
             return
@@ -1051,6 +1078,18 @@ class Session:
         self.following_up = True
         self._emit("note", "brought back the last prompt")
         self._after_draft_change()
+
+    @property
+    def send_words(self) -> tuple[str, str]:
+        """The two spoken triggers: (Send, Send-then-Enter).
+
+        From the profile when there is one, and from the shipped defaults otherwise —
+        `--no-profile` has to keep working, and so does a first run.
+        """
+        if self.profile is None:
+            return (SEND_WORD, SEND_ENTER_WORD)
+        return (getattr(self.profile, "send_word", SEND_WORD),
+                getattr(self.profile, "send_enter_word", SEND_ENTER_WORD))
 
     @property
     def can_take_reply(self) -> bool:

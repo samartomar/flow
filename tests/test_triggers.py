@@ -1,0 +1,392 @@
+"""A word for Send, and a word for Send-then-Enter.
+
+The last keyboard step in the workshop loop — item 21 takes the reply, this sends it —
+becomes voice. First feature to run at R5 and P7 directly, and the safety comes from
+inheriting Send's existing refusals rather than from new machinery: the trigger presses
+the same button the chip does, so every refusal that already exists applies unchanged.
+
+Two things carry the risk and both are pinned here. **Whole-utterance matching** is what
+makes a false fire rare: the word is a command only when it is the entire thing said, so
+a mis-fire needs the speaker to have said nothing else. And **the order of the two
+defaults is the safe one** — a decode that loses a word from "enter boom" yields "enter"
+(no trigger at all) or "boom" (paste without submit). Degradation falls away from
+execution, never toward it.
+"""
+
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from flow.audio import BLOCK  # noqa: E402
+from flow.edits import SEND_ENTER_WORD, SEND_WORD, plan  # noqa: E402
+from flow.profile import Profile  # noqa: E402
+from flow.session import CONVERSE, Session  # noqa: E402
+
+LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
+DRAFT = "Ship the release notes on Tuesday."
+
+
+class FakeMic:
+    def __init__(self) -> None:
+        self._blocks: list[np.ndarray] = []
+        self.level_db = -60.0
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    @property
+    def active(self) -> bool:
+        return True
+
+    def restart(self) -> None: ...
+
+    def drain(self) -> list[np.ndarray]:
+        out, self._blocks = self._blocks, []
+        return out
+
+
+class FakeAsr:
+    loading = False
+
+    def load(self, final=None) -> None: ...
+
+    def text(self, audio, *, final=False, hotwords="") -> str:
+        return ""
+
+
+def session(**kw) -> Session:
+    return Session(asr=FakeAsr(), mic=FakeMic(), **kw)
+
+
+def notes(s) -> str:
+    return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+
+def sends(s) -> list[str]:
+    return [e.text for e in s.events() if e.kind == "send"]
+
+
+def routed(text: str) -> str:
+    p = plan(text, DRAFT)
+    return f"{p.kind}/{p.op}"
+
+
+class TestTheWordIsTheWholeUtterance(unittest.TestCase):
+    """Both directions in one class, because they are one diff apart."""
+
+    def test_the_defaults_are_the_ones_the_owner_chose(self):
+        self.assertEqual(SEND_WORD, "boom")
+        self.assertEqual(SEND_ENTER_WORD, "enter boom")
+
+    def test_each_alone_routes_to_its_trigger(self):
+        self.assertEqual(routed("boom"), "send_trigger/")
+        self.assertEqual(routed("Boom."), "send_trigger/")
+        self.assertEqual(routed("enter boom"), "send_trigger/enter")
+        self.assertEqual(routed("Enter boom!"), "send_trigger/enter")
+
+    def test_the_same_word_inside_a_sentence_is_dictation(self):
+        for s in ("boom goes the dynamite",
+                  "and then boom",
+                  "the deploy went boom last night",
+                  "enter boom into the log",
+                  "press enter boom is the word"):
+            with self.subTest(s=s):
+                self.assertEqual(routed(s), "append/")
+
+    def test_degradation_falls_away_from_execution(self):
+        # The order of the two words is the safety argument, so it is asserted rather
+        # than described: losing either word from "enter boom" can never *upgrade* a
+        # paste into a submit.
+        self.assertEqual(routed("enter"), "append/", "a lost word must not execute")
+        self.assertEqual(routed("boom"), "send_trigger/", "and the other loses only Enter")
+
+    def test_a_hedge_in_front_still_counts(self):
+        self.assertEqual(routed("okay, boom"), "send_trigger/")
+
+
+class Pressed:
+    """A pill whose Send goes to a list instead of to a window.
+
+    Driven the way `send_check.py`'s fixture is, and at that layer deliberately: the
+    refusals this item must inherit live in `session.send()`, which the *UI* calls — so
+    a check that stopped at the session would be asserting that an event was emitted,
+    not that a paste was refused.
+    """
+
+    def __init__(self, s: Session) -> None:
+        import flow.ui as ui
+
+        self.pastes: list[tuple[str, bool]] = []
+        self.pill = ui.Pill.__new__(ui.Pill)
+        self.pill.session = s
+        self.pill.on_send = self._on_send
+        self.pill.paste_target = 0x22
+        self.pill.bubble = mock.Mock()
+        self.pill._flash = 0
+        self.session = s
+
+    def _on_send(self, text: str, target=None, submit: bool = False) -> str:
+        self.pastes.append((text, submit))
+        return ""
+
+    def say(self, utterance: str) -> None:
+        """Route an utterance and pump the events the way `Pill._frame` does.
+
+        Pumped until the queue is empty, because `send()`'s own refusal notes are
+        emitted *during* the `_send` this loop calls — in the real app they arrive on
+        the following frame, 30 ms later, and a single drain would miss exactly the
+        lines these checks are about.
+        """
+        self.session._route(utterance)
+        while events := self.session.events():
+            for ev in events:
+                if ev.kind == "send":
+                    self.pill._send(submit=ev.text == "enter")
+                elif ev.kind == "note":
+                    self.pill.bubble.note(ev.text)
+
+    def notes(self) -> str:
+        return " | ".join(str(c.args[0]) for c in self.pill.bubble.note.call_args_list)
+
+
+class TestTheWordsAreNotThingsPeopleSay(unittest.TestCase):
+    """The admission gate, asked of the words directly rather than of an aggregate.
+
+    `command_bench.py`'s precision leg reports 0 misroutes on these 580 utterances, but
+    that is a number about the whole grammar. The question a *trigger* word raises is
+    narrower and sharper: does anyone in this corpus say it, alone, as a whole thing?
+    """
+
+    def test_no_real_utterance_fires_either_trigger(self):
+        from flow.edits import _trigger
+
+        bench = Path(__file__).resolve().parent.parent / ".bench" / "accent"
+        refs: list[str] = []
+        for mf in sorted(bench.glob("manifest-edacc*.jsonl")):
+            with mf.open(encoding="utf-8") as fh:
+                refs += [json.loads(ln)["ref"] for ln in fh if ln.strip()]
+        if not refs:
+            self.skipTest("no EdAcc manifest in this tree")
+        self.assertGreaterEqual(len(refs), 500, "the corpus shrank")
+        fired = [r for r in refs if _trigger(r, (SEND_WORD, SEND_ENTER_WORD)) is not None]
+        self.assertEqual(fired, [])
+
+    def test_and_the_one_that_nearly_does_still_does_not(self):
+        # Measured: exactly one of the 580 contains either word — "…MAYBE ENTERING
+        # THERE BECAUSE…" — and whole-utterance matching is what makes it harmless.
+        from flow.edits import _trigger
+
+        near = "YEAH WELL NOT I DON'T KNOW NOT NECESSARILY MAYBE ENTERING THERE BECAUSE "
+        self.assertIsNone(_trigger(near, (SEND_WORD, SEND_ENTER_WORD)))
+
+
+class TestItPressesTheSameButton(unittest.TestCase):
+    """Check 2: every refusal Send already has, inherited rather than re-implemented."""
+
+    def test_a_spoken_trigger_pastes_the_draft(self):
+        p = Pressed(session())
+        p.session.draft.set(DRAFT)
+        p.say("boom")
+        self.assertEqual(p.pastes, [(DRAFT, False)])
+
+    def test_and_the_enter_variant_asks_for_the_submit(self):
+        p = Pressed(session())
+        p.session.draft.set(DRAFT)
+        p.say("enter boom")
+        self.assertEqual(p.pastes, [(DRAFT, True)])
+
+    def test_an_empty_draft_refuses_with_no_paste_and_no_enter(self):
+        p = Pressed(session())
+        p.say("enter boom")
+        self.assertEqual(p.pastes, [], "something was pasted with nothing to send")
+        self.assertIn("nothing to send", p.notes())
+
+    def test_a_question_in_flight_refuses_the_same_way_the_chip_does(self):
+        p = Pressed(session())
+        p.session.draft.set(DRAFT)
+        p.session._ask_op = 7  # `send()` refuses on the call itself, not on `state`
+        p.say("boom")
+        self.assertEqual(p.pastes, [])
+        self.assertIn("still waiting", p.notes())
+
+    def test_a_rewrite_in_flight_refuses_too(self):
+        p = Pressed(session())
+        p.session.draft.set(DRAFT)
+        p.session._refine_op = 7
+        p.say("boom")
+        self.assertEqual(p.pastes, [])
+        self.assertIn("still rewriting", p.notes())
+
+    def test_the_trigger_word_never_lands_in_the_draft(self):
+        s = session()
+        s.draft.set(DRAFT)
+        s._route("boom")
+        self.assertEqual(s.draft.text, DRAFT, "the trigger was dictated into the draft")
+
+    def test_the_session_asks_rather_than_pasting_on_its_own(self):
+        # The paste belongs to the UI thread, which is the only place that knows the
+        # window Send is aimed at. The session's whole part is the request.
+        s = session()
+        s.draft.set(DRAFT)
+        s._route("enter boom")
+        self.assertEqual(sends(s), ["enter"])
+
+
+class TestConverseIgnoresTheSuffix(unittest.TestCase):
+    """Check 4: nothing is pasted, so there is nothing for Enter to submit."""
+
+    def test_both_variants_ask_and_neither_pastes_anything(self):
+        # The suffix is not stripped on the way through — the session says what was
+        # said, and `send()` returning "" in converse is what makes the submit
+        # unreachable. One place decides, and it is the one that already refuses.
+        for word in ("boom", "enter boom"):
+            with self.subTest(word=word):
+                p = Pressed(session())
+                p.session.toggle_mode()
+                self.assertEqual(p.session.mode, CONVERSE)
+                p.session.draft.set("what is a rollback")
+                with mock.patch("flow.session.ask",
+                                return_value=("an answer", "codex")):
+                    p.say(word)
+                    p.session.wait_idle(timeout=5.0)
+                self.assertEqual(p.pastes, [], "converse pasted the question")
+                self.assertEqual(p.session.reply, "an answer", "it did not ask either")
+                p.session.close()
+
+    def test_the_note_about_the_suffix_is_said_once_and_only_for_enter(self):
+        s = session()
+        s.toggle_mode()
+        s.draft.set("what is a rollback")
+        s.events()
+        with mock.patch("flow.session.ask", return_value=("an answer", "codex")):
+            s._route("enter boom")
+            s.wait_idle(timeout=5.0)
+        said = notes(s)
+        self.assertIn("nothing to submit", said)
+        self.assertEqual(said.count("nothing to submit"), 1)
+        s.close()
+
+
+class TestTheWordsAreThePersonsOwn(unittest.TestCase):
+    """Check 5: defaults must work out of the box, because nobody will edit JSON."""
+
+    def tmp_profile(self) -> Profile:
+        return Profile(Path(tempfile.mkdtemp()) / "profile.json")
+
+    def test_a_profile_with_nothing_stored_uses_the_shipped_words(self):
+        p = self.tmp_profile()
+        self.assertEqual(p.send_word, SEND_WORD)
+        self.assertEqual(p.send_enter_word, SEND_ENTER_WORD)
+
+    def test_stored_words_win_and_survive_a_reload(self):
+        p = self.tmp_profile()
+        p.send_word, p.send_enter_word = "zap", "enter zap"
+        self.assertTrue(p.save())
+        again = Profile(p.path)
+        self.assertEqual((again.send_word, again.send_enter_word), ("zap", "enter zap"))
+
+    def test_a_stored_blank_falls_back_rather_than_disabling_the_feature(self):
+        # `""` would match nothing and read as a silent switch-off; absent and blank are
+        # the same thing, the way `auto_ask` treats a stored null.
+        p = self.tmp_profile()
+        p.path.parent.mkdir(parents=True, exist_ok=True)
+        p.path.write_text('{"schema": 1, "send_word": "", "send_enter_word": null}',
+                          encoding="utf-8")
+        self.assertTrue(p.load())
+        self.assertEqual(p.send_word, SEND_WORD)
+        self.assertEqual(p.send_enter_word, SEND_ENTER_WORD)
+
+    def test_a_session_with_a_profile_routes_the_stored_word(self):
+        p = self.tmp_profile()
+        p.send_word, p.send_enter_word = "zap", "enter zap"
+        s = session(profile=p)
+        s.draft.set(DRAFT)
+        s._route("zap")
+        self.assertEqual(sends(s), [""])
+
+    def test_and_the_shipped_word_stops_working_when_one_is_stored(self):
+        # Otherwise "boom" is a permanent second trigger nobody chose — a live word in
+        # somebody's vocabulary that they believed they had renamed away.
+        #
+        # This is also the check that caught `_route` calling `plan()` a second time
+        # without the stored words: "boom" came back as a `send_trigger` nothing
+        # handled, fell into `_escalate`, and started a ~7 s CLI call on an empty
+        # instruction. The draft assertion is what noticed.
+        p = self.tmp_profile()
+        p.send_word, p.send_enter_word = "zap", "enter zap"
+        s = session(profile=p)
+        s.draft.set(DRAFT)
+        s._route("boom")
+        self.assertEqual(sends(s), [])
+        self.assertEqual(s.draft.text, f"{DRAFT} boom")
+
+    def test_no_profile_at_all_still_has_working_defaults(self):
+        s = session(profile=None)
+        s.draft.set(DRAFT)
+        s._route("boom")
+        self.assertEqual(sends(s), [""])
+
+
+class TestTheEnterGoesWithThePaste(unittest.TestCase):
+    """Check 3: to the validated target, after the paste, and never on its own."""
+
+    def test_paste_sends_enter_only_when_asked(self):
+        import flow.inject as inject
+
+        for submit, expected in ((False, 0), (True, 1)):
+            with self.subTest(submit=submit):
+                keys: list = []
+                with mock.patch.object(inject, "resolve",
+                                       return_value=inject.Target("ConsoleWindowClass",
+                                                                  "cmd.exe")), \
+                        mock.patch.object(inject, "set_clipboard_text",
+                                          return_value=True), \
+                        mock.patch.object(inject, "get_clipboard_text",
+                                          return_value=None), \
+                        mock.patch.object(inject, "_send",
+                                          side_effect=lambda *a: keys.append(a)):
+                    self.assertTrue(inject.paste("deploy it\n", hwnd=0x22, submit=submit))
+                self.assertEqual(len(keys), 1 + expected)
+
+    def test_a_refused_paste_never_reaches_the_enter(self):
+        # The one ordering that matters: no paste, no submit. A stray Enter into a
+        # terminal runs whatever was already on its prompt.
+        import flow.inject as inject
+
+        keys: list = []
+        inject.take_warnings()
+        with mock.patch.object(inject, "resolve",
+                               return_value=inject.Target("TkTopLevel", "python.exe",
+                                                          is_flow=True)), \
+                mock.patch.object(inject, "_send",
+                                  side_effect=lambda *a: keys.append(a)):
+            self.assertFalse(inject.paste("deploy it\n", hwnd=0x22, submit=True))
+        self.assertEqual(keys, [], "an Enter was sent into a refused paste")
+
+    def test_the_payload_still_loses_its_trailing_newline(self):
+        # P7's one guarantee is untouched: the Enter is the submit, and it is the *only*
+        # submit — a payload that kept its newline would press it twice.
+        import flow.inject as inject
+
+        written: list = []
+        with mock.patch.object(inject, "resolve",
+                               return_value=inject.Target("ConsoleWindowClass",
+                                                          "cmd.exe")), \
+                mock.patch.object(inject, "set_clipboard_text",
+                                  side_effect=lambda t: written.append(t) or True), \
+                mock.patch.object(inject, "get_clipboard_text", return_value=None), \
+                mock.patch.object(inject, "_send"):
+            inject.paste("deploy it\n", hwnd=0x22, submit=True)
+        self.assertEqual(written, ["deploy it"])
+
+
+if __name__ == "__main__":
+    unittest.main()

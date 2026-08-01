@@ -28,7 +28,7 @@ from typing import Literal
 from .phonetic import find_span, find_spans
 
 Kind = Literal["append", "local", "semantic", "undo", "rescue",
-              "recall", "followup"]
+              "recall", "followup", "take", "send_trigger"]
 
 # Spoken numbers, for "delete the last two words".
 _NUMS = {
@@ -150,6 +150,43 @@ _RECALL = re.compile(
     r"(?: prompt| message| draft| text| one)(?:\W|$)",
     re.I,
 )
+
+#: R5/P7. One word presses Send; a second presses Send and then submits with Enter.
+#:
+#: Chosen by the owner 2026-08-01, and **the order is the safety argument**: whole-
+#: utterance matching means a decode that loses a word from "enter boom" yields "enter"
+#: (no trigger at all) or "boom" (paste without submit). Degradation falls away from
+#: execution, never toward it — which is the property that makes a two-word execute
+#: trigger acceptable at all.
+#:
+#: Known risk, recorded rather than hoped away: "boom" is a short plosive and may decode
+#: as "bhoom" or as nothing for the anchor accents. The lexicon's arrow lines repair a
+#: consistent bend (`bhoom -> boom`), and if it will not decode at the desk the fallback
+#: is renaming the default *in code* on a NEEDS_YOU report — not asking the owner to
+#: hand-edit `profile.json`, which they have said they will not do.
+SEND_WORD = "boom"
+SEND_ENTER_WORD = "enter boom"
+
+
+def _trigger(utterance: str, words: tuple[str, str]) -> str | None:
+    """"" for a plain Send, "enter" for Send-then-Enter, None for anything else.
+
+    Whole utterance only, and that is the whole safety story: "boom goes the dynamite"
+    is dictation, so a false fire needs the speaker to have said nothing else. Matched
+    after the lead-in the rest of this module already strips, and after the punctuation
+    Whisper adds — "Boom." is the same word.
+
+    The longer word is tested first: "enter boom" ends in the plain word, and testing in
+    the other order would make the suffix unreachable.
+    """
+    stripped = _strip(_LEAD_ONLY.sub("", utterance)).lower()
+    plain, enter = (w.strip().lower() for w in words)
+    if enter and stripped == enter:
+        return "enter"
+    if plain and stripped == plain:
+        return ""
+    return None
+
 
 #: P9. "That answer is the prompt I wanted" — the reply becomes the draft.
 #:
@@ -474,7 +511,11 @@ _REFERENTIAL = re.compile(
 )
 
 
-def plan(utterance: str, draft: str = "") -> Plan:
+def plan(
+    utterance: str,
+    draft: str = "",
+    triggers: tuple[str, str] = (SEND_WORD, SEND_ENTER_WORD),
+) -> Plan:
     """Decide what a spoken utterance means while a draft is held.
 
     `draft` is needed, not optional decoration. "Delete key handling is broken" is
@@ -491,6 +532,15 @@ def plan(utterance: str, draft: str = "") -> Plan:
     after it are genuinely in the draft, which is the same evidence the exact grammar
     already demands.
     """
+    # First of all, and with no draft condition: the trigger presses a button, and a
+    # button that only works when the router likes the draft is one that sometimes does
+    # nothing. Every refusal lives in `send()`, where the chip's already are, rather
+    # than being re-implemented one layer up. Ahead of the snapping passes too — a
+    # trigger is an exact word by construction, and letting a verb snap *toward* one
+    # would be edit distance deciding to execute something.
+    if (submit := _trigger(utterance, triggers)) is not None:
+        return Plan("send_trigger", op=submit)
+
     exact = _plan_exact(utterance, draft)
     if exact.kind == "local":
         return exact

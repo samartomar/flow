@@ -53,7 +53,7 @@ CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 KEYEVENTF_KEYUP = 0x0002
 INPUT_KEYBOARD = 1
-VK_CONTROL, VK_V = 0x11, 0x56
+VK_CONTROL, VK_V, VK_RETURN = 0x11, 0x56, 0x0D
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -178,7 +178,13 @@ def take_warnings() -> list[str]:
         return out
 
 
-def paste(text: str, *, hwnd: int | None = None, restore_clipboard: bool = True) -> bool:
+def paste(
+    text: str,
+    *,
+    hwnd: int | None = None,
+    restore_clipboard: bool = True,
+    submit: bool = False,
+) -> bool:
     """Place `text` on the clipboard and send Ctrl-V to the window it is aimed at.
 
     `hwnd` is the window the caller believes it is pasting into, and passing one is
@@ -233,6 +239,18 @@ def paste(text: str, *, hwnd: int | None = None, restore_clipboard: bool = True)
     stamp = clipboard_sequence()
 
     _send(_key(VK_CONTROL), _key(VK_V), _key(VK_V, up=True), _key(VK_CONTROL, up=True))
+
+    if submit:
+        # After the paste and never instead of it. Every refusal above has already run,
+        # so an Enter can only be sent into a window that took the text — a stray one
+        # would run whatever was already sitting on a shell prompt.
+        #
+        # This is the only place Flow presses Enter, and it does so *because it was
+        # asked to*, which is what keeps P7 intact rather than breaking it: the payload
+        # still lost its trailing newline above, so there is exactly one submit and the
+        # user is the one who called for it. Under bracketed paste the block stays inert
+        # until this keystroke, which is deliberate execution done deliberately.
+        _send(_key(VK_RETURN), _key(VK_RETURN, up=True))
 
     if previous is not None:
         def restore() -> None:

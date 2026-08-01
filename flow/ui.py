@@ -438,15 +438,23 @@ class Pill(tk.Tk):
             )
         parent.add_cascade(label="Voice", menu=sub)
 
-    def _send(self) -> None:
-        """R5: hand the draft over, and leave it recoverable either way."""
+    def _send(self, submit: bool = False) -> None:
+        """R5: hand the draft over, and leave it recoverable either way.
+
+        `submit` presses Enter after the paste, and arrives only from the spoken
+        Send-then-Enter trigger — no chip and no hotkey can set it.
+        """
         text = self.session.send()
         problem = ""
         if text and self.on_send:
             # The window is chosen here, on the UI thread, from what was polled before
             # the click — not inside `paste()` after it. The handler reports back what
             # went wrong rather than printing it somewhere nobody is looking.
-            problem = self.on_send(text, self.paste_target) or ""
+            #
+            # Passed only when it is true, the way `DecodeWorker` passes `hotwords`: a
+            # handler predating this — `send_check.py`'s fixture is one — still works.
+            extra = {"submit": True} if submit else {}
+            problem = self.on_send(text, self.paste_target, **extra) or ""
         if getattr(self.session, "mode", DICTATE) != DICTATE:
             # Converse: send() returns "" and the answer is still coming, so the bubble
             # stays up to render it and there is nothing to linger over.
@@ -660,6 +668,11 @@ class Pill(tk.Tk):
                 self.bubble.show_reply(ev.text)
             elif ev.kind == "mode":
                 pass  # the accompanying note is what the user reads
+            elif ev.kind == "send":
+                # A spoken trigger. Handled here rather than in the session because the
+                # paste belongs to this thread and to `paste_target` — the same button
+                # the chip presses, arrived at by a different route.
+                self._send(submit=ev.text == "enter")
             elif ev.kind == "drop":
                 # Shown, not hidden: P2 is that a rejection is never silent. The
                 # recovery affordance itself is Phase 3's rescue chip.

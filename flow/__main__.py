@@ -269,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
             say("hotkey thread did not start; continuing without hotkeys")
             hotkeys = None
 
-    def on_send(text: str, target: int | None = None) -> str:
+    def on_send(text: str, target: int | None = None, submit: bool = False) -> str:
         """Paste the draft into `target`, and return what went wrong, or "".
 
         Converse mode returns "" from send(), so this is dictate-mode only by
@@ -284,9 +284,9 @@ def main(argv: list[str] | None = None) -> int:
         stderr nobody is watching while the button reported success.
         """
         if args.no_paste:
-            say(f"\n--- draft ---\n{text}\n")
+            say(f"\n--- draft ---\n{text}{' [+Enter]' if submit else ''}\n")
             return ""
-        ok = paste(text, hwnd=target)
+        ok = paste(text, hwnd=target, submit=submit)
         problems = take_warnings()
         if not ok and not problems:
             problems.append("not pasted, and no reason was recorded")

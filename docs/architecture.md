@@ -452,6 +452,8 @@ being admitted, **0/580** misroutes on real utterances (unchanged), adversarial 
 whole result file came back identical apart from its date, because the corpus contains no
 "follow and" utterance at all — which is what "costs nothing" means here.
 
+**The send triggers.** `send_trigger` is checked first of all and with no draft condition, because it presses a button and a button that works only when the router likes the draft is one that sometimes does nothing. It is also ahead of the snapping passes: a trigger is an exact word by construction, and letting a verb snap *toward* one would be edit distance deciding to execute something. Section 7 has the rest. Note that `plan()` takes the words as an argument -- the session passes the profile's, and `_route` calls `plan()` twice, which is how a renamed trigger briefly turned the shipped word into an unhandled plan that `_escalate` spent a ~7 s CLI call on.
+
 **The thread verbs.** `recall` brings the last sent prompt back, `followup` marks the
 next thing said as a continuation, and `take` moves the CLI's answer into the draft.
 All three mean something with an *empty* draft, which is why they are checked before
@@ -513,6 +515,45 @@ Three things now hold, and they are independent on purpose:
    window it was aimed at rather than the one it reached. A foreground of `0` is
    deliberately not a refusal: that is the OS declining to answer, not evidence that
    somebody else is holding it.
+
+### Send, spoken
+
+Two words press it. `boom` pastes; `enter boom` pastes and then submits with Enter, and
+they are the last keyboard step in the workshop loop -- item 21 takes the reply, this
+sends it. Both are stored in `profile.json` and both have shipped defaults that work out
+of the box, because a feature needing a text editor before first use is dead on arrival
+for the person who asked for it.
+
+**The safety is inherited, not new.** A trigger emits a request; `Pill._send` handles it
+and calls the same `session.send()` the chip does, so an empty draft gets the existing
+"nothing to send", an in-flight ask or refine gets the existing refusal, and invariant
+10's target revalidation happens exactly where it always did. There is no second Send to
+keep in step with the first.
+
+**Whole-utterance matching** is what makes a false fire rare: the word is a command only
+when it is the entire thing said, so "boom goes the dynamite" is dictation and a mis-fire
+needs the speaker to have said nothing else. Measured against the 580 real EdAcc
+utterances: **none of them fires either trigger**, and the single one containing the
+substring at all ("...MAYBE ENTERING THERE BECAUSE...") does not.
+
+**The order of the two defaults is deliberate.** A decode that loses a word from "enter
+boom" yields "enter" (no trigger) or "boom" (paste without submit): degradation falls
+away from execution, never toward it. That property is what makes a spoken *execute*
+trigger acceptable at all, and it is asserted rather than described.
+
+**The Enter goes after the paste, inside the same call, to the already-validated
+target.** Every refusal has run by then, so a submit can only reach a window that took
+the text -- a stray Enter would run whatever was already sitting on a shell prompt. P7 is
+untouched: the payload still loses its trailing newline, so there is exactly one submit
+and the user called for it. Under bracketed paste the block stays inert until that
+keystroke, which is deliberate execution done deliberately. Measured in a real console,
+twice: without the submit the line sits on the prompt and no marker file appears; with
+it, the same line ran.
+
+Known risk, recorded: "boom" is a short plosive and may decode as "bhoom" or as nothing
+for the anchor accents. A lexicon arrow line repairs a consistent bend (`bhoom -> boom`);
+if it will not decode at the desk, the fallback is renaming the default in code, not
+asking the owner to edit JSON.
 
 ### The one window that deliberately takes the focus
 
@@ -625,7 +666,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | Path | When | What |
 |---|---|---|
 | `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. **The one other thing Flow may write is a single appended `wrong -> right` line, and only on an explicit tap in the right-click menu** (see below): it never edits, reorders, removes or reformats a line, so everything already in the file comes back byte for byte. Re-read by mtime on every decode, which is how a pair added from the menu reaches the very next utterance |
-| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, and whether auto-ask is on. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
+| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, and the two spoken send triggers (`send_word`, `send_enter_word`). The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, and — on each route — how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the cache revision of each model tier that run loaded -- a number is a measurement *of a build*, and until 2026-08-01 none of these said which |
@@ -684,6 +725,11 @@ policy here; it is enforced by absence.
    asking is not one. Switching it off is remembered, because a setting that decides
    whether words leave the machine unpressed is not one to make the user re-state every
    launch. A Send that refuses says why — a button that does nothing reads as broken.
+   "Explicit" means *asked for*, not *clicked*: the spoken triggers press the same
+   button through the same refusals, and a word said as a whole utterance is as
+   deliberate as a chip. The Enter suffix is the sharper case and is why P7 keeps its
+   newline strip -- the submit is one keystroke the user named, not a newline that
+   travelled along with the text.
    Taking a reply into the draft (`take_reply`) is reviewed here and changes nothing:
    it moves text *within* Flow, nothing reaches another window, and it flips the mode
    to dictate so the following Send is the ordinary explicit one. It deliberately does
@@ -748,7 +794,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (720 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (745 tests, ~13 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -822,7 +868,7 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 | Check | Command | Result |
 |---|---|---|
 | bench provenance | `uv run python scripts/command_bench.py`, twice | the `identity` block resolves here (faster-whisper 1.2.1, ctranslate2 4.8.1, date) and the non-identity content of two consecutive runs is **identical**, so item 14's byte-for-byte idiom survives the addition |
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **720 passed**, 13.8 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **745 passed**, 13.2 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
 | command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by every 2026-08-01 grammar addition, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row. Run again *before* admitting the `follow and` elision, as the admission gate rather than as a check afterwards — every figure identical, and so was the rest of the file bar its date |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
 | **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |
