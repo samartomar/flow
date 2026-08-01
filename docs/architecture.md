@@ -142,8 +142,8 @@ is written down.
 | `decode` | `DecodeWorker.__init__` | runs the model | Owns the only model calls. Catches every exception and turns it into an `error` result |
 | `preload` | `Session.start()` | warms both tiers | Not awaited — a first run includes a model download, and doing it inline froze the UI on the first click |
 | `hotkeys` | `Hotkeys.start()` | `RegisterHotKey` + `GetMessageW` message loop | `RegisterHotKey` requires the message loop to be on the registering thread. Presses go back through a `queue`, drained on the UI thread |
-| `refine` | per semantic rewrite | one `subprocess.run` | Result handed back under `_refine_lock` |
-| `ask` | per converse question | one `subprocess.run` | Result handed back under `_ask_lock` |
+| `refine` | per semantic rewrite | one `refine._invoke` | Result handed back under `_refine_lock`, tagged with its operation id and the draft revision it was computed from. Watches `Session._cancel` while it waits, so `close()` does not have to |
+| `ask` | per converse question | one `refine._invoke` | Result handed back under `_ask_lock`, tagged with its operation id. Same cancellation |
 | clipboard restore | per paste | sleeps 0.6 s, puts the old clipboard back | Lets the target app read the clipboard first |
 | `speech` watcher | each `Speaker.say()` | polls the host until it reports `Ready`, then clears `speaking` | Best-effort only. The ceiling that actually bounds `speaking` is enforced by the reader, so a wedged host cannot leave Flow deaf |
 | speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking, and the state protocol needs it responsive |
@@ -467,7 +467,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `MATCH_THRESHOLD` | 0.82 | Swept, not chosen: 10/10 real mis-transcription pairs recovered at 4 false spans in 354; stricter costs three recoveries and buys nothing until 0.90 |
 | `SNAP_MAX_WORDS` | 6 | Without it, suffix-stripping turned sentence-opening gerunds into commands — "Deleting a branch does not delete the history" became a delete |
 | `refine.MAX_CHARS` | 2000 | Never hand the CLI an unbounded draft (R11). Past this only the tail is sent, cut on a sentence boundary. A Refine keeps the head verbatim and reattaches it to the result — the CLI rewrites only what it saw, and the rest of the draft is untouched rather than lost. An Ask sends only the tail; the head of an over-long question is simply never seen. Neither path tells the user yet — that note is queued work |
-| `refine.TIMEOUT_SEC` | 20 s | Measurement put a normal call at 5.7–7.3 s, so the 6 s first sketched would have killed healthy calls |
+| `refine.TIMEOUT_SEC` | 20 s | Measurement put a normal call at 5.7–7.3 s, so the 6 s first sketched would have killed healthy calls. Enforced against the process *tree*: measured, a 0.4 s timeout used to return after 1.37 s and leave the CLI's own child running, because killing a launcher leaves the pipe its child inherited open and the read blocks on it |
 | `ASK_SENTENCES` | 3 | The shortest that can carry an answer plus its caveat. Right for a conversational answer, wrong for an artifact: "give me a complete reusable prompt from this conversation" cannot fit in three sentences, and nothing lifts the ceiling today. `ask()` already takes it as a parameter, so the fix is policy, not plumbing — queued work |
 | `ASK_MAX_CHARS` | 4000 | The bubble has to render it |
 | `Thread.MAX_TURNS` / `MAX_CHARS` | 20 / 20 000 | R8. Measured: 5000 sends of a realistic prompt settle at 20 turns, 1640 chars |
@@ -538,19 +538,22 @@ policy here; it is enforced by absence.
     work owns the state until it returns, and `send()` and the converse countdown ask the
     calls themselves rather than reading the pill. A second rewrite is refused while one
     is out, the way a second Send already was.
+12. **A CLI call can be ended, and ending it reaches the whole tree.** `_invoke` is the
+    one place this codebase starts a process, and it polls a `threading.Event` while it
+    waits, so `Session.close()` abandons a call instead of waiting out `TIMEOUT_SEC` of
+    a rewrite with no reader. The kill is `taskkill /T`, because `codex` is a launcher
+    and killing a launcher leaves the `node` doing the work — still holding the pipe it
+    inherited, so the read would block on it anyway.
 
 ### Gaps that are one fix away from being invariants
 
 Written down so the reference does not claim them early. The wording above is already
 narrowed to stay true while these are open; each is queued work.
 
-1. **Nothing cancels a CLI call.** The refine and ask threads run `subprocess.run` to
-   completion. Quitting Flow does not terminate the child process tree, and a superseded
-   call cannot be abandoned before its timeout.
-2. **The provider is named only at startup.** The console diagnostics say which CLI will
+1. **The provider is named only at startup.** The console diagnostics say which CLI will
    answer and the notes say which one did, but nothing on the pill says — before the
    fact — that Ask goes to `codex` and off the machine.
-3. **The paste target is revalidated only against Flow.** `resolve()` refuses when Flow
+2. **The paste target is revalidated only against Flow.** `resolve()` refuses when Flow
    itself holds the foreground; a third window that took focus between the poll and the
    click still receives the Ctrl-V. And the clipboard restore writes back unconditionally
    after 0.6 s — `GetClipboardSequenceNumber` is the check it should make first.
@@ -559,7 +562,7 @@ narrowed to stay true while these are open; each is queued work.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (465 tests, ~3.5 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it |
+| units | `tests/` (473 tests, ~9 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

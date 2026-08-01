@@ -14,9 +14,12 @@ no output parser is needed — merging them is what makes the output look pollut
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 
 #: R11: never hand the CLI an unbounded draft. Past this, only the tail is sent.
@@ -141,6 +144,106 @@ def _split_tail(text: str) -> tuple[str, str]:
     return text[:cut], text[cut:]
 
 
+#: How often a running call checks whether anyone still wants it. Small enough that
+#: quitting feels immediate, large enough to be free against a call that takes ~7 s.
+_POLL_SEC = 0.1
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """End the call and everything it started.
+
+    `proc.kill()` reaches only the process this module launched, and that is not the
+    process doing the work: `codex` is a launcher that runs `node`. Killing the
+    launcher leaves the model call running — still holding the pipe it inherited, so
+    the read would block on it anyway, which is how a call could time out while the
+    thing it timed out on carried on. Windows has no process group to signal, so the
+    tree walk is `taskkill /T`; it ships with the OS and costs no dependency (R16),
+    and `send_check.py` already reaps its target window the same way.
+    """
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5.0,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass  # fall through to the direct kill, which is better than nothing
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def _abandon(proc: subprocess.Popen, reason: str) -> tuple[None, str]:
+    """Kill a call and reap it, so no thread of ours is left waiting on a dead pipe."""
+    _kill_tree(proc)
+    try:
+        proc.communicate(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        pass
+    return None, reason
+
+
+def _invoke(
+    cli: Cli,
+    prompt: str,
+    *,
+    timeout: float,
+    cwd: str | None = None,
+    cancel: threading.Event | None = None,
+) -> tuple[str | None, str]:
+    """Run one CLI call. Returns `(stdout, "")`, or `(None, reason)` on any failure.
+
+    The one place this module starts a process, so that ending one early is also in
+    one place. `subprocess.run` could not do that: it blocks until the child exits,
+    so closing Flow left the call running to completion — up to `TIMEOUT_SEC` of a
+    child nobody was waiting for, and its own child after that.
+
+    `cancel` is polled rather than waited on. The child's output has to be drained
+    while we wait or a full pipe blocks it, and `communicate` is what drains it, so
+    the wait has to be the one `communicate` is already doing.
+    """
+    if cancel is not None and cancel.is_set():
+        return None, f"{cli.name} was cancelled"
+
+    try:
+        proc = subprocess.Popen(
+            [*cli.argv, prompt],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            # codex waits on stdin ("Reading additional input from stdin..."), so it
+            # must be closed explicitly or the call can hang until the timeout.
+            stdin=subprocess.DEVNULL,
+            text=True,
+            cwd=cwd,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as exc:
+        return None, f"{cli.name} failed to start: {exc}"
+
+    deadline = time.monotonic() + timeout
+    while True:
+        if cancel is not None and cancel.is_set():
+            return _abandon(proc, f"{cli.name} was cancelled")
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return _abandon(proc, f"{cli.name} timed out after {timeout:.0f}s")
+        try:
+            out, err = proc.communicate(timeout=min(_POLL_SEC, left))
+        except subprocess.TimeoutExpired:
+            continue  # retrying communicate loses no output; the docs promise that
+        break
+
+    if proc.returncode != 0:
+        first = (err or "").strip().splitlines()
+        return None, f"{cli.name} exited {proc.returncode}: {first[0] if first else ''}"
+    return out, ""
+
+
 def _clean(out: str) -> str:
     """Light defensive tidy. Deliberately not a parser — stdout is already clean."""
     s = out.strip()
@@ -161,6 +264,7 @@ def refine(
     cwd: str | None = None,
     polish: bool = False,
     context: list[str] | None = None,
+    cancel: threading.Event | None = None,
 ) -> tuple[str | None, str]:
     """Apply a semantic instruction to `text`.
 
@@ -171,6 +275,9 @@ def refine(
     labelled as background and explicitly excluded from the output, because a follow-up
     like "and do the same for the other endpoint" is meaningless without it and
     disastrous if the model decides to rewrite it too.
+
+    `cancel` abandons the call — the session sets it on close, so quitting does not
+    wait out a rewrite nobody is going to read.
 
     Returns `(revised_text, note)`, or `(None, reason)` on any failure. Failure must
     always be non-destructive: the caller keeps the pre-edit draft, so a CLI that is
@@ -193,29 +300,11 @@ def refine(
             + chr(10) + prior + chr(10) + chr(10) + prompt
         )
 
-    try:
-        proc = subprocess.run(
-            [*chosen.argv, prompt],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            # codex waits on stdin ("Reading additional input from stdin..."), so it
-            # must be closed explicitly or the call can hang until the timeout.
-            stdin=subprocess.DEVNULL,
-            cwd=cwd,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        return None, f"{chosen.name} timed out after {timeout:.0f}s"
-    except OSError as exc:
-        return None, f"{chosen.name} failed to start: {exc}"
+    out, reason = _invoke(chosen, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+    if out is None:
+        return None, reason
 
-    if proc.returncode != 0:
-        first = (proc.stderr or "").strip().splitlines()
-        return None, f"{chosen.name} exited {proc.returncode}: {first[0] if first else ''}"
-
-    revised = _clean(proc.stdout)
+    revised = _clean(out)
     if not revised:
         return None, f"{chosen.name} returned nothing"
 
@@ -236,6 +325,7 @@ def ask(
     cwd: str | None = None,
     context: list[str] | None = None,
     sentences: int = ASK_SENTENCES,
+    cancel: threading.Event | None = None,
 ) -> tuple[str | None, str]:
     """P9: put a question to the agent CLI and return its answer.
 
@@ -267,27 +357,11 @@ def ask(
             + chr(10) + prior + chr(10) + chr(10) + prompt
         )
 
-    try:
-        proc = subprocess.run(
-            [*chosen.argv, prompt],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            stdin=subprocess.DEVNULL,  # codex blocks on stdin otherwise
-            cwd=cwd,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        return None, f"{chosen.name} timed out after {timeout:.0f}s"
-    except OSError as exc:
-        return None, f"{chosen.name} failed to start: {exc}"
+    out, reason = _invoke(chosen, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+    if out is None:
+        return None, reason
 
-    if proc.returncode != 0:
-        first = (proc.stderr or "").strip().splitlines()
-        return None, f"{chosen.name} exited {proc.returncode}: {first[0] if first else ''}"
-
-    answer = _clean(proc.stdout)
+    answer = _clean(out)
     if not answer:
         return None, f"{chosen.name} returned nothing"
     if len(answer) > ASK_MAX_CHARS:

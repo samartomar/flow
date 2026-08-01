@@ -20,6 +20,15 @@ from flow.edits import plan  # noqa: E402
 from flow.refine import _POLISH_PROMPT, refine  # noqa: E402
 from flow.session import Session, State  # noqa: E402
 
+
+def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
+    """A `Popen` with the surface `_invoke` uses: one `communicate` and an exit code."""
+    proc = mock.Mock(returncode=returncode, pid=0)
+    proc.communicate.return_value = (stdout, stderr)
+    proc.poll.return_value = returncode
+    return proc
+
+
 RAMBLE = (
     "so the login is broken when you use SSO, it throws a five hundred, "
     "um, this is on version 2.3.1, and I need you to find the root cause"
@@ -103,8 +112,8 @@ class TestPrompt(unittest.TestCase):
     def test_polish_ignores_the_spoken_instruction(self):
         # The user said "make it a proper prompt"; that phrase must not end up inside
         # the prompt sent to the CLI, or the CLI is being asked to interpret it.
-        fake = mock.Mock(returncode=0, stdout="POLISHED", stderr="")
-        with mock.patch("subprocess.run", return_value=fake) as run:
+        fake = fake_popen("POLISHED", stderr="")
+        with mock.patch("subprocess.Popen", return_value=fake) as run:
             out, note = refine(RAMBLE, "make it a proper prompt", polish=True)
         sent = run.call_args.args[0][-1]
         self.assertEqual(out, "POLISHED")
@@ -112,8 +121,8 @@ class TestPrompt(unittest.TestCase):
         self.assertIn(RAMBLE, sent)
 
     def test_a_normal_refine_still_carries_its_instruction(self):
-        fake = mock.Mock(returncode=0, stdout="REVISED", stderr="")
-        with mock.patch("subprocess.run", return_value=fake) as run:
+        fake = fake_popen("REVISED", stderr="")
+        with mock.patch("subprocess.Popen", return_value=fake) as run:
             refine(RAMBLE, "make it more formal")
         self.assertIn("make it more formal", run.call_args.args[0][-1])
 
@@ -122,8 +131,8 @@ class TestPrompt(unittest.TestCase):
         # slack: a revision may grow 4x + 200, a polish 8x + 600.
         short = "fix the login bug " * 20  # 360 chars
         grown = "Context: " + "x" * (5 * len(short))
-        fake = mock.Mock(returncode=0, stdout=grown, stderr="")
-        with mock.patch("subprocess.run", return_value=fake):
+        fake = fake_popen(grown, stderr="")
+        with mock.patch("subprocess.Popen", return_value=fake):
             polished, _ = refine(short, "make it a proper prompt", polish=True)
             revised, reason = refine(short, "make it more formal")
         self.assertEqual(polished, grown)
@@ -131,8 +140,8 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("commentary", reason)
 
     def test_runaway_output_is_still_refused(self):
-        fake = mock.Mock(returncode=0, stdout="y" * 20000, stderr="")
-        with mock.patch("subprocess.run", return_value=fake):
+        fake = fake_popen("y" * 20000, stderr="")
+        with mock.patch("subprocess.Popen", return_value=fake):
             out, reason = refine("fix the login bug", "x", polish=True)
         self.assertIsNone(out)
         self.assertIn("commentary", reason)

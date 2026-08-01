@@ -22,6 +22,14 @@ from flow.session import Session  # noqa: E402
 from flow.thread import CONTEXT_CHARS, MAX_CHARS, MAX_TURNS, Thread  # noqa: E402
 
 
+def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
+    """A `Popen` with the surface `_invoke` uses: one `communicate` and an exit code."""
+    proc = mock.Mock(returncode=returncode, pid=0)
+    proc.communicate.return_value = (stdout, stderr)
+    proc.poll.return_value = returncode
+    return proc
+
+
 class TestThreadStore(unittest.TestCase):
     def test_turns_are_kept_in_order(self):
         t = Thread()
@@ -273,8 +281,8 @@ class TestSessionThread(unittest.TestCase):
 
 class TestContextInThePrompt(unittest.TestCase):
     def test_prior_turns_are_labelled_background(self):
-        fake = mock.Mock(returncode=0, stdout="REVISED", stderr="")
-        with mock.patch("subprocess.run", return_value=fake) as run_:
+        fake = fake_popen("REVISED", stderr="")
+        with mock.patch("subprocess.Popen", return_value=fake) as run_:
             refine("and a rollback", "make it formal",
                    context=["write the migration"])
         sent = run_.call_args.args[0][-1]
@@ -283,8 +291,8 @@ class TestContextInThePrompt(unittest.TestCase):
         self.assertIn("do not repeat or rewrite", sent)
 
     def test_no_context_means_no_extra_prompt(self):
-        fake = mock.Mock(returncode=0, stdout="REVISED", stderr="")
-        with mock.patch("subprocess.run", return_value=fake) as run_:
+        fake = fake_popen("REVISED", stderr="")
+        with mock.patch("subprocess.Popen", return_value=fake) as run_:
             refine("and a rollback", "make it formal")
         self.assertNotIn("EARLIER IN THIS THREAD", run_.call_args.args[0][-1])
 

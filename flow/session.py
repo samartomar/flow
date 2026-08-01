@@ -350,6 +350,11 @@ class Session:
         self._op = 0
         self._refine_op: int | None = None
         self._ask_op: int | None = None
+        #: Set once, by `close()`. Every CLI call watches it, so quitting does not
+        #: wait out a rewrite nobody will read. Deliberately not touched by `pause()`:
+        #: disarming is a way of saying "stop capturing", and an answer to a question
+        #: already asked does not depend on still listening.
+        self._cancel = threading.Event()
         #: P9: dictate (paste into the focused window) or converse (ask the CLI).
         self.mode = DICTATE
         #: Spoken replies. None means the engine was unavailable or refused.
@@ -434,6 +439,11 @@ class Session:
     def close(self) -> None:
         self.mic.stop()
         self._mic_started = False
+        # Before the worker, because this is the one that reaches outside the process.
+        # A refine thread used to run its `subprocess.run` to completion after the app
+        # was gone, and killing the CLI Flow launched still left the `node` it launched
+        # behind it — a model call billing tokens for an answer with no reader.
+        self._cancel.set()
         self.worker.close()
 
     def __enter__(self) -> "Session":
@@ -1059,7 +1069,7 @@ class Session:
         def work() -> None:
             result = refine(
                 before, instruction, cwd=self._refine_cwd, polish=polish,
-                context=context,
+                context=context, cancel=self._cancel,
             )
             with self._refine_lock:
                 self._refine_result = (op, revision, result)
@@ -1202,7 +1212,8 @@ class Session:
         context = self.thread.tail()[:-1]
 
         def work() -> None:
-            result = ask(question, cwd=self._refine_cwd, context=context)
+            result = ask(question, cwd=self._refine_cwd, context=context,
+                         cancel=self._cancel)
             with self._ask_lock:
                 self._ask_result = (op, result)
 

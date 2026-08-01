@@ -18,10 +18,22 @@ from flow.refine import MAX_CHARS, Cli, _split_tail, refine  # noqa: E402
 CLI = Cli("codex", ("codex", "exec"))
 
 
-def fake_proc(stdout: str = "", returncode: int = 0, stderr: str = ""):
-    return subprocess.CompletedProcess(
-        args=[], returncode=returncode, stdout=stdout, stderr=stderr
-    )
+def fake_proc(stdout: str = "", returncode: int = 0, stderr: str = "", *,
+              hang: bool = False):
+    """A `Popen` with the surface `_invoke` uses, and nothing else.
+
+    `hang=True` never completes, which is how a timeout is reproduced without waiting
+    for one. `poll` reports an exit either way, so the guard that kills a live tree is
+    not asked to kill a mock. What that guard does to a real process tree is measured
+    in `test_lifecycle.py`, which is the only place a real one is started.
+    """
+    proc = mock.Mock(returncode=returncode, pid=0)
+    if hang:
+        proc.communicate.side_effect = subprocess.TimeoutExpired("codex", 0)
+    else:
+        proc.communicate.return_value = (stdout, stderr)
+    proc.poll.return_value = returncode
+    return proc
 
 
 class TestTailSplit(unittest.TestCase):
@@ -46,7 +58,7 @@ class TestGuards(unittest.TestCase):
     def test_head_is_preserved_and_tail_replaced(self):
         text = "Old sentence. " * 300
         head, tail = _split_tail(text)
-        with mock.patch("subprocess.run", return_value=fake_proc("REVISED")):
+        with mock.patch("subprocess.Popen", return_value=fake_proc("REVISED")):
             out, note = refine(text, "shorten this", cli=CLI)
         self.assertEqual(note, "codex")
         self.assertEqual(out, head + "REVISED")
@@ -55,43 +67,41 @@ class TestGuards(unittest.TestCase):
     def test_commentary_is_refused(self):
         # A ballooning reply is the model explaining itself, not revising.
         chatty = "Certainly! Here is the revised version you asked for. " * 40
-        with mock.patch("subprocess.run", return_value=fake_proc(chatty)):
+        with mock.patch("subprocess.Popen", return_value=fake_proc(chatty)):
             out, note = refine("ship it", "make it formal", cli=CLI)
         self.assertIsNone(out)
         self.assertIn("commentary", note)
 
     def test_timeout_is_non_destructive(self):
-        with mock.patch(
-            "subprocess.run", side_effect=subprocess.TimeoutExpired("codex", 20)
-        ):
-            out, note = refine("ship it", "make it formal", cli=CLI, timeout=20)
+        with mock.patch("subprocess.Popen", return_value=fake_proc(hang=True)):
+            out, note = refine("ship it", "make it formal", cli=CLI, timeout=0.2)
         self.assertIsNone(out)
         self.assertIn("timed out", note)
 
     def test_nonzero_exit_is_reported(self):
         with mock.patch(
-            "subprocess.run", return_value=fake_proc("", 1, "not logged in\nmore")
+            "subprocess.Popen", return_value=fake_proc("", 1, "not logged in\nmore")
         ):
             out, note = refine("ship it", "make it formal", cli=CLI)
         self.assertIsNone(out)
         self.assertIn("not logged in", note)
 
     def test_empty_output_is_refused(self):
-        with mock.patch("subprocess.run", return_value=fake_proc("   \n")):
+        with mock.patch("subprocess.Popen", return_value=fake_proc("   \n")):
             out, note = refine("ship it", "make it formal", cli=CLI)
         self.assertIsNone(out)
         self.assertIn("nothing", note)
 
     def test_code_fences_are_stripped(self):
-        with mock.patch("subprocess.run", return_value=fake_proc("```\nShip it.\n```")):
+        with mock.patch("subprocess.Popen", return_value=fake_proc("```\nShip it.\n```")):
             out, _note = refine("ship it", "make it formal", cli=CLI)
         self.assertEqual(out, "Ship it.")
 
     def test_stdin_is_closed(self):
         """codex blocks reading stdin; without DEVNULL the call hangs to the timeout."""
-        with mock.patch("subprocess.run", return_value=fake_proc("ok")) as run:
+        with mock.patch("subprocess.Popen", return_value=fake_proc("ok")) as popen:
             refine("ship it", "make it formal", cli=CLI)
-        self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(popen.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
     def test_missing_cli_is_reported_not_raised(self):
         with mock.patch("flow.refine.available", return_value=[]):
