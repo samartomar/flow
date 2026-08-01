@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 # Generated benchmark audio and soak logs — reproducible via scripts/, not worth tracking.
 .bench/
+# Editor state, not project content: pane layout and local UI preferences.
+.obsidian/

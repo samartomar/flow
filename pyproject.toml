@@ -11,5 +11,22 @@ dependencies = [
     "numpy>=2",
 ]
 
+[project.scripts]
+flow = "flow.__main__:main"
+
+# R16 is about *runtime* dependencies, and this does not touch them: hatchling is fetched
+# into an isolated build environment and never enters the venv Flow runs in. Checked, not
+# assumed — the installed distribution count is unchanged by this block.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["flow"]
+
 [tool.uv]
-package = false
+# Installed, and editable — so `uv run flow` works while an edit to flow/*.py still takes
+# effect on the next run with no reinstall. This was `package = false`, which meant the
+# `flow` console script did not exist and `uv run flow` died on the relative imports in
+# __main__.py, which is the invocation --help itself was printing.
+package = true

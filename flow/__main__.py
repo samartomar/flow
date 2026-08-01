@@ -1,8 +1,21 @@
-"""Entry point: `uv run flow` (or `uv run python -m flow`).
+"""Local English dictation with a talk-to-it refine loop. Run: uv run flow
 
-Wires the real pieces together — mic, ASR, router, CLI refine, pill, hotkeys, paste —
+Wires the real pieces together - mic, ASR, router, CLI refine, pill, hotkeys, paste -
 and nothing else. All the behaviour lives in the modules.
 """
+
+# The docstring above is argparse's `description`, so it is what `--help` prints. Two
+# constraints follow from that, both learned the hard way.
+#
+# ASCII only, for the reason `say()` documents below: a redirected stdout on a legacy
+# console code page cannot encode an en-dash, and the help text would crash instead of
+# printing.
+#
+# And the invocation in it has to be one that actually runs. This said `uv run flow` while
+# pyproject said `package = false`, which installs no console script: that command found
+# this file, ran it as a loose script, and died on the relative imports below. So --help
+# was printing the one invocation guaranteed to fail. `package = true` fixes it properly —
+# both forms work now, and `python -m flow` needs no install at all.
 
 from __future__ import annotations
 
