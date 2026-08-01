@@ -86,11 +86,28 @@ def decode_audio(path: Path) -> np.ndarray:
         format="s16", layout="mono", rate=SR
     )
     chunks = []
-    for frame in container.decode(audio=0):
-        for out in resampler.resample(frame):
-            chunks.append(out.to_ndarray().reshape(-1))
+    bad = 0
+    # Demux and decode packet by packet rather than `container.decode()`, so one bad
+    # packet costs a few milliseconds instead of the whole recording. The first real
+    # phone recordings — raw MP3 streams named `.mpeg` — threw InvalidDataError partway
+    # in, and the all-or-nothing loop discarded five minutes of a volunteer's time for
+    # it. A recording is expensive and unrepeatable; a decoder that gives up on it is
+    # the wrong trade.
+    for packet in container.demux(container.streams.audio[0]):
+        try:
+            frames = packet.decode()
+        except av.error.InvalidDataError:
+            bad += 1
+            continue
+        for frame in frames:
+            for out in resampler.resample(frame):
+                chunks.append(out.to_ndarray().reshape(-1))
     if not chunks:
         raise ValueError("no audio decoded")
+    if bad:
+        # Never silent: a dropped packet is missing audio, and the person reading the
+        # scores has to know the recording was not whole.
+        print(f"  {path.name}: skipped {bad} undecodable packet(s)", file=sys.stderr)
     return np.concatenate(chunks).astype(np.float32) / 32768.0
 
 
@@ -184,14 +201,24 @@ def main() -> None:
     if "--model" in argv:
         model_name = argv[argv.index("--model") + 1]
 
+    # `.mpeg`/`.mpg` are here because a real phone produced them: the first Indian-accent
+    # recordings arrived as MP3 in an .mpeg container. The decoder never cared — ffmpeg
+    # reads the codec, not the extension — so an allow-list that omitted them silently
+    # ingested nothing and said nothing about why.
     files = sorted(
         p for p in INBOX.glob("*")
-        if p.suffix.lower() in {".m4a", ".mp3", ".wav", ".opus", ".aac", ".ogg", ".amr"}
+        if p.suffix.lower() in {".m4a", ".mp3", ".mpeg", ".mpg", ".mp4", ".wav",
+                                ".opus", ".aac", ".ogg", ".amr"}
     )
-    named = [p for p in files if re.match(r"^[a-z-]+_\d+$", p.stem)]
+    # The id may be a name, not just a number. Volunteers are people, the files arrive
+    # named after them, and `us-control_02` and `indian_vijaya01` are both useful — the
+    # second more so, because the speaker travels with the clip into the manifest.
+    # Still one underscore before the id, since the group is taken by rsplit.
+    named = [p for p in files if re.match(r"^[a-z-]+_[a-z0-9-]+$", p.stem)]
     skipped = [p for p in files if p not in named]
     for p in skipped:
-        print(f"  skipping {p.name}: not named <group>_<id>", file=sys.stderr)
+        print(f"  skipping {p.name}: not named <group>_<id> "
+              f"(lower case, one underscore, e.g. indian_vijaya01)", file=sys.stderr)
     if not named:
         print(f"nothing to ingest in {INBOX}")
         return

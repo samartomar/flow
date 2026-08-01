@@ -63,7 +63,7 @@ faster-whisper 1.2.1), final beam 2 vs library default 5, uncapped temperature f
 |---|---|---|
 | Per-accent WER, every anchor group (P1) | **read register: 5.2–6.3% (small.en), 5.8–8.5% (base.en)** — target met for **3 of 4** groups. **Spanish is closed as unmeasurable**: no obtainable read-register corpus contains it (see below). Conversational EdAcc: 15.1–23.4% (small.en), Spanish 16.3% | **≤ 12% floor** (not average) |
 | Filter false-reject on real speech (P2) | 0 drops on 300 clips ≥ 1.5 s; on 280 clips < 1.5 s the user sees nothing on 1.1% (base.en) / 2.1% (small.en), of which correct content lost is 0% / 0.36% — and **every drop is now logged with its signals** | **< 1%**, every drop logged |
-| Command recognition, accented (P3) | **10/11 end-to-end from phone audio, 1 speaker (us-control)** — decode + route, not transcripts. Synthetic grammar: 100% recall on all six corruption classes, 0/580 misroutes on real speech | **≥ 95%**; silent misroutes ≈ 0 |
+| Command recognition, accented (P3) | **0/10 on the first anchor-group speaker** (Indian L1, own phrasing — every utterance silently appended; see below). 10/11 for the us-control speaker who read the prompts as written. Synthetic grammar: 100% recall on all six corruption classes, 0/580 misroutes on real speech | **≥ 95%**; silent misroutes ≈ 0 |
 | Personal-lexicon entity accuracy (P4) | no biasing exists | **≥ 90%** |
 | Partial latency (R4) | base.en **clean to 8 s of speech** (worst 1.07 s) after the Phase 1 decode fix, breaching only at ≥ 12 s (1.98 s worst); small.en 2.66–3.78 s median at every length | **< 1.5 s, preserved** |
 
@@ -622,5 +622,59 @@ utterance never pays for `small.en` at all.
   worthless until the words being streamed are the right ones.
 - The command-phrase recorded benchmark: **the pipeline is done and scored** (recording
   sheet, `scripts/ingest_recordings.py`, `command_bench.py --recorded`), and one control
-  speaker has been through it end to end. What is still missing is people — zero
-  recordings exist for any of the four L1 anchor groups.
+  speaker has been through it end to end. **The first anchor-group speaker arrived
+  2026-08-01** (Indian L1) and is written up below; three of the four groups are still
+  unrepresented, and one speaker is not a population.
+
+## The first anchor-group recording, and what it found (2026-08-01)
+
+Two recordings arrived from one Indian-L1 speaker (11.4 minutes, phone, real room).
+They are the first from any of the four anchor groups, and they do not say what the
+benchmark expected — which turns out to be the finding.
+
+**The speaker did not issue commands. They described the change they wanted.**
+
+| what the kit suggested | what was actually said |
+|---|---|
+| "capitalize sameer" | *"I feel the name Samir is spelled wrong. it should start with uppercase letter s"* |
+| "delete the bit about the standup" | *"I feel that it should contain the summary from the stand-up"* |
+| "make it a proper prompt" | *"If I have given this prompt to the AI, I don't feel this is the proper prompt. It should be restructured."* |
+| "that was a command" | *"I have asked the AI to do something, instead it was typing into words"* |
+
+This is not a mistake by the speaker. The recording kit explicitly says *"if your own way
+of saying it comes to mind first, say that instead"*, and this is what their own way looks
+like: indirect, hedged, describing the desired end state rather than commanding.
+
+**Routed through the shipped `edits.plan()` against the reference draft:**
+
+| speaker | utterances | routed to a local edit | correctly routed overall |
+|---|---|---|---|
+| us-control (read the prompts as written) | 12 | 7 | 11 |
+| indian_vijaya (own words) | 10 | **0** | **0** |
+
+Every one appended as dictation. The user's correction would be typed into their message
+rather than applied to it — silently, which is defect 4's exact signature arriving from a
+real speaker instead of a synthetic corruption.
+
+**The cause is register, not transcription.** Accent damage is present and visible —
+"Sameer" → *"some air"*, "rollback plan" → *"role black plan"*, "Hi Priya" → *"Hibera"* —
+and the phonetic matcher exists for exactly that. But it is not what broke here. Not one
+of these utterances is an imperative, so there is no verb for `snap()` to reach and no
+`change X to Y` shape to escalate. `command_bench`'s six corruption classes all corrupt a
+command; none of them turns a command into a description, because nobody thought to.
+
+**What this does not yet establish.** One speaker, and no WER: the speaker ad-libbed, so
+there is no reference text to score against. Item alignment is also unreliable here — the
+ingest anchors on spoken numbers and this speaker did not announce them consistently
+(8/11 located in the first recording, 3/11 in the second), so the per-item `op` labels
+should not be trusted. The routing result above does not depend on those labels: it is
+every non-empty utterance against the same draft.
+
+**The open question this raises, which is a design decision and not a patch.** The
+router's default for "not a recognised command" is APPEND, and that default is wrong for
+this population. A long utterance that talks *about* the draft's contents is far likelier
+to be a request than to be more dictation. The candidate fix is to send descriptive,
+draft-referential utterances to the CLI — which can act on *"the name Samir is spelled
+wrong, it should start with uppercase S"* — instead of typing them. That costs ~7 s and a
+subprocess on a path that is currently free, so it needs measuring against P3's
+"silent-append ≈ 0" target before it ships.
