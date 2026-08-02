@@ -6,6 +6,29 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-02 — The npm-shim defect: refuse loudly now, repair per-CLI when measured
+
+Found by item 35's live verification and measured against a synthetic shim: a `.cmd`
+launcher — the shape `npm -g` writes on Windows — forwards `%*` through cmd.exe,
+which stops at the first newline. Every prompt `refine.py` sends is multi-line, so a
+CLI installed that way receives the framing and none of the user's text, **exits 0,
+and answers fluently about nothing** — the silent-wrong-answer class this project
+ranks above every other failure. This machine's `codex` and `claude` are native
+builds and unaffected, which is exactly why the *repair* cannot be picked here: the
+candidate that matters (stdin delivery) is per-CLI — codex was measured hanging on
+an open stdin, which is why `_invoke` pins `stdin=DEVNULL` — and there is no real
+npm shim of either CLI on this machine to verify against. So the decision is staged
+by what can be proven today:
+1. **Refusal ships now.** A resolved CLI whose executable ends `.cmd`/`.bat` is
+   refused *before* the call, with the cure in the message: install the native
+   build. Loud beats fluent-and-wrong; verifiable today with the four-line shim.
+2. **The repair ships as a capability, off by default.** A per-CLI `stdin_ok` flag:
+   where verified true on a machine that has that install, the prompt travels on
+   stdin and a shim becomes usable — item 35's verify-per-machine discipline, not a
+   guess. codex stays argv with the measured hang recorded beside it.
+3. README's agent-CLI paragraph gains one sentence steering installs to native
+   builds and saying Flow will refuse a shim and why.
+
 ### 2026-08-02 — Workspace grounding: proven by a misfire, so the ground becomes
 ### switchable and named at egress
 
