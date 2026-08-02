@@ -62,5 +62,58 @@ class TestTheProjectUrls(unittest.TestCase):
         self.assertEqual(urls["Listing"], "https://github.com/samartomar/ai-harness")
 
 
+class TestTheInstallSection(unittest.TestCase):
+    """What a stranger reads first, checked against what the project actually is.
+
+    Until the repo went public the README's install line was `uv sync`, which is the
+    command for someone who has already cloned — the one thing a reader arriving from a
+    link has not done. These assertions are the ones that would have caught that.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.readme = README.read_text(encoding="utf-8")
+
+    def test_the_uv_command_names_the_repository_pyproject_declares(self):
+        # Built from the metadata rather than typed twice: a repo that is renamed moves
+        # this URL in one place and fails here until the README follows.
+        repo = pyproject()["project"]["urls"]["Repository"]
+        self.assertIn(f"uv tool install git+{repo}", self.readme)
+
+    def test_and_the_command_that_runs_it_afterwards_is_there_too(self):
+        # `uv tool install` puts `flow` on the PATH; a reader who is not told that goes
+        # looking for a directory that does not exist.
+        self.assertIn("uv tool install", self.readme)
+        self.assertRegex(self.readme, r"uv tool install [^\n]+\nflow\b")
+
+    def test_the_binary_download_names_the_artifact_the_release_carries(self):
+        self.assertIn("flow-windows-x64.zip", self.readme)
+        self.assertIn("/releases", self.readme)
+
+    def test_and_says_what_windows_will_do_the_first_time(self):
+        # Unsigned, by decision — signing is a subscription with no buyer today. The
+        # honest version of that decision is telling people about the warning before
+        # they meet it, rather than letting it look like a virus alert.
+        self.assertIn("SmartScreen", self.readme)
+        self.assertIn("Run anyway", self.readme)
+
+    def test_windows_only_is_stated_where_someone_deciding_will_read_it(self):
+        install = self.readme.split("## Install", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("Windows", install)
+        self.assertIn("macOS", install)
+
+    def test_and_that_the_agent_cli_is_optional(self):
+        install = self.readme.split("## Install", 1)[1].split("\n## ", 1)[0]
+        for phrase in ("codex", "claude", "PATH"):
+            self.assertIn(phrase, install, phrase)
+
+    def test_install_comes_before_the_reference_material(self):
+        # "At the top" as a check rather than a hope: someone who arrived to try it
+        # should not have to scroll past the flag table to find out how.
+        self.assertLess(self.readme.index("## Install"), self.readme.index("### Flags"))
+        self.assertLess(self.readme.index("## Install"),
+                        self.readme.index("## Running it"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,8 +8,13 @@ paste the version you settled on.
 Windows. English only. Three declared dependencies. No API key.
 
 ```bash
-uv sync && uv run flow
+uv tool install git+https://github.com/samartomar/flow
+flow
 ```
+
+No Python on the machine? Take `flow-windows-x64.zip` from
+[Releases](https://github.com/samartomar/flow/releases) instead — [Install](#install) has
+both, and the clone.
 
 Click the pill to arm it, speak, and the draft floats up above it. Talk to the draft to
 correct it, keep talking to add more, type into it when that is faster, then **Send**
@@ -23,7 +28,7 @@ correct it, keep talking to add more, type into it when that is faster, then **S
 
 ## Contents
 
-- [What it does](#what-it-does) · [Requirements](#requirements) · [Install](#install)
+- [What it does](#what-it-does) · [Install](#install) · [Requirements](#requirements)
 - [Running it](#running-it) — [flags](#flags), [hotkeys](#hotkeys), [the pill](#the-pill-and-the-bubble)
 - [Dictate mode](#dictate-mode) — [saying the send](#sending-it-without-touching-anything) · [Talking to the draft](#talking-to-the-draft)
 - [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [taking the answer](#taking-the-answer)
@@ -47,6 +52,86 @@ correct it, keep talking to add more, type into it when that is faster, then **S
 | **Silence stays silent** | Whisper invents words on silence and noise; those are filtered out, and every rejection is shown |
 | **Adapts to you** | One 60-second calibration measures your room and your voice instead of guessing |
 | **Send** | Pastes into the window you were working in, and presses Enter only if you asked for it |
+
+## Install
+
+**Windows 10/11 only.** The paste and hotkey layer is 96 Win32 call sites and the timing
+behaviour around them was measured on Windows, so a macOS port means re-taking those
+measurements rather than swapping a few calls — it waits for Mac users asking and Mac
+hardware to measure on. Run Flow on anything else and it says so in one sentence and
+exits, rather than throwing a `ctypes` traceback at you.
+
+### With `uv` — nothing to clone
+
+```bash
+uv tool install git+https://github.com/samartomar/flow
+flow
+```
+
+[`uv`](https://docs.astral.sh/uv/) is a single static binary; it fetches Python 3.12 and
+the three dependencies itself, and `uv tool install` puts `flow` on your PATH (run
+`uv tool update-shell` once if your shell has never seen uv's bin directory).
+`uv tool upgrade flow` takes a newer version, `uv tool uninstall flow` removes it.
+
+### Without Python at all — the binary
+
+Download `flow-windows-x64.zip` from
+[Releases](https://github.com/samartomar/flow/releases), unzip it anywhere, and run
+`flow.exe`. Nothing to install and no Python on the machine. The two speech models are
+*not* in the zip — they download to your Hugging Face cache on the first decode, exactly
+as they do for every other install, and the startup line names the path.
+
+The download is **unsigned**, and the honest version of that is telling you what you will
+see rather than letting it look like a virus alert: the first launch shows Windows
+SmartScreen's "Windows protected your PC" panel, and it takes **More info → Run anyway**,
+once, per machine. A code-signing certificate is a yearly subscription, so it waits for
+someone who actually needs it; when that happens, this paragraph is what changes. The zip
+is built by GitHub Actions from a tagged commit, and the workflow runs the full test
+suite before it builds — a release that skips the gate is not a release.
+
+### From a clone — to change it
+
+```bash
+uv sync && uv run flow
+```
+
+Downloads ~244 MB of packages (28 distributions, measured) and installs Flow itself into
+the venv in editable mode, which is what puts the `flow` command on the path. The two
+models are fetched on first use, not at install: `base.en` (141 MiB) drives the live
+partials and `small.en` (464 MiB) produces the text that actually gets pasted.
+
+### The agent CLI is optional, and Flow says which it found
+
+Dictation, voice corrections, the lexicon, calibration and paste need nothing but Flow.
+An agent CLI — `codex` or `claude` on PATH, already signed in — adds the three things the
+local grammar cannot do: semantic rewrites, the "make it a proper prompt" polish, and
+converse mode's prompt workshop. With neither installed, startup prints `refine CLI: NONE
+- semantic rewrites disabled` and everything else works; you find out at the top rather
+than at the moment you first ask for a rewrite. No API key is read, stored or passed
+anywhere in this codebase — see [Requirements](#requirements) for exactly what a CLI call
+does and does not send.
+
+### Slimming it down (optional, ~106 MB)
+
+Two of those packages are unreachable from this app:
+
+| Package | Size | Why it is never used |
+|---|---|---|
+| `onnxruntime` (+`protobuf`) | 34 MB | Only for faster-whisper's Silero VAD. Flow always passes `vad_filter=False` because it does its own speech gating |
+| `av` | 66 MB | Only for decoding audio *files*. Flow feeds numpy arrays from the mic and never calls `decode_audio()` |
+
+```bash
+uv run python scripts/slim.py --apply
+```
+
+Recorded measurement: **243.5 MB → 137.3 MB**, with the full test suite and a real decode
+still passing. `av` is replaced by a small stub because faster-whisper imports it at
+package load time; the stub raises a clear error if anything ever does reach for it.
+
+This deliberately breaks a dependency contract, which is why it is opt-in. A future
+faster-whisper release could start touching `av` at import time or enable VAD by default.
+Nothing is lost either way — `uv sync` rebuilds the full venv, and
+`uv run python scripts/slim.py --undo` reinstalls both packages.
 
 ## Requirements
 
@@ -94,39 +179,6 @@ screen is the CLI that will be called, not the first one on PATH.
 `--cli-timeout SEC` raises the 20 s budget. It was chosen when a call measured 5.7–7.3 s;
 `codex` now measures 6.6–8.5 s here for a one-word answer, so a long question can breach
 it.
-
-## Install
-
-```bash
-uv sync
-```
-
-Downloads ~244 MB of packages (28 distributions, measured) and installs Flow itself into
-the venv in editable mode, which is what puts the `flow` command on the path. The two
-models are fetched on first use, not at install: `base.en` (141 MiB) drives the live
-partials and `small.en` (464 MiB) produces the text that actually gets pasted.
-
-### Slimming it down (optional, ~106 MB)
-
-Two of those packages are unreachable from this app:
-
-| Package | Size | Why it is never used |
-|---|---|---|
-| `onnxruntime` (+`protobuf`) | 34 MB | Only for faster-whisper's Silero VAD. Flow always passes `vad_filter=False` because it does its own speech gating |
-| `av` | 66 MB | Only for decoding audio *files*. Flow feeds numpy arrays from the mic and never calls `decode_audio()` |
-
-```bash
-uv run python scripts/slim.py --apply
-```
-
-Recorded measurement: **243.5 MB → 137.3 MB**, with the full test suite and a real decode
-still passing. `av` is replaced by a small stub because faster-whisper imports it at
-package load time; the stub raises a clear error if anything ever does reach for it.
-
-This deliberately breaks a dependency contract, which is why it is opt-in. A future
-faster-whisper release could start touching `av` at import time or enable VAD by default.
-Nothing is lost either way — `uv sync` rebuilds the full venv, and
-`uv run python scripts/slim.py --undo` reinstalls both packages.
 
 ## Running it
 
