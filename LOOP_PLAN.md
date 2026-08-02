@@ -73,7 +73,31 @@ The loop's single source of truth. One "do"-tier item per iteration, top to bott
 
 ## Backlog — "do" tier
 
-(empty — round four's items go here)
+### 26. "font" joins the mis-heard-prompt table
+From the 2026-08-01 `--takes 3` live run (committed with this spec): take 3 decoded
+"Make it a proper **font**." and routed `semantic/` — the CLI got a free-form nonsense
+instruction where a polish was asked for. Same failure, same bounded fix as "brown"
+(round-three history, item 14): `_MISHEARD_PROMPT` is consulted only inside
+`_POLISH_FRAME`, only after the exact reading fails, and changes only *which*
+instruction a semantic plan carries, never whether one is sent.
+- Files: `flow/edits.py`, `tests/test_edits.py`, `tests/test_live_replay.py` (pin this
+  run's item-9 rows the way the first three runs' rows are pinned — all three takes,
+  so the two hits guard against regression while the miss documents the fix).
+- Instrument first: "Make it a proper font." asserts `semantic/` today, then
+  `semantic/polish`; "make the font bigger" (or the nearest phrase the corpus offers)
+  asserts it still routes as ordinary semantic — the table must not swallow real
+  font-talk outside the polish frame.
+- Gate: `command_bench.py` before and after — expected identical bar identity, as with
+  "brown"; any moved row is reported to NEEDS_YOU, not shipped silently.
+- **Escalation tripwire, so this table cannot grow forever in silence:** when
+  `_MISHEARD_PROMPT` reaches **5 entries**, stop adding and write a NEEDS_YOU entry —
+  at that size the mis-heard-noun family is measured to be open, and the honest fix is
+  Phase 3's decode-time command bias, whose acceptance fixtures already wait in
+  `test_live_replay.py`.
+- Acceptance: suite green; [selfdrive] 64/64 (routing tables changed — item 14's
+  precedent).
+- Doc sync: §6's noun-snap paragraph gains the second entry and the tripwire.
+- Status: (not started)
 
 ## Backlog — "prepare" tier
 

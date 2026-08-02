@@ -23,36 +23,34 @@ done, commit `a18b619`: the notes now name the CLI the call will actually make)
   the smoke benchmark wants 3–5 speakers per anchor group. New clips go to
   `D:\dev\flow-recordings\recorded\inbox\`, then copy into `.bench/recorded/` and run
   `scripts/ingest_recordings.py` (git ignores them now).
-- [ ] **Next desk session — the one measurement this round could not take:**
-
-  ```bash
-  uv run python scripts/live_check.py --stage D --takes 3
-  ```
-
-  Items 13 and 14 have both landed, so there are two named predictions to check and a
-  correction to record. Three single takes measured 7/11, 8/11 and 6/11, no two miss
-  sets alike, and — correcting what this file said before, which the item-14 fixtures
-  caught — **only items 3 and 11 held across all three**, not 2, 3 and 11: run 1 heard
-  "Change Semir to Samir" on item 2 and escalated to the CLI.
-
-  What should move, if the fixes are real: **item 4** ("lowercase release notes")
-  should now hold whichever way Whisper spells it, and **item 9** ("make it a proper
-  prompt") should reach `semantic/polish` even when the noun comes back as "brown".
-  **Item 10 has joined the predictions**: plan item 20's gate passed on 2026-08-01 —
-  `follow and` is admitted, priced at 0/580 misroutes with the whole `command_bench`
-  output identical bar its date, so run 1's "follow and mention the roleback plan"
-  should now route as a follow-up. Bare "follow" is still dictation, deliberately.
-  What will not move without you: items 5 and 7 — theirs is Phase 3
-  (see [docs/decisions.md](docs/decisions.md), the pinned-misses entry).
-  And with `semir -> Samir` in `~/.flow/lexicon.txt` — right-click → **Open settings
-  folder** writes the file — item 2 should stop escalating. **Checked 2026-08-01:
-  `~/.flow/lexicon.txt` does not exist**, so that third prediction is not testable until
-  the menu entry has been used once and the arrow line typed. `profile.json` also holds
-  `"pairs": {}` — no confusion pair has ever been learned from your speech, the fact the
-  inferred-pairs decision ([docs/decisions.md](docs/decisions.md)) was made on.
-
-  Per-item stability is the number that means something; a single run cannot show
-  whether a change helped, which is what `--takes` is for.
+- [x] **The `--takes 3` measurement — done 2026-08-01, the best sheet ever recorded:
+  29/33 (was 21/33 across the three single takes), takes of 11/11, 9/11, 9/11, seven
+  items stable, nothing at zero.** Committed with its identity block (item 18 working
+  live). Scored against the four predictions:
+  - **Item 4 — confirmed, causally.** 3/3, including take 3 decoding "release nodes"
+    and still routing `local/lower`. The spelling-variant fix is real.
+  - **Item 9 — confirmed for "brown", and the family is open.** Take 1's "Make it a
+    proper brown." — the exact decode that missed in run 1 — now reaches
+    `semantic/polish`. But take 3 produced a *new* noun: "Make it a proper **font**."
+    → `semantic/` unpolished. The lookup table admits only what is in it; "font" is
+    plan item 26, same bounds as "brown".
+  - **Item 10 — 3/3, but not attributable to item 20.** All three takes decoded
+    "follow **up** and…" with the particle intact, so the admitted `follow and` path
+    was never exercised live. The fix stays proven by its fixtures and its 0/580 gate,
+    not by this run.
+  - **Item 2 — still untestable, and still the weakest item.** 2/3, both hits the
+    homophone no-op ("Change Samir to Samir"), the miss a full-sentence mis-decode
+    ("It's time to send me" → silent append). **`lexicon.txt` now exists but the
+    `semir -> Samir` line has still not been typed** — 30 seconds, right-click →
+    Open settings folder, and the next run makes this prediction testable.
+  - **Unpredicted:** item 7 went 3/3 *without* its Phase 3 fix — "draft" survived
+    decoding all three takes (and "nodes"→"notes" snapped at 0.900, in range all
+    along). Item 5 reproduced its pinned miss exactly once ("standard" vs "standup",
+    0.667 — the Phase 3 fixture behaving as documented). And item 3 *fell out* of the
+    stable set ("Samir" → "some you"): membership of the stable set changed for the
+    fourth time in four measurements, which is the whole argument for `--takes`.
+  P3's bar is ≥95%; this run is 88%. The gap is now concentrated in decode variance on
+  content words — Phase 3 territory — not in the grammar.
 - [ ] **Is a grounded answer actually less generic?** The felt half of item 23, and the
   one thing no unit test can settle. Ask the *same* question about your real repo twice,
   once with the workspace set and once without, and keep both transcripts:
@@ -95,18 +93,20 @@ done, commit `a18b619`: the notes now name the CLI the call will actually make)
   `Catch the README up…`, plus a fifth stale spot the entry missed: the storage table
   still said the volunteer recordings were tracked.
 
-## Parked — the evidence these wait on does not exist yet (2026-08-01)
+## Parked — the evidence is now arriving, and is not yet enough (updated 2026-08-01 evening)
 
-`~/.flow/` holds one file: `profile.json`, 158 bytes, calibrated today.
-**There is no `diag.jsonl`, and no `diag.jsonl.1`.** The writer landed in commit
-`069f869` and `flow/__main__.py` creates it on every launch that is not `--no-profile`,
-so its absence means the app has not been run through `__main__` since item 9 shipped —
-the three live_check runs are a script and write nothing here. Both entries below were
-written as "waiting for volume". They are waiting for the **first record**.
+**`diag.jsonl` exists — 419 records from ~5 launches on 2026-08-01**: 229 decodes,
+26 asks (the workshop got real use), 24 append routes, **2 refines**, and one stale
+discard already recorded. The collection both entries wait on has started. Where it
+stands against the bars: **2 of ≥30 refines** for the stale-rewrite entry; state
+transitions are accumulating toward P2's ~200 pauses but are nowhere near it. Also
+noted from the profile: a voice is chosen ("Microsoft George"), `auto_ask` is stored
+ON, and `pairs` is still `{}` — no spoken "change X to Y" correction has occurred in
+real use yet, so item 19's menu has had nothing to offer.
 
-**What unblocks both, once:** use Flow for ordinary work — `uv run python -m flow`,
-without `--no-profile` — for three sessions. The trace is content-free and bounded at
-two files; the cost of collecting is a startup line naming the path.
+**What fills both:** keep using Flow plainly. The refine counter is the slow one —
+rewrites happen a few per session, so ≥30 is likely two or three more real working
+sessions away.
 
 - [ ] **What a stale rewrite should cost.** Today it loses to newer words, visibly. The
   third option — re-run the instruction against the moved draft, once, for ~7 s more —

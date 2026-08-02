@@ -1,37 +1,97 @@
 {
- "A_capture": {
-  "blocks": 46,
-  "expected": 47.1,
-  "median_db": -96.7,
-  "max_db": -89.6
- },
- "B_gate": {
-  "opened": true,
-  "start_s": 1.02,
-  "stop_s": 2.09,
-  "preroll_blocks": 4,
-  "floor_db": -76.4
- },
- "C_partial_latency": {
-  "partials": 13,
-  "speech_s": 15.1,
-  "median_s": 0.61,
-  "worst_s": 0.74,
-  "pass": true
+ "identity": {
+  "date": "2026-08-01",
+  "faster-whisper": "1.2.1",
+  "ctranslate2": "4.8.1",
+  "models": {
+   "base.en": "3d3d5dee26484f91867d81cb899cfcf72b96be6c",
+   "small.en": "d1d751a5f8271d482d14ca55d9e2deeebbae577f"
+  }
  },
  "D_commands": {
-  "n": 11,
-  "hit": 6,
+  "n": 33,
+  "hit": 29,
+  "takes": 3,
+  "stable": [
+   1,
+   4,
+   6,
+   7,
+   8,
+   10,
+   11
+  ],
+  "never": [],
+  "per_item": {
+   "1": 3,
+   "2": 2,
+   "3": 2,
+   "4": 3,
+   "5": 2,
+   "6": 3,
+   "7": 3,
+   "8": 3,
+   "9": 2,
+   "10": 3,
+   "11": 3
+  },
+  "attempts": {
+   "1": 3,
+   "2": 3,
+   "3": 3,
+   "4": 3,
+   "5": 3,
+   "6": 3,
+   "7": 3,
+   "8": 3,
+   "9": 3,
+   "10": 3,
+   "11": 3
+  },
   "rows": [
    {
     "item": 1,
-    "hit": false,
-    "text": "Change a bit used into an aspect.",
-    "got": "semantic/",
+    "take": 1,
+    "hit": true,
+    "text": "Change every Tuesday to Wednesday",
+    "got": "local/replace_all",
+    "want": "local/replace_all"
+   },
+   {
+    "item": 1,
+    "take": 2,
+    "hit": true,
+    "text": "Change every Tuesday to Wednesday",
+    "got": "local/replace_all",
+    "want": "local/replace_all"
+   },
+   {
+    "item": 1,
+    "take": 3,
+    "hit": true,
+    "text": "Change every Tuesday to Wednesday",
+    "got": "local/replace_all",
     "want": "local/replace_all"
    },
    {
     "item": 2,
+    "take": 1,
+    "hit": true,
+    "text": "Change Samir to Samir",
+    "got": "local/replace",
+    "want": "local/replace"
+   },
+   {
+    "item": 2,
+    "take": 2,
+    "hit": false,
+    "text": "It's time to send me",
+    "got": "append/",
+    "want": "local/replace"
+   },
+   {
+    "item": 2,
+    "take": 3,
     "hit": true,
     "text": "Change Samir to Samir",
     "got": "local/replace",
@@ -39,20 +99,71 @@
    },
    {
     "item": 3,
+    "take": 1,
     "hit": true,
-    "text": "Capitalized Samir.",
+    "text": "Capitalize Samir",
+    "got": "local/capitalize",
+    "want": "local/capitalize"
+   },
+   {
+    "item": 3,
+    "take": 2,
+    "hit": false,
+    "text": "capitalized some you",
+    "got": "append/",
+    "want": "local/capitalize"
+   },
+   {
+    "item": 3,
+    "take": 3,
+    "hit": true,
+    "text": "capitalized Samir.",
     "got": "local/capitalize",
     "want": "local/capitalize"
    },
    {
     "item": 4,
+    "take": 1,
     "hit": true,
     "text": "lowercase release notes",
     "got": "local/lower",
     "want": "local/lower"
    },
    {
+    "item": 4,
+    "take": 2,
+    "hit": true,
+    "text": "lowercase release notes",
+    "got": "local/lower",
+    "want": "local/lower"
+   },
+   {
+    "item": 4,
+    "take": 3,
+    "hit": true,
+    "text": "lowercase release nodes",
+    "got": "local/lower",
+    "want": "local/lower"
+   },
+   {
     "item": 5,
+    "take": 1,
+    "hit": true,
+    "text": "Delete the bit about the standup.",
+    "got": "local/delete",
+    "want": "local/delete"
+   },
+   {
+    "item": 5,
+    "take": 2,
+    "hit": true,
+    "text": "Delete the bit about the standup",
+    "got": "local/delete",
+    "want": "local/delete"
+   },
+   {
+    "item": 5,
+    "take": 3,
     "hit": false,
     "text": "Delete the bit about the standard",
     "got": "append/",
@@ -60,20 +171,71 @@
    },
    {
     "item": 6,
-    "hit": false,
-    "text": "delete the task sentence",
-    "got": "append/",
+    "take": 1,
+    "hit": true,
+    "text": "Delete the last sentence.",
+    "got": "local/delete_last",
+    "want": "local/delete_last"
+   },
+   {
+    "item": 6,
+    "take": 2,
+    "hit": true,
+    "text": "Delete the last sentence.",
+    "got": "local/delete_last",
+    "want": "local/delete_last"
+   },
+   {
+    "item": 6,
+    "take": 3,
+    "hit": true,
+    "text": "Delete the last sentence",
+    "got": "local/delete_last",
     "want": "local/delete_last"
    },
    {
     "item": 7,
-    "hit": false,
-    "text": "Insert before release nodes",
-    "got": "append/",
+    "take": 1,
+    "hit": true,
+    "text": "Insert draft before release notes",
+    "got": "local/insert_before",
+    "want": "local/insert_before"
+   },
+   {
+    "item": 7,
+    "take": 2,
+    "hit": true,
+    "text": "Insert draft before release notes",
+    "got": "local/insert_before",
+    "want": "local/insert_before"
+   },
+   {
+    "item": 7,
+    "take": 3,
+    "hit": true,
+    "text": "Insert draft before release nodes",
+    "got": "local/insert_before",
     "want": "local/insert_before"
    },
    {
     "item": 8,
+    "take": 1,
+    "hit": true,
+    "text": "and do that",
+    "got": "undo/",
+    "want": "undo/"
+   },
+   {
+    "item": 8,
+    "take": 2,
+    "hit": true,
+    "text": "and do that",
+    "got": "undo/",
+    "want": "undo/"
+   },
+   {
+    "item": 8,
+    "take": 3,
     "hit": true,
     "text": "and do that",
     "got": "undo/",
@@ -81,33 +243,76 @@
    },
    {
     "item": 9,
+    "take": 1,
+    "hit": true,
+    "text": "Make it a proper brown.",
+    "got": "semantic/polish",
+    "want": "semantic/polish"
+   },
+   {
+    "item": 9,
+    "take": 2,
+    "hit": true,
+    "text": "Make it a proper prompt",
+    "got": "semantic/polish",
+    "want": "semantic/polish"
+   },
+   {
+    "item": 9,
+    "take": 3,
     "hit": false,
-    "text": "Make it a drop a drop.",
+    "text": "Make it a proper font.",
     "got": "semantic/",
     "want": "semantic/polish"
    },
    {
     "item": 10,
+    "take": 1,
     "hit": true,
-    "text": "Follow up and mention the rollback plant.",
+    "text": "follow up and mention the role back plant.",
+    "got": "followup/",
+    "want": "followup/"
+   },
+   {
+    "item": 10,
+    "take": 2,
+    "hit": true,
+    "text": "Follow up and mention the rollback flag.",
+    "got": "followup/",
+    "want": "followup/"
+   },
+   {
+    "item": 10,
+    "take": 3,
+    "hit": true,
+    "text": "follow up and mention the rollback flag",
     "got": "followup/",
     "want": "followup/"
    },
    {
     "item": 11,
+    "take": 1,
+    "hit": true,
+    "text": "That was a command.",
+    "got": "rescue/",
+    "want": "rescue/"
+   },
+   {
+    "item": 11,
+    "take": 2,
+    "hit": true,
+    "text": "That was a command.",
+    "got": "rescue/",
+    "want": "rescue/"
+   },
+   {
+    "item": 11,
+    "take": 3,
     "hit": true,
     "text": "That was a command.",
     "got": "rescue/",
     "want": "rescue/"
    }
   ]
- },
- "E_target": {
-  "window_class": "CASCADIA_HOSTING_WINDOW_CLASS",
-  "process": "WindowsTerminal.exe",
-  "is_terminal": true,
-  "brackets_paste": true,
-  "wrapped": false,
-  "warning": ""
  }
 }
