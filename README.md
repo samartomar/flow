@@ -992,7 +992,7 @@ Verified on this machine while writing this document:
 | Speech engine | `System.Speech` available |
 | Hotkeys | 4 actions, each with 1-3 fallback combos |
 
-Recorded in [PROGRESS.md](PROGRESS.md) from earlier runs, not re-measured here:
+Recorded in [PROGRESS.md](docs/history/PROGRESS.md) from earlier runs, not re-measured here:
 
 |                                                     |                                                               |
 | --------------------------------------------------- | ------------------------------------------------------------- |
@@ -1024,5 +1024,5 @@ build, with the accent benchmark that measures it.
 [docs/analysis.md](docs/analysis.md) has the requirements breakdown, the four
 architectures considered, and the ranked risks with measurements.
 [docs/recording-kit.md](docs/recording-kit.md) is what gets sent to a volunteer recording
-accented commands. [PROGRESS.md](PROGRESS.md) is the build log, including the things that
+accented commands. [PROGRESS.md](docs/history/PROGRESS.md) is the build log, including the things that
 broke.

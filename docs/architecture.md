@@ -914,6 +914,6 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 | models | HuggingFace cache blob sizes | `base.en` 147.8 MB, `small.en` 486.1 MB |
 
 Constants were read from source rather than from memory. Numbers attributed to earlier runs
-(WER, soak drift, CLI latency) are quoted from [../PROGRESS.md](../PROGRESS.md) and
+(WER, soak drift, CLI latency) are quoted from [history/PROGRESS.md](history/PROGRESS.md) and
 [roadmap.md](roadmap.md) and were **not** re-measured here; they are labelled as recorded
 wherever they appear.

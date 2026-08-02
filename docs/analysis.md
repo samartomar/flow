@@ -2,7 +2,7 @@
 
 Local, English-only, voice-first dictation with a talk-to-it refine loop.
 Reference product: Wispr Flow. This document is the analysis of the raw idea,
-not the build plan (see [PROGRESS.md](../PROGRESS.md) for that).
+not the build plan (see [PROGRESS.md](history/PROGRESS.md) for that).
 
 Status of every claim below: `CONFIRMED` = verified on this machine ·
 `PLAUSIBLE` = mechanism known, not yet run · `SPECULATIVE` = pattern-match only.
@@ -119,7 +119,7 @@ sometimes, which is tolerable *only because* the draft is non-destructive and
 undoable — a mis-route costs one undo, not lost text. This keeps the CLI out of
 the hot path entirely, which is what R11 asks for.
 
-**As built, option 3 turned out to need two refinements** (see PROGRESS.md stages 4
+**As built, option 3 turned out to need two refinements** (see [history/PROGRESS.md](history/PROGRESS.md) stages 4
 and 5):
 
 - **The utterance alone is not enough — the draft is part of the decision.**
