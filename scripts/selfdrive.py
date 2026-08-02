@@ -146,6 +146,47 @@ class Driver:
             time.sleep(0.02)
         raise TimeoutError(f"session never settled after {text!r}")
 
+    def speak_decoded(self, text: str, name: str, timeout: float = 90.0) -> None:
+        """Say one utterance to the decoder directly, skipping the room and the gate.
+
+        `speak` is the honest path and is what 63 of the 64 checks use: the cached WAV is
+        padded with generated room noise, handed to `ScriptedMic`, and `_pump_audio` decides
+        block by block — under whatever CPU load the machine is carrying — where the gate
+        opens, what preroll it takes and where the utterance ends. The WAV on disk is
+        identical every run; the array that reaches the model is assembled fresh, and for a
+        *marginal* decode a different slice is a different answer. That is Rule 2's tripwire,
+        fired twice on `capitalize sameer` and fixed here rather than quarantined
+        (decisions.md, "Five words from the owner").
+
+        What is skipped is the padding, the gate and the block pump. What is **not** skipped
+        is everything the check is actually about: this goes in at `submit_final`, which is
+        the seam `Session._finalise` itself uses, so the real decoder, the real router and
+        the real apply are all still under test. `_last_audio` is set for the same reason
+        `_finalise` sets it — the rescue path re-decodes it, and a harness whose session
+        disagreed with the shipped one about what was last heard would be a fake.
+        """
+        with wave.open(str(synth(text, name)), "rb") as w:
+            pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        audio = pcm.astype(np.float32) / 32768.0
+        self.session._last_audio = audio
+        self.session.worker.submit_final(audio)
+        deadline = time.perf_counter() + timeout
+        while time.perf_counter() < deadline:
+            self.session.tick()
+            if not self.session.worker.busy:
+                if self.session.state in (State.REFINING, State.ASKING):
+                    time.sleep(0.05)
+                    continue
+                # The same settle the mic path uses: one more tick after a pause, because
+                # the route runs on the tick that drains the decode rather than on the one
+                # that finished it.
+                time.sleep(0.15)
+                self.session.tick()
+                if not self.session.worker.busy:
+                    return
+            time.sleep(0.02)
+        raise TimeoutError(f"session never settled after {text!r}")
+
     def notes(self) -> list[str]:
         return [e.text for e in self.session.events()]
 
@@ -176,6 +217,23 @@ MALFORMED = ("hi priya, the deploy is scheduled for Tuesday afternoon. sameer is
              "writing the RELEASE NOTES. tell me if Tuesday still works.")
 
 
+#: The one correction case that decodes without the gate, and why it is only this one.
+#:
+#: `capitalize sameer` is marginal by design — that is what makes it worth checking — and
+#: Rule 2's same-check tripwire fired on it twice, on 2026-08-01 and 2026-08-02, both times
+#: after sustained CPU load and both times green on the rerun. Nothing had regressed: the
+#: decoder, the gate and the router were untouched by every item in between. What varies is
+#: the *input*, because `speak` rebuilds it every run out of generated room noise and
+#: whatever boundaries a timing-sensitive pump happened to choose.
+#:
+#: So this one submits the cached WAV as one final utterance and the other four keep the
+#: acoustic loop, which is what this harness exists for. Owner-decided: fix, not quarantine.
+#: `scenario_learning` also says "sameer" and is deliberately **not** included — it is a
+#: different check, about a correction said twice becoming a decode bias, and speech
+#: arriving repeatedly is its whole subject.
+_DECODES_DIRECTLY = {"cap"}
+
+
 def scenario_corrections(report) -> None:
     """Each correction shape, spoken, applied to a draft that needs it."""
     cases = [
@@ -192,7 +250,8 @@ def scenario_corrections(report) -> None:
         d = Driver()
         d.session.draft.set(MALFORMED)
         start = d.session.draft.text
-        d.speak(text, f"cmd_{name}")
+        say = d.speak_decoded if name in _DECODES_DIRECTLY else d.speak
+        say(text, f"cmd_{name}")
         after = d.session.draft.text
         report(f"spoken: {text!r}", check(after) and after != start, after)
 

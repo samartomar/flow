@@ -1116,6 +1116,24 @@ level meter is the fourth of that kind and the reason `ui_probe.py` is listed as
 rather than a convenience: every automated layer passed while the bars animated to Flow's
 own voice, because no assertion anywhere read what the pill was actually drawing.
 
+**One of the 64 checks decodes without the gate, and it is the only one.** `capitalize
+sameer` is marginal by design — that is what makes it worth checking — and Rule 2's
+same-check tripwire fired on it twice, 2026-08-01 and 2026-08-02, both after sustained CPU
+load and both green on the rerun. Nothing had regressed; the *input* was never the same
+twice. `Driver.speak` rebuilds it every run: the cached WAV is padded with generated room
+noise, handed to `ScriptedMic`, and `_pump_audio` decides block by block — under whatever
+load the machine is carrying — where the gate opens, what preroll it takes and where the
+utterance ends. For a marginal decode a different slice is a different answer. That one case
+uses `Driver.speak_decoded`, which submits the cached WAV at `worker.submit_final` — the seam
+`Session._finalise` itself uses, so the real decoder, router and apply are all still under
+test and only the room, the gate and the block pump are gone. The other 63 keep the acoustic
+loop, because the loop is what this harness is for. `scenario_learning` says "sameer" too and
+is deliberately not included: a correction said *twice* becoming a decode bias is its whole
+subject, so speech arriving repeatedly is the thing under test. `tests/test_selfdrive.py`
+asserts the routing — which case takes which path — and deliberately never waits for a
+marginal decode to flip, because a check that is red only sometimes is the variance this
+removed, promoted to a gate.
+
 `send_check.py` is the fifth, and the worst of them. Every layer above it was green for the
 entire life of the project while **no prompt had ever reached a window via the Send chip**,
 because the thing that broke it — a click moving the foreground — is precisely the thing a
