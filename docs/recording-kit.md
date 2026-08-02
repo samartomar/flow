@@ -17,6 +17,19 @@ others — which is exactly what your recording tells us.
 anything, and it is deleted whenever you ask. If you would rather not be recorded,
 that is completely fine.
 
+**Where it actually lives, exactly.** The tool's code is public — anyone can read it,
+and this page is part of it. Your recording is not. The audio sits in a private folder
+on one laptop, outside the code entirely. It was briefly kept *inside* the code's
+version history, and that was undone on 2026-08-01: the history was rewritten, so
+nothing anyone can download or browse contains a clip, and the one archive that still
+holds the old version sits in that same private folder and goes when the clips go.
+Publishing the code changed none of this and was never going to — a clip that is not in
+the repository cannot be published with it. What does get published is the scoring: how
+many of the eleven items the tool understood, and, where a miss needs explaining, the
+sheet sentence it misheard. Not your name, not the forty-five seconds in your own words.
+Ask for it to be deleted and it is, along with everything cut from it — no form, no
+notice period, and you never have to say why.
+
 ## How to record
 
 1. Open whatever voice-recorder app your phone already has.
