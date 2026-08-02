@@ -1,8 +1,9 @@
 # Flow
 
-Local English dictation with a talk-to-it refine loop, and a voice conversation with the
+Local English dictation with a talk-to-it refine loop, and a prompt workshop against the
 agent CLI you already have. Speak, watch the text build, correct it by voice — then paste
-it into the window you were working in, or ask it as a question and hear the answer back.
+it into the window you were working in, or work the prompt over with the CLI first and
+paste the version you settled on.
 
 Windows. English only. Three declared dependencies. No API key.
 
@@ -11,7 +12,8 @@ uv sync && uv run flow
 ```
 
 Click the pill to arm it, speak, and the draft floats up above it. Talk to the draft to
-correct it, keep talking to add more, then **Send** (pastes) or **Ask** (converse mode).
+correct it, keep talking to add more, type into it when that is faster, then **Send**
+(pastes) or **Ask** (converse mode).
 
 > Flow is built for developers who speak English as a second language, with a strong
 > accent — Spanish, Indian, Russian and Japanese L1 speakers anchor the design and the
@@ -23,8 +25,9 @@ correct it, keep talking to add more, then **Send** (pastes) or **Ask** (convers
 
 - [What it does](#what-it-does) · [Requirements](#requirements) · [Install](#install)
 - [Running it](#running-it) — [flags](#flags), [hotkeys](#hotkeys), [the pill](#the-pill-and-the-bubble)
-- [Dictate mode](#dictate-mode) · [Talking to the draft](#talking-to-the-draft)
-- [Converse mode](#converse-mode-p9) · [Calibration](#calibration-p8) · [Vocabulary](#vocabulary-p4)
+- [Dictate mode](#dictate-mode) — [saying the send](#sending-it-without-touching-anything) · [Talking to the draft](#talking-to-the-draft)
+- [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [taking the answer](#taking-the-answer)
+- [Calibration](#calibration-p8) · [Vocabulary](#vocabulary-p4)
 - [What Flow stores](#what-flow-stores-on-disk) · [Layout](#layout) · [Development](#development)
 - [Known limitations](#known-limitations) · [Measured](#measured) · [Design notes](#design-notes)
 
@@ -37,11 +40,13 @@ correct it, keep talking to add more, then **Send** (pastes) or **Ask** (convers
 | **Correct it by voice** | "change Tuesday to Wednesday" edits the draft in place |
 | **Keep talking** | Anything that isn't a correction is appended |
 | **Shape it into a prompt** | "make it a proper prompt" restructures dictation via your agent CLI |
-| **Ask instead of type** | Converse mode sends the draft to `codex`/`claude` and reads the reply back |
-| **Remember the thread** | Send doesn't erase — "follow up" and "bring back my last prompt" both work |
+| **Work the prompt over** | Converse mode puts the draft to `codex`/`claude` as a prompt to improve, reads the reply back, and **Use this** makes that reply the draft |
+| **Fix it by hand** | The **Edit** chip turns the draft into a text box; the mic stands down while you type |
+| **Say the send** | "boom" pastes, "enter boom" pastes and presses Enter — whole utterance only |
+| **Remember the thread** | Send doesn't erase — "follow up", "follow and …", and "bring back my last prompt" all work |
 | **Silence stays silent** | Whisper invents words on silence and noise; those are filtered out, and every rejection is shown |
 | **Adapts to you** | One 60-second calibration measures your room and your voice instead of guessing |
-| **Send** | Pastes into the window you were working in, without pressing Enter for you |
+| **Send** | Pastes into the window you were working in, and presses Enter only if you asked for it |
 
 ## Requirements
 
@@ -52,9 +57,17 @@ correct it, keep talking to add more, then **Send** (pastes) or **Ask** (convers
   prompt polish and converse mode. Everything else works without them.
 
 **No API key is read, stored or passed anywhere in this codebase.** Semantic rewrites and
-converse mode shell out to a CLI you have already authenticated. Nothing leaves the
-machine — see [`flow/profile.py`](flow/profile.py), which has no code that could send
-anything anywhere.
+converse mode shell out to a CLI you have already authenticated.
+
+That is a *process* boundary, not a data one, and the difference is worth being exact
+about: `codex` and `claude` are cloud-backed, so starting a local executable is not the
+same as staying local. Audio, the utterance buffers, the lexicon, the profile, every local
+edit and the spoken replies never leave. What does leave is what you hand to the CLI — the
+draft tail on a rewrite; the question, the thread tail and the workshop preamble on an
+Ask. That preamble names your workspace, so **a filesystem path leaves the machine along
+with the words**, and a project path can identify an employer, a client or a codebase. Set
+no workspace and nothing of the kind is sent. Send also puts the draft on the Windows
+clipboard, where any clipboard manager or cloud-clipboard sync you run will see it.
 
 ### When a CLI is slow or stuck
 
@@ -73,6 +86,10 @@ uv run flow --cli claude
 or pick it mid-session from **Agent CLI** in the right-click menu — the current choice is
 marked, and **Automatic** puts the fallback back. A pinned CLI is a decision and is never
 second-guessed, so it does not fall through.
+
+Everything that names a provider reads the pin: the converse marker on the pill, the note
+when you switch modes, and the notes before a rewrite and before a question. What is on
+screen is the CLI that will be called, not the first one on PATH.
 
 `--cli-timeout SEC` raises the 20 s budget. It was chosen when a call measured 5.7–7.3 s;
 `codex` now measures 6.6–8.5 s here for a one-word answer, so a long question can breach
@@ -127,11 +144,14 @@ lines are the first thing to read when something is not working:
 
 ```
 refine CLI: codex
-  (fallbacks: claude)
+  (falls back to claude if it fails)
+CLI timeout: 20s per call
 models: base.en for partials, small.en for finals
 profile: room -96.5 dB, margin 18.0 dB, 2 learned pairs
+trace: C:\Users\you\.flow\diag.jsonl (timings and state only, no words; --no-profile to disable)
 lexicon: none - right-click > Open settings folder, or create C:\Users\you\.flow\lexicon.txt, to add names and corrections
 speech: on, voice Microsoft Susan (9 installed; --voice, or the right-click menu, to change)
+workshop: not set - Ask runs without a project
 mode: DICTATE - Send pastes into the focused window (--converse, or ctrl+alt+M, to ask instead)
 hotkey  toggle   ctrl+alt+space
 hotkey  send     ctrl+alt+enter
@@ -162,6 +182,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--no-auto-ask` | in converse mode, wait for the Ask button instead of a pause |
 | `--cli NAME` | pin the agent CLI (`codex` or `claude`) instead of trying each in turn |
 | `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
+| `--cwd PATH` | the project converse-mode questions are asked from; overrides the stored `workspace` ([P9](#converse-mode-p9)) |
 
 If capture cannot start — no microphone, device held exclusively by another app, a bad
 `--device` index — the pill stays slate and the reason appears in a red bubble. It will
@@ -192,12 +213,13 @@ Right-click the pill for **Send**, **Converse/Dictate mode**, **Mute/Speak repli
 (only when a speech engine was found), **Clear draft** and **Quit**. Drag it anywhere —
 it stays inside the desktop work area.
 
-**Neither window ever takes the focus.** Both carry `WS_EX_NOACTIVATE`, so clicking the
-pill, dragging it, or pressing Send leaves the foreground exactly where it was — in the
-editor or terminal you are dictating into. The one exception is the right-click menu,
-which borrows the foreground for as long as it is open and hands it straight back: a
-Windows popup menu only receives input while its owner is in front, and without that it
-posts and never closes.
+**Neither window takes the focus while you are dictating.** Both carry
+`WS_EX_NOACTIVATE`, so clicking the pill, dragging it, or pressing Send leaves the
+foreground exactly where it was — in the editor or terminal you are dictating into. Two
+things borrow it deliberately and give it back: the right-click menu, because a Windows
+popup menu only receives input while its owner is in front and otherwise posts and never
+closes; and the hand editor, because a text box you cannot type into is not one. Both are
+reached by clicking, which is what lets Windows grant the foreground at all.
 
 The pill's colour is the state:
 
@@ -210,8 +232,13 @@ The pill's colour is the state:
 | violet | agent CLI is answering a question (converse mode) |
 | red | something failed (the draft is never lost) |
 
-In converse mode the pill also carries a small **ASK** badge, because "there was no spoken
-reply" and "I was never in converse mode" otherwise look identical.
+In converse mode the pill also carries a standing **converse marker** under the mic glyph,
+because "there was no spoken reply" and "I was never in converse mode" otherwise look
+identical. The marker reads `codex` or `claude` — the name of the CLI that would answer,
+pin included — and falls back to **ASK** when none is on PATH, since naming a provider
+that is not there is worse than naming the mode. A longer name than those two also falls
+back to **ASK**: the slot sits beside the level bars, and a clipped name reads as a
+different CLI.
 
 The eighteen bars are the answer to "am I being heard". They move with your voice while
 Flow is listening and drop to a **flat line** the moment it stops listening — which
@@ -233,10 +260,13 @@ no knowable length:
 | ⋯ `refining` | the agent CLI is rewriting the draft, about 6 s | yes |
 | ⋯ `asking` | the agent CLI is answering, about 8–10 s | yes |
 | ▬ `speaking - not listening` | the reply is playing | **no** |
+| ▬ `editing - not listening` | the draft is open in the hand editor | **no** |
 
-Only the last one means *stop talking*; the rest mean *wait a moment*. That is why it is
+Only the last two mean *stop talking*; the rest mean *wait a moment*. That is why they are
 drawn as a flat line rather than dots, and why the bars on the pill go flat at the same
-instant — the same fact, in the two places you are already looking. If a wait starts when
+instant — the same fact, in the two places you are already looking. The two deafnesses are
+named apart because only one of them is your own doing: told "not listening" with no
+reason, somebody typing would read it as a fault. If a wait starts when
 there is nothing else on screen, the bubble comes up to carry it and goes away again when
 the wait ends.
 
@@ -247,6 +277,9 @@ The chips:
 | **Refine** | force the next utterance to be an instruction |
 | **Continue** | force the next utterance to be dictation |
 | **Was a command** | re-read the last dictation as an instruction (only shown when there is something to re-read) |
+| **Edit** | open the draft in a text box and type (only shown when there is a draft) |
+| **Done** / **Cancel** | keep what you typed, or throw it away — the only two chips while the editor is open |
+| **Use this** | make the answer on screen the draft (converse mode, once there is a reply) |
 | **Send** / **Ask** | hand the draft off — pasted in dictate mode, put to the CLI in converse mode |
 | **Put it back** | return the words a Send just took (shown on the sent card, for 4 s) |
 
@@ -260,6 +293,30 @@ so a Send that went somewhere unexpected costs one click rather than the whole u
 The words are in the thread either way and *"bring back my last prompt"* still works long
 afterwards; the chip is there because a mis-aimed Send and a good one used to leave
 exactly the same empty screen behind.
+
+### Editing the draft by hand
+
+Some things are faster to type than to say — a URL, a flag, one wrong character in the
+middle of a word. **Edit** turns the draft into a real text box in the bubble, and
+**Done** or **Cancel** closes it. `Esc` cancels and `Ctrl+Enter` keeps; a bare `Enter`
+inserts a newline rather than committing, because the thing being edited is a prompt and
+prompts have paragraphs.
+
+**The microphone stands down for as long as the editor is open**, and says so —
+`editing - not listening` on the bubble, flat bars on the pill, and a note when it starts
+and when it ends. Without that, whatever the room said while you were typing would be
+appended to the very text you were typing. The auto-ask countdown is held for the same
+reason.
+
+This is the one window that deliberately takes the focus, and the guarantees around Send
+survive it: Flow only ever remembers a foreground window that is *not* its own, so a Send
+after an edit still aims at the window you were dictating into, and a paste that would
+land in Flow itself is refused and says so. Windows can decline to hand over the
+foreground; when it does, the editor closes itself and tells you, rather than leaving a
+cursor blinking in a box while the keystrokes go somewhere else.
+
+An edit that lands on top of words dictated while the editor was open says so too, and
+those words are on the undo stack — displaced is not lost.
 
 Partial text is dimmed and italic: partials come from the faster model and can contain
 nonsense at mid-word boundaries, so "not final yet" has to be visible. A converse-mode
@@ -279,10 +336,12 @@ hands that to the paste explicitly. If the paste is somehow still aimed at Flow 
 it refuses and says so rather than pretending — a Ctrl+V into Flow's own canvas does
 nothing at all, and that is a bug to report, not a paste to attempt.
 
-**Flow never presses Enter for you.** The target window is classified before the
-clipboard is touched — by window class *or* process name — and a draft ending in a newline
-has that newline stripped when the target is a terminal. That is the failure worth
-preventing, because a trailing newline in a shell does not paste, it *runs*.
+**Flow never presses Enter unless you asked for it by name.** The target window is
+classified before the clipboard is touched — by window class *or* process name — and a
+draft ending in a newline has that newline stripped when the target is a terminal. That
+is the failure worth preventing, because a trailing newline in a shell does not paste, it
+*runs*. The one Enter Flow will send is the one spoken as `enter boom` below, and it goes
+after the paste, into the window that just accepted the text.
 
 Interior newlines are honestly not a guarantee, and Flow says so instead of pretending: a
 terminal with bracketed paste (Windows Terminal, mintty, Alacritty, WezTerm, kitty, Hyper,
@@ -294,6 +353,32 @@ that does not bracket prints a warning naming the process — in the bubble, on 
 that holds what was just sent, so it is somewhere you are already looking.
 
 The clipboard is restored about 0.6 s after the paste, so Flow does not permanently own it.
+
+### Sending it without touching anything
+
+Two words press Send, so the last step of the loop does not need the mouse:
+
+```
+boom             paste the draft into the window you were working in
+enter boom       paste it and press Enter
+```
+
+**Only as the whole utterance.** "boom goes the dynamite" is dictation; a false fire needs
+you to have said nothing else. Measured against the 580 real accented utterances in the
+EdAcc slice, **none of them fires either trigger**. And the pair degrades the safe way: a
+decode that drops a word from "enter boom" leaves "enter" (nothing happens) or "boom"
+(pastes without submitting), never the other direction.
+
+They press the same button the chip does, refusals included — an empty draft, a rewrite
+still out, a paste that would land in Flow itself all behave exactly as they do for a
+click. In converse mode `boom` asks the question and the `enter` half says it has nothing
+to submit rather than quietly doing nothing.
+
+Both words are stored in `profile.json` as `send_word` and `send_enter_word`, and both
+have shipped defaults that work out of the box. Recorded risk: "boom" is a short plosive
+and may decode as something else in a strong accent — a `wrong -> right` line in your
+lexicon repairs a consistent bend, and if it will not decode at your desk it is a default
+worth changing rather than living with.
 
 ## Talking to the draft
 
@@ -381,9 +466,16 @@ characters, and two spoken verbs reach them — the only commands that mean anyt
 empty draft, which is exactly the state Send leaves behind:
 
 ```
-bring back my last prompt      restore it into the draft
-follow up: and add a rollback  mark the new draft as a continuation
+bring back my last prompt        restore it into the draft
+follow up: and add a rollback    mark the new draft as a continuation
+follow and mention the rollback  the same thing, with the "up" swallowed
 ```
+
+That third line is an elision rather than a new verb. Said quickly, the unstressed "up"
+between two stressed words disappears, and the first live run lost it — so **"follow
+and …"** is read as a follow-up. Bare **"follow"** on its own is still dictation, and so
+is "follow the instructions": the form only counts when "and" comes straight after.
+Priced before it was admitted — across 580 real accented utterances it changes **nothing**.
 
 A CLI rewrite sees the thread tail **only** on a follow-up, labelled as background and
 explicitly excluded from the output, so an ordinary correction never pays for the context.
@@ -391,8 +483,16 @@ explicitly excluded from the output, so an ordinary correction never pays for th
 ## Converse mode (P9)
 
 `ctrl+alt+M`, the right-click menu, or `--converse` at launch. Send becomes **Ask**: the
-draft goes to your agent CLI as a question instead of into the focused window, the answer
-renders in the bubble in its own colour, and it is read aloud.
+draft goes to your agent CLI instead of into the focused window, the answer renders in the
+bubble in its own colour, and it is read aloud.
+
+**It is a prompt workshop, not a general chat.** Every question carries a preamble saying
+so — the CLI is helping you refine the prompt you just dictated, which you are about to
+hand to an agentic coding CLI, and it is asked to discuss what the prompt leaves
+ambiguous, what context it is missing and what it should say instead, rather than to carry
+the task out. That framing is the feature. Without it the CLI answers as a general
+assistant, and a general assistant with no internet access is a worse one than the browser
+you already have open.
 
 Everything before Send is deliberately identical in both modes — the same gate, the same
 decode, the same correction grammar shaping the outgoing words. The thing being corrected
@@ -403,7 +503,11 @@ is a prompt either way.
 - **There is no persistent CLI process.** Continuity is re-sent from the thread, not held
   open, so a crashed or upgraded CLI cannot take the conversation with it.
 - **Answers are asked to be short** — at most three sentences of plain prose — because the
-  reply is read on a floating bubble and spoken aloud, and neither survives an essay.
+  reply is read on a floating bubble and spoken aloud, and neither survives an essay. The
+  exception is asking for a piece of *work*: "give me a prompt for…", a plan, a list. Then
+  the ceiling comes off, because truncating the thing the conversation was for is the one
+  failure worse than a tall bubble. Which brief applies is decided from your request,
+  never from the answer.
 - **A pause sends the question.** Stop talking for 4 seconds and the draft goes on its
   own — see [Asking without pressing anything](#asking-without-pressing-anything).
 - **Flow goes deaf while it talks, and says so.** The microphone is ignored for as long as
@@ -413,6 +517,54 @@ is a prompt either way.
   state that announces itself. See [Interrupting a reply](#interrupting-a-reply).
 - **Failure is non-destructive.** An absent, slow or broken CLI degrades converse mode to
   dictate mode rather than losing what was said.
+
+### Where the question is asked from
+
+Advice about *your* project beats advice about nothing, so converse mode is grounded in a
+working directory:
+
+```bash
+uv run flow --cwd D:\dev\yourproject
+```
+
+The flag wins, then the `workspace` field in `~/.flow/profile.json`, then nothing — the
+same order `--voice` follows. The CLI is run there, and the preamble names the path, so
+the answer can assume the prompt will be run in that project.
+
+The cost is stated rather than hidden: a workspace set today goes stale silently when the
+project moves, and Flow cannot tell. The mitigation is visibility, so it is said out loud
+in two places — at startup, and every time you switch into converse mode:
+
+```
+workshop: D:\dev\yourproject
+workshop: not set - Ask runs without a project
+workshop: D:\dev\oldpath no longer exists - Ask runs without a project
+```
+
+A path that has gone is reported and then ignored. A startup that refused over a stale
+setting would be worse than an ungrounded question — the project moved, and Flow is not
+the thing that should stop working.
+
+### Taking the answer
+
+The loop is: dictate a rough prompt, work it over with the CLI, then send the version you
+settled on to your terminal. That last step used to mean re-typing it — Send hands over
+the *draft*, and the version you wanted was in the *reply*. Two ways across:
+
+| | |
+|---|---|
+| the **Use this** chip | one click, and it cannot be misheard |
+| *"use that answer"* | also "use that reply", "take that answer", "keep that response" — whole utterance only, so "use that answer in the summary" stays dictation |
+
+It **replaces** the draft rather than appending to it: an answer is a whole thing, and
+gluing it onto a half-written question makes a third thing nobody asked for. One undo
+brings your text back, and the note names what was displaced.
+
+Taking an answer **flips back to dictate mode**, and says so, because it changes what the
+button under your cursor does. Staying in converse would make the next Send re-ask Flow's
+own answer back at the CLI, which is the confusion this verb exists to remove.
+
+### Hearing the reply
 
 Spoken replies are **on by default in converse mode** — entering converse mode is the
 opt-in, and a conversation you have to read is not the feature. `--no-speak` refuses the
@@ -575,6 +727,24 @@ correction is *recognised*. If you phrase corrections descriptively rather than 
 commands, nothing is learned either — see the register limitation in
 [Known limitations](#known-limitations).
 
+**And it will offer to write the arrow line for you.** A pair you have corrected twice is
+also a candidate for a `wrong -> right` substitution, but a guess from a word-level diff
+is not consent to rewrite what you said — so Flow asks instead of acting. Right-click and
+up to three of them sit in the menu:
+
+```
+Add correction:  semir → Samir
+Never offer  ▸   semir → Samir
+```
+
+One tap appends the line to `~/.flow/lexicon.txt`, and it applies to the very next
+utterance. **That tap is the only thing that ever writes to your lexicon** — Flow appends
+one line, at the end, and never edits, reorders, removes or reformats one, so everything
+already in the file comes back byte for byte. (The one other write is creating the file
+from a template of comments, if the menu's **Open settings folder** finds it missing.)
+A pair already in the file stops being offered; **Never offer** drops one without
+unlearning the bias, which never needed consent because it rewrites nothing.
+
 Undo-straight-after-append is also recorded, as the signature of a command read as
 dictation. It is **reported**, never applied automatically: changing the alias table
 changes what a word means for every future utterance, and "this was a command twice"
@@ -587,13 +757,15 @@ cannot establish "this is never dictation".
 
 | Path | Written by | Contents |
 |---|---|---|
-| `~/.flow/lexicon.txt` | you, by hand — and once by Flow, if you use the menu's **Open settings folder** while it is missing | terms to bias toward, and `wrong -> right` corrections to apply. The written template is comments only, so the opt-in is typing a line that is not a comment |
-| `~/.flow/profile.json` | `--calibrate`, and Send | measured room/voice/confidence, learned confusion pairs, misroute signatures. Plain JSON, readable and deletable by hand |
+| `~/.flow/lexicon.txt` | you, by hand — and by Flow in exactly two cases: creating it from a template of comments if the menu's **Open settings folder** finds it missing, and appending one `wrong -> right` line when you tap an offered correction | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders, removes or reformats a line — what you wrote comes back byte for byte |
+| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, and the `workspace` a converse question is asked from. Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks |
 | `~/.cache/huggingface/hub/` | first decode | the models. `base.en` 141 MiB, `small.en` 464 MiB |
-| `.bench/` | `scripts/` | benchmark audio, results and manifests. **Tracked**, except the downloadable corpora and the volunteer recordings — a recording is a person, so those live outside the repo and out of its history; `.bench/README.md` says where |
+| `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call and device event, unless `--no-profile` | a content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, error *categories*, and on each route a `confidence` — how well the decoder heard the utterance being routed, or `null` when that is unknown. **No words.** Field names are an allow-list checked against a deny-list at import, so a draft cannot get in by being short. Bounded with one rotation: two files, a known ceiling. Startup names the path out loud |
+| `.bench/` | `scripts/` | benchmark audio, results and manifests. **Tracked**, except the downloadable corpora and the volunteer recordings — a recording is a person, so those live outside the repo and out of its history; `.bench/README.md` says where. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the model revisions that run loaded |
 
-Deleting `~/.flow/profile.json` forgets every inference and nothing else. Nothing here is
-ever uploaded.
+Deleting `~/.flow/profile.json` forgets every inference and nothing else. None of these
+files is ever uploaded — the one value in them that can leave the machine is the
+`workspace` path, which the workshop preamble names when you ask a question.
 
 ### Why `.bench/` is in the repository
 
@@ -638,11 +810,12 @@ flow/
   lexicon.py   the user's own terms and declared corrections, re-read on change
   thread.py    what has already been sent, bounded (P6)
   speak.py     spoken replies through one long-lived System.Speech host (P9)
-  ui.py        the pill and the draft bubble (tkinter), DPI-aware
+  ui.py        the pill, the draft bubble and the hand editor (tkinter), DPI-aware
   inject.py    clipboard + SendInput, and terminal-safe paste (ctypes, P7)
   hotkey.py    RegisterHotKey on its own message-loop thread (ctypes)
+  diag.py      the wordless trace, and the identity block every benchmark records
 scripts/       benchmarks, probes, the soak test and the self-drive harness
-tests/         437 tests: routing, state machine, filters, phonetics, resilience
+tests/         773 tests: routing, state machine, filters, phonetics, resilience
 docs/          what Flow is for, the roadmap, the analysis, the recording kit
 ```
 
@@ -658,7 +831,7 @@ the event stream and the tuning constants with the measurements behind them.
 uv run python -m unittest discover -s tests
 ```
 
-437 tests, ~3 s, no microphone or model required — the fakes are injectable precisely so
+773 tests, ~16 s, no microphone or model required — the fakes are injectable precisely so
 the routing logic, where the subtle bugs live, can be tested without either.
 
 The end-to-end harness is the one that catches what unit tests cannot:
@@ -716,6 +889,12 @@ anywhere, and Send reporting success. After: 18 of 18.
 | `ui_probe.py` | render the pill and bubble against a fake session that walks every state — `--hold STATE` pins one, `--bare` drops the draft, `--sent` presses Send so the card it leaves behind can be looked at |
 | `slim.py` | trim the unreachable dependencies |
 
+Every benchmark writes an `identity` block into its result file — the date, the
+`faster-whisper` and `ctranslate2` versions, and the cache revision of each model tier
+that run loaded. A number is a measurement *of a build*, and comparing an old result to a
+fresh one used to mean hoping nothing underneath had moved. Comparisons that were
+byte-for-byte before still are: they drop `identity` and diff the rest.
+
 Benchmark scripts download additional models (`small`, `medium`, `distil-large-v3`) into
 the HuggingFace cache — several GB. Only `base.en` and `small.en` are needed to run Flow.
 
@@ -769,7 +948,8 @@ started; the wheel is the unit of distribution today.
   an Indian-L1 speaker phrased **every** correction the second way, and **0 of 10** were
   recognised — against 7 of 12 local edits for a speaker who read the prompts as written.
   The cause is register rather than accent, and it is unfixed. Until it is, **Refine**
-  forces the next utterance to be treated as an instruction. See
+  forces the next utterance to be treated as an instruction, and the **Edit** chip lets
+  you type the fix instead of saying it. See
   [docs/roadmap.md](docs/roadmap.md#the-first-anchor-group-recording-and-what-it-found-2026-08-01).
 - **A personal lexicon cuts both ways.** `~/.flow/lexicon.txt` biases decoding toward your
   names and jargon. Measured on EdAcc with `small.en`: it recovers **27-34%** of the rare
@@ -803,8 +983,8 @@ Verified on this machine while writing this document:
 
 | | |
 |---|---|
-| Test suite | **381 tests, 4.2 s**, no mic or model needed |
-| End-to-end | `scripts/selfdrive.py`, **29/29 checks**, live CLI round trip |
+| Test suite | **773 tests, 15.9 s**, no mic or model needed |
+| End-to-end | `scripts/selfdrive.py`, **64/64 checks**, live CLI round trip |
 | Build | `uv build` → wheel + sdist; wheel installs into a clean venv and its `flow` command runs |
 | Dependencies | 3 declared, **28 installed**, 243.9 MB venv |
 | Models on disk | `base.en` 147.8 MB, `small.en` 486.1 MB (141 / 464 MiB) |
