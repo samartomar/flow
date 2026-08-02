@@ -21,11 +21,7 @@ from collections import deque
 from pathlib import Path
 
 from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
-from .help import (
-    open_file as open_help_file,
-    open_guide,
-    write as write_help_sheet,
-)
+from .help import TITLE as HELP_TITLE, open_guide, rows as help_rows
 from .inject import foreground_hwnd, owned_by_flow, take_warnings
 from .lexicon import (
     DEFAULT_PATH as LEXICON_PATH,
@@ -204,6 +200,34 @@ CHIP_H = 26
 #: on Send, so a Send that went nowhere looked exactly like one that worked.
 SENT_LINGER_SEC = 4.0
 
+#: The help window. Wider than the bubble because it has two columns and does not wrap:
+#: a row is one line, so the width is what the widest row costs rather than a taste.
+#: `HELP_RIGHT_X` is the gutter both columns are measured against in `help.MAX_*`.
+HELP_W = 600
+HELP_RIGHT_X = 214
+HELP_LINE_H = 19
+HELP_GAP_H = 9
+#: Extra air above a section heading, so the sections separate without a rule.
+HELP_HEAD_TOP = 7
+HELP_HEAD_H = HELP_LINE_H + HELP_HEAD_TOP
+#: The title band and the chip row, both of which the body scrolls under rather than over.
+HELP_HEAD_BAND = 40
+HELP_FOOT_BAND = PAD + CHIP_H + PAD
+#: Bounded like everything else (invariant 7): the sheet grows with every command added,
+#: and a window that grows with it would eventually be taller than the screen. The work
+#: area bounds it too, and usually first — measured on this machine, `SPI_GETWORKAREA`
+#: reports 1280×672 while the full sheet wants 1025 px, so the fit is decided by the
+#: desktop rather than by this number. Scrolling exists for that case; on a display with
+#: room, the whole sheet is simply on screen and neither the thumb nor the drag hint
+#: appears.
+#: Set just above what the whole sheet measures today (1025 px), so a display with the
+#: room shows all of it and anything added past that scrolls rather than growing the
+#: window off the bottom of the screen.
+HELP_MAX_H = 1040
+#: Air left around the window inside the work area, so it reads as floating rather than
+#: as a panel wedged against the edges.
+HELP_MARGIN = 48
+
 #: How long each dot of the indeterminate-wait animation holds.
 #:
 #: Three dots at this cadence is a 1.2 s cycle — visibly alive without being a strobe,
@@ -259,6 +283,8 @@ class Pill(tk.Tk):
         self.armed = False
         self._flash = 0  # frames remaining of the error flash
         self._clis: list | None = None  # PATH lookup, deferred and then kept (`_resolved`)
+        #: Built on first use, then kept — see `_open_commands`.
+        self._help: HelpWindow | None = None
         self._alive = True
         #: The last window that had the foreground and was not Flow's own — where a
         #: Send is aimed. Seeded before any of Flow's windows can take it.
@@ -678,32 +704,35 @@ class Pill(tk.Tk):
         parent.add_cascade(label="Help", menu=sub)
 
     def _open_commands(self) -> None:
-        """Regenerate the sheet for this machine, then hand it to Explorer.
+        """Regenerate the sheet for this machine, and show it in Flow's own window.
 
-        Written on every open, not cached, and that is the feature: the combos in it are
+        Regenerated on every open, not cached, and that is the feature: the combos are
         the ones `RegisterHotKey` accepted this launch rather than the first alternative
         in the table, and the trigger words are the ones stored rather than the ones
-        shipped. A cached sheet is the stale help file this replaces.
+        shipped. A cached render is the stale help file this replaced, one surface along.
 
         The workshop line is worded by `resolve_workspace`, the same function the startup
         line uses, and it is asked about the path the *session* holds — `--cwd` outranks
         the profile and never reaches it.
+
+        The window is built on first use rather than at launch. Nothing else needs it,
+        and a second `Toplevel` costs a handle and a paint on a path most sessions never
+        take.
         """
-        try:
-            path = write_help_sheet(
-                self.settings_path.parent,
-                hotkeys=self.hotkeys,
-                send_words=self.session.send_words,
-                workspace_note=resolve_workspace(
-                    getattr(self.session, "workspace", None), None
-                )[1],
-            )
-            open_help_file(path)
-        except OSError as exc:
-            # Same treatment as the settings folder: the menu item did nothing visible,
-            # and the bubble is the only place a user would look for the reason.
-            self._flash = 12
-            self.bubble.note(f"could not open the command sheet: {exc}")
+        # `self._help`, never `getattr(self, "_help", None)`. `tk.Misc.__getattr__`
+        # forwards an unknown attribute to `self.tk`, so on an instance whose `__init__`
+        # has not run the "safe" default-getattr looks up `tk`, misses, looks up `tk`
+        # again, and dies of recursion rather than returning the default. `__init__` sets
+        # this; a straight read is both correct and the one that fails legibly.
+        if self._help is None:
+            self._help = HelpWindow(self)
+        self._help.show(help_rows(
+            hotkeys=self.hotkeys,
+            send_words=self.session.send_words,
+            workspace_note=resolve_workspace(
+                getattr(self.session, "workspace", None), None
+            )[1],
+        ))
 
     def _open_guide(self) -> None:
         try:
@@ -945,6 +974,224 @@ class Pill(tk.Tk):
             x = x0 + i * (BAR_W + BAR_GAP)
             shade = accent if lvl > 0.04 else MUTED
             c.create_rectangle(x, mid - h, x + BAR_W, mid + h, fill=shade, outline="")
+
+
+class HelpWindow(tk.Toplevel):
+    """Commands & shortcuts, drawn by Flow instead of handed to Notepad.
+
+    This used to write `~/.flow/commands.txt` and shell out to it. The owner's verdict
+    was three words — "which is not help" — and the three reasons behind it are all
+    structural: Notepad is another application's chrome around Flow's content, opening it
+    takes the foreground that 96 Win32 call sites exist to protect, and it leaves a file
+    in the settings folder that looks editable sitting beside one that is. The generated
+    data did not change and neither did its guarantees; only the surface did.
+
+    **Read-only and mouse-only, and that follows from the window rather than from taste.**
+    It carries `WS_EX_NOACTIVATE` like every other window here, so it can never hold the
+    keyboard — which means it must never be given anything that needs one. A Close chip
+    in the bubble's idiom and a scrolling body are the whole interaction.
+
+    **Two ways to scroll, and the second one is not redundancy.** On Windows
+    `WM_MOUSEWHEEL` is posted to the *focused* window, and this window is never focused;
+    the wheel reaches it only through "Scroll inactive windows when I hover over them",
+    which is a default a user can switch off. That is the same shape as the two defects
+    this file already carries — the `Esc` binding that could not fire once the windows
+    stopped taking focus, and the popup menu that received nothing until it borrowed the
+    foreground — so the body also scrolls by press-and-drag, which is delivered by
+    hit-test and cannot depend on focus. The footer names the drag only when there is
+    something below the fold to reach.
+
+    The body scrolls by whole rows rather than by pixels. Nothing is clipped that way: a
+    row is either drawn or it is not, so scrolled text can never appear under the title
+    or over the chip, and no overpainting is needed to hide it.
+    """
+
+    def __init__(self, pill: Pill) -> None:
+        super().__init__(pill)
+        self.pill = pill
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.0)
+        self.attributes("-transparentcolor", TRANSPARENT)
+        self.attributes("-toolwindow", True)
+        self.configure(bg=TRANSPARENT)
+        self.canvas = tk.Canvas(self, bg=TRANSPARENT, highlightthickness=0)
+        self.canvas.pack()
+        #: Reported rather than assumed, exactly as the pill and bubble do it: a style
+        #: that failed to apply would give this window the focus the moment it opened,
+        #: and take it from whatever the user was typing in.
+        self.no_activate = _no_activate(self)
+        self._rows: list[tuple[str, str, str]] = []
+        self._top = 0  # index of the first row drawn
+        self._drag_y: int | None = None
+        self._drag_px = 0
+        self._h = 200
+        self.canvas.bind("<MouseWheel>", self._wheel)
+        self.canvas.bind("<ButtonPress-1>", self._grab)
+        self.canvas.bind("<B1-Motion>", self._drag)
+        self.withdraw()
+
+    # -- content -----------------------------------------------------------
+
+    def show(self, rows) -> None:
+        """Replace what is shown and bring the window up, back at the top.
+
+        Replaced on every open rather than kept: the combos, the trigger words and the
+        workshop are read at the moment the menu is tapped, and a window that reused the
+        last render would be the stale help file this replaced, one surface along.
+        """
+        self._rows = list(rows)
+        self._top = 0
+        self._render()
+        self.deiconify()
+        self.attributes("-alpha", 0.97)
+
+    def close(self) -> None:
+        self.withdraw()
+
+    @property
+    def showing(self) -> bool:
+        return bool(self.winfo_exists() and self.state() != "withdrawn")
+
+    # -- scrolling ---------------------------------------------------------
+
+    @staticmethod
+    def _row_h(kind: str) -> int:
+        return {"gap": HELP_GAP_H, "head": HELP_HEAD_H}.get(kind, HELP_LINE_H)
+
+    def _view_h(self) -> int:
+        return self._h - HELP_HEAD_BAND - HELP_FOOT_BAND
+
+    def _max_top(self) -> int:
+        """The furthest first-row index that still fills the view.
+
+        Walked from the end so the last row can always be reached and the body never
+        scrolls into empty space below itself.
+        """
+        height = 0
+        for i in range(len(self._rows) - 1, -1, -1):
+            height += self._row_h(self._rows[i][0])
+            if height > self._view_h():
+                return min(i + 1, len(self._rows) - 1)
+        return 0
+
+    def _scroll(self, rows: int) -> None:
+        top = max(0, min(self._top + rows, self._max_top()))
+        if top != self._top:
+            self._top = top
+            self._render()
+
+    def _wheel(self, e) -> None:
+        # Three rows a notch, the Windows default. Delivered only when the OS is
+        # forwarding the wheel to the hovered window; see the class docstring.
+        self._scroll(-3 * (e.delta // 120 or (1 if e.delta > 0 else -1)))
+
+    def _grab(self, e) -> None:
+        self._drag_y, self._drag_px = e.y, 0
+
+    def _drag(self, e) -> None:
+        if self._drag_y is None:
+            return
+        self._drag_px += self._drag_y - e.y
+        self._drag_y = e.y
+        # Content follows the hand: dragging up moves the page up, which is the direction
+        # every touch surface has taught. Whole rows, so the accumulator keeps the
+        # remainder rather than dropping it and making a slow drag do nothing.
+        steps, self._drag_px = divmod(self._drag_px, HELP_LINE_H)
+        if steps:
+            self._scroll(steps)
+
+    # -- painting ----------------------------------------------------------
+
+    def _render(self) -> None:
+        c = self.canvas
+        accent = self.pill.accent
+        content = sum(self._row_h(kind) for kind, _l, _r in self._rows)
+        _l, top, _r, bottom = self.pill.work
+        self._h = min(HELP_HEAD_BAND + content + HELP_FOOT_BAND, HELP_MAX_H,
+                      max(200, bottom - top - HELP_MARGIN))
+        c.configure(width=HELP_W, height=self._h)
+        self._place()
+
+        c.delete("all")
+        _round_rect(c, 1, 1, HELP_W - 1, self._h - 1, 14, fill=SHELL, outline=accent)
+        c.create_text(PAD, PAD + 2, anchor="nw", text=HELP_TITLE, fill=TEXT,
+                      font=("Segoe UI", 11, "bold"))
+
+        y, floor = HELP_HEAD_BAND, self._h - HELP_FOOT_BAND
+        drawn = self._top
+        for kind, left, right in self._rows[self._top:]:
+            h = self._row_h(kind)
+            if y + h > floor:
+                break
+            if kind == "head":
+                c.create_text(PAD, y + HELP_HEAD_TOP, anchor="nw", text=left,
+                              fill=accent, font=("Segoe UI", 10, "bold"))
+                if right:
+                    c.create_text(HELP_RIGHT_X, y + HELP_HEAD_TOP + 2, anchor="nw",
+                                  text=right, fill=MUTED, font=("Segoe UI", 8))
+            elif kind == "pair":
+                c.create_text(PAD, y, anchor="nw", text=left, fill=TEXT,
+                              font=("Segoe UI", 10))
+                if right:
+                    c.create_text(HELP_RIGHT_X, y + 2, anchor="nw", text=right,
+                                  fill=MUTED, font=("Segoe UI", 9))
+            elif kind == "note":
+                c.create_text(PAD, y, anchor="nw", text=left, fill=MUTED,
+                              font=("Segoe UI", 9))
+            y += h
+            drawn += 1
+
+        self._scrollbar(drawn)
+        self._footer(drawn)
+
+    def _place(self) -> None:
+        """Centred in the work area, clamped inside it.
+
+        Not anchored to the pill like the bubble: the pill lives in a corner and this is
+        three times the height, so anchoring would push it off the edge on the one
+        display it has to work on.
+        """
+        left, top, right, bottom = self.pill.work
+        x = left + ((right - left) - HELP_W) // 2
+        y = top + ((bottom - top) - self._h) // 2
+        self.geometry(f"{HELP_W}x{self._h}+{max(left, x)}+{max(top, y)}")
+
+    def _scrollbar(self, drawn: int) -> None:
+        """A thumb, only when there is something off screen to point at."""
+        if self._top == 0 and drawn >= len(self._rows):
+            return
+        c = self.canvas
+        x = HELP_W - 9
+        y1, y2 = HELP_HEAD_BAND, self._h - HELP_FOOT_BAND
+        c.create_rectangle(x, y1, x + 3, y2, fill=CHIP, outline="")
+        span = max(1, len(self._rows))
+        shown = max(1, drawn - self._top)
+        height = max(24, int((y2 - y1) * shown / span))
+        offset = int((y2 - y1 - height) * self._top / max(1, span - shown))
+        c.create_rectangle(x, y1 + offset, x + 3, y1 + offset + height,
+                           fill=MUTED, outline="")
+
+    def _footer(self, drawn: int) -> None:
+        """The Close chip, and the hint that says the drag exists.
+
+        The hint is conditional on purpose. Advice about scrolling on a window with
+        nothing below the fold is noise, and it is the second thing somebody reads.
+        """
+        c = self.canvas
+        label = "Close"
+        w = 20 + 7 * len(label)
+        y2 = self._h - PAD
+        y1 = y2 - CHIP_H
+        tag = chip_tag(label)
+        _round_rect(c, PAD, y1, PAD + w, y2, 13, fill=CHIP, outline="", tags=tag)
+        c.create_text(PAD + w / 2, (y1 + y2) / 2, text=label, fill=TEXT,
+                      font=("Segoe UI", 9, "bold"), tags=tag)
+        c.tag_bind(tag, "<Button-1>", lambda _e: self.close())
+        if self._top or drawn < len(self._rows):
+            c.create_text(PAD + w + 12, (y1 + y2) / 2, anchor="w",
+                          text="scroll, or drag the page, for the rest",
+                          fill=MUTED, font=("Segoe UI", 8))
 
 
 class Bubble(tk.Toplevel):

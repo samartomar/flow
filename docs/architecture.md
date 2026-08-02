@@ -12,14 +12,14 @@ against a run — see [Verification](#verification) at the end.
 
 ## 1. The parts
 
-Seventeen modules in five bands. The bands are drawn by *cost*, not by feature: the top
+Eighteen modules in five bands. The bands are drawn by *cost*, not by feature: the top
 two are pure Python and stdlib, which is why the pill is on screen in 0.40 s and why a
 literal correction is microseconds. The three declared dependencies only matter in one
 box, and only two boxes are another process.
 
 ```mermaid
 flowchart TB
-    surface["<b>Surface</b> — tkinter and ctypes, stdlib only<br/>ui.py · hotkey.py · inject.py"]
+    surface["<b>Surface</b> — tkinter and ctypes, stdlib only<br/>ui.py · hotkey.py · inject.py · help.py"]
     core["<b>Core</b> — pure python, no model, microseconds<br/>session.py · edits.py · phonetic.py · thread.py"]
     speech["<b>Speech in</b> — lazy, and where the memory is<br/>audio.py · asr.py · clean.py"]
     personal["<b>Personal</b> — plain files under ~/.flow, never sent<br/>calibrate.py · profile.py · lexicon.py"]
@@ -601,6 +601,12 @@ silent. Free text was rejected because a word typed into a dialog cannot be meas
 before it is live, and speak-to-set because it writes configuration through the accented
 decoder this product exists to work around.
 
+The list shipped as seven and is six: **"goose" was removed at the owner's review** on
+taste, not on measurement. Its gate numbers stand unchanged in the record and nothing was
+re-run to take it out, which is the distinction anyone adding to the tuple needs — passing
+the gate is what makes a word *admissible*, not what earns it a row in the menu. The
+thirteen words that passed and were never shipped stay swappable on the same basis.
+
 Every word in that list has passed a **four-leg gate**, asserted by the suite over the
 tuple itself so a word added later pays the same price: 0 hits as a whole utterance across
 the 580 real EdAcc references; `command_bench`'s adversarial count unmoved at 5/20; its
@@ -726,7 +732,6 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 |---|---|---|
 | `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. **The one other thing Flow may write is a single appended `wrong -> right` line, and only on an explicit tap in the right-click menu** (see below): it never edits, reorders, removes or reformats a line, so everything already in the file comes back byte for byte. Re-read by mtime on every decode, which is how a pair added from the menu reaches the very next utterance |
 | `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, the two spoken send triggers (`send_word`, `send_enter_word`), and the `workspace` a converse question is asked from. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
-| `~/.flow/commands.txt` | every time **Help ▸ Commands & shortcuts** is used | a generated sheet, rewritten whole on every open and never read back. Generated rather than shipped because every answer on it belongs to one machine: `ctrl+alt+space` is only the *first* alternative in `DEFAULT_BINDINGS` and is already owned by another app here, so this machine arms the mic with `ctrl+shift+space` and a shipped sheet would have named a dead key. It carries the combos `RegisterHotKey` accepted this launch — with any action in `Hotkeys.failed` named as unavailable rather than left out — the trigger words currently configured, one example per command family, the take-reply verbs and the workshop line. The examples are not prose: the suite routes every one of them through `plan()` and asserts the family it is filed under, so the sheet cannot document a command the router does not have. Its first line says it is overwritten, because it sits beside `lexicon.txt`, which is the file that *is* meant to be typed in |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, and — on each route — how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the cache revision of each model tier that run loaded -- a number is a measurement *of a build*, and until 2026-08-01 none of these said which |
@@ -752,10 +757,50 @@ the grounds that the person about to add forty terms is the one who needs that n
 
 **Help ▸** answers the question underneath both of those, and the app had never answered
 it: nothing on screen named a single command, or the key that arms the mic. **Commands &
-shortcuts** regenerates the sheet above and hands it to Explorer — the same
-`os.startfile`, the same three dependencies — and **Open the guide** opens the public
-README. Neither is a settings surface; they are the documentation the product was
-shipping without.
+shortcuts** opens `ui.HelpWindow`, and **Open the guide** opens the public README in the
+browser. Neither is a settings surface; they are the documentation the product was
+shipping without, and neither writes anything.
+
+The sheet is **generated on every open and drawn by Flow** — it is not on the table above
+because it is not written anywhere. Generated rather than shipped because every answer on
+it belongs to one machine: `ctrl+alt+space` is only the *first* alternative in
+`DEFAULT_BINDINGS` and is already owned by another app here, so this machine arms the mic
+with `ctrl+shift+space` and a shipped sheet would have named a dead key. It carries the
+combos `RegisterHotKey` accepted this launch — with any action in `Hotkeys.failed` named
+as unavailable rather than left out — the trigger words currently configured, one example
+per command family, the take-reply verbs and the workshop line. The examples are not
+prose: the suite routes every one of them through `plan()` and asserts the family it is
+filed under, so the sheet cannot document a command the router does not have.
+
+**It stopped being a text file at the owner's review**, whose verdict on opening Notepad
+was "which is not help". Three things were wrong with it structurally: Notepad is another
+application's chrome around Flow's content, opening it takes the foreground that
+`WS_EX_NOACTIVATE` and §7 exist to protect, and it left a generated file in the settings
+folder next to `lexicon.txt`, which is the one that *is* meant to be typed in. So
+`help.rows()` yields `(kind, left, right)` instead of padded lines — a layout aligned with
+spaces is a layout for a monospace editor — and `ui.HelpWindow` draws them in the bubble's
+palette. The route-checked test did not change, which is what made this a move rather than
+a rewrite. The text-file path was removed rather than kept: a second surface is a second
+thing to keep true.
+
+**The window is read-only and mouse-only because of what it is, not to keep it small.**
+It carries `WS_EX_NOACTIVATE` like every other window here, so it can never hold the
+keyboard and must not be given anything that needs one. Measured on this machine when it
+was built: the style applied and read back `True`, the window placed itself at
+`600x624+340+24` inside a `SPI_GETWORKAREA` of 1280×672, and 45 text items were drawn. The
+body scrolls by **whole rows**, so nothing is ever half-clipped and no overpainting is
+needed to keep scrolled text from appearing under the title or over the chip. The height
+is bounded by the work area first and by `HELP_MAX_H` second — on a display with the room,
+the whole sheet is simply on screen and neither the thumb nor the drag hint appears.
+
+**And it scrolls two ways, which is not redundancy.** On Windows `WM_MOUSEWHEEL` is posted
+to the *focused* window; this one is never focused, so the wheel reaches it only through
+"Scroll inactive windows when I hover over them" — a Windows 11 default that a user can
+switch off. That is the same shape as the two defects already recorded here (the `Esc`
+binding that could not fire once the windows stopped taking focus, and the popup menu that
+received nothing until it borrowed the foreground), so the body also scrolls by
+press-and-drag, which is delivered by hit-test and cannot depend on focus. Whether the
+wheel actually arrives is a desk check, not a claim.
 
 The menu is split into those two submenus because a flat list that grows with every
 feature is one nobody scans, and this one is also a modal loop that stalls the UI thread
@@ -876,7 +921,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (869 tests, ~17 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (890 tests, ~16 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

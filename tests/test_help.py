@@ -1,18 +1,23 @@
 """The help sheet has to describe *this* machine, or it is worse than no help sheet.
 
-Two failures are possible and only one of them is obvious. The obvious one is a stale
-file: `ctrl+alt+space` is the first alternative in `DEFAULT_BINDINGS` and was already
+Two failures are possible and only one of them is obvious. The obvious one is stale
+content: `ctrl+alt+space` is the first alternative in `DEFAULT_BINDINGS` and was already
 owned by another app on the development machine, so a shipped sheet would name a combo
 that does nothing here. The quieter one is a sheet that documents a command the router
 does not have - the product telling somebody who went looking for help to say a sentence
 that will be typed into their draft. So every example in the sheet is routed, and the
 family it is filed under is asserted rather than described.
+
+The sheet moved out of a text file and into Flow's own window at the owner's review
+(2026-08-02, "which is not help"). The route check below is the same check it was before
+the move, unchanged and deliberately so: it never looked at the rendering, which is what
+made the move a presentation change rather than a rewrite.
 """
 
 import sys
-import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -32,70 +37,84 @@ REGISTERED = {"toggle": "ctrl+shift+space", "send": "ctrl+alt+enter",
               "mode": "ctrl+alt+M", "quit": "ctrl+alt+Q"}
 
 
+def rendered(**kw) -> str:
+    """Every row flattened, for the assertions that are about content and not layout.
+
+    Kept here rather than in `help.py`: the window draws rows, so a flat rendering in the
+    module would be a second representation with no reader but this file.
+    """
+    return "\n".join(f"{left}  {right}" for _kind, left, right in helpfile.rows(**kw))
+
+
 class TestItNamesWhatRegistered(unittest.TestCase):
     def test_the_combo_that_registered_is_the_one_shown(self):
-        text = helpfile.sheet(hotkeys=FakeHotkeys(REGISTERED))
-        self.assertIn("ctrl+shift+space", text)
+        self.assertIn("ctrl+shift+space", rendered(hotkeys=FakeHotkeys(REGISTERED)))
 
     def test_and_the_default_it_fell_back_from_appears_nowhere(self):
-        # The whole reason this file is generated. ctrl+alt+space is `DEFAULT_BINDINGS`'
+        # The whole reason this is generated. ctrl+alt+space is `DEFAULT_BINDINGS`'
         # first alternative and is taken on this machine; a sheet naming it would send
         # the user to a key that cannot arm the mic.
-        text = helpfile.sheet(hotkeys=FakeHotkeys(REGISTERED))
-        self.assertNotIn("ctrl+alt+space", text)
+        self.assertNotIn("ctrl+alt+space", rendered(hotkeys=FakeHotkeys(REGISTERED)))
 
     def test_an_action_that_could_not_register_is_named_as_unavailable(self):
-        text = helpfile.sheet(hotkeys=FakeHotkeys(REGISTERED, failed=["cancel"]))
-        line = next(ln for ln in text.splitlines() if ln.strip().startswith("cancel"))
-        self.assertIn("NOT AVAILABLE", line)
+        text = rendered(hotkeys=FakeHotkeys(REGISTERED, failed=["cancel"]))
+        line = next(ln for ln in text.splitlines() if "cancel" in ln)
+        self.assertIn("owned by another app", line)
 
     def test_no_hotkeys_at_all_is_a_sentence_rather_than_a_hole(self):
         # `--no-hotkeys` is a supported way to run, and an empty section reads as a bug
         # in the help rather than as a choice the user made at launch.
-        text = helpfile.sheet(hotkeys=None)
-        self.assertIn("--no-hotkeys", text)
+        self.assertIn("--no-hotkeys", rendered(hotkeys=None))
 
     def test_every_action_that_registered_gets_a_line(self):
-        text = helpfile.sheet(hotkeys=FakeHotkeys(REGISTERED))
+        text = rendered(hotkeys=FakeHotkeys(REGISTERED))
         for action, combo in REGISTERED.items():
             with self.subTest(action=action):
                 self.assertIn(combo, text)
 
+    def test_the_combo_is_the_column_somebody_reads_first(self):
+        # The action names are this codebase's words for its own bindings; the combo is
+        # the thing a user presses. So the combo is the left column and the sentence is
+        # the right one, rather than the other way round.
+        rows = helpfile.rows(hotkeys=FakeHotkeys(REGISTERED))
+        self.assertIn(("pair", "ctrl+shift+space", "start and stop listening"), rows)
+
 
 class TestItNamesTheWordsCurrentlyConfigured(unittest.TestCase):
     def test_a_stored_trigger_is_what_the_sheet_shows(self):
-        text = helpfile.sheet(send_words=("goose", "enter goose"))
+        text = rendered(send_words=("goose", "enter goose"))
         self.assertIn("goose", text)
         self.assertIn("enter goose", text)
 
     def test_and_the_shipped_default_is_not_still_advertised(self):
         # Said as its own check because the failure is silent: the user renamed the
         # trigger, the sheet kept naming the old word, and the old word no longer works.
-        text = helpfile.sheet(send_words=("goose", "enter goose"))
-        shown = [ln for ln in text.splitlines() if ln.startswith("  goose")
-                 or ln.startswith("  enter goose")]
-        self.assertEqual(len(shown), 2, text)
-        # Nowhere at all, not merely absent from the two lines that list it. The prose
+        # Nowhere at all, not merely absent from the two rows that list it - the prose
         # around them used to illustrate whole-utterance matching with "boom goes the
         # dynamite", which is exactly the kind of sentence that survives a rename and
-        # then teaches somebody a word that no longer works.
+        # then teaches somebody a word that has stopped working.
+        text = rendered(send_words=("goose", "enter goose"))
         self.assertNotIn(SEND_WORD, text)
 
     def test_with_nothing_passed_it_shows_the_shipped_pair(self):
-        text = helpfile.sheet()
+        text = rendered()
         self.assertIn(SEND_WORD, text)
         self.assertIn(SEND_ENTER_WORD, text)
 
     def test_the_workshop_line_is_the_one_the_session_resolved(self):
-        text = helpfile.sheet(workspace_note=r"workshop: D:\dev\products\widget")
-        self.assertIn(r"workshop: D:\dev\products\widget", text)
+        self.assertIn(r"workshop: D:\dev\products\widget",
+                      rendered(workspace_note=r"workshop: D:\dev\products\widget"))
 
     def test_an_unset_workshop_still_says_something_true(self):
-        self.assertIn("workshop: not set", helpfile.sheet())
+        self.assertIn("workshop: not set", rendered())
 
 
 class TestEveryExampleIsRealSpeech(unittest.TestCase):
-    """The check that stops the sheet from documenting a command nobody has."""
+    """The check that stops the sheet from documenting a command nobody has.
+
+    Unchanged across the move into a window, which is the point: it reads `COMMANDS` and
+    `plan()`, and neither of those is a rendering.
+    """
 
     def routed(self, utterance: str, triggers=(SEND_WORD, SEND_ENTER_WORD)) -> str:
         p = plan(utterance, helpfile.EXAMPLE_DRAFT, triggers)
@@ -107,14 +126,14 @@ class TestEveryExampleIsRealSpeech(unittest.TestCase):
                 self.assertEqual(self.routed(say), route)
 
     def test_every_example_appears_in_the_rendered_sheet(self):
-        text = helpfile.sheet()
+        text = rendered()
         for say, does, _route in helpfile.COMMANDS:
             with self.subTest(say=say):
                 self.assertIn(say, text)
                 self.assertIn(does, text)
 
     def test_the_take_verbs_come_from_the_grammar_and_all_of_them_work(self):
-        text = helpfile.sheet()
+        text = rendered()
         for verb in TAKE_VERBS:
             with self.subTest(verb=verb):
                 self.assertEqual(self.routed(f"{verb} that answer"), "take/")
@@ -136,37 +155,232 @@ class TestEveryExampleIsRealSpeech(unittest.TestCase):
                 self.assertIn(target, helpfile.EXAMPLE_DRAFT)
 
 
-class TestTheFileOnDisk(unittest.TestCase):
-    def setUp(self) -> None:
-        self.folder = Path(tempfile.mkdtemp())
+class TestNothingRunsOffTheEdge(unittest.TestCase):
+    """The window draws one line per row and does not wrap, so the budget is a rule.
 
-    def test_it_lands_in_the_settings_folder_under_a_name_that_says_what_it_is(self):
-        path = helpfile.write(self.folder)
-        self.assertEqual(path, self.folder / "commands.txt")
-        self.assertTrue(path.exists())
+    Enforced here rather than discovered on screen: a wrapped row would need a height
+    that depends on its content, and the scroll offset is counted in whole rows.
+    """
 
-    def test_a_second_open_replaces_it_rather_than_growing_it(self):
-        # Regenerated, not appended: a sheet that says two things about one hotkey is
-        # the stale-file failure with extra steps.
-        helpfile.write(self.folder, hotkeys=FakeHotkeys(REGISTERED))
-        first = (self.folder / "commands.txt").read_text(encoding="utf-8")
-        path = helpfile.write(self.folder, hotkeys=FakeHotkeys(REGISTERED))
-        self.assertEqual(path.read_text(encoding="utf-8"), first)
+    def test_no_row_of_the_shipped_content_is_truncated(self):
+        # The truncation mark is the signal. Anything this file writes itself should fit;
+        # a mark appearing here means a string grew past the column it is drawn in.
+        for kind, left, right in helpfile.rows(hotkeys=FakeHotkeys(REGISTERED)):
+            with self.subTest(row=(kind, left)):
+                self.assertNotIn("…", left)
+                self.assertNotIn("…", right)
 
-    def test_it_overwrites_whatever_somebody_typed_into_it_and_says_so_first(self):
-        path = helpfile.write(self.folder)
-        path.write_text("my notes", encoding="utf-8")
-        again = helpfile.write(self.folder)
-        self.assertNotIn("my notes", again.read_text(encoding="utf-8"))
-        self.assertIn("overwritten", again.read_text(encoding="utf-8").splitlines()[3])
+    def test_a_heading_that_carries_a_second_column_clears_the_gutter(self):
+        for kind, left, right in helpfile.rows(hotkeys=FakeHotkeys(REGISTERED)):
+            if kind == "head" and right:
+                with self.subTest(head=left):
+                    self.assertLessEqual(len(left), helpfile.MAX_HEAD)
 
-    def test_a_folder_that_does_not_exist_yet_is_created(self):
-        # First run, never calibrated: there is no ~/.flow/ until something writes one.
-        path = helpfile.write(self.folder / "flow")
-        self.assertTrue(path.exists())
+    def test_the_one_row_carrying_a_users_own_text_is_cut_to_fit(self):
+        # The workshop path is the only string here that nobody in this repo wrote, and
+        # a deep project path is longer than the window. Cut and marked, the way
+        # `edits.removed_text` cuts, rather than allowed to run off the edge.
+        note = "workshop: " + "D:\\dev\\" + "verylongsegment\\" * 8
+        rows = helpfile.rows(workspace_note=note)
+        shown = next(left for kind, left, _r in rows if left.startswith("workshop:"))
+        self.assertLessEqual(len(shown), helpfile.MAX_NOTE)
+        self.assertTrue(shown.endswith("…"))
 
-    def test_the_sheet_is_ascii_so_any_console_code_page_can_open_it(self):
-        helpfile.sheet(hotkeys=FakeHotkeys(REGISTERED)).encode("ascii")
+    def test_a_gap_row_stays_empty_rather_than_becoming_an_ellipsis(self):
+        # `_fit` cuts to a limit and the gap's limit is zero, which is exactly the shape
+        # that turns "" into "…" if the empty case is not handled first.
+        for kind, left, right in helpfile.rows():
+            if kind == "gap":
+                self.assertEqual((left, right), ("", ""))
+
+
+class RecordingCanvas:
+    """Enough of a Tk canvas to see what the help window draws, without a desktop.
+
+    Same fixture idea as `test_indicator.py`'s: a real window would need a display, and
+    the questions here - what text was drawn, and what a click on the chip does - are
+    answerable from the calls.
+    """
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+        self.bindings: dict = {}
+
+    def configure(self, **kw) -> None: ...
+
+    def delete(self, *a) -> None:
+        self.texts.clear()
+
+    def create_polygon(self, *a, **kw) -> None: ...
+
+    def create_rectangle(self, *a, **kw) -> None: ...
+
+    def create_text(self, x, y, text="", **kw) -> None:
+        self.texts.append(text)
+
+    def tag_bind(self, tag, sequence, func) -> None:
+        self.bindings[(tag, sequence)] = func
+
+    def bind(self, sequence, func) -> None:
+        self.bindings[sequence] = func
+
+    def pack(self, **kw) -> None: ...
+
+
+class FakeWindow:
+    """A `HelpWindow` with the Toplevel taken out from under it.
+
+    Every method under test is about rows, scrolling and drawing; none of them needs a
+    window handle. Building it this way keeps the check in the unit suite, where
+    `test_resilience.py` already pays for the one case that genuinely needs a desktop.
+    """
+
+    #: The work area this machine actually reports (`SPI_GETWORKAREA`, measured), which
+    #: is the case the scrolling exists for. A test on an imagined 1080p desktop would be
+    #: testing a window that never has to scroll.
+    WORK = (0, 0, 1280, 672)
+
+    def __init__(self, rows, work=WORK, accent="#f59e0b") -> None:
+        import flow.ui as ui
+
+        self.win = ui.HelpWindow.__new__(ui.HelpWindow)
+        self.win.pill = mock.Mock(work=work, accent=accent)
+        self.win.canvas = RecordingCanvas()
+        self.win._rows = list(rows)
+        self.win._top = 0
+        self.win._drag_y = None
+        self.win._drag_px = 0
+        self.win._h = 200
+        self.geometry: list[str] = []
+        self.win.geometry = self.geometry.append
+        self.win._render()
+
+    @property
+    def drawn(self) -> str:
+        return "\n".join(self.win.canvas.texts)
+
+
+class TestTheWindowShowsTheGeneratedContent(unittest.TestCase):
+    def rows(self, **kw):
+        return helpfile.rows(hotkeys=FakeHotkeys(REGISTERED), **kw)
+
+    def test_the_title_is_drawn(self):
+        self.assertIn(helpfile.TITLE, FakeWindow(self.rows()).drawn)
+
+    def test_a_hotkey_line_carries_the_combo_that_actually_registered(self):
+        drawn = FakeWindow(self.rows()).drawn
+        self.assertIn("ctrl+shift+space", drawn)
+        self.assertNotIn("ctrl+alt+space", drawn)
+
+    def test_a_renamed_trigger_word_reaches_the_window(self):
+        drawn = FakeWindow(self.rows(send_words=("goose", "enter goose"))).drawn
+        self.assertIn("goose", drawn)
+        self.assertIn("enter goose", drawn)
+        self.assertNotIn(SEND_WORD, drawn)
+
+    def test_the_commands_are_drawn_with_what_they_do_beside_them(self):
+        drawn = FakeWindow(self.rows()).drawn
+        for say, does, _route in helpfile.COMMANDS[:4]:
+            with self.subTest(say=say):
+                self.assertIn(say, drawn)
+                self.assertIn(does, drawn)
+
+    def test_the_close_chip_is_bound_and_closes_it(self):
+        import flow.ui as ui
+
+        w = FakeWindow(self.rows())
+        closed: list[bool] = []
+        w.win.withdraw = lambda: closed.append(True)
+        w.win.canvas.bindings[(ui.chip_tag("Close"), "<Button-1>")](None)
+        self.assertEqual(closed, [True])
+
+    def test_it_is_bounded_rather_than_growing_with_the_content(self):
+        import flow.ui as ui
+
+        w = FakeWindow(self.rows() * 4, work=(0, 0, 3840, 4000))
+        self.assertLessEqual(w.win._h, ui.HELP_MAX_H)
+
+    def test_and_the_work_area_bounds_it_before_that_number_usually_does(self):
+        import flow.ui as ui
+
+        small = FakeWindow(self.rows(), work=(0, 0, 1280, 672))
+        self.assertLessEqual(small.win._h, 672 - ui.HELP_MARGIN)
+
+    def test_a_display_with_room_shows_more_of_it_without_being_asked(self):
+        # The best outcome is a sheet nobody has to scroll. The window takes the room it
+        # is given rather than sitting at a fixed height and hiding the rest.
+        small = FakeWindow(self.rows(), work=(0, 0, 1280, 672))
+        big = FakeWindow(self.rows(), work=(0, 0, 1920, 1200))
+        self.assertGreater(big.win._h, small.win._h)
+        self.assertEqual(big.win._max_top(), 0, "it still scrolls with room to spare")
+
+    def test_the_window_is_placed_inside_the_work_area(self):
+        w = FakeWindow(self.rows(), work=(0, 0, 1280, 800))
+        self.assertTrue(w.geometry, "the window was never positioned")
+        size, _, offset = w.geometry[-1].partition("+")
+        x, _, y = offset.partition("+")
+        self.assertGreaterEqual(int(x), 0)
+        self.assertGreaterEqual(int(y), 0)
+
+
+class TestScrollingWithoutAKeyboard(unittest.TestCase):
+    """It never holds the focus, so everything here has to work without one."""
+
+    def window(self, work=FakeWindow.WORK) -> FakeWindow:
+        # The measured work area, where 22 rows are below the fold. On a taller desktop
+        # only one row is, which would make every assertion here a coin toss.
+        return FakeWindow(helpfile.rows(hotkeys=FakeHotkeys(REGISTERED)), work=work)
+
+    def test_the_content_is_taller_than_the_window_so_there_is_something_to_scroll(self):
+        w = self.window()
+        self.assertGreater(w.win._max_top(), 0, "nothing is off screen to reach")
+
+    def test_the_wheel_moves_the_page_and_stops_at_the_top(self):
+        w = self.window()
+        w.win._wheel(mock.Mock(delta=-120))
+        self.assertEqual(w.win._top, 3)
+        w.win._wheel(mock.Mock(delta=120))
+        self.assertEqual(w.win._top, 0)
+        w.win._wheel(mock.Mock(delta=120))
+        self.assertEqual(w.win._top, 0, "scrolled above the first row")
+
+    def test_it_stops_at_the_bottom_rather_than_running_into_empty_space(self):
+        w = self.window()
+        for _ in range(40):
+            w.win._wheel(mock.Mock(delta=-120))
+        self.assertEqual(w.win._top, w.win._max_top())
+
+    def test_dragging_scrolls_too_because_the_wheel_may_never_arrive(self):
+        # WM_MOUSEWHEEL goes to the focused window, and this one is never focused. The
+        # drag is delivered by hit-test, so it works whatever the OS setting says.
+        import flow.ui as ui
+
+        w = self.window()
+        w.win._grab(mock.Mock(y=200))
+        w.win._drag(mock.Mock(y=200 - 3 * ui.HELP_LINE_H))
+        self.assertEqual(w.win._top, 3)
+
+    def test_a_slow_drag_keeps_its_remainder_instead_of_losing_it(self):
+        # Sub-row movements accumulate. Dropping them would make a careful drag do
+        # nothing at all, which reads as the window being stuck.
+        import flow.ui as ui
+
+        w = self.window()
+        w.win._grab(mock.Mock(y=300))
+        step = ui.HELP_LINE_H // 3 + 1
+        for i in range(1, 4):
+            w.win._drag(mock.Mock(y=300 - i * step))
+        self.assertGreaterEqual(w.win._top, 1)
+
+    def test_the_footer_names_the_drag_only_when_there_is_more_to_see(self):
+        self.assertIn("drag", self.window().drawn)
+        short = FakeWindow([("note", "one line", "")])
+        self.assertNotIn("drag", short.drawn)
+
+    def test_a_short_sheet_scrolls_nowhere(self):
+        short = FakeWindow([("note", "one line", "")])
+        short.win._wheel(mock.Mock(delta=-120))
+        self.assertEqual(short.win._top, 0)
 
 
 class FakeMenu:
@@ -193,16 +407,22 @@ class FakeMenu:
 
 
 class TestTheMenuReachesIt(unittest.TestCase):
-    """The two entries exist, and the tap does the two things it promises."""
+    """The two entries, and the inversion.
+
+    Before this item, both entries shelled out: the sheet to `~/.flow/commands.txt` and
+    the guide to a URL. That was pinned green first - `os.startfile` called with a path
+    ending `commands.txt`, and the file left behind. Now only one of them shells out, and
+    both halves of that are asserted, because removing one path must not quietly remove
+    the other.
+    """
 
     def setUp(self) -> None:
-        self.folder = Path(tempfile.mkdtemp())
-        self.opened: list = []
+        self.started: list[str] = []
+        self.shown: list[list] = []
         self.notes: list[str] = []
 
-    def _help_menu(self, hotkeys=None) -> FakeMenu:
+    def _help_menu(self, hotkeys=None, folder=None) -> FakeMenu:
         import tkinter as tk
-        from unittest import mock
 
         import flow.ui as ui
 
@@ -212,15 +432,20 @@ class TestTheMenuReachesIt(unittest.TestCase):
             built.append(FakeMenu())
             return built[-1]
 
-        pill = ui.Pill.__new__(ui.Pill)
+        self.pill = pill = ui.Pill.__new__(ui.Pill)
         pill.session = mock.Mock(mode=ui.DICTATE, speaker=None, profile=None,
                                  send_words=("goose", "enter goose"), workspace=None)
-        pill.settings_path = self.folder / "lexicon.txt"
+        pill.settings_path = (folder or Path.cwd()) / "lexicon.txt"
         pill.hotkeys = hotkeys
         pill.bubble = mock.Mock()
         pill.bubble.note = self.notes.append
         pill._clis = []
         pill._flash = 0
+        # None rather than a stand-in, so the lazy construction in `_open_commands` is
+        # the path under test — the window is built on first use and kept.
+        pill._help = None
+        self.window = mock.Mock()
+        self.window.show = self.shown.append
         with mock.patch.object(tk, "Menu", make), \
                 mock.patch.object(tk, "StringVar", mock.Mock()), \
                 mock.patch.object(ui, "available", return_value=[]), \
@@ -230,54 +455,93 @@ class TestTheMenuReachesIt(unittest.TestCase):
             pill._menu(mock.Mock(x_root=0, y_root=0))
         return built[0].cascades["Help"]
 
-    def _tap(self, label: str, hotkeys=None) -> None:
-        from unittest import mock
-
+    def _tap(self, label: str, hotkeys=None, folder=None) -> None:
         import flow.ui as ui
 
-        command = self._help_menu(hotkeys or FakeHotkeys(REGISTERED)).commands[label]
-        with mock.patch.object(ui, "open_help_file", self.opened.append), \
-                mock.patch.object(ui, "open_guide",
-                                  lambda: self.opened.append(helpfile.GUIDE_URL)):
+        command = self._help_menu(hotkeys or FakeHotkeys(REGISTERED),
+                                  folder=folder).commands[label]
+        # Both patched over the tap, not over the build: the window is constructed and
+        # the shell is called when the entry is chosen, which is after `_menu` returned.
+        with mock.patch.object(ui, "HelpWindow", return_value=self.window), \
+                mock.patch.object(helpfile.os, "startfile", self.started.append):
             command()
 
     def test_help_is_a_submenu_with_both_entries(self):
         self.assertEqual(sorted(self._help_menu().commands),
                          ["Commands & shortcuts", "Open the guide"])
 
-    def test_the_tap_writes_the_sheet_and_opens_what_it_wrote(self):
+    def test_the_sheet_no_longer_shells_out_to_anything(self):
+        # The inversion. This assertion was true the other way round before the item,
+        # and pinned green against the old tree before it was changed.
         self._tap("Commands & shortcuts")
-        written = self.folder / "commands.txt"
-        self.assertEqual(self.opened, [written])
-        text = written.read_text(encoding="utf-8")
-        self.assertIn("ctrl+shift+space", text)
-        self.assertIn("enter goose", text)
+        self.assertEqual(self.started, [])
 
-    def test_the_guide_entry_opens_the_public_readme(self):
-        self._tap("Open the guide")
-        self.assertEqual(self.opened, [helpfile.GUIDE_URL])
+    def test_and_writes_no_file_into_the_settings_folder(self):
+        import tempfile
 
-    def test_it_is_rewritten_on_the_second_tap_rather_than_read_back(self):
-        # The one behaviour that makes this file worth generating: a hotkey that
-        # registered differently on the next launch has to show up on the next open.
+        folder = Path(tempfile.mkdtemp())
+        self._tap("Commands & shortcuts", folder=folder)
+        self.assertEqual(list(folder.iterdir()), [])
+
+    def test_it_hands_the_window_the_freshly_generated_rows(self):
         self._tap("Commands & shortcuts")
-        (self.folder / "commands.txt").write_text("stale", encoding="utf-8")
+        self.assertEqual(len(self.shown), 1)
+        flat = " ".join(f"{left} {right}" for _k, left, right in self.shown[0])
+        self.assertIn("ctrl+shift+space", flat)
+        self.assertIn("enter goose", flat)
+
+    def test_a_second_open_regenerates_rather_than_reusing(self):
+        # The property the whole file exists for, kept across the move: a hotkey that
+        # registered differently, or a trigger word changed since, has to show up.
         self._tap("Commands & shortcuts")
-        self.assertIn("ctrl+shift+space",
-                      (self.folder / "commands.txt").read_text(encoding="utf-8"))
+        self._tap("Commands & shortcuts", hotkeys=FakeHotkeys({"toggle": "ctrl+alt+\\"}))
+        self.assertIn("ctrl+alt+\\",
+                      " ".join(left for _k, left, _r in self.shown[-1]))
 
-    def test_a_folder_that_cannot_be_written_says_so_instead_of_raising(self):
-        # The menu is how somebody reaches Quit. An exception out of a menu command
-        # takes the whole thing down, which is the one failure worse than no help.
-        from unittest import mock
-
+    def test_the_window_is_built_once_and_then_kept(self):
+        # Lazy, because most sessions never open Help and a second Toplevel is a handle
+        # and a paint. Kept, because building a new one per open would drop the scroll
+        # position and blink.
         import flow.ui as ui
 
-        command = self._help_menu(FakeHotkeys(REGISTERED)).commands["Commands & shortcuts"]
-        with mock.patch.object(ui, "write_help_sheet",
-                               side_effect=OSError("access is denied")):
+        self._help_menu(FakeHotkeys(REGISTERED))
+        built = mock.Mock(return_value=self.window)
+        with mock.patch.object(ui, "HelpWindow", built):
+            self.pill._open_commands()
+            self.pill._open_commands()
+        self.assertEqual(built.call_count, 1)
+        self.assertEqual(len(self.shown), 2, "the second open showed nothing")
+
+    def test_the_guide_still_shells_out_to_the_readme(self):
+        # Deliberately not moved. A long-form guide belongs where links work, and a
+        # browser is the right application for a browser's content - which is the same
+        # argument that took the command sheet out of Notepad.
+        self._tap("Open the guide")
+        self.assertEqual(self.started, [helpfile.GUIDE_URL])
+
+    def test_a_shell_that_refuses_the_guide_says_so_instead_of_raising(self):
+        # The menu is how somebody reaches Quit. An exception out of a menu command takes
+        # the whole thing down, which is the one failure worse than no help.
+        command = self._help_menu(FakeHotkeys(REGISTERED)).commands["Open the guide"]
+        with mock.patch.object(helpfile.os, "startfile",
+                               side_effect=OSError("no handler")):
             command()
-        self.assertIn("access is denied", " | ".join(self.notes))
+        self.assertIn("no handler", " | ".join(self.notes))
+
+
+class TestTheTextFilePathIsGone(unittest.TestCase):
+    """Removed, not kept as a second surface: two surfaces is two things to keep true."""
+
+    def test_the_module_no_longer_writes_or_opens_a_file(self):
+        for gone in ("write", "open_file", "sheet", "FILENAME"):
+            with self.subTest(gone=gone):
+                self.assertFalse(hasattr(helpfile, gone))
+
+    def test_and_nothing_in_the_ui_imports_one(self):
+        import flow.ui as ui
+
+        self.assertFalse(hasattr(ui, "write_help_sheet"))
+        self.assertFalse(hasattr(ui, "open_help_file"))
 
 
 if __name__ == "__main__":

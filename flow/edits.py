@@ -182,8 +182,13 @@ SEND_ENTER_WORD = "enter boom"
 #: shapes are chosen with that in mind: two open syllables and no consonant clusters
 #: wherever possible, which is why "thunder" and "otter" are not here despite passing.
 #: `profile.json` remains the path for a word that is nobody's business but the speaker's.
+#:
+#: "goose" was here and was removed at the owner's review (2026-08-02) on taste rather
+#: than measurement — it passed the gate exactly as these did, and its numbers stand in
+#: the record. Recorded because the distinction matters for anyone adding to this tuple:
+#: passing the gate is what makes a word *admissible*, not what puts it in the menu.
 SEND_WORD_PRESETS: tuple[str, ...] = (
-    "boom", "goose", "tango", "mango", "falcon", "rocket", "banana",
+    "boom", "tango", "mango", "falcon", "rocket", "banana",
 )
 
 
@@ -191,7 +196,7 @@ def enter_word(word: str) -> str:
     """The Send-then-Enter variant of a trigger word, in the order that degrades safely.
 
     Derived rather than asked for, and always in this order: a decode that loses a word
-    from "enter goose" yields "enter" (no trigger at all) or "goose" (paste without
+    from "enter tango" yields "enter" (no trigger at all) or "tango" (paste without
     submit). Reversing it would make a lost word *upgrade* a paste into a submit, which
     is the one direction a spoken execute trigger may not fail in.
     """

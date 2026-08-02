@@ -255,10 +255,12 @@ not show a green pill that is quietly recording nothing.
 Combos already owned by another app fall back automatically, in that order. The startup
 log prints which one actually registered, so a dead shortcut is never a silent mystery;
 if every alternative for an action is taken, that is printed too. **Right-click ▸ Help ▸
-Commands & shortcuts** answers the same question after the log has scrolled away: it
-writes a text file listing the combos that registered on your machine this launch — not
-the primaries in the table above — along with your trigger words and one example of every
-command, and opens it.
+Commands & shortcuts** answers the same question after the log has scrolled away: a
+read-only window listing the combos that registered on your machine this launch — not the
+primaries in the table above — along with your trigger words and one example of every
+command. It is regenerated every time you open it, so it is never describing a machine you
+are not sitting at. Scroll it with the wheel or by dragging the page; the Close chip shuts
+it. It never takes the focus from whatever you were typing in.
 
 Quit used to be `Esc`, and `Esc` was a Tk key binding on the pill. The pill does not take
 keyboard focus any more — that is what makes Send land in the window you were working in
@@ -442,7 +444,7 @@ lexicon repairs a consistent bend, and if it will not decode at your desk it is 
 worth changing rather than living with.
 
 **Changing it is a tap: right-click ▸ Settings ▸ Trigger word.** The list is short and
-closed on purpose — `boom`, `goose`, `tango`, `mango`, `falcon`, `rocket`, `banana` — and
+closed on purpose — `boom`, `tango`, `mango`, `falcon`, `rocket`, `banana` — and
 every word on it has been through the same measurement `boom` passed: zero hits as a whole
 utterance across those 580 real utterances, no movement in the command benchmark's
 adversarial or recall numbers, and no meaning of its own in the grammar. That last one is

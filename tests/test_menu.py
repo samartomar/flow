@@ -230,8 +230,8 @@ class TestTheTapStoresBothWords(Menu):
 
     def test_it_writes_the_word_and_the_derived_enter_variant(self):
         p = self.profile()
-        self.tap(p, "goose")
-        self.assertEqual((p.send_word, p.send_enter_word), ("goose", "enter goose"))
+        self.tap(p, "rocket")
+        self.assertEqual((p.send_word, p.send_enter_word), ("rocket", "enter rocket"))
 
     def test_and_it_survives_a_reload_because_it_was_saved_on_the_tap(self):
         # Saved now rather than at the next Send: a choice made just before closing the
@@ -252,10 +252,10 @@ class TestTheTapStoresBothWords(Menu):
         # One rule with no special case, including for the word already current: the
         # note is what makes the overwrite visible rather than silent.
         p = self.profile()
-        p.send_word, p.send_enter_word = "goose", "submit goose"
-        self.tap(p, "goose")
-        self.assertEqual(p.send_enter_word, enter_word("goose"))
-        self.assertIn("enter goose", " | ".join(self.notes))
+        p.send_word, p.send_enter_word = "mango", "submit mango"
+        self.tap(p, "mango")
+        self.assertEqual(p.send_enter_word, enter_word("mango"))
+        self.assertIn("enter mango", " | ".join(self.notes))
 
     def test_the_stored_word_is_what_the_router_then_uses(self):
         # The point of the setting, checked end to end rather than at the file: the

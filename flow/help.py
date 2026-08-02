@@ -13,24 +13,29 @@ The examples are checked rather than asserted in prose: the suite feeds every li
 `COMMANDS` through `edits.plan()` and requires it to come back as the family it is filed
 under, so this file cannot document a command the router does not have.
 
-`os.startfile` opens it. Explorer is the viewer the same way it is the settings editor,
-and R16 keeps its three dependencies.
+**Rows, not lines.** This used to render a block of text, write it to
+`~/.flow/commands.txt` and hand it to Explorer, and the owner's verdict on that was
+"which is not help": Notepad is another application's chrome over Flow's content, it
+takes the foreground the app spends 96 call sites avoiding, and it leaves a file beside
+`lexicon.txt` that looks editable and is not. So the content comes out structured — a
+kind, a left column and a right one — and `ui.HelpWindow` draws it in the app's own
+idiom. A layout aligned with spaces is a layout for a monospace editor; this one is
+drawn, and the columns are positions rather than padding.
 """
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from .edits import SEND_ENTER_WORD, SEND_WORD, TAKE_VERBS
 
-#: The public README, which is the one page that outlives any one machine.
+#: The public README, which is the one page that outlives any one machine. Still opened
+#: with the shell: a long-form guide belongs where links work, and a browser is the right
+#: application for a browser's content — which is the same argument that took the command
+#: sheet out of Notepad.
 GUIDE_URL = "https://github.com/samartomar/flow#readme"
 
-#: Written beside `lexicon.txt`, in the folder the menu already opens. One settings
-#: folder rather than two places to look, at the cost of a generated file sitting next
-#: to an editable one - which the first line of the sheet exists to disambiguate.
-FILENAME = "commands.txt"
+TITLE = "Commands & shortcuts"
 
 #: What each hotkey does, in the words of the thing it does. An action with no entry
 #: renders as its own name rather than being dropped: a combo somebody can press and
@@ -54,7 +59,8 @@ EXAMPLE_DRAFT = (
 #: (what to say, what it does, the route it must produce). The third column is not
 #: documentation: `tests/test_help.py` routes every example against `EXAMPLE_DRAFT` and
 #: asserts the family, so an example that stops working fails the suite instead of
-#: quietly misleading somebody.
+#: quietly misleading somebody. Untouched by the move into a window - the route check
+#: never looked at the rendering, which is what made the move safe.
 COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("change Tuesday to Wednesday", "replace the last occurrence", "local/replace"),
     ("change every Tuesday to Friday", "every occurrence", "local/replace_all"),
@@ -78,97 +84,104 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("make it more formal", "any other rewrite (agent CLI)", "semantic/"),
 )
 
+#: What a row may hold before it runs off the edge. The window draws one line per row and
+#: does not wrap - wrapping would make a row's height depend on its content, and the
+#: scroll offset is computed from a fixed line height - so the budget is enforced by the
+#: suite instead of discovered on screen. Measured against the widest strings above at
+#: the window's own column positions, with room to spare rather than to the pixel.
+MAX_LEFT, MAX_RIGHT, MAX_NOTE = 32, 58, 82
 
-def _hotkeys(hotkeys) -> list[str]:
+#: A heading that carries a right column has to clear the same gutter a pair does, and it
+#: is drawn bold, so it gets a tighter budget than a heading standing alone. "Taking the
+#: answer into the draft" was 32 characters with "converse mode" beside it, which is
+#: inside `MAX_LEFT` and still wide enough at 10 pt bold to run into it.
+MAX_HEAD = 24
+
+
+def _fit(text: str, limit: int) -> str:
+    """Cut to the budget, marked. The same idiom `edits.removed_text` uses, and here for
+    the same reason: exactly one row carries text nobody in this file wrote."""
+    text = text.strip()
+    if not text:
+        return ""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _hotkey_rows(hotkeys) -> list[tuple[str, str, str]]:
     """The combos that registered, not the ones that were asked for."""
     if hotkeys is None:
-        return ["  none this launch (--no-hotkeys) - the pill and the right-click menu",
-                "  still do everything the keys do"]
+        return [("note", "None this launch (--no-hotkeys) - the pill and the menu still "
+                 "do all of it.", "")]
     chosen = getattr(hotkeys, "chosen", {}) or {}
     failed = list(getattr(hotkeys, "failed", []) or [])
-    out = [f"  {action:<8}{combo:<20}{_ACTIONS.get(action, action)}"
-           for action, combo in chosen.items()]
+    rows = [("pair", combo, _ACTIONS.get(action, action))
+            for action, combo in chosen.items()]
     # Named as unavailable rather than left out. A shortcut that silently does nothing is
     # the defect `Hotkeys.failed` was built to report, and a sheet that omitted it would
     # send somebody looking for a key that cannot exist on this machine.
-    out += [f"  {action:<8}{'NOT AVAILABLE':<20}every alternative combo is owned by "
-            "another app" for action in failed]
-    return out or ["  none registered - the pill and the right-click menu still work"]
+    rows += [("note", f"No combo left for '{action}' - every alternative is owned by "
+              "another app.", "") for action in failed]
+    return rows or [("note", "None registered. The pill and the right-click menu still "
+                     "work.", "")]
 
 
-def sheet(hotkeys=None, send_words: tuple[str, str] | None = None,
-          workspace_note: str = "") -> str:
-    """The whole file, as text. Pure, so the suite can read it without a desktop.
+def rows(hotkeys=None, send_words: tuple[str, str] | None = None,
+         workspace_note: str = "") -> list[tuple[str, str, str]]:
+    """The whole sheet as `(kind, left, right)`. Pure - no Tk, no disk.
 
-    ASCII only, for the reason the lexicon template is: this is opened by whatever
-    Windows hands a `.txt` to, and Notepad on a legacy code page is still a thing people
-    have.
+    Kinds: `head` a section title, `pair` a two-column line, `note` a full-width line,
+    `gap` a blank one. The window knows how to draw four things; this knows what there is
+    to say. Keeping them apart is what lets the suite assert the content without a
+    desktop and the window change without touching the content.
     """
-    word, enter_word = send_words or (SEND_WORD, SEND_ENTER_WORD)
-    lines = [
-        "Flow - commands & shortcuts",
-        "",
-        "Regenerated every time you open it from the menu, so it describes this machine",
-        "as it is running right now. Anything typed in here is overwritten. The file you",
-        "are meant to edit is lexicon.txt, next door.",
-        "",
-        "HOTKEYS - the combos that actually registered this launch",
-        *_hotkeys(hotkeys),
-        "",
-        "SAYING SEND INSTEAD OF PRESSING IT",
-        f"  {word:<30}paste the draft into the window you were in",
-        f"  {enter_word:<30}paste it and press Enter, so a terminal prompt submits",
-        # Worded without naming the word, because the word is a setting: the sheet used
-        # to illustrate this with "boom goes the dynamite", which stops being true the
-        # moment somebody changes the trigger - and this file exists to be true.
-        "  Say it on its own. The same word inside a sentence stays dictation, which is",
-        "  what makes a false Send rare. Change it in the right-click menu, under",
-        "  Settings > Trigger word.",
-        "",
-        "TALKING TO THE DRAFT",
-        "  A correction counts only when the words it names are really in your draft.",
-        "  These examples assume the draft says:",
-        f"    {EXAMPLE_DRAFT}",
-        "",
-        *[f"  {say:<33}{does}" for say, does, _route in COMMANDS],
-        "",
-        "  Hesitation and politeness are absorbed: 'no, sorry, can you delete Tuesday'",
-        "  is the same command as 'delete Tuesday'.",
-        "",
-        "TAKING THE ANSWER INTO THE DRAFT (converse mode)",
-        "  " + ", ".join(f"{verb} that answer" for verb in TAKE_VERBS),
-        "  Or press the 'Use this' chip on the reply. The answer becomes the draft and",
-        "  Flow flips back to dictate, so the next Send pastes it.",
-        "",
-        "WHERE CONVERSE-MODE QUESTIONS ARE ASKED FROM",
-        f"  {workspace_note or 'workshop: not set - Ask runs without a project'}",
-        "",
-        "THE GUIDE",
-        f"  {GUIDE_URL}",
-        "",
+    word, enter = send_words or (SEND_WORD, SEND_ENTER_WORD)
+    out: list[tuple[str, str, str]] = [
+        ("note", "Regenerated every time you open it, so this is the machine you are on "
+         "right now.", ""),
+        ("gap", "", ""),
+        ("head", "Hotkeys", "the combos that actually registered this launch"),
+        *_hotkey_rows(hotkeys),
+        ("gap", "", ""),
+        ("head", "Saying Send instead of pressing it", ""),
+        ("pair", word, "paste the draft into the window you were in"),
+        ("pair", enter, "paste it and press Enter, so a terminal prompt submits"),
+        # Worded without naming the word, because the word is a setting: this used to
+        # illustrate whole-utterance matching with "boom goes the dynamite", which stops
+        # being true the moment somebody changes the trigger - and the sheet exists to be
+        # true.
+        ("note", "Say it on its own - the same word inside a sentence stays "
+         "dictation.", ""),
+        ("note", "Change it under Settings > Trigger word.", ""),
+        ("gap", "", ""),
+        ("head", "Talking to the draft", "these examples assume your draft says:"),
+        ("note", EXAMPLE_DRAFT, ""),
+        ("note", "A correction counts only when the words it names are really in "
+         "your draft.", ""),
+        ("gap", "", ""),
+        *[("pair", say, does) for say, does, _route in COMMANDS],
+        ("gap", "", ""),
+        ("note", "Politeness is absorbed: 'can you please delete Tuesday' is the same "
+         "command.", ""),
+        ("gap", "", ""),
+        ("head", "Taking the answer", "converse mode"),
+        *[("pair", f"{verb} that answer",
+           "the answer becomes the draft; Flow flips to dictate"
+           if verb == TAKE_VERBS[0] else "")
+          for verb in TAKE_VERBS],
+        ("note", "Or press the 'Use this' chip on the reply.", ""),
+        ("gap", "", ""),
+        ("head", "Where converse-mode questions are asked from", ""),
+        ("note", workspace_note or "workshop: not set - Ask runs without a project", ""),
+        ("gap", "", ""),
+        ("head", "The guide", "right-click > Help > Open the guide"),
+        ("note", GUIDE_URL, ""),
     ]
-    return "\n".join(lines)
-
-
-def write(folder: Path | str, **kw) -> Path:
-    """Write the sheet into the settings folder and return where it went.
-
-    Truncating rather than appending, and unconditionally: the point of the file is that
-    it says what is true now, so a stale copy is the one outcome worth refusing. The
-    folder is created for the same reason `Profile.save` creates it - a first run that
-    has never been calibrated has no `~/.flow/` yet.
-    """
-    path = Path(folder) / FILENAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(sheet(**kw), encoding="utf-8")
-    return path
-
-
-def open_file(path: Path | str) -> None:
-    """Hand it to whatever Windows opens a .txt with. Raises OSError, like the caller
-    already handles for the settings folder."""
-    os.startfile(str(path))
+    limits = {"pair": (MAX_LEFT, MAX_RIGHT), "note": (MAX_NOTE, 0),
+              "head": (MAX_NOTE, MAX_RIGHT), "gap": (0, 0)}
+    return [(kind, _fit(left, limits[kind][0]), _fit(right, limits[kind][1]))
+            for kind, left, right in out]
 
 
 def open_guide() -> None:
+    """Hand the README to the browser. Raises OSError, which the caller reports."""
     os.startfile(GUIDE_URL)

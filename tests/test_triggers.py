@@ -326,8 +326,15 @@ class TestTheListIsTheOwnersToChooseFrom(unittest.TestCase):
         # Otherwise the menu is a one-way door out of the word that works today.
         self.assertIn(SEND_WORD, SEND_WORD_PRESETS)
 
-    def test_the_word_the_owner_named_is_in_the_list(self):
-        self.assertIn("goose", SEND_WORD_PRESETS)
+    def test_the_shipped_list_is_the_one_the_owner_approved(self):
+        # Pinned rather than described, because the list moved once already. "goose" was
+        # here, passed all four legs, and was taken out at review on taste — which is a
+        # different question from the gate's: passing says a word is *admissible*, the
+        # review says which admissible words are worth a row in the menu. Its numbers
+        # stand in the record and nothing was re-run to remove it.
+        self.assertEqual(SEND_WORD_PRESETS,
+                         ("boom", "tango", "mango", "falcon", "rocket", "banana"))
+        self.assertNotIn("goose", SEND_WORD_PRESETS)
 
     def test_the_enter_variant_is_derived_in_the_order_that_degrades_safely(self):
         for word in SEND_WORD_PRESETS:
