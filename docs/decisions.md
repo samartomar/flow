@@ -6,6 +6,39 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-02 — Five words from the owner: the round-seven residue decided
+
+1. **The selfdrive tripwire resolves as a fix, not a quarantine.** `capitalize
+   sameer` — two flakes in two runs, both following sustained CPU load — stops
+   traveling the speaker-to-microphone loop: that one check feeds its cached SAPI
+   wav directly to the decoder, keeping the learning-promotion assertion (the only
+   live one the gate has) while removing the room, the fan, and the acoustic
+   variance that made a marginal decode flip. The other 63 checks keep the acoustic
+   loop; the gate stays 64/64-shaped.
+2. **The marker nickname stands.** The pill's badge says `kiro`; the menu, the
+   notes, and the Help sheet say `kiro-cli` in full. A marker is a glanceable tag,
+   not an identifier, and in a four-CLI product the short form collides with
+   nothing.
+3. **The bubble anchors below as a fallback.** Above by default exactly as today;
+   below only when the pill sits high enough that "above" has no room. A fallback,
+   not a mode — tooltip behavior, and the 36-placement geometry harness from item
+   42 is the instrument that proves both directions.
+4. **P10 ships as shape (b): the head window.** A reply renders its first lines —
+   the ones triage reads — with "… N more lines" at the foot, and Copy / Use this
+   carry the whole text as they already do. Shape (c), a real reading viewport, is
+   deliberately not built: a bubble that becomes a document reader drifts Flow from
+   courier toward viewer, against its own non-goals; if the desk ever proves
+   artifacts get read in-bubble, the Help sheet's viewport is the clean upgrade
+   path. §8's row tells the truth it now has.
+5. **The 39-second workshop turn is parked on the owner's hands**: real kiro-cli
+   turns in the MCP workspace decide it. If the owner finds themselves always
+   tapping codex there, a per-workspace CLI preference becomes an entry; if the
+   wait reads as the employer-brain thinking, it does not.
+Alongside, a Rules line from a twice-paid papercut: loop commit messages are
+written via bash heredoc, never PowerShell here-strings — two rounds each mangled
+a subject to `@` and repaired it by amending an unpushed tip against Rule 3's
+letter; the sentence ends the class.
+
 ### 2026-08-02 — kiro-cli's 20-second wall, the six-character marker, and the cut bubble
 
 Three findings from the owner's first real workshop session on kiro-cli, the first
