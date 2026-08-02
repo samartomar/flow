@@ -6,6 +6,34 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-02 — kiro-cli's 20-second wall, the six-character marker, and the cut bubble
+
+Three findings from the owner's first real workshop session on kiro-cli, the first
+one measured to its root: **"ask failed (kiro-cli timed out after 20s)" is
+structural, not flaky.** The identical one-line call measured **4.3 s in a bare
+directory and 35.8 s inside a workspace whose `.kiro` settings declare MCP servers**
+— kiro-cli spawns the project's MCP servers on every `chat` invocation (uvx-resolved,
+cold), and Flow's global `TIMEOUT_SEC` = 20 executes the call at second twenty, every
+time, in exactly the workspaces the workshop is for. No flag skips MCP startup
+(`--require-mcp-startup` exists; its inverse does not), and Flow altering the user's
+kiro settings is out of bounds — Flow does not reconfigure other tools. So:
+1. **Per-CLI timeout.** `Cli` entries gain `timeout_sec` (default: the global 20);
+   kiro-cli ships at **60**, basis 35.8 measured plus headroom. The timeout note
+   already names the CLI and the seconds; §8's TIMEOUT_SEC row gains the reason a
+   CLI may need more than the constant. The honest residue, stated: ~36 s per turn
+   in MCP-heavy workspaces is kiro-cli's startup cost, not Flow's — the cure lives
+   upstream (a persistent serve mode someday, or a trimmed server list), and until
+   then the pin menu makes "codex for this workspace" one tap.
+2. **The marker gets a display alias.** "kiro-cli" at 8 characters overflows item
+   15's 6-character bound and falls back to `ASK` — the owner read that as "Kiro is
+   not captured". Cli entries gain a marker alias ("kiro"), bounded at 6; the menu
+   and the notes keep the full name.
+3. **The bubble can still leave the screen by position.** Item 37 capped its height;
+   the owner's screenshots show the top border cut off at the display edge — the cap
+   bounds size, nothing clamps placement. The bubble's geometry must be clamped
+   inside the work area at every pill position, instrumented the way item 37 was:
+   position measured at the corners, before and after.
+
 ### 2026-08-02 — The long-draft incident: no draft may disable its own rescue
 
 A very long dictation took down five layers in a chain, live at the owner's desk: the
