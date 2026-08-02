@@ -1,9 +1,9 @@
 # NEEDS_YOU — things only you can do
 
-Updated 2026-08-01, end of the day the decisions were made and built. Every decision
-that was open in the morning is closed or parked on named evidence: the standing record
-with each decision's why and its reopen bar is **[docs/decisions.md](docs/decisions.md)**;
-the 25 items they spec'd are done, with their evidence archived in
+Updated 2026-08-02, the morning Flow went public. Every decision that was open is closed
+or parked on named evidence: the standing record with each decision's why and its reopen
+bar is **[docs/decisions.md](docs/decisions.md)**; the 28 items they spec'd are done,
+with rounds one to three archived in
 [docs/history/loop-rounds-1-3.md](docs/history/loop-rounds-1-3.md). This file holds only
 what is live: desk work, and the two decisions parked on evidence.
 
@@ -17,26 +17,55 @@ entries are further down)
 (resolved — the `Session._provider()` pin mismatch became LOOP_PLAN item 24 and is
 done, commit `a18b619`: the notes now name the CLI the call will actually make)
 
-## Going public — the steps only you can take (2026-08-01, final: public in place, one repo)
+## Going public — done 2026-08-02, except two steps that are not on this machine
 
-Decisions.md "Distribution, final": this repo flips public as it stands — working
-notes ship deliberately, audio verified clean (volunteer voices untracked, outside the
-repo, and out of history), the split retired. Going forward, personal notes migrate to
-ai-continuum at your pace; the repo keeps the engineering record. In order:
+**Flow is public: https://github.com/samartomar/flow · release
+[v0.1.0](https://github.com/samartomar/flow/releases/tag/v0.1.0) with
+`flow-windows-x64.zip` (126 MB) attached.** MIT in the sidebar, README rendering with
+the `uv tool install` two-liner as its first code block, and
+`uv tool install git+https://github.com/samartomar/flow` verified from the public URL in
+a throwaway tool directory (`flow --help` exit 0, `uv tool list` → `flow v0.1.0`, then
+uninstalled).
 
-1. ~~Say the license word~~ — **MIT, decided with Phase A.** Item 27 is unblocked.
-2. **Run the Phase A session** (the prompt is in the conversation record): items
-   26–28 under the Rules, then the sweep, then it STOPS and shows you the sweep
-   before asking for the word to flip.
-3. **Give the flip word in that session** — it runs
-   `gh repo edit samartomar/flow --visibility public`, tags v0.1.0, and verifies
-   `flow-windows-x64.zip` lands on the release.
-4. **List Flow in ai-harness** with the uv one-liner and the Releases link (prompt 2,
-   on the other machine).
-5. After the first release: **run the zip on a machine with no Python** — the one
-   thing no harness here can prove.
-6. **Consent paragraph** in `docs/recording-kit.md` — public makes it mandatory and
-   the Phase A session writes it; your job is only to read it and agree it is true.
+- [x] **License word** — MIT, © Samar Tomar 2026 (`LICENSE`, and the metadata says the
+  same thing so a wheel cannot disagree with the file beside it).
+- [x] **Phase A** — LOOP_PLAN items 26, 27, 28, each instrumented, gated on the full
+  suite and committed separately.
+- [x] **The flip** — but **not** by `gh repo edit` alone, and this is the part worth
+  reading. The sweep found the volunteer recordings still live on GitHub: a force-push
+  moves a ref, it does not remove objects, and the pre-rewrite tip `50d16f5` was still
+  served by the API with `.bench/recorded/inbox/` intact — five clips, two named after a
+  volunteer, plus the manifest that names people. Private that cost nothing; public it
+  would have handed a stranger a volunteer's voice by SHA. So the repo was **deleted and
+  recreated** (your call, over a Support purge, for being certain rather than promised),
+  the clean history pushed, and the old SHA now returns 422. Same name, same URL, one
+  repo. `docs/decisions.md`'s "Distribution, final" entry carries the correction.
+- [x] **Consent paragraph** — written in `docs/recording-kit.md`. **Your job is still to
+  read it and agree it is true**, since it speaks for you to people who trusted you.
+- [ ] **List Flow in ai-harness** with the uv one-liner and the Releases link — the
+  other machine, so it is still yours:
+  `uv tool install git+https://github.com/samartomar/flow`, then
+  `https://github.com/samartomar/flow/releases`.
+- [ ] **Run the zip on a machine with no Python** — the one thing no harness here can
+  prove. CI ran `flow.exe --help` against the bundle it built before zipping it, and the
+  same bundle launched here and printed all 17 startup lines, but both machines have
+  Python installed. Download `flow-windows-x64.zip`, unzip, run `flow.exe`, and expect
+  one-time SmartScreen: **More info → Run anyway**.
+
+Two things the sweep turned up that you have not ruled on, kept here rather than lost:
+
+- [ ] **`docs/record.html:277` still carries the old one-line consent claim** ("stays on
+  one laptop, is never uploaded, and is deleted whenever you ask") while
+  `recording-kit.md` now carries the full paragraph. Both are true; the guided page is
+  the one volunteers are actually walked through, so it is the one that matters more.
+  Say the word and it gets the same paragraph.
+- [ ] **`.bench/accent/manifest-aesrc.jsonl` is 240 rows of reference transcripts and
+  speaker IDs** from a re-upload that, in `fetch_accent_data.py`'s own words, declares no
+  licence — and `.gitignore` excludes the audio on exactly that reasoning ("not a claim
+  that survives being committed anywhere") while the manifest carrying the text is
+  committed. The 580 EdAcc rows are from a published corpus with its own terms and are a
+  different question. Nobody has been harmed by this; it is simply inconsistent with the
+  argument already written down.
 
 ## At the desk
 
