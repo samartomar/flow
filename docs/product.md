@@ -41,6 +41,19 @@ Japanese L1 speakers. These four cover the major phonological failure modes (v/w
 mergers, th-stopping, retroflex stops, r/l merger, epenthetic vowels, syllable- and
 mora-timed rhythm). A fix that generalises across these four generalises broadly.
 
+### Environments
+
+Flow is two halves with different portability. The brain and the ear are portable Python
+on cross-platform wheels — routing, the correction loop, both decoder tiers, the lexicon,
+the profile — and the hands are not: 96 Win32 call sites across `inject.py`, `hotkey.py`
+and `ui.py` are what put text into another application's window, what register a global
+combo, and what keep the pill out of the activation chain. The design center's own
+environments include macOS, which is what makes shipping the portable half on its own
+worth doing. That half is **Flow Lite**, defined below. A native macOS body is not
+promised here: it is weeks of work plus re-taking every measurement in
+[architecture.md](architecture.md)'s §7 and §8 per OS, and what would fund it is evidence
+from Lite rather than intent.
+
 ## The job to be done
 
 > "I have a thought about what the AI should do. Get it into the tool as a precise,
@@ -86,6 +99,53 @@ minimal dependencies (R16), long sessions without drift (R8).
 - **Being an AI itself.** Flow never generates content on its own; every semantic
   operation — polish, rewrite, conversation reply — is the local agent CLI's work (R9,
   R11). Flow is the microphone, the editor, and the courier.
+
+## Flow Lite — the portable body
+
+**Lite is the brain, the ear, and the clipboard.** Everything above that does not need
+hands is in it, unchanged: the same two decoder tiers and the same personal lexicon (P1,
+P4), the correction loop by voice (P2, P3), the calibrated profile (P8), one-shot polish
+(P5), the thread (P6), and the prompt workshop (P9). What changes is the last inch. The
+finished draft is *copied* — through Tk's own clipboard, which is OS-agnostic and already
+a dependency — and the user pastes it wherever they meant it to go.
+
+**What Lite is not.** Four exclusions, and they are exclusions rather than four things not
+built yet:
+
+- **no injection** — nothing is ever written into another application's window;
+- **no global hotkeys** — arming is a click on the pill, so no combo is registered with
+  the OS at all;
+- **no auto-paste** — the paste is the user's own keystroke, in their own application, at
+  a moment they chose;
+- **no target-window awareness** — Flow neither knows nor tracks what had focus, so there
+  is no window to aim at and none to lose.
+
+What those four buy is the one property Lite has that full Flow does not: **no OS
+permission beyond the microphone.** No accessibility grant, no input monitoring, no
+trusted-application prompt. The list a dictation tool normally has to ask a user for is
+empty, and that is a property rather than a shortfall.
+
+**Two requirements Lite cannot meet, named rather than quietly dropped.** P7 (safe into a
+terminal) is a promise about a paste *Flow* performs, and Lite performs none: whether a
+multi-line draft arrives unexecuted becomes the terminal's behaviour and the user's
+keystroke, which is not something this product can promise on their behalf. And P9's
+acceptance loop ends "**send it** … into the terminal where the work is" — in Lite it ends
+on the clipboard, one keystroke short. The rest of the table holds unchanged, because the
+rest of it was never about hands.
+
+**The fence.** Features land in full Flow first, and reach Lite only if they survive
+without hands. That is a rule about direction rather than a schedule: anything needing a
+target window, a registered combo or a synthesised keystroke is a full-Flow feature and
+stays one, and the Lite question gets asked of it once instead of designed around. Read
+the other way — build for Lite and port up — and every feature would be shaped by the
+weaker body.
+
+**The price, which is the point.** The hands-free magic is what Lite gives up, and paying
+it knowingly is what makes the measurement possible: **the clipboard hop is the
+measurement.** How often that extra keystroke makes someone wish Flow had hands is the one
+number the native-port decision waits on. Sustained real use is the instrument, and
+nothing here can be answered by a benchmark — the question is how much a working day
+notices a keystroke.
 
 ## What "useful" looks like, concretely
 
