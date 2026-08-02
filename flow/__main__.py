@@ -25,7 +25,7 @@ import sys
 from .asr import FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
-from .refine import CANDIDATES, available, named
+from .refine import CANDIDATES, available, named, unverified, unverified_note
 from .session import AUTO_ASK_SEC, Session
 
 # `.hotkey`, `.inject` and `.ui` are imported inside main() rather than up here, and the
@@ -119,7 +119,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--cli", default=None, metavar="NAME",
-        help="pin the agent CLI (codex or claude) instead of trying each in turn",
+        help="pin the agent CLI instead of trying each in turn "
+             f"({', '.join(c.name for c in CANDIDATES if c.verified)})",
     )
     ap.add_argument(
         "--cli-timeout", type=float, default=REFINE_TIMEOUT_SEC, metavar="SEC",
@@ -162,6 +163,13 @@ def main(argv: list[str] | None = None) -> int:
             say(f"--cli {args.cli}: not a known CLI "
                 f"({', '.join(c.name for c in CANDIDATES)})")
             return 2
+        # Before the PATH check, and that order is the point: an inert entry may well be
+        # installed, and "not on PATH" would be a lie about the one thing the user can
+        # check themselves.
+        if not pinned.verified:
+            say(f"--cli {pinned.name}: its invocation shape has never been run, so Flow "
+                "will not guess it - see NEEDS_YOU for the one command that settles it")
+            return 2
         if pinned.name not in clis:
             say(f"--cli {pinned.name}: not on PATH")
             return 2
@@ -176,6 +184,11 @@ def main(argv: list[str] | None = None) -> int:
         rest = ", ".join(clis[1:])
         say(f"  (falls back to {rest} if it fails)" if rest
             else "  (no fallback - only one CLI on PATH)")
+    # Said out loud rather than left silent, for the same reason the trace line is: a CLI
+    # that is installed and deliberately not used looks exactly like one Flow failed to
+    # find, and the person who installed it is the one who can end the difference.
+    for cli in unverified():
+        say(f"  ({unverified_note(cli)})")
     say(f"CLI timeout: {args.cli_timeout:.0f}s per call")
 
     partial_name = args.model or args.partial_model

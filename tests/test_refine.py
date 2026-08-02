@@ -314,6 +314,91 @@ class TestTheFallbackIsReal(unittest.TestCase):
         self.assertIsNone(refine_mod.named("gpt"))
 
 
+def only(*names):
+    """A `shutil.which` that finds exactly these, so PATH is not the test's variable."""
+    return lambda cmd, *a, **kw: f"/somewhere/{cmd}" if cmd in names else None
+
+
+class TestAnUnverifiedEntryIsInert(unittest.TestCase):
+    """Detection ships everywhere; invocation shapes are run or they do not exist.
+
+    The adapter grew past `codex`/`claude` (decisions.md, "Flow Lite"), and the whole risk
+    of growing it is that a plausible argv is indistinguishable from a measured one once
+    both are written in the same tuple. So `verified=False` means detection only, and the
+    negatives below are the ones that matter: not what an inert entry does, but that
+    nothing can reach it.
+    """
+
+    def unverified(self):
+        return [c for c in refine_mod.CANDIDATES if not c.verified]
+
+    def test_there_are_some_and_they_carry_no_shape_at_all(self):
+        # The mechanical form of "never asserted from memory". An entry with a guessed
+        # `("gemini", "-p")` in it would pass every other check in this class.
+        pending = self.unverified()
+        self.assertTrue(pending, "the inert entries went missing")
+        for cli in pending:
+            with self.subTest(cli=cli.name):
+                self.assertEqual(cli.argv, (cli.name,))
+
+    def test_available_never_offers_one_however_the_path_is_arranged(self):
+        with mock.patch("shutil.which", only("gemini", "copilot", "codex")):
+            self.assertEqual([c.name for c in refine_mod.available()], ["codex"])
+        with mock.patch("shutil.which", only("gemini", "copilot")):
+            self.assertEqual(refine_mod.available(), [])
+
+    def test_and_no_process_is_started_for_one(self):
+        # Asserted on `Popen` rather than on the return value: a check that only looked at
+        # the answer would pass just as well if the call was made and failed.
+        with mock.patch("shutil.which", only("gemini")), \
+                mock.patch("subprocess.Popen") as started:
+            answer, note = refine_mod.ask("q")
+        self.assertIsNone(answer)
+        started.assert_not_called()
+
+    def test_the_reason_names_what_was_found_and_not_run(self):
+        with mock.patch("shutil.which", only("gemini")), mock.patch("subprocess.Popen"):
+            _answer, note = refine_mod.ask("q")
+        self.assertIn("no agent CLI found on PATH", note)
+        self.assertIn("gemini", note)
+        self.assertIn("not yet verified", note)
+
+    def test_detected_is_the_only_thing_that_names_them(self):
+        with mock.patch("shutil.which", only("gemini", "codex")):
+            self.assertEqual([c.name for c in refine_mod.detected()],
+                             ["codex", "gemini"])
+            self.assertEqual([c.name for c in refine_mod.unverified()], ["gemini"])
+
+    def test_a_pin_can_still_look_one_up_so_the_refusal_can_be_honest(self):
+        # `named` searching the inert entries is what lets `--cli gemini` say the true
+        # reason instead of "not on PATH", which is a lie about the one thing the user
+        # can check themselves.
+        self.assertFalse(refine_mod.named("gemini").verified)
+        self.assertTrue(refine_mod.named("codex").verified)
+
+    def test_kiro_is_not_a_candidate_at_all(self):
+        # Verified live on 2026-08-02 and the answer was that it is not an agent CLI: the
+        # `kiro` on PATH is the IDE launcher, and invoking it opens an editor window.
+        # "Not yet verified" would be the wrong thing to say about it — it is verified.
+        self.assertIsNone(refine_mod.named("kiro"))
+        self.assertNotIn("kiro", [c.name for c in refine_mod.CANDIDATES])
+
+    def test_opencode_is_inert_despite_answering_once(self):
+        # The most instructive entry in the tuple. `opencode run "<one line>"` exits 0
+        # with the answer on stdout, which looks exactly like a verified shape — and every
+        # prompt this module sends is multi-line, where it returns an answer to a question
+        # it never received. Whether that is opencode or the `.cmd` shim it is installed
+        # behind is unknown, and unknown is what inert is for.
+        cli = refine_mod.named("opencode")
+        self.assertFalse(cli.verified)
+        self.assertEqual(cli.argv, ("opencode",), "a shape it does not have")
+
+    def test_codex_stays_first_and_the_new_names_come_after(self):
+        # R10's preference order is not something a new entry may quietly reorder.
+        names = [c.name for c in refine_mod.CANDIDATES]
+        self.assertEqual(names[:2], ["codex", "claude"])
+
+
 class TestWhatWhichFindsIsWhatRuns(unittest.TestCase):
     """`shutil.which` and `CreateProcess` disagree about what a bare name means.
 

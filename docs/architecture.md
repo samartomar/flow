@@ -49,9 +49,11 @@ the user's own file — so the merged result biases both decoder tiers.
 
 That band used to be labelled "nothing leaves the machine", and the label was wrong. It
 described the *process* boundary — no API key is read, no HTTP client is linked (R9) —
-and read as a *data* boundary, which it is not: `codex` and `claude` are cloud-backed
-CLIs, and starting a local executable is not the same as staying local. The data
-boundary is this:
+and read as a *data* boundary, which it is not: every entry in `refine.CANDIDATES` is a
+cloud-backed CLI, and starting a local executable is not the same as staying local. Which
+one answers is now a list rather than a pair (§8), and that changes nothing here except
+whose provider receives the words — which is exactly why the pill names the CLI and the
+notes name it again before a call goes out. The data boundary is this:
 
 - **Always local.** Microphone audio, the utterance buffers, the lexicon, the profile,
   every local edit, and SAPI speech. R9 is enforced by absence — there is no code in
@@ -759,7 +761,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `SNAP_MAX_WORDS` | 6 | Without it, suffix-stripping turned sentence-opening gerunds into commands — "Deleting a branch does not delete the history" became a delete |
 | `refine.MAX_CHARS` | 2000 | Never hand the CLI an unbounded draft (R11). Past this only the tail is sent, cut on a sentence boundary. A Refine keeps the head verbatim and reattaches it to the result — the CLI rewrites only what it saw, and the rest of the draft is untouched rather than lost. An Ask sends only the tail; the head of an over-long question is simply never seen. Both now say so, in notes worded differently because the two behaviours differ, and the figure is `refine.tail_sent()` rather than the constant — the cut walks to a sentence boundary, so a 6300-character draft sends 1995, not 2000 |
 | `refine.TIMEOUT_SEC` | 20 s | Measurement put a normal call at 5.7–7.3 s, so the 6 s first sketched would have killed healthy calls. Enforced against the process *tree*: measured, a 0.4 s timeout used to return after 1.37 s and leave the CLI's own child running, because killing a launcher leaves the pipe its child inherited open and the read blocks on it. `codex` now measures 6.6–8.5 s for a one-word answer here, so the headroom is thinner than when 20 s was chosen: `--cli-timeout` raises it, and a breach falls through to the next CLI rather than failing |
-| `refine.CANDIDATES` | codex, then claude | A preference order that is now actually walked. Both entry points used to take the first available CLI and stop, while startup printed "(fallbacks: claude)" — so a `codex` timeout produced a dead feature and a message naming a second CLI that was installed, working and never tried. Falls through on not answering at all (start failure, non-zero exit, timeout, empty output); an answer judged *bad* is the output guards' problem, not a reason to pay for a second call. `--cli` pins one, and a pinned CLI is never second-guessed |
+| `refine.CANDIDATES` | codex, then claude; then opencode, copilot, gemini **inert** | A preference order that is now actually walked. Both entry points used to take the first available CLI and stop, while startup printed "(fallbacks: claude)" — so a `codex` timeout produced a dead feature and a message naming a second CLI that was installed, working and never tried. Falls through on not answering at all (start failure, non-zero exit, timeout, empty output); an answer judged *bad* is the output guards' problem, not a reason to pay for a second call. `--cli` pins one, and a pinned CLI is never second-guessed. **`verified=False` means detection only**: the entry may be found on PATH and named at startup, carries `argv == (name,)` and no shape at all, and is never invoked — `available()` is what may be called and `detected()` is the only thing that may name the rest. An invocation shape is not remembered, it is run; see §"Verifying a candidate" below |
 | `ASK_SENTENCES` | 3 | The shortest that can carry an answer plus its caveat. Conversational answers only: a request for a piece of *work* — "give me a complete reusable prompt" — is recognised from the request (`edits.is_artifact_request`, matched on the ask and never guessed from the answer) and briefed without the ceiling, because truncating the deliverable the conversation was for is the product failing at its own point |
 | `ASK_ARTIFACT_MAX_CHARS` | 12 000 | The artifact render bound — a bound, not a brief: the bubble scrolls, and truncating a prompt someone asked for in full is worse than a tall bubble. The spoken half flips instead: past `ARTIFACT_SAY_MAX_LINES` / `ARTIFACT_SAY_MAX_CHARS` the voice says only "a 12-line answer is on screen", because invariant 6 makes a read-aloud artifact minutes of deafness |
 | `ASK_MAX_CHARS` | 4000 | The bubble has to render it |
@@ -1013,6 +1015,29 @@ and `codex --version` / `claude --version`. On this machine that reads: faster-w
 `3d3d5dee`, `small.en` at `d1d751a5`, codex 0.145.0, claude 2.1.218. Half the numbers in
 this document are latencies and error rates, and every one of them belongs to a build:
 without this, a result six months old can only be compared to a fresh one by hoping.
+
+### Verifying a candidate
+
+A `CANDIDATES` entry is `verified=True` only after somebody has run it: one prompt in,
+text on stdout, exit code checked, banner on stderr. **And the prompt has to be one of
+this app's**, which is the lesson `opencode` taught on 2026-08-02. `opencode run "Reply
+with exactly: PONG"` exited 0 in 8.2 s with `PONG` alone on stdout — every box ticked —
+while a *multi-line* prompt, which is the only kind this module sends, came back
+`No SECRET was provided.`
+
+The cause is not opencode. `shutil.which("opencode")` returns `opencode.CMD`, an `npm -g`
+batch shim, and a batch shim forwards `%*` through cmd.exe, **which truncates the argument
+at the first newline**. Measured against a shim of the same shape: `['line one']` arrived
+where `['line one\nline two\nline three']` was sent, and the identical argument through a
+real executable arrived whole. So the measurement belongs to the *install*, not to the
+CLI, and a machine where opencode is a real binary would answer a different question.
+That is why the entry is inert rather than either shipped or deleted.
+
+This is the second defect from the same seam — the first was `WinError 2` on a `.cmd` shim
+that `shutil.which` found and `CreateProcess` could not start (see the `agent CLI` row in
+Verification). Both codex and claude document an `npm -g` install, so **the shim path is
+not hypothetical for them either**; NEEDS_YOU carries it, because it is a defect in
+shipped behaviour rather than anything item 35 was scoped to fix.
 
 **And in every bench result**, since the same day. All nine result writers under
 `scripts/` — `accent_bench`, `asr_bench`, `command_bench`, `gate_bench`,

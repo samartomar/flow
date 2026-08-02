@@ -384,6 +384,24 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         long = Cli("gemini-cli", ("gemini",))
         self.assertEqual(self._draw(clis=[long]), ["ASK"])
 
+    def test_the_rule_holds_for_the_names_that_actually_ship(self):
+        # The check above used an invented name, which proves the rule and not the
+        # product. The adapter carries five entries now and two are wider than the slot.
+        # Asked of every candidate rather than only the invocable ones, deliberately:
+        # `verified` flips the day somebody runs the verification, and the marker has to
+        # be right *before* that rather than a fix that follows it.
+        from flow.refine import CANDIDATES, named
+
+        self.assertEqual(self._draw(clis=[named("opencode")]), ["ASK"], "8 characters")
+        self.assertEqual(self._draw(clis=[named("gemini")]), ["gemini"], "exactly 6")
+        for cli in CANDIDATES:
+            with self.subTest(cli=cli.name):
+                drawn = self._draw(clis=[cli])
+                self.assertEqual(
+                    drawn, [cli.name if len(cli.name) <= 6 else "ASK"],
+                    "a shipped name that neither fits nor falls back",
+                )
+
     def test_dictate_mode_still_draws_no_marker_at_all(self):
         self.assertEqual(self._draw(mode=DICTATE, clis=[CODEX]), [])
 

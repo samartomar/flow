@@ -651,11 +651,26 @@ class TestTheNotesObeyThePin(unittest.TestCase):
         # The two are read together — the badge on the pill and the note drawn beside
         # it — and item 15 gave the badge the pin. Same inputs, same answer, or the
         # window contradicts itself.
+        #
+        # Restated when the adapter grew past two names, because "same answer" was only
+        # ever the whole rule by accident: every shipped name fitted the 6-character slot,
+        # so equality and agreement were the same assertion. They are not. The marker may
+        # **decline** to name a CLI — a clipped name reads as a different CLI, so it draws
+        # the mode instead — and what it may never do is name a *different* one. `ASK` is
+        # the mode, and `opencode` at 8 characters is the first shipped name to reach it.
         import flow.ui as ui
 
+        from flow.refine import named
+
         codex, claude = self.clis()
+        # The last three rows are the adapter's new names, and they are here because the
+        # marker refuses anything over six characters while the note has no such budget:
+        # the two can only agree by both falling back, and nothing but a test says so.
+        opencode, gemini = named("opencode"), named("gemini")
         for pinned, resolved in ((claude, [codex, claude]), (None, [codex, claude]),
-                                 (claude, [codex])):
+                                 (claude, [codex]),
+                                 (opencode, [codex, opencode]), (None, [opencode]),
+                                 (None, [gemini])):
             with self.subTest(pinned=pinned, resolved=[c.name for c in resolved]):
                 pill = ui.Pill.__new__(ui.Pill)
                 pill._clis = None
@@ -663,7 +678,11 @@ class TestTheNotesObeyThePin(unittest.TestCase):
                 s = session(cli=pinned)
                 with mock.patch("flow.session.available", return_value=resolved), \
                      mock.patch.object(ui, "available", return_value=resolved):
-                    self.assertEqual(s._provider(), pill._marker())
+                    who, marker = s._provider(), pill._marker()
+                if len(who) <= ui.Pill.MARKER_MAX:
+                    self.assertEqual(marker, who)
+                else:
+                    self.assertEqual(marker, "ASK", "it named a CLI that is not answering")
 
 
 class TestTheReplyCanBecomeTheDraft(unittest.TestCase):

@@ -177,5 +177,67 @@ class TestWindowsStillGetsHands(unittest.TestCase):
         self.assertNotIn("Windows-only", out.getvalue())
 
 
+class TestThePinKnowsWhyItRefused(unittest.TestCase):
+    """Three ways `--cli` can fail, and they are three different sentences.
+
+    An inert entry may well be installed, so "not on PATH" would be a lie about the one
+    thing the user can check for themselves — which is why the `verified` refusal sits
+    above the PATH one rather than after it.
+    """
+
+    def run_main(self, argv):
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with mock.patch.object(sys, "platform", "win32"), \
+                contextlib.redirect_stdout(out):
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", *argv])
+        return code, out.getvalue()
+
+    def test_an_unverified_pin_says_why_and_does_not_blame_the_path(self):
+        code, out = self.run_main(["--cli", "gemini"])
+        self.assertEqual(code, 2)
+        self.assertIn("never been run", out)
+        self.assertNotIn("not on PATH", out)
+
+    def test_a_name_nobody_knows_lists_the_ones_it_does(self):
+        code, out = self.run_main(["--cli", "kiro"])
+        self.assertEqual(code, 2)
+        self.assertIn("not a known CLI", out)
+        self.assertIn("codex", out)
+
+    def test_a_verified_pin_that_is_absent_still_blames_the_path(self):
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch("shutil.which", lambda *a, **kw: None), \
+                contextlib.redirect_stdout(out):
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon",
+                             "--cli", "claude"])
+        self.assertEqual(code, 2)
+        self.assertIn("not on PATH", out.getvalue())
+
+    def test_an_installed_but_inert_cli_is_named_at_startup(self):
+        # Silence would make an installed-and-unused CLI look exactly like one Flow could
+        # not find, and the person who installed it is the one who can end that.
+        import flow.asr
+        import flow.ui
+
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch("shutil.which", lambda cmd, *a, **kw:
+                           "/somewhere/gemini" if cmd == "gemini" else None), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill"), \
+                contextlib.redirect_stdout(out):
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite"])
+        self.assertEqual(code, 0)
+        self.assertIn("found gemini, not yet verified", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

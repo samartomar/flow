@@ -96,21 +96,80 @@ _POLISH_SLACK = 600
 class Cli:
     name: str
     argv: tuple[str, ...]  # the prompt is appended as the final argument
+    #: False means **detection only**: this CLI may be found on PATH and named, and it is
+    #: never invoked. An invocation shape is not a thing to remember — it is a thing
+    #: somebody ran on a machine that had the CLI — and an entry whose shape has not been
+    #: run would otherwise sit here looking exactly like one that has.
+    verified: bool = True
 
 
 #: Order is the preference order — codex first, per R10.
+#:
+#: **An unverified entry carries no shape at all**, only the executable name that
+#: detection needs. That is the rule rather than a convention, and `tests/test_refine.py`
+#: asserts it of every entry: a plausible-looking argv sitting here unused is still a
+#: guess, and the next person to read this file has no way to tell a guess from a
+#: measurement once both are written in the same form.
+#:
+#: **`opencode` stays inert, and the attempt to verify it is why the rule is worth
+#: having.** Run here on 2026-08-02: `opencode run "Reply with exactly: PONG"` exited 0 in
+#: 8.2 s with `PONG` alone on stdout and its banner on stderr — the exact stream
+#: discipline this module's docstring requires, and enough to look verified. It is not.
+#: Every prompt this module sends is multi-line, and a multi-line prompt came back
+#: `No SECRET was provided.`: the `opencode` on PATH here is `opencode.CMD`, an `npm -g`
+#: batch shim, and a batch shim forwards `%*` through cmd.exe, which **truncates the
+#: argument at the first newline**. Measured directly against a shim of the same shape:
+#: `['line one']` arrived where `['line one\nline two\nline three']` was sent, while the
+#: same argument through a real executable arrived whole. So what was measured is the
+#: install, not opencode's contract, and a machine where opencode is a real binary would
+#: answer a different question. Guessing which is what `verified` exists to forbid.
+#:
+#: **`kiro` is deliberately not here.** Verified the same day and the answer was that it is
+#: not an agent CLI at all: the `kiro` on PATH is the IDE launcher — a VS Code fork whose
+#: `--help` offers `--diff`, `--goto` and `--wait` and no headless prompt mode. Detecting
+#: it and saying "not yet verified" would be false, because it *is* verified; adding it
+#: would open an editor window instead of answering a question.
 CANDIDATES: tuple[Cli, ...] = (
     Cli("codex", ("codex", "exec", "--skip-git-repo-check")),
     Cli("claude", ("claude", "-p")),
+    Cli("opencode", ("opencode",), verified=False),
+    Cli("copilot", ("copilot",), verified=False),
+    Cli("gemini", ("gemini",), verified=False),
 )
 
 
 def available() -> list[Cli]:
+    """The CLIs that may be *invoked*: on PATH, and with a shape somebody has run.
+
+    Keeps its old meaning exactly, which is what lets every existing caller —
+    `_invoke_any`, `Session._provider`, the pill's marker, the menu's picker — stay
+    correct without knowing `verified` exists.
+    """
+    return [c for c in CANDIDATES if c.verified and shutil.which(c.argv[0])]
+
+
+def detected() -> list[Cli]:
+    """Everything found on PATH, verified or not. The only thing that may name the rest."""
     return [c for c in CANDIDATES if shutil.which(c.argv[0])]
 
 
+def unverified() -> list[Cli]:
+    """On this machine, and inert. Startup says so; nothing calls them."""
+    return [c for c in detected() if not c.verified]
+
+
+def unverified_note(cli: Cli) -> str:
+    """What to say about a CLI that is here and has never been run."""
+    return f"found {cli.name}, not yet verified - see NEEDS_YOU"
+
+
 def named(name: str) -> Cli | None:
-    """Look a CLI up by name, so a user can pin one rather than take the order."""
+    """Look a CLI up by name, so a user can pin one rather than take the order.
+
+    Searches every candidate including the inert ones, deliberately: `--cli gemini` on a
+    machine that has gemini deserves the true reason rather than "not on PATH", which
+    would be a lie about the one thing the user can check for themselves.
+    """
     want = name.strip().lower()
     return next((c for c in CANDIDATES if c.name == want), None)
 
@@ -152,7 +211,11 @@ def _invoke_any(
         if cancel is not None and cancel.is_set():
             break
     if not reasons:
-        return None, "no agent CLI found on PATH", None
+        # Appended rather than substituted: "no agent CLI found on PATH" stays true —
+        # none that may be *called* was found — and the detail says what is sitting there
+        # unusable, which is the difference between an empty PATH and an unfinished entry.
+        pending = ", ".join(unverified_note(c) for c in unverified())
+        return None, "no agent CLI found on PATH" + (f" ({pending})" if pending else ""), None
     return None, "; then ".join(reasons), None
 
 
