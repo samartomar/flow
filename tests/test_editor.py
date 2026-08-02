@@ -465,6 +465,15 @@ if __name__ == "__main__":
     unittest.main()
 
 
+#: The work area this machine reports, and the desktop every bubble fixture is laid out
+#: against. It is a real input to `_render` now rather than only to `reposition`: the window
+#: is fitted to it before anything reads the height, which is what keeps the chip row inside
+#: the display when the reply path asks for 4 179 px of it. Lives here beside
+#: `MeasuringCanvas` so `test_bubble.py` can borrow both — a second copy of a desktop the
+#: two files have to agree about is the same drift risk as a second canvas.
+WORK = (0, 0, 1280, 672)
+
+
 class MeasuringCanvas:
     """A canvas that answers `bbox`, which is what a layout test needs.
 
@@ -557,6 +566,11 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
             can_take_reply=False,
         )
         b.pill.accent = "#000000"
+        #: `_render` fits the window to the desktop before anything reads the height, so a
+        #: bubble that renders needs a real work area. A `Mock` here is not a default — it
+        #: is an unpackable that raises, which is the loud failure this would rather have
+        #: than a fixture silently laying out against a screen of no particular size.
+        b.pill.work = WORK
         b.canvas = MeasuringCanvas()
         b._text, b._sent, b._reply, b._partial, b._note = text, "", "", "", note
         b._editor = None

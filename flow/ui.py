@@ -306,6 +306,20 @@ BODY_BOUNDARY_SCAN = 200
 #: The line above the window saying what is not in it, at the note's font plus its gap.
 BODY_ELIDED_H = 17
 
+#: Air between the bubble and every edge of the work area — the same number the window is
+#: bounded by and the number it is clamped with, because they have to agree and nothing but
+#: this made them. It is what turns the clamp into a proof: with the height fitted to
+#: `work − 2 × EDGE_AIR`, `max(top + air, min(y, bottom − h − air))` cannot put either edge
+#: outside, at any pill position.
+#:
+#: The measurement that earned the fit: item 37 capped the *draft* body and left the reply
+#: path alone, so a 4 000-character answer still sized the window **1 459 px** and a 12 000-
+#: character artifact **4 179 px** — both pinned at `top + 8` on a 672 px desktop, at all
+#: four pill corners, which put the chip row at screen y **1 427** and **4 147**. The cap
+#: bounded one path's size; nothing bounded the window, so the exits went off the bottom of
+#: the display exactly as they had off the draft.
+EDGE_AIR = 8
+
 #: How many times the window may be measured and shrunk before it is drawn. Each probe is
 #: over at most `BODY_TAIL_CHARS`, so the ceiling on one render is a small multiple of a
 #: fixed cost rather than anything to do with the draft. Two is what it takes in practice;
@@ -1643,6 +1657,17 @@ class Bubble(tk.Toplevel):
 
     # -- geometry ----------------------------------------------------------
 
+    def work_h(self) -> int:
+        """The tallest this window may be and still be placed inside the desktop.
+
+        Read by `_render` before anything else sees `self._h`, so the height is *already*
+        inside the work area by the time it is drawn from, placed with, or used to put the
+        chip row at the foot. Bounding only what `reposition` places would leave the chips
+        drawn below the visible window — which looks fixed and is not.
+        """
+        _left, top, _right, bottom = self.pill.work
+        return bottom - top - 2 * EDGE_AIR
+
     def reposition(self, lift: int = 0) -> None:
         """Anchor above the pill, clamped inside the work area.
 
@@ -1650,12 +1675,19 @@ class Bubble(tk.Toplevel):
         right edge run off the display — so on a screen whose coordinates the app had
         got wrong, the bubble hung half outside it with its buttons unreachable. Both
         edges are bounded now, and against the work area rather than the raw screen.
+
+        It is only a *clamp*, and that was the gap: a window taller than the work area
+        cannot be placed inside it however carefully the position is computed, so the
+        reply path — the one item 37 deliberately did not touch — ran 795 px past the
+        bottom on an ordinary answer and 3 515 px on an artifact, at every pill corner.
+        The height is fitted in `_render` now (`work_h`), which is what makes the
+        arithmetic below a guarantee rather than a best effort.
         """
         left, top, right, bottom = self.pill.work
         x = self.pill.x + PILL_W - BUBBLE_W
         y = self.pill.y - self._h - 10 + lift
-        x = max(left + 8, min(x, right - BUBBLE_W - 8))
-        y = max(top + 8, min(y, bottom - self._h - 8))
+        x = max(left + EDGE_AIR, min(x, right - BUBBLE_W - EDGE_AIR))
+        y = max(top + EDGE_AIR, min(y, bottom - self._h - EDGE_AIR))
         self.geometry(f"{BUBBLE_W}x{self._h}+{x}+{y}")
 
     def _float_up(self) -> None:
@@ -1770,7 +1802,11 @@ class Bubble(tk.Toplevel):
             extra += 20
         if self._note:
             extra += note_h + 4
-        self._h = max(96, text_h + extra + 74)
+        # Fitted to the desktop before anything reads it. `BODY_MAX_H` bounds what the
+        # *draft* asks for; this bounds what the window may be whatever asked — which is
+        # the reply path, whose full-text probe is unchanged and is what sizes a 12 000-
+        # character artifact to 4 179 px on a 672 px desktop.
+        self._h = min(max(96, text_h + extra + 74), self.work_h())
         c.configure(width=BUBBLE_W, height=self._h)
         self.reposition()
 
