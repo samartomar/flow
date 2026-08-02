@@ -150,7 +150,10 @@ Two things the sweep turned up that you have not ruled on, kept here rather than
   truncation; bad args exit 2, loudly. Shape facts for the wiring: stdout carries
   furniture (ANSI colour, a `> ` answer prefix, a `▸ Credits: … • Time: …` status
   line — the CLI meters, ~0.10 credits/call) that the adapter must strip; detection
-  cannot be PATH-only — probe the default install directory too; `--trust-tools=`
+  by PATH works — the MSI adds `%LOCALAPPDATA%\Kiro-Cli\` to the user PATH (verified
+  in the registry; the "off-PATH" first impression was this session's own stale
+  environment, corrected by the owner's fresh shell finding it) — with the AppData
+  probe kept only as cheap insurance for stale environments; `--trust-tools=`
   (empty) is the right courier default, no tool runs without asking. Wiring is in
   the next session's prompt (the shim item's session, second item).
 - [ ] **Verify `opencode` on a machine where it is not an npm `.cmd` shim** (a Mac, or a
