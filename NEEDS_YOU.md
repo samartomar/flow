@@ -17,24 +17,30 @@ entries are further down)
 (resolved — the `Session._provider()` pin mismatch became LOOP_PLAN item 24 and is
 done, commit `a18b619`: the notes now name the CLI the call will actually make)
 
-## Going public — the steps only you can take (2026-08-01, decisions.md "Distribution")
+## Going public — the steps only you can take (2026-08-01, amended same day: split repos)
 
-In order; items 27 and 28 are the loop's mechanical half and item 27 is blocked on the
-first step here:
+The architecture (decisions.md "Distribution amendment"): full repo goes private at
+**gosaminfo/flow**; **samartomar/flow is recreated public** holding the curated
+snapshot item 29's script produces. The working layer — this file, LOOP_PLAN,
+decisions.md, docs/history/, recording-kit, .bench — never ships. In order:
 
-1. **Say the license word.** Recommendation on record: MIT. One word unblocks item 27.
-2. **Write the consent paragraph** in `docs/recording-kit.md` (the standing desk item
-   below — public visibility makes it mandatory): where volunteer recordings live (a
-   private folder outside the repo; the repo's *history* no longer), and that going
-   public does not change that.
-3. **Skim `NEEDS_YOU.md`, `docs/decisions.md` and `docs/history/` with public eyes.**
-   Your name, your accent, your working notes are throughout — it is the best
-   documentation the project has and my recommendation is to ship it as-is, but that
-   is your call to make once, consciously.
-4. **Flip the repo public** (Settings → visibility). The loop never touches remotes.
-5. **List Flow in ai-harness** with the uv one-liner and the Releases link.
-6. After item 28's first release: **run the zip on a machine with no Python** — the
-   one thing no harness here can prove.
+1. ~~Say the license word~~ — **MIT, decided with Phase A.** Item 27 is unblocked.
+2. **Transfer the repo** to gosaminfo/flow (GitHub → Settings → Transfer ownership;
+   preserves history, issues, and this remote redirects until step 3 reuses the name).
+   Update the local remote: `git remote set-url origin https://github.com/gosaminfo/flow.git`
+3. **Create the public repo** `samartomar/flow` (empty; creating it retires the
+   redirect). The publish script pushes the snapshot into it.
+4. **Approve the first snapshot** — the Phase A session stops and shows you the exact
+   file list before the first public push. What you are checking: nothing from the
+   excluded list, and nothing in the shipped docs that reads private.
+5. **Tag v0.1.0 in the public repo** — its workflow builds and attaches
+   `flow-windows-x64.zip`.
+6. **List Flow in ai-harness** with the uv one-liner and the Releases link (prompt 2,
+   on the other machine).
+7. After the first release: **run the zip on a machine with no Python** — the one
+   thing no harness here can prove.
+8. The consent paragraph in `docs/recording-kit.md` stays wanted (the file stays
+   private, but volunteers still read it — keep it true).
 
 ## At the desk
 

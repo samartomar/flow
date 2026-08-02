@@ -156,7 +156,44 @@ zipped, attached to a GitHub Release by a workflow that runs on tag push.
   Releases.
 - Doc sync: architecture.md's Verification section gains one line on where releases
   come from and that the suite gates them.
-- Status: (not started — item 27 first, so the release ships with a LICENSE inside)
+- Status: (not started — item 27 first, so the release ships with a LICENSE inside.
+  Amended by the split decision: the workflow file ships *in the public snapshot* and
+  runs there — the public repo must build its own releases, which is also the proof
+  the snapshot is complete)
+
+### 29. The publish script — one command turns the private repo into the public snapshot
+Owner-decided 2026-08-01 (decisions.md "Distribution amendment"). Two repos is a
+standing sync problem; this makes it one command. The private repo (gosaminfo/flow)
+is the source of truth; the public repo (samartomar/flow) receives a curated snapshot.
+- Files: new `scripts/publish_snapshot.py`, tests (`tests/test_publish.py`), README
+  (one line in a maintainer section).
+- The whitelist, explicit in the script and mirrored in a test: `flow/`, `tests/`,
+  `scripts/`, `docs/product.md`, `docs/architecture.md`, `docs/analysis.md`,
+  `docs/roadmap.md`, `README.md`, `LICENSE`, `pyproject.toml`, `uv.lock`,
+  `.github/workflows/release.yml`, `.gitignore`. **Excluded, and the test asserts each
+  never lands in a snapshot:** `NEEDS_YOU.md`, `LOOP_PLAN.md`, `docs/decisions.md`,
+  `docs/history/`, `docs/recording-kit.md`, `Feedback.md` (gone already, belt and
+  braces), `.bench/` (carries the owner's decoded speech), `.claude/`.
+- Instrument first, three checks that must fail before the script exists:
+  1. **Self-sufficiency of links:** every relative markdown link in the snapshot set
+     resolves inside the set. Run it against today's tree and it will fail — README
+     links `docs/history/PROGRESS.md`, architecture.md links `history/` and
+     `decisions.md` — and those references get a public-safe form (drop, reword, or
+     point at the private repo by absolute URL with a "maintainer's record" note).
+  2. **Self-sufficiency of the suite:** the unit suite runs green *inside a snapshot
+     staging directory*. `tests/test_bench.py` and anything else reading `.bench/`
+     must skip cleanly when the directory is absent — a skip with a reason, never a
+     failure, and never a silent pass that proves nothing.
+  3. **The snapshot is a squash, not a history:** the script commits the staged tree
+     as a single commit on the public remote's `main` ("Snapshot from private repo at
+     <short-hash>"), so no private history can leak through a snapshot push.
+- Acceptance: suite green in the working repo AND in a staged snapshot; the link
+  check reports zero danglers; a dry run prints the file list it would ship and the
+  one it deliberately withholds.
+- Doc sync: architecture.md's Verification section notes that the public repo is a
+  generated snapshot and where it is generated from.
+- Status: (not started — runs after 26–28; the first real publish is the owner's
+  Stage 2)
 
 ## Backlog — "prepare" tier
 

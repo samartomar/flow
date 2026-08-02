@@ -197,7 +197,26 @@ and the trigger words live in `profile.json` — defaults must therefore work ou
 box, and re-wording them is the one step that still needs an editor. Spec'd as
 LOOP_PLAN item 22.
 
-### 2026-08-01 — Distribution: public via ai-harness, uv install; installer and Mac parked
+### 2026-08-01 — Distribution amendment, same day: split repos — private working, public snapshot
+
+Supersedes the single-repo flip below, on the owner's actual constraint surfacing: the
+working layer (NEEDS_YOU.md, LOOP_PLAN.md, decisions.md, docs/history/,
+docs/recording-kit.md, .bench/ with the owner's decoded utterances) is not for
+publication. Architecture: the full repo moves private to **gosaminfo/flow** (GitHub
+transfer, preserving history and issues), and **samartomar/flow is recreated public**
+holding a curated source snapshot — `flow/`, `tests/`, `scripts/`, the reference docs
+(README, product, architecture, analysis, roadmap as curated), LICENSE, pyproject, and
+the release workflow — because "release only" cannot work: `uv tool install git+…`
+needs source and CI needs code to build the zip from. The named cost, accepted: two
+repos is a standing sync problem, so publishing is automated as a **publish script**
+(LOOP_PLAN item 29) that copies the whitelist, proves the snapshot self-sufficient
+(zero dangling links to excluded files; the unit suite green *inside the snapshot*),
+and pushes it — one command per release, no hand-exporting to rot. Contributors get
+snapshots, not history; public issues live on the public repo; the provenance religion
+(identity blocks in bench results, measured constants in architecture.md) survives in
+the public set without the personal layer.
+
+### 2026-08-01 — Distribution (original): public via ai-harness, uv install; installer and Mac parked
 
 Flow goes public and is listed in the owner's public
 [ai-harness](https://github.com/samartomar/ai-harness) ("Enterprise AI Bootstrapping
