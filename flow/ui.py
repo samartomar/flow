@@ -179,6 +179,11 @@ DB_FLOOR, DB_CEIL = -58.0, -12.0  # level range mapped onto bar height
 
 BUBBLE_W = 380
 PAD = 14
+#: The chip row's height, named because two places need it: `_lay_out` draws the row and
+#: `_render` has to keep the note clear of it. It used to be a 26 in one place and a 52
+#: in the other, and nothing tied them together — which is how a note came to be drawn on
+#: top of the chips the moment it wrapped to a second line.
+CHIP_H = 26
 
 #: How long the bubble stays up after a dictate-mode Send, holding what was sent.
 #:
@@ -1011,6 +1016,20 @@ class Bubble(tk.Toplevel):
             )
             rx1, ry1, rx2, ry2 = c.bbox(rprobe)
             reply_h = ry2 - ry1 + 8
+        # The note gets measured too, and did not until 2026-08-02. It reserved a flat
+        # 18 px — one line — and drew at a fixed offset from the foot with `anchor="nw"`,
+        # so every line past the first grew *downward* into the chip row. An Ask that
+        # failed on a Hyper-V VM put its reason across Refine / Continue / Ask and the
+        # owner could read neither. Errors are the longest strings this ever shows and
+        # the ones it is least acceptable to hide.
+        note_h = 0
+        if self._note:
+            nprobe = c.create_text(
+                PAD, PAD, anchor="nw", text=self._note, fill=MUTED,
+                font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD,
+            )
+            nx1, ny1, nx2, ny2 = c.bbox(nprobe)
+            note_h = ny2 - ny1
         # The box gets a floor of its own: a one-line draft measures ~18 px, and a
         # text box that size is a slot to squint into rather than something to work in.
         edit_h = max(text_h + 8, 44) if self._editor is not None else 0
@@ -1024,7 +1043,7 @@ class Bubble(tk.Toplevel):
         if self._act is not None:
             extra += 20
         if self._note:
-            extra += 18
+            extra += note_h + 4
         self._h = max(96, text_h + extra + 74)
         c.configure(width=BUBBLE_W, height=self._h)
         self.reposition()
@@ -1071,9 +1090,14 @@ class Bubble(tk.Toplevel):
             self._indicator(y)
             y += 20
         if self._note:
+            # Anchored to its own bottom edge, four pixels clear of the chip row, and
+            # derived from the row's geometry rather than restating it: the old `52` and
+            # `_lay_out`'s `PAD + CHIP_H` were two numbers that had to agree and nothing
+            # made them. `sw` is what makes a second line grow up into the space the
+            # measurement above just reserved, instead of down onto the chips.
             c.create_text(
-                PAD, self._h - 52, anchor="nw", text=self._note, fill=MUTED,
-                font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD,
+                PAD, self._h - PAD - CHIP_H - 4, anchor="sw", text=self._note,
+                fill=MUTED, font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD,
             )
 
         self._chips()
@@ -1135,7 +1159,7 @@ class Bubble(tk.Toplevel):
         c = self.canvas
         x = PAD
         y2 = self._h - PAD
-        y1 = y2 - 26
+        y1 = y2 - CHIP_H
         for key, label, cmd in specs:
             w = 20 + 7 * len(label)
             primary = key in ("Send", "Ask", "Put it back")

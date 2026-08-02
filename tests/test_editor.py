@@ -463,3 +463,132 @@ class TestAnEditorThatCannotHearIsClosed(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MeasuringCanvas:
+    """A canvas that answers `bbox`, which is what a layout test needs.
+
+    `RecordingCanvas` in test_indicator.py records what `_draw` puts on the pill and
+    never measures anything, because the pill's geometry is fixed. The bubble's is not:
+    it sizes itself to wrapped text, so a fake that cannot wrap cannot catch a bug about
+    wrapping. Line height and character width are the Segoe UI values the real canvas
+    reports for the two fonts this draws in; the exact numbers do not matter, only that
+    more text means more lines.
+    """
+
+    LINE_H = {8: 13, 10: 17}
+    CHAR_W = {8: 6, 10: 7}
+
+    def __init__(self) -> None:
+        self.items: list[dict] = []
+
+    def delete(self, *a, **kw) -> None:
+        self.items.clear()
+
+    def configure(self, **kw) -> None: ...
+
+    def create_polygon(self, *a, **kw) -> None: ...
+
+    def create_oval(self, *a, **kw) -> None: ...
+
+    def create_arc(self, *a, **kw) -> None: ...
+
+    def create_line(self, *a, **kw) -> None: ...
+
+    def create_rectangle(self, *a, **kw) -> None: ...
+
+    def tag_bind(self, *a, **kw) -> None: ...
+
+    def tag_raise(self, *a, **kw) -> None: ...
+
+    def itemconfigure(self, *a, **kw) -> None: ...
+
+    def create_text(self, x, y, text="", **kw):
+        size = (kw.get("font") or ("", 10))[1]
+        width = kw.get("width")
+        per_line = max(1, int(width / self.CHAR_W.get(size, 7))) if width else 10**6
+        lines = max(1, -(-len(text) // per_line))
+        item = {
+            "x": x, "y": y, "text": text, "anchor": kw.get("anchor", "center"),
+            "h": lines * self.LINE_H.get(size, 17), "lines": lines,
+        }
+        self.items.append(item)
+        return len(self.items) - 1
+
+    def bbox(self, item):
+        it = self.items[item]
+        top = it["y"] if "n" in it["anchor"] else it["y"] - it["h"]
+        return (it["x"], top, it["x"] + 10, top + it["h"])
+
+    def band(self, needle: str) -> tuple[float, float]:
+        """The vertical band the item containing `needle` occupies."""
+        it = next(i for i in self.items if needle in i["text"])
+        top = it["y"] if "n" in it["anchor"] else it["y"] - it["h"]
+        return top, top + it["h"]
+
+
+class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
+    """The bubble sizes itself to wrapped text everywhere except the note.
+
+    Reported from a Hyper-V VM on 2026-08-02: an Ask failed, and the failure — the one
+    sentence explaining why — was drawn across the Refine / Continue / Ask row, leaving
+    fragments of both readable and neither legible. "can not see due to overlap".
+
+    `_render` measures the draft with a probe and a `bbox`, and says so in a comment:
+    *"Measure first: the window has to be sized to the wrapped text."* The note is the
+    one thing it does not measure — it reserved a flat 18 px, one line's worth, and drew
+    at a fixed offset from the bottom with `anchor="nw"`, so every line past the first
+    grew downward into the chips.
+
+    The error that found it is 84 characters, which is three lines at this width. Errors
+    are the longest strings this ever shows and the ones it is least acceptable to hide.
+    """
+
+    ERROR = ("ask failed (codex failed to start: [WinError 2] "
+             "The system cannot find the file specified)")
+
+    def _bubble(self, note: str, text: str = "a draft"):
+        import flow.ui as ui
+
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock()
+        b.pill.session = mock.Mock(
+            mode="dictate", can_rescue=False, editing=False, auto_ask_in=None,
+            can_take_reply=False,
+        )
+        b.pill.accent = "#000000"
+        b.canvas = MeasuringCanvas()
+        b._text, b._sent, b._reply, b._partial, b._note = text, "", "", "", note
+        b._editor = None
+        b._act = None
+        b._h = 120
+        b.reposition = lambda *a, **kw: None
+        return b
+
+    def test_the_error_clears_the_chip_row(self):
+        b = self._bubble(self.ERROR)
+        b._render()
+        note_top, note_bottom = b.canvas.band("WinError 2")
+        chips_top = b._h - 14 - 26  # `_lay_out`: y2 = _h - PAD, y1 = y2 - 26
+        self.assertGreater(note_bottom, note_top)
+        self.assertLessEqual(
+            note_bottom, chips_top,
+            f"the note runs to y={note_bottom} and the chips start at y={chips_top}",
+        )
+
+    def test_the_bubble_grew_to_make_room_rather_than_clipping(self):
+        # The other way to stop an overlap is to cut the text off, and for an error
+        # message that is the same defect wearing a different hat.
+        short = self._bubble("ok")
+        short._render()
+        long_ = self._bubble(self.ERROR)
+        long_._render()
+        self.assertGreater(long_._h, short._h)
+        drawn = next(i for i in long_.canvas.items if "WinError 2" in i["text"])
+        self.assertEqual(drawn["text"], self.ERROR, "the note must not be truncated")
+
+    def test_a_one_line_note_still_sits_where_it_always_did(self):
+        b = self._bubble("saved")
+        b._render()
+        _top, bottom = b.canvas.band("saved")
+        self.assertLessEqual(bottom, b._h - 14 - 26)

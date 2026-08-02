@@ -280,7 +280,7 @@ spoken reply it tracks Flow's own voice coming back through the speakers — see
 | `partial` | provisional text | dimmed italic line in the bubble |
 | `draft` | the whole held draft | main bubble text; empty hides it, unless `ASKING` |
 | `state` | new state name | pill colour |
-| `note` | what just happened | small line at the bubble's foot |
+| `note` | what just happened | line at the bubble's foot, **measured and anchored to its own bottom edge** — it wraps upward into space the bubble reserves for it, four pixels clear of the chip row |
 | `error` | what failed | red flash + note; the draft is never lost |
 | `reply` | the CLI's answer | its own colour, plus spoken aloud |
 | `mode` | `dictate` / `converse` | pill badge and chip label (an accompanying `note` is what the user reads) |
