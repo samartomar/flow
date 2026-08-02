@@ -360,10 +360,16 @@ class Session:
         diag: Diag | None = None,
         cli: object | None = None,
         cli_timeout: float = REFINE_TIMEOUT_SEC,
+        lite: bool = False,
     ) -> None:
         # `mic` and `asr` are injectable so the state machine can be tested without a
         # microphone or a 141 MB model — the routing logic is where the subtle bugs live.
         self.asr = asr or WhisperTranscriber()
+        #: Lite (product.md): the draft is copied rather than pasted. Nothing in the
+        #: state machine changes — routing, the draft, the thread and every refusal are
+        #: the same brain — so this is read in exactly one place, the note that would
+        #: otherwise name a focused window Lite cannot see.
+        self.lite = lite
         self.mic = mic or Mic(device=device)
         self.gate = SpeechGate()
         self.worker = DecodeWorker(self.asr)
@@ -1639,7 +1645,9 @@ class Session:
                        if who else
                        "converse mode - no agent CLI on PATH, so Ask has nothing to send")
         else:
-            self._emit("note", "dictate mode - Send pastes into the focused window")
+            self._emit("note", "dictate mode - Send copies the draft, and you paste it"
+                       if self.lite
+                       else "dictate mode - Send pastes into the focused window")
         return self.mode
 
     def send(self) -> str:

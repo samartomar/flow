@@ -26,6 +26,8 @@ drawn, and the columns are positions rather than padding.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 
 from .edits import SEND_ENTER_WORD, SEND_WORD, TAKE_VERBS
 
@@ -125,26 +127,62 @@ def _hotkey_rows(hotkeys) -> list[tuple[str, str, str]]:
                      "work.", "")]
 
 
+def _arming_rows(hotkeys, lite: bool) -> list[tuple[str, str, str]]:
+    """How the microphone is armed on this machine, which in Lite is not a combo.
+
+    Lite's section is a replacement rather than an emptied version of the full one:
+    "absent, not disabled-looking" (product.md). A "Hotkeys" heading with a line saying
+    there are none describes a feature that was taken away, when the truth is that
+    nothing was registered with the OS and nothing needed to be.
+    """
+    if lite:
+        return [
+            ("head", "Arming the microphone", "no global shortcuts in Lite"),
+            ("note", "Click the pill. Nothing is registered with the OS, so no other "
+             "app loses a combo.", ""),
+        ]
+    return [
+        ("head", "Hotkeys", "the combos that actually registered this launch"),
+        *_hotkey_rows(hotkeys),
+    ]
+
+
+def _send_rows(word: str, enter: str, lite: bool) -> list[tuple[str, str, str]]:
+    """What the spoken triggers do here. Two bodies, two answers.
+
+    The enter-variant is missing from Lite's list and still understood by the router:
+    somebody who learned it in the full body will say it, and the answer to saying it is
+    a copy plus a note (`ui.COPIED_ENTER`), not silence. Offered nowhere, handled anyway.
+    """
+    if lite:
+        return [("pair", word, "copy the draft, then paste it where you want it")]
+    return [
+        ("pair", word, "paste the draft into the window you were in"),
+        ("pair", enter, "paste it and press Enter, so a terminal prompt submits"),
+    ]
+
+
 def rows(hotkeys=None, send_words: tuple[str, str] | None = None,
-         workspace_note: str = "") -> list[tuple[str, str, str]]:
+         workspace_note: str = "", lite: bool = False) -> list[tuple[str, str, str]]:
     """The whole sheet as `(kind, left, right)`. Pure - no Tk, no disk.
 
     Kinds: `head` a section title, `pair` a two-column line, `note` a full-width line,
     `gap` a blank one. The window knows how to draw four things; this knows what there is
     to say. Keeping them apart is what lets the suite assert the content without a
     desktop and the window change without touching the content.
+
+    `lite` changes only the two sections that describe hands. Everything else - the
+    corrections, the take verbs, the workshop line - is the same brain and reads the same.
     """
     word, enter = send_words or (SEND_WORD, SEND_ENTER_WORD)
     out: list[tuple[str, str, str]] = [
         ("note", "Regenerated every time you open it, so this is the machine you are on "
          "right now.", ""),
         ("gap", "", ""),
-        ("head", "Hotkeys", "the combos that actually registered this launch"),
-        *_hotkey_rows(hotkeys),
+        *_arming_rows(hotkeys, lite),
         ("gap", "", ""),
         ("head", "Saying Send instead of pressing it", ""),
-        ("pair", word, "paste the draft into the window you were in"),
-        ("pair", enter, "paste it and press Enter, so a terminal prompt submits"),
+        *_send_rows(word, enter, lite),
         # Worded without naming the word, because the word is a setting: this used to
         # illustrate whole-utterance matching with "boom goes the dynamite", which stops
         # being true the moment somebody changes the trigger - and the sheet exists to be
@@ -182,6 +220,29 @@ def rows(hotkeys=None, send_words: tuple[str, str] | None = None,
             for kind, left, right in out]
 
 
+def open_path(target: str) -> None:
+    """Hand a file, a folder or a URL to whatever this OS opens things with.
+
+    `os.startfile` is Windows-only and is the whole implementation of two menu entries,
+    so Lite would lose both to an `AttributeError` raised inside a Tk callback. stdlib
+    `subprocess` elsewhere — R16 still holds at three declared dependencies.
+
+    Everything that goes wrong leaves as `OSError`, because that is the contract both
+    callers already report on screen: `subprocess.run` raises `FileNotFoundError` (an
+    OSError) when the opener is missing, and `CalledProcessError` — which is not one —
+    when it runs and refuses, so the second is translated rather than allowed to escape
+    into a menu handler that does not catch it.
+    """
+    if sys.platform == "win32":
+        os.startfile(target)
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        subprocess.run([opener, str(target)], check=True)
+    except subprocess.SubprocessError as exc:
+        raise OSError(f"{opener} could not open {target}: {exc}") from exc
+
+
 def open_guide() -> None:
     """Hand the README to the browser. Raises OSError, which the caller reports."""
-    os.startfile(GUIDE_URL)
+    open_path(GUIDE_URL)

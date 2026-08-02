@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import sys
 import time
 import tkinter as tk
 import traceback
@@ -21,8 +22,7 @@ from collections import deque
 from pathlib import Path
 
 from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
-from .help import TITLE as HELP_TITLE, open_guide, rows as help_rows
-from .inject import foreground_hwnd, owned_by_flow, take_warnings
+from .help import TITLE as HELP_TITLE, open_guide, open_path, rows as help_rows
 from .lexicon import (
     DEFAULT_PATH as LEXICON_PATH,
     append_pair,
@@ -42,22 +42,61 @@ class _RECT(ctypes.Structure):
 #: SystemParametersInfo(SPI_GETWORKAREA)
 _SPI_GETWORKAREA = 0x0030
 
-#: Its own handle rather than `ctypes.windll.user32`, which is a process-wide cached
-#: object: declaring `restype` on it would change the signature under `inject.py` too.
-#: Every call below is declared for the reason inject.py spells out — an undeclared
-#: ctypes restype is C `int`, so a 64-bit HWND or style word comes back truncated.
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_user32.GetParent.argtypes = [ctypes.c_void_p]
-_user32.GetParent.restype = ctypes.c_void_p
-_user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
-_user32.SetForegroundWindow.restype = ctypes.c_int
-# The Ptr forms exist only on 64-bit; the plain ones are the whole API on 32-bit.
-_get_style = getattr(_user32, "GetWindowLongPtrW", None) or _user32.GetWindowLongW
-_set_style = getattr(_user32, "SetWindowLongPtrW", None) or _user32.SetWindowLongW
-_get_style.argtypes = [ctypes.c_void_p, ctypes.c_int]
-_get_style.restype = ctypes.c_ssize_t
-_set_style.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
-_set_style.restype = ctypes.c_ssize_t
+
+class _NoHands:
+    """Every Win32 entry point this module has, answering "nothing happened".
+
+    Lite's rule is that the *platform* decides what can be imported and `lite` decides
+    what happens, so every call site that matters is already guarded by `self.lite`. This
+    exists for the ones that are not: a stray call returns 0 instead of raising an
+    `AttributeError` inside a Tk callback, where the only place it would surface is a
+    stderr nobody is watching.
+    """
+
+    def __getattr__(self, _name):
+        return lambda *_a, **_kw: 0
+
+
+if sys.platform == "win32":
+    from .inject import foreground_hwnd, owned_by_flow, take_warnings
+
+    #: Its own handle rather than `ctypes.windll.user32`, which is a process-wide cached
+    #: object: declaring `restype` on it would change the signature under `inject.py`
+    #: too. Every call below is declared for the reason inject.py spells out — an
+    #: undeclared ctypes restype is C `int`, so a 64-bit HWND or style word comes back
+    #: truncated.
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _user32.GetParent.argtypes = [ctypes.c_void_p]
+    _user32.GetParent.restype = ctypes.c_void_p
+    _user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    _user32.SetForegroundWindow.restype = ctypes.c_int
+    # The Ptr forms exist only on 64-bit; the plain ones are the whole API on 32-bit.
+    _get_style = getattr(_user32, "GetWindowLongPtrW", None) or _user32.GetWindowLongW
+    _set_style = getattr(_user32, "SetWindowLongPtrW", None) or _user32.SetWindowLongW
+    _get_style.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    _get_style.restype = ctypes.c_ssize_t
+    _set_style.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+    _set_style.restype = ctypes.c_ssize_t
+else:
+    # `inject.py` is not made portable and is not imported: 470 lines of Win32 with no
+    # meaning in a body that never types into another window. Its three exports are the
+    # only ones this module needs, and each has an honest answer with no hands — there is
+    # no foreground to find, nothing of Flow's to recognise, and no paste to warn about.
+    def foreground_hwnd() -> int:
+        return 0
+
+    def owned_by_flow(_hwnd) -> bool:
+        return False
+
+    def take_warnings() -> list[str]:
+        return []
+
+    _user32 = _NoHands()
+
+    def _get_style(*_a, **_kw) -> int:
+        return 0
+
+    _set_style = _get_style
 
 GWL_EXSTYLE = -20
 
@@ -105,6 +144,27 @@ def _no_activate(win) -> bool:
         return bool(_get_style(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE)
     except (AttributeError, OSError, tk.TclError):
         return False
+
+
+def _shell_window(win, lite: bool, alpha: float) -> str:
+    """Apply the window attributes every Flow window shares, and return its background.
+
+    Two of the five are Windows-only Tk attributes. `-transparentcolor` is what keys the
+    magenta out, so without it the keyed colour is not invisible — it is a magenta
+    rectangle where the app should be — and `-toolwindow` does not exist off Windows at
+    all. Asking for either is a `TclError` before anything is drawn.
+
+    The background is returned rather than left to the caller so a window cannot be given
+    one that contradicts what was applied to it.
+    """
+    win.overrideredirect(True)
+    win.attributes("-topmost", True)
+    win.attributes("-alpha", alpha)
+    if lite:
+        return SHELL
+    win.attributes("-transparentcolor", TRANSPARENT)
+    win.attributes("-toolwindow", True)
+    return TRANSPARENT
 
 
 def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:
@@ -188,6 +248,17 @@ PAD = 14
 #: top of the chips the moment it wrapped to a second line.
 CHIP_H = 26
 
+#: What Lite says instead of pasting. Both name the same fact from two directions: the
+#: draft is on the clipboard and the last step belongs to the user. The second exists
+#: because the enter-variant has to be *answered* rather than ignored — a spoken trigger
+#: that produces silence reads as the app being broken, which is the report that put the
+#: refusals in `session.send()` in the first place.
+#:
+#: Unicode is fine here and only here: these are drawn by Tk, not printed through
+#: `__main__.say`, whose ASCII rule is about a redirected console code page.
+COPIED = "copied — paste where you need it"
+COPIED_ENTER = "copied — Enter is yours to press"
+
 #: How long the bubble stays up after a dictate-mode Send, holding what was sent.
 #:
 #: Not `session.AUTO_ASK_SEC`, which is also four seconds and is a different four
@@ -262,9 +333,17 @@ def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
 class Pill(tk.Tk):
     """The always-visible control. Click to arm/disarm, drag to move."""
 
+    #: Declared on the class, not only assigned in `__init__`, and that is load-bearing:
+    #: `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on an instance
+    #: built with `__new__` — which is how every UI test fixture in this suite builds one
+    #: — a missing name recurses until the stack ends instead of defaulting (item 32 found
+    #: exactly this as a `RecursionError`). A class attribute is a real lookup that never
+    #: reaches `__getattr__`; `__init__` overrides it per instance.
+    lite = False
+
     def __init__(
         self, session: Session, on_send=None, hotkeys=None, arm=False,
-        settings_path=None,
+        settings_path=None, lite=False,
     ) -> None:
         scale = _dpi_aware()  # before the first Tk window exists, or it has no effect
         super().__init__()
@@ -272,6 +351,11 @@ class Pill(tk.Tk):
         self.session = session
         self.on_send = on_send
         self.hotkeys = hotkeys
+        #: Lite: no hands (product.md). Set before either child window is built, because
+        #: both read it. A plain attribute rather than a `getattr` default at each use —
+        #: `tk.Misc.__getattr__` forwards an unknown name to `self.tk`, so a missing one
+        #: recurses instead of defaulting (item 32 found this the hard way).
+        self.lite = lite
         #: The lexicon actually in use, so the menu opens the folder Flow is reading
         #: rather than the default one — `--lexicon elsewhere.txt` would otherwise send
         #: the user to edit a file nothing loads.
@@ -291,12 +375,8 @@ class Pill(tk.Tk):
         self.paste_target: int | None = None
         self._track_target()
 
-        self.overrideredirect(True)
-        self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.94)
-        self.attributes("-transparentcolor", TRANSPARENT)
-        self.attributes("-toolwindow", True)
-        self.configure(bg=TRANSPARENT)
+        self.bg = _shell_window(self, lite, 0.94)
+        self.configure(bg=self.bg)
 
         self.work = _work_area(self.winfo_screenwidth(), self.winfo_screenheight())
         left, top, right, bottom = self.work
@@ -305,7 +385,7 @@ class Pill(tk.Tk):
         self.geometry(f"{PILL_W}x{PILL_H}+{self.x}+{self.y}")
 
         self.canvas = tk.Canvas(
-            self, width=PILL_W, height=PILL_H, bg=TRANSPARENT, highlightthickness=0
+            self, width=PILL_W, height=PILL_H, bg=self.bg, highlightthickness=0
         )
         self.canvas.pack()
 
@@ -416,8 +496,12 @@ class Pill(tk.Tk):
         # Send is unharmed either way. `paste_target` only ever records a window that is
         # not Flow's own, so a menu passing through the foreground cannot become the
         # thing a later paste is aimed at.
-        previous = foreground_hwnd()
-        _user32.SetForegroundWindow(toplevel_hwnd(self))
+        # None of which applies in Lite: `_no_activate` cannot take, so the window is in
+        # the activation chain like any other and the popup gets its input the ordinary
+        # way. Borrowing a foreground there would be a Win32 call with nothing behind it.
+        previous = 0 if self.lite else foreground_hwnd()
+        if not self.lite:
+            _user32.SetForegroundWindow(toplevel_hwnd(self))
         try:
             m.tk_popup(e.x_root, e.y_root)
         finally:
@@ -535,8 +619,12 @@ class Pill(tk.Tk):
             return
         profile.send_word = word
         profile.send_enter_word = enter_word(word)
+        # Stored in both bodies and echoed in only one. The enter-variant is derived
+        # unconditionally so a profile written in Lite is a full-Flow profile too — but
+        # offering it here would be advertising an Enter Lite does not press.
         if profile.save():
-            self.bubble.note(f'send: say "{word}", or "{enter_word(word)}" to submit')
+            self.bubble.note(f'send: say "{word}"' if self.lite
+                             else f'send: say "{word}", or "{enter_word(word)}" to submit')
         else:
             self._flash = 12
             self.bubble.note(f"could not save {profile.path}")
@@ -572,15 +660,43 @@ class Pill(tk.Tk):
             )
         parent.add_cascade(label="Voice", menu=sub)
 
+    def _copy(self, text: str) -> str:
+        """Lite's way out: the draft onto the clipboard. Returns what went wrong, or "".
+
+        Tk's own clipboard rather than `inject`'s Win32 one — it is the same three
+        declared dependencies on every OS, and it is the whole of Lite's handoff.
+
+        `update_idletasks`, not `update`: Tk owns the selection while the interpreter
+        lives and the copy has to be flushed out to the OS, but a full `update` from
+        inside `_tick` would service the pending `after` callbacks and re-enter the frame
+        pump. Idle tasks are what needs draining here, and they are not timers.
+        """
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.update_idletasks()
+        except tk.TclError as exc:
+            return f"could not copy: {exc}"
+        return ""
+
     def _send(self, submit: bool = False) -> None:
         """R5: hand the draft over, and leave it recoverable either way.
 
         `submit` presses Enter after the paste, and arrives only from the spoken
         Send-then-Enter trigger — no chip and no hotkey can set it.
+
+        **In Lite it collapses.** The plain trigger copies, and the enter-variant copies
+        too and says what did not happen. Refusing it was the alternative and it is wrong
+        on `edits.enter_word`'s own argument: a decode that drops a word from "enter
+        boom" yields "boom", so a refusing enter-variant would make the degraded decode
+        the working case and the fuller utterance the broken one — the exact inversion
+        the word order exists to prevent.
         """
         text = self.session.send()
         problem = ""
-        if text and self.on_send:
+        if text and self.lite:
+            problem = self._copy(text)
+        elif text and self.on_send:
             # The window is chosen here, on the UI thread, from what was polled before
             # the click — not inside `paste()` after it. The handler reports back what
             # went wrong rather than printing it somewhere nobody is looking.
@@ -601,6 +717,10 @@ class Pill(tk.Tk):
             self.bubble.show_sent(text, problem)
         elif text:
             self.bubble.show_sent(text)
+            if self.lite:
+                # After the card, not instead of it: the words are the important half and
+                # the note is what tells somebody the last step is theirs.
+                self.bubble.note(COPIED_ENTER if submit else COPIED)
         # Nothing else: an empty `text` means send() refused and said why in a note, and
         # hiding the bubble here is what used to take that explanation off the screen.
 
@@ -676,7 +796,7 @@ class Pill(tk.Tk):
         folder = self.settings_path.parent
         try:
             created = ensure_lexicon(self.settings_path)
-            os.startfile(folder)
+            open_path(folder)
         except OSError as exc:
             # A locked profile directory, or a shell with no handler for a folder. Said
             # on screen: the menu item did nothing visible, and there is no other place
@@ -732,6 +852,7 @@ class Pill(tk.Tk):
             workspace_note=resolve_workspace(
                 getattr(self.session, "workspace", None), None
             )[1],
+            lite=self.lite,
         ))
 
     def _open_guide(self) -> None:
@@ -787,7 +908,13 @@ class Pill(tk.Tk):
         Two cheap user-mode calls per frame, and the reason Send can be aimed at all:
         by the time `paste()` runs, the click that started it has had its chance to move
         the foreground. This is the same question asked 30 ms earlier, and filtered.
+
+        Lite has no target-window awareness (product.md), so it does not ask. Gated on
+        `lite` rather than on the platform, which is what makes `--lite` here the same
+        code a Mac runs instead of a rehearsal of it.
         """
+        if self.lite:
+            return
         hwnd = foreground_hwnd()
         if hwnd and not owned_by_flow(hwnd):
             self.paste_target = hwnd
@@ -1009,13 +1136,9 @@ class HelpWindow(tk.Toplevel):
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
         self.pill = pill
-        self.overrideredirect(True)
-        self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.0)
-        self.attributes("-transparentcolor", TRANSPARENT)
-        self.attributes("-toolwindow", True)
-        self.configure(bg=TRANSPARENT)
-        self.canvas = tk.Canvas(self, bg=TRANSPARENT, highlightthickness=0)
+        self.bg = _shell_window(self, pill.lite, 0.0)
+        self.configure(bg=self.bg)
+        self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
         self.canvas.pack()
         #: Reported rather than assumed, exactly as the pill and bubble do it: a style
         #: that failed to apply would give this window the focus the moment it opened,
@@ -1197,16 +1320,20 @@ class HelpWindow(tk.Toplevel):
 class Bubble(tk.Toplevel):
     """The draft, floated above the pill (R14) with Refine / Continue / Send (R15)."""
 
+    #: Copied from the pill at construction rather than read back off it, for the reason
+    #: the class attribute exists at all: `self.pill` is a `Mock` in several fixtures, and
+    #: `mock.lite` is a truthy Mock — so a bubble that asked its parent each time would
+    #: quietly run every Lite branch in tests that are about the full body. Same class-
+    #: attribute default as `Pill.lite`, and for the same `__getattr__` reason.
+    lite = False
+
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
         self.pill = pill
-        self.overrideredirect(True)
-        self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.0)
-        self.attributes("-transparentcolor", TRANSPARENT)
-        self.attributes("-toolwindow", True)
-        self.configure(bg=TRANSPARENT)
-        self.canvas = tk.Canvas(self, bg=TRANSPARENT, highlightthickness=0)
+        self.lite = pill.lite
+        self.bg = _shell_window(self, pill.lite, 0.0)
+        self.configure(bg=self.bg)
+        self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
         self.canvas.pack()
         self._visible = False
         self._text = ""
@@ -1714,7 +1841,12 @@ class Bubble(tk.Toplevel):
         text = self.pill.session.begin_edit()
         if text is None:
             return  # refused, and the note says why
-        self._previous_focus = foreground_hwnd()
+        # Lite skips the whole foreground argument: with no `WS_EX_NOACTIVATE` to work
+        # around, `focus_force` on an ordinary window is the whole implementation, and
+        # the verification below has nothing to verify with — left in, it would close the
+        # editor and report that "Windows kept the focus" on a machine with no Windows.
+        lite = self.lite
+        self._previous_focus = 0 if lite else foreground_hwnd()
         box = self._editor = tk.Text(
             self, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
             highlightthickness=1, highlightbackground=self.pill.accent,
@@ -1727,7 +1859,8 @@ class Bubble(tk.Toplevel):
         box.bind("<Escape>", lambda _e: (self._cancel_edit(), "break")[1])
         box.bind("<Control-Return>", lambda _e: (self._commit_edit(), "break")[1])
         self._render()
-        _user32.SetForegroundWindow(toplevel_hwnd(self))
+        if not lite:
+            _user32.SetForegroundWindow(toplevel_hwnd(self))
         box.focus_force()
         box.mark_set("insert", "end")
 
@@ -1737,7 +1870,7 @@ class Bubble(tk.Toplevel):
         # while every keystroke goes to whatever really has the focus. Measured: driven
         # without a click, the editor opened and the word typed into it landed in the
         # browser behind. Better to close and say so than to swallow somebody's typing.
-        if not owned_by_flow(foreground_hwnd()):
+        if not lite and not owned_by_flow(foreground_hwnd()):
             self._close_editor()
             self.pill.session.cancel_edit()
             self.note("could not open the editor - Windows kept the focus where it was")

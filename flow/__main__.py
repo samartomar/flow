@@ -28,12 +28,20 @@ from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, available, named
 from .session import AUTO_ASK_SEC, Session
 
-# `.hotkey`, `.inject` and `.ui` are imported inside main(), under the platform guard,
-# and that placement is the whole point of the guard: each of the three calls
-# `ctypes.WinDLL("user32")` at import time, so on a Mac this file cannot even be read
-# into memory. A check at the top of a function that is never reached says nothing. The
-# rest of the package — session, asr, lexicon, refine, audio — is portable and stays up
-# here, which is also the honest summary of what a port would have to do.
+# `.hotkey`, `.inject` and `.ui` are imported inside main() rather than up here, and the
+# placement still matters: `hotkey` and `inject` call `ctypes.WinDLL("user32")` at import
+# time, so a Lite launch must not reach either. `ui` is the one that changed — it binds
+# Win32 behind a `sys.platform` check now, because Lite still draws a pill. The rest of
+# the package — session, asr, lexicon, refine, audio — was always portable and stays up
+# here, which is also the honest summary of what the body costs and the brain does not.
+
+#: Said on every Lite launch, before anything else, in ASCII for the reason `say()` gives.
+#: It names the platform because the two ways into Lite are a flag and an OS, and someone
+#: who did not type `--lite` deserves to be told which one they got.
+LITE_LINE = (
+    "Flow Lite on {platform}: Send copies the draft and you paste it - no injection, "
+    "no global hotkeys, nothing to grant but the microphone."
+)
 
 
 def say(msg: str) -> None:
@@ -48,22 +56,6 @@ def say(msg: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # First, and above argparse: a Mac user's first impression of this product should be
-    # a sentence they can act on, not a stack trace from ctypes about a DLL they have
-    # never heard of. Above the flags too — being told the flag is wrong when the
-    # platform is the problem is the smaller answer to the larger question. The port is
-    # parked on Mac users existing and Mac hardware to re-measure on, not on the code
-    # being unportable (docs/decisions.md, "Distribution").
-    if sys.platform != "win32":
-        say("Flow's paste and hotkey layer is Windows-only today, so it cannot run "
-            f"on {sys.platform} - see the README's Install section for what a port "
-            "would take.")
-        return 2
-
-    from .hotkey import DEFAULT_BINDINGS, Hotkeys
-    from .inject import paste, take_warnings
-    from .ui import Pill
-
     ap = argparse.ArgumentParser(prog="flow", description=__doc__)
     ap.add_argument(
         "--partial-model", default=PARTIAL_MODEL,
@@ -133,7 +125,32 @@ def main(argv: list[str] | None = None) -> int:
         "--cli-timeout", type=float, default=REFINE_TIMEOUT_SEC, metavar="SEC",
         help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f})",
     )
+    ap.add_argument(
+        "--lite", action="store_true",
+        help="clipboard-out mode: Send copies the draft instead of pasting it, and no "
+             "hotkeys are registered (automatic off Windows)",
+    )
     args = ap.parse_args(argv)
+
+    # The platform is read once, here, and only to choose a body. Everything downstream
+    # reads `lite`, which is why `--lite` on Windows runs the same code a Mac runs rather
+    # than a rehearsal of it — and why every Lite path is a unit test with no desktop.
+    #
+    # This used to be a refusal above argparse, on the argument that being told a flag is
+    # wrong when the platform is the problem answers the smaller question. That was right
+    # while the platform *was* the problem; it is not one any more (decisions.md,
+    # "Flow Lite").
+    lite = args.lite or sys.platform != "win32"
+    if lite:
+        say(LITE_LINE.format(platform=sys.platform))
+        if args.no_paste:
+            # Accepted rather than refused: a launcher shared between two machines should
+            # not fail on a flag that has simply run out of things to suppress.
+            say("  (--no-paste has nothing to suppress here - the copy is the send)")
+    if not lite:
+        from .hotkey import DEFAULT_BINDINGS, Hotkeys
+        from .inject import paste, take_warnings
+    from .ui import Pill
 
     from .asr import WhisperTranscriber
 
@@ -244,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         cli=pinned,
         cli_timeout=args.cli_timeout,
         refine_cwd=workspace,
+        lite=lite,
     )
 
     if args.calibrate:
@@ -285,12 +303,15 @@ def main(argv: list[str] | None = None) -> int:
                 "(--no-auto-ask to press it yourself)")
         else:
             say("auto-ask: off - press Ask when you are ready")
+    elif lite:
+        say("mode: DICTATE - Send copies the draft, and you paste it "
+            "(--converse, or the right-click menu, to ask instead)")
     else:
         say("mode: DICTATE - Send pastes into the focused window "
             "(--converse, or ctrl+alt+M, to ask instead)")
 
     hotkeys = None
-    if not args.no_hotkeys:
+    if not args.no_hotkeys and not lite:
         hotkeys = Hotkeys(DEFAULT_BINDINGS)
         if hotkeys.start():
             for action, combo in hotkeys.chosen.items():
@@ -314,6 +335,10 @@ def main(argv: list[str] | None = None) -> int:
         The return value is what the bubble shows. Both halves of that are new: the
         warnings were collected and never drained by anybody, and a failure went to a
         stderr nobody is watching while the button reported success.
+
+        Never reached in Lite, and not merely unused there: `paste` and `take_warnings`
+        are not imported, so this closure has nothing to resolve — which is why the pill
+        is handed `None` rather than a handler that would fail on its first call.
         """
         if args.no_paste:
             say(f"\n--- draft ---\n{text}{' [+Enter]' if submit else ''}\n")
@@ -351,8 +376,9 @@ def main(argv: list[str] | None = None) -> int:
     # there either way, and creating a template beside the source is nobody's idea of
     # settings.
     Pill(
-        session, on_send=on_send, hotkeys=hotkeys, arm=args.arm,
+        session, on_send=None if lite else on_send, hotkeys=hotkeys, arm=args.arm,
         settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
+        lite=lite,
     ).mainloop()
     return 0
 

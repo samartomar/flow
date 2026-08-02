@@ -17,6 +17,12 @@ two are pure Python and stdlib, which is why the pill is on screen in 0.40 s and
 literal correction is microseconds. The three declared dependencies only matter in one
 box, and only two boxes are another process.
 
+The Surface band is also where the OS line falls, and it is not drawn evenly across it.
+`hotkey.py` and `inject.py` bind `user32` at import and are the hands; `help.py` is
+portable; and `ui.py` binds Win32 behind a `sys.platform` check, because Lite still draws
+a pill (§7, and product.md's Lite definition). Everything below the top band was always
+portable, which is why the second body costs a branch rather than a port.
+
 ```mermaid
 flowchart TB
     surface["<b>Surface</b> — tkinter and ctypes, stdlib only<br/>ui.py · hotkey.py · inject.py · help.py"]
@@ -552,6 +558,43 @@ Three things now hold, and they are independent on purpose:
    deliberately not a refusal: that is the OS declining to answer, not evidence that
    somebody else is holding it.
 
+### Lite
+
+`--lite`, and automatic when `sys.platform` is not `win32`. **The platform decides what
+can be imported; `lite` decides what happens.** `main()` reads the platform exactly once,
+to choose a body, and every branch after that reads the flag — which is why `--lite` on
+Windows is not a rehearsal of the Mac path but the same code, and why every Lite path is
+a unit test with no desktop.
+
+Send becomes a copy: `Pill._copy` puts the draft on Tk's own clipboard, `update_idletasks`
+flushes it (`update` would service the pending `after` callbacks and re-enter the frame
+pump), and the note hands the last step back — "copied — paste where you need it". The
+sent card is drawn exactly as it is for a paste, because R5 does not weaken with the body.
+Measured on this machine: after `_copy`, `inject.get_clipboard_text` — a Win32 read, a
+different implementation from the one that wrote it — returns the draft verbatim.
+
+**The spoken enter-variant collapses into the plain one**, and says so: "copied — Enter is
+yours to press". Refusing it was the alternative and it is wrong on `edits.enter_word`'s
+own argument — a decode that drops a word from "enter boom" yields "boom", so a refusing
+enter-variant would make the degraded decode the working case and the fuller utterance the
+broken one, which is the inversion the word order exists to prevent. It is offered nowhere
+in Lite (not in the sheet, not in the trigger note) and understood anyway, because somebody
+who learned it in the full body will still say it.
+
+What is not built rather than disabled: no `Hotkeys` (arming is the click that already
+exists), no `paste` import and therefore no `on_send` at all, no `_track_target`, and none
+of the foreground borrowing the menu and the hand editor do — a Lite window is not in the
+`WS_EX_NOACTIVATE` chain, so it takes the keyboard the ordinary way. `-transparentcolor`
+and `-toolwindow` are Windows-only Tk attributes and are not asked for; the windows take
+an opaque background instead, because the keyed colour is invisible only while something
+keys it out.
+
+Known and left alone: Tk normalises line endings on write, so a draft copied on Windows
+arrives CRLF. Flow's drafts are LF-only (nothing in `edits.py` emits a `\r`), so that is
+the platform convention rather than a translation of the user's text — but feeding it text
+that is *already* CRLF yields `\r\r\n`, which is worth knowing before anything else in
+this app starts copying arbitrary strings.
+
 ### Send, spoken
 
 Two words press it. `boom` pastes; `enter boom` pastes and then submits with Enter, and
@@ -891,6 +934,10 @@ policy here; it is enforced by absence.
     below. The second is why "aimed at" is the promise rather than "aimed at, probably":
     the caller polls 30 ms before the click, and 30 ms is long enough for something else
     to take the foreground.
+    Lite keeps this invariant by not being able to break it: it aims at nothing, holds no
+    target, and never synthesises a keystroke, so the promise is met vacuously and the
+    clipboard is the whole handoff (§7). That is the shape every hands-dependent invariant
+    takes in the second body, and the reason none of them needed a Lite clause of its own.
 11. **An old result never overwrites newer intent.** Every CLI call carries an operation
     id and the `Draft.revision` it was computed from. A rewrite whose draft moved during
     the ~7 s it took is discarded with a note saying so, rather than deleting whatever was
@@ -929,7 +976,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (890 tests, ~16 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (926 tests, ~16 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

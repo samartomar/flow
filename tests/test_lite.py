@@ -11,13 +11,23 @@ word, because a promise nothing checks is the one that goes stale first.
 """
 
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from flow import help as helpmod  # noqa: E402
+from flow.audio import BLOCK  # noqa: E402
+from flow.session import Session  # noqa: E402
+
 PRODUCT = Path(__file__).resolve().parent.parent / "docs" / "product.md"
+
+DRAFT = "Ship the release notes on Tuesday."
 
 #: The four things Lite is *not*, from the decision entry. Stated as exclusions rather
 #: than as "not yet": each one is what buys the only property Lite has that full Flow does
@@ -122,6 +132,338 @@ class TestProductMdKnowsThereAreTwoBodies(unittest.TestCase):
                      "Writing code by voice", "General voice control",
                      "Being an AI itself"):
             self.assertIn(lead, goals)
+
+
+# ---------------------------------------------------------------------------
+# and the body that obeys it
+# ---------------------------------------------------------------------------
+
+
+class FakeMic:
+    def __init__(self) -> None:
+        self.level_db = -60.0
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    @property
+    def active(self) -> bool:
+        return True
+
+    def restart(self) -> None: ...
+
+    def drain(self) -> list[np.ndarray]:
+        return []
+
+
+class FakeAsr:
+    loading = False
+
+    def load(self, final=None) -> None: ...
+
+    def text(self, audio, *, final=False, hotwords="") -> str:
+        return ""
+
+
+def session(**kw) -> Session:
+    return Session(asr=FakeAsr(), mic=FakeMic(), **kw)
+
+
+class Pill:
+    """A pill whose clipboard is a list — `test_triggers.Pressed`, one body over.
+
+    Built at the same layer and for the same reason: what a spoken trigger *means* in
+    Lite is decided in `Pill._send`, which the router reaches through the same `send`
+    event the full body uses. A check that stopped at the session would be asserting an
+    event was emitted, not that anything was copied.
+
+    `lite` is set here rather than left to a default, and that is not tidiness:
+    `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on an instance
+    whose `__init__` has not run a missing one recurses instead of defaulting (item 32
+    found this the hard way). The attribute has to exist.
+    """
+
+    def __init__(self, s: Session, lite: bool = True) -> None:
+        import flow.ui as ui
+
+        self.copied: list[str] = []
+        self.pasted: list[tuple[str, bool]] = []
+        self.flushes = 0
+        self.pill = ui.Pill.__new__(ui.Pill)
+        self.pill.session = s
+        self.pill.lite = lite
+        self.pill.on_send = self._on_send
+        self.pill.paste_target = 0x22
+        self.pill.bubble = mock.Mock()
+        self.pill._flash = 0
+        self.pill.clipboard_clear = self.copied.clear
+        self.pill.clipboard_append = self.copied.append
+        self.pill.update_idletasks = self._flush
+        self.session = s
+
+    def _flush(self) -> None:
+        self.flushes += 1
+
+    def _on_send(self, text: str, target=None, submit: bool = False) -> str:
+        self.pasted.append((text, submit))
+        return ""
+
+    def say(self, utterance: str) -> None:
+        self.session._route(utterance)
+        while events := self.session.events():
+            for ev in events:
+                if ev.kind == "send":
+                    self.pill._send(submit=ev.text == "enter")
+                elif ev.kind == "note":
+                    self.pill.bubble.note(ev.text)
+
+    def notes(self) -> str:
+        return " | ".join(str(c.args[0]) for c in self.pill.bubble.note.call_args_list)
+
+
+class TestSendInLiteIsACopy(unittest.TestCase):
+    def setUp(self):
+        self.s = session()
+        self.p = Pill(self.s)
+        self.s.draft.set(DRAFT)
+
+    def test_the_draft_goes_to_the_clipboard_and_nowhere_else(self):
+        # `on_send` is the paste closure, and in Lite `__main__` does not even build one.
+        # Asserting it is untouched is asserting the injection path is unreachable rather
+        # than merely unused.
+        self.p.pill._send()
+        self.assertEqual(self.p.copied, [DRAFT])
+        self.assertEqual(self.p.pasted, [])
+
+    def test_the_note_hands_the_paste_back_to_the_user(self):
+        self.p.pill._send()
+        self.assertIn("copied", self.p.notes())
+        self.assertIn("paste where you need it", self.p.notes())
+
+    def test_the_words_stay_on_screen_the_way_a_paste_leaves_them(self):
+        # R5 is not weakened by the body change: a copy that goes wrong has to be as
+        # recoverable as a paste that does, so the sent card is drawn either way.
+        self.p.pill._send()
+        self.p.pill.bubble.show_sent.assert_called_once_with(DRAFT)
+
+    def test_a_clipboard_that_refuses_is_said_out_loud(self):
+        import tkinter as tk
+
+        def refuse(_text=None):
+            raise tk.TclError("clipboard busy")
+
+        self.p.pill.clipboard_append = refuse
+        self.p.pill._send()
+        args = self.p.pill.bubble.show_sent.call_args.args
+        self.assertEqual(args[0], DRAFT, "the words are still recoverable")
+        self.assertIn("clipboard busy", args[1])
+        self.assertTrue(self.p.pill._flash, "a failed handoff has to be looked at")
+
+    def test_the_flush_is_not_skipped(self):
+        # Tk owns the selection while the interpreter lives; without a flush the copy can
+        # be a promise to a clipboard nobody comes back to read.
+        self.p.pill._send()
+        self.assertEqual(self.p.flushes, 1)
+
+    def test_full_mode_still_pastes_and_never_copies(self):
+        p = Pill(session(), lite=False)
+        p.session.draft.set(DRAFT)
+        p.pill._send(submit=True)
+        self.assertEqual(p.pasted, [(DRAFT, True)])
+        self.assertEqual(p.copied, [])
+
+
+class TestTheEnterVariantCollapses(unittest.TestCase):
+    """The one question the fence asks of Lite, answered and pinned.
+
+    A refusal was the alternative and it is the wrong answer on `edits.enter_word`'s own
+    argument: a decode that drops a word from "enter boom" yields "boom", so a refusing
+    enter-variant would make the *degraded* decode the working case and the fuller
+    utterance the broken one. That is the inversion the word order exists to prevent, and
+    it must not come back one layer up.
+    """
+
+    def setUp(self):
+        self.s = session()
+        self.p = Pill(self.s)
+        self.s.draft.set(DRAFT)
+
+    def test_it_copies_rather_than_refusing(self):
+        self.p.pill._send(submit=True)
+        self.assertEqual(self.p.copied, [DRAFT])
+
+    def test_and_says_what_did_not_happen(self):
+        self.p.pill._send(submit=True)
+        self.assertIn("Enter is yours to press", self.p.notes())
+
+    def test_both_spoken_triggers_reach_it_through_the_router(self):
+        # End to end from the utterance, because the collapse has to survive the route,
+        # not just the method call. The grammar keeps both words in Lite: somebody who
+        # learned "enter boom" in the full body will still say it.
+        for said, expect in (("boom", "paste where you need it"),
+                             ("enter boom", "Enter is yours to press")):
+            with self.subTest(said=said):
+                s = session()
+                p = Pill(s)
+                s.draft.set(DRAFT)
+                p.say(said)
+                self.assertEqual(p.copied, [DRAFT])
+                self.assertIn(expect, p.notes())
+
+
+class TestLiteHasNoTarget(unittest.TestCase):
+    def _pill(self, lite: bool):
+        import flow.ui as ui
+
+        pill = ui.Pill.__new__(ui.Pill)
+        pill.lite = lite
+        pill.paste_target = None
+        return pill
+
+    def test_the_foreground_is_never_asked_about_in_lite(self):
+        # No target-window awareness (product.md). Read off `lite` rather than off the
+        # platform, which is what makes `--lite` on Windows the same code a Mac runs
+        # instead of a rehearsal of it.
+        import flow.ui as ui
+
+        pill = self._pill(lite=True)
+        with mock.patch.object(ui, "foreground_hwnd", return_value=0x99) as asked:
+            pill._track_target()
+        self.assertIsNone(pill.paste_target)
+        asked.assert_not_called()
+
+    def test_full_mode_still_tracks_it(self):
+        import flow.ui as ui
+
+        pill = self._pill(lite=False)
+        with mock.patch.object(ui, "foreground_hwnd", return_value=0x99), \
+                mock.patch.object(ui, "owned_by_flow", return_value=False):
+            pill._track_target()
+        self.assertEqual(pill.paste_target, 0x99)
+
+
+class TestTheWindowsOnlyTkAttributes(unittest.TestCase):
+    """`-transparentcolor` and `-toolwindow` exist only on Windows.
+
+    Asking for either off-Windows is a `TclError` before the pill is ever drawn, and the
+    keyed colour is invisible only *because* something keys it out — without the
+    attribute it is a magenta rectangle where the app should be.
+    """
+
+    class FakeWindow:
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        def overrideredirect(self, _flag) -> None: ...
+
+        def attributes(self, name, _value=None) -> None:
+            self.asked.append(name)
+
+    def test_lite_asks_for_neither_and_takes_an_opaque_background(self):
+        import flow.ui as ui
+
+        win = self.FakeWindow()
+        bg = ui._shell_window(win, lite=True, alpha=0.94)
+        self.assertEqual(bg, ui.SHELL)
+        self.assertNotIn("-transparentcolor", win.asked)
+        self.assertNotIn("-toolwindow", win.asked)
+        self.assertIn("-topmost", win.asked)
+
+    def test_full_mode_asks_for_both_and_keeps_the_keyed_colour(self):
+        import flow.ui as ui
+
+        win = self.FakeWindow()
+        bg = ui._shell_window(win, lite=False, alpha=0.94)
+        self.assertEqual(bg, ui.TRANSPARENT)
+        self.assertIn("-transparentcolor", win.asked)
+        self.assertIn("-toolwindow", win.asked)
+
+
+class TestOpeningAThingWithoutStartfile(unittest.TestCase):
+    """`os.startfile` does not exist off Windows, and it is the whole of two menu entries."""
+
+    def test_windows_still_uses_the_shell_it_always_did(self):
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch("os.startfile", create=True) as shell:
+            helpmod.open_path("C:/somewhere")
+        shell.assert_called_once_with("C:/somewhere")
+
+    def test_darwin_and_linux_get_their_own_openers(self):
+        for platform, opener in (("darwin", "open"), ("linux", "xdg-open")):
+            with self.subTest(platform=platform):
+                with mock.patch.object(sys, "platform", platform), \
+                        mock.patch("subprocess.run") as run:
+                    helpmod.open_path("/somewhere")
+                self.assertEqual(run.call_args.args[0], [opener, "/somewhere"])
+
+    def test_a_failure_still_arrives_as_the_oserror_the_menu_reports(self):
+        # Both callers catch OSError and put the reason on the bubble. A
+        # CalledProcessError escaping instead would take the pill's menu handler with it.
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch("subprocess.run",
+                           side_effect=subprocess.CalledProcessError(1, "open")):
+            with self.assertRaises(OSError):
+                helpmod.open_path("/somewhere")
+
+
+class TestTheSheetDropsWhatLiteDoesNotHave(unittest.TestCase):
+    """Absent, not disabled-looking. A greyed-out row is still a row about hands."""
+
+    @staticmethod
+    def flat(**kw) -> str:
+        return " | ".join(f"{left} {right}" for _kind, left, right
+                          in helpmod.rows(**kw))
+
+    def test_lite_offers_the_plain_word_and_not_the_enter_variant(self):
+        text = self.flat(lite=True, send_words=("tango", "enter tango"))
+        self.assertIn("tango", text)
+        self.assertNotIn("enter tango", text)
+
+    def test_full_mode_still_offers_both(self):
+        text = self.flat(send_words=("tango", "enter tango"))
+        self.assertIn("enter tango", text)
+
+    def test_lite_has_no_hotkey_section_because_it_registers_none(self):
+        hotkeys = mock.Mock(chosen={"toggle": "ctrl+shift+space"}, failed=[])
+        text = self.flat(lite=True, hotkeys=hotkeys)
+        self.assertNotIn("ctrl+shift+space", text)
+        self.assertIn("Click the pill", text)
+
+    def test_and_it_does_not_tell_you_to_paste_into_a_window_it_cannot_see(self):
+        text = self.flat(lite=True)
+        self.assertNotIn("the window you were in", text)
+
+    def test_every_lite_row_still_fits_the_column_budget(self):
+        # The window draws one line per row and does not wrap, so a Lite-only row that
+        # runs off the edge is a defect the suite has to catch rather than the screen.
+        limits = {"pair": (helpmod.MAX_LEFT, helpmod.MAX_RIGHT),
+                  "note": (helpmod.MAX_NOTE, 0),
+                  "head": (helpmod.MAX_NOTE, helpmod.MAX_RIGHT), "gap": (0, 0)}
+        for kind, left, right in helpmod.rows(lite=True):
+            with self.subTest(row=(kind, left)):
+                # A heading that carries a right column has to clear the same gutter a
+                # pair does, and it is drawn bold, so it gets the tighter budget.
+                cap = helpmod.MAX_HEAD if kind == "head" and right else limits[kind][0]
+                self.assertLessEqual(len(left), cap or len(left))
+                self.assertLessEqual(len(right), limits[kind][1] or len(right))
+
+
+class TestTheModeNoteNamesTheRightBody(unittest.TestCase):
+    def note_for(self, lite: bool) -> str:
+        s = session(lite=lite)
+        s.toggle_mode()  # into converse
+        s.events()
+        s.toggle_mode()  # and back
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def test_lite_says_it_copies(self):
+        note = self.note_for(lite=True)
+        self.assertIn("copies", note)
+        self.assertNotIn("focused window", note)
+
+    def test_full_mode_still_says_it_pastes(self):
+        self.assertIn("focused window", self.note_for(lite=False))
 
 
 if __name__ == "__main__":
