@@ -279,9 +279,23 @@ def _invoke(
     if cancel is not None and cancel.is_set():
         return None, f"{cli.name} was cancelled"
 
+    # Launch what `available()` found, not the name it looked up. The two resolvers do
+    # not agree on Windows: `shutil.which` honours `PATHEXT` and finds `codex.cmd`, while
+    # `CreateProcess` — which is what a bare name in `Popen` reaches — searches PATH
+    # appending only `.exe`. So on a machine where an agent CLI is an `npm -g` shim,
+    # which is how both CLIs document installing them, startup said "refine CLI: codex"
+    # and every call came back "codex failed to start: [WinError 2] The system cannot
+    # find the file specified". Both statements were true, which is what made it
+    # baffling. Found on a Hyper-V VM on 2026-08-02; invisible on the machine this was
+    # built on, where WinGet had put a real `codex.EXE` on the path.
+    #
+    # `or cli.argv[0]` keeps the genuinely-absent case honest: nothing is fabricated,
+    # the bare name goes to Popen, and the OSError below still says what is missing.
+    executable = shutil.which(cli.argv[0]) or cli.argv[0]
+
     try:
         proc = subprocess.Popen(
-            [*cli.argv, prompt],
+            [executable, *cli.argv[1:], prompt],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             # codex waits on stdin ("Reading additional input from stdin..."), so it

@@ -938,7 +938,7 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 | flags | `uv run python -m flow --help` | 13 flags, matching the README table |
 | build | `uv build`, then install the wheel into a fresh venv | wheel + sdist built; `flow --help` runs from a clean install. `hatchling` stays out of the runtime venv, so R16 holds |
 | hotkeys ↻ | `flow.hotkey.DEFAULT_BINDINGS` | 5 actions, 1–3 fallbacks each. `quit` is the new one: `Esc` was a Tk binding, and a window that never takes focus can never receive it |
-| agent CLI | `flow.refine.available()` | `codex`, then `claude` |
+| agent CLI | `flow.refine.available()` | `codex`, then `claude` — and `_invoke` launches **the path that lookup returned**, never the bare name. `shutil.which` honours `PATHEXT` and finds `codex.cmd`; `CreateProcess`, which is what a bare name in `Popen` reaches, appends only `.exe`. On a Hyper-V VM (2026-08-02) that gap made startup say `refine CLI: codex` while every Ask returned `codex failed to start: [WinError 2] The system cannot find the file specified` — both true at once. Invisible on the development machine, where WinGet had installed real `.EXE`s; certain for anyone who took the `npm -g` install both CLIs document |
 | speech | `flow.speak.Speaker().available` | `True` |
 | speech state | `Speaker.say()` then poll `speaking` | `True` at t=0.00 s (gated before the first phoneme), cleared by the watcher at 7.7 s for a 23-word sentence, and cleared immediately when the host is killed |
 | echo guard | same scenario with and without the guard | without: the draft gains text transcribed from the reply playing through the speakers. With: nothing, and 50 blocks counted as discarded |

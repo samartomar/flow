@@ -9,8 +9,11 @@ refined only at the end, and from outside that looks like the CLI ignoring most 
 was asked. The last class here is about that being said out loud.
 """
 
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 import flow.refine as refine_mod
@@ -309,3 +312,63 @@ class TestTheFallbackIsReal(unittest.TestCase):
         self.assertEqual(refine_mod.named("claude").name, "claude")
         self.assertEqual(refine_mod.named("  CODEX ").name, "codex")
         self.assertIsNone(refine_mod.named("gpt"))
+
+
+class TestWhatWhichFindsIsWhatRuns(unittest.TestCase):
+    """`shutil.which` and `CreateProcess` disagree about what a bare name means.
+
+    Found on a Hyper-V VM, 2026-08-02, minutes after the repo went public: startup said
+    `refine CLI: codex` and every Ask came back **"codex failed to start; [WinError 2]
+    The system cannot find the file specified"**. Both statements were true at once.
+
+    `available()` asks `shutil.which`, which honours `PATHEXT` and so finds `codex.cmd`.
+    `_invoke` handed `subprocess.Popen` the bare string `"codex"`, and `CreateProcess`
+    searches `PATH` appending only `.exe` — it does not read `PATHEXT`. So on any machine
+    where an agent CLI is installed as a `.cmd` shim, which is what `npm -g` produces and
+    what both CLIs document, Flow reported a CLI it could never start.
+
+    It never showed up here because this machine installed both through WinGet, which
+    puts real `codex.EXE` and `claude.EXE` on the path. One install method away from a
+    product whose headline feature does not work at all.
+    """
+
+    def setUp(self) -> None:
+        self.dir = tempfile.mkdtemp(prefix="cmd-shim-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        old = os.environ["PATH"]
+        self.addCleanup(os.environ.__setitem__, "PATH", old)
+        os.environ["PATH"] = self.dir + os.pathsep + old
+
+    def _shim(self, name: str, says: str = "SHIMMED") -> str:
+        p = Path(self.dir) / f"{name}.cmd"
+        p.write_text(f"@echo {says}\n", encoding="utf-8")
+        return str(p)
+
+    def test_a_cmd_shim_is_found_and_actually_starts(self):
+        self._shim("faketool")
+        cli = Cli("faketool", ("faketool",))
+        self.assertIsNotNone(shutil.which("faketool"), "which must find the shim")
+        out, reason = refine_mod._invoke(cli, "a prompt", timeout=30)
+        self.assertIsNotNone(out, reason)
+        self.assertIn("SHIMMED", out)
+
+    def test_the_launch_uses_the_path_the_lookup_returned(self):
+        # The invariant the defect broke, stated once: presence and launch must not use
+        # two different resolvers. Asserted on the argv rather than by running anything,
+        # because on a machine that has a real codex.EXE further down PATH the bare name
+        # *does* start something — just not the shim `which` found, which is a quieter
+        # version of the same bug and would have made a launch-based test pass here.
+        shim = self._shim("codex")
+        self.assertIn("codex", [c.name for c in refine_mod.available()])
+        with mock.patch("subprocess.Popen", side_effect=OSError("stopped here")) as run:
+            refine_mod._invoke(refine_mod.named("codex"), "a prompt", timeout=30)
+        self.assertEqual(run.call_args.args[0][0], shutil.which("codex"))
+        self.assertEqual(run.call_args.args[0][0].lower(), shim.lower())
+
+    def test_a_cli_that_is_genuinely_absent_still_reports_absent(self):
+        # The fix must not paper over the real not-found case with a fabricated path.
+        cli = Cli("nosuchtool", ("nosuchtool",))
+        self.assertIsNone(shutil.which("nosuchtool"))
+        out, reason = refine_mod._invoke(cli, "a prompt", timeout=30)
+        self.assertIsNone(out)
+        self.assertIn("nosuchtool", reason)
