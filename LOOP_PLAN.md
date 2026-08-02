@@ -157,9 +157,8 @@ zipped, attached to a GitHub Release by a workflow that runs on tag push.
 - Doc sync: architecture.md's Verification section gains one line on where releases
   come from and that the suite gates them.
 - Status: (not started — item 27 first, so the release ships with a LICENSE inside.
-  Amended by the split decision: the workflow file ships *in the public snapshot* and
-  runs there — the public repo must build its own releases, which is also the proof
-  the snapshot is complete)
+  The split was superseded the same evening: this repo IS the public repo, and the
+  workflow runs right here on tag push)
 
 ### 29. The publish script — one command turns the private repo into the public snapshot
 Owner-decided 2026-08-01 (decisions.md "Distribution amendment"). Two repos is a
@@ -192,8 +191,10 @@ is the source of truth; the public repo (samartomar/flow) receives a curated sna
   one it deliberately withholds.
 - Doc sync: architecture.md's Verification section notes that the public repo is a
   generated snapshot and where it is generated from.
-- Status: (not started — runs after 26–28; the first real publish is the owner's
-  Stage 2)
+- Status: **superseded, never started** — the split-repo decision was reversed the
+  same evening (decisions.md "Distribution, final"): the repo goes public in place,
+  so there is no snapshot to publish and no second remote. Kept as the record of a
+  spec that was right for a decision that did not survive the hour. Do not execute.
 
 ## Backlog — "prepare" tier
 

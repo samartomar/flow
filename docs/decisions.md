@@ -197,7 +197,27 @@ and the trigger words live in `profile.json` — defaults must therefore work ou
 box, and re-wording them is the one step that still needs an editor. Spec'd as
 LOOP_PLAN item 22.
 
-### 2026-08-01 — Distribution amendment, same day: split repos — private working, public snapshot
+### 2026-08-01 — Distribution, final: public in place, one repo — the split is superseded
+
+Third position in one evening, and the one that closed it deliberately rather than by
+mood: **flip this repo public as it stands.** The working notes ship — NEEDS_YOU, this
+file, docs/history/, the live-check rows with the owner's decoded utterances — because
+the owner's real objection dissolved on inspection: the personal-layer problem is what
+their own **ai-continuum** exists to solve ("that was the reason i am building
+ai-continuum — so i can store my personal notes there and you can still refer to
+them"). Going forward, personal working notes belong in ai-continuum, referable by
+agents and decoupled from any repo; the repo keeps the engineering record, which is its
+credibility. Audio verified clean before the word was taken: all 49 tracked WAVs are
+machine-synthesized or script-remade fixtures, the volunteer recordings are untracked,
+outside the repo, and rewritten out of history (P4, force-push verified), and the
+license-murky corpora were never committed. The one-way door was named and accepted:
+public is permanent in practice — clones and mirrors survive any later flip back.
+**Item 29 (publish script) and the gosaminfo transfer are retired unexecuted**; the
+split entry below stands as the record of a position held for one hour. Parked,
+owner-paced: migrating the live personal layer (NEEDS_YOU-style notes, future
+decisions) into ai-continuum — a workflow change, not a tonight change.
+
+### 2026-08-01 — Distribution amendment, superseded same evening: split repos — private working, public snapshot
 
 Supersedes the single-repo flip below, on the owner's actual constraint surfacing: the
 working layer (NEEDS_YOU.md, LOOP_PLAN.md, decisions.md, docs/history/,
