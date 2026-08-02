@@ -1682,12 +1682,27 @@ class Bubble(tk.Toplevel):
         bottom on an ordinary answer and 3 515 px on an artifact, at every pill corner.
         The height is fitted in `_render` now (`work_h`), which is what makes the
         arithmetic below a guarantee rather than a best effort.
+
+        Fitting it exposed the next thing, at the desk: with the pill dragged to the top of
+        the work area there is no "above" left, so the bubble clamped to the top edge and
+        was drawn **over the pill it is anchored to**. Nothing clipped — that is item 42's
+        guarantee and it survives — but an anchor pointing at something it covers is not
+        an anchor. Below is the fallback, and only that.
         """
         left, top, right, bottom = self.pill.work
         x = self.pill.x + PILL_W - BUBBLE_W
-        y = self.pill.y - self._h - 10 + lift
+        above = self.pill.y - self._h - 10
+        below = self.pill.y + PILL_H + 10
+        # Above whenever above fits, which is every ordinary placement and is why this
+        # reads as one anchor rather than two. Below only when above has no room and below
+        # does — a fallback, not a mode. When *neither* fits, `above` goes through and the
+        # clamp below does what it has always done: a window as tall as the desktop cannot
+        # be placed clear of a pill on either side of it, and inventing a third rule for
+        # that would be pretending otherwise.
+        y = below if above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR \
+            else above
         x = max(left + EDGE_AIR, min(x, right - BUBBLE_W - EDGE_AIR))
-        y = max(top + EDGE_AIR, min(y, bottom - self._h - EDGE_AIR))
+        y = max(top + EDGE_AIR, min(y + lift, bottom - self._h - EDGE_AIR))
         self.geometry(f"{BUBBLE_W}x{self._h}+{x}+{y}")
 
     def _float_up(self) -> None:

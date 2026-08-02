@@ -233,18 +233,24 @@ def corners(pill_w: int = None, pill_h: int = None):
     }
 
 
-def placed(b, x: int, y: int) -> tuple[int, int, int, int]:
-    """Render with the pill at (x, y) and return the window rect `reposition` computes.
+def geometry_of(b, x: int, y: int) -> str:
+    """Render with the pill at (x, y) and return the geometry string itself.
 
-    The real `reposition` rather than the fixture's stub, and the geometry string it builds
-    rather than a recomputation of it: what is being pinned is where the window is *put*.
+    The real `reposition` rather than the fixture's stub, and the string it built rather
+    than a recomputation of it: a check that re-derives the formula it is checking passes
+    whatever the formula says.
     """
     b.pill.x, b.pill.y = x, y
     b.reposition = ui.Bubble.reposition.__get__(b)
     box: list[str] = []
     b.geometry = box.append
     b._render()
-    size, _, offset = box[-1].partition("+")
+    return box[-1]
+
+
+def placed(b, x: int, y: int) -> tuple[int, int, int, int]:
+    """The window rect `reposition` computes, as (x1, y1, x2, y2)."""
+    size, _, offset = geometry_of(b, x, y).partition("+")
     w, _, h = size.partition("x")
     px, _, py = offset.partition("+")
     return int(px), int(py), int(px) + int(w), int(py) + int(h)
@@ -322,6 +328,126 @@ class TestTheWindowIsInsideTheWorkAreaWhereverThePillIs(unittest.TestCase):
         x1, y1, _x2, y2 = placed(b, *corners()["bottom-right"])
         self.assertEqual(y1, top + ui.EDGE_AIR)
         self.assertEqual(y2, bottom - ui.EDGE_AIR)
+
+
+#: Three x positions along the top edge of the work area — the pill dragged where there is
+#: no "above" left. Left, middle and right, because the anchor is horizontal as well as
+#: vertical and a fallback that only worked in one corner would pass a single-point check.
+def along_the_top() -> dict[str, tuple[int, int]]:
+    left, top, right, _bottom = WORK
+    return {
+        "top-left": (left, top),
+        "top-middle": ((left + right - ui.PILL_W) // 2, top),
+        "top-right": (right - ui.PILL_W, top),
+    }
+
+
+#: Every geometry string `reposition` produced **before** item 44, captured by running the
+#: harness against the tree as it stood. This is the regression half and it is a table rather
+#: than a formula on purpose: a check that recomputes what it is checking cannot fail.
+#:
+#: The rows absent from it are the ones the fallback is *for* — a draft-sized window with the
+#: pill along the top, where "above" has no room. Everything else must come through byte for
+#: byte, including the reply-sized windows at the top, which are taller than either side of
+#: the pill and so keep today's clamp.
+GEOMETRY_BEFORE = {
+    ("1k draft", "bottom-left"): "380x414+8+208",
+    ("1k draft", "bottom-right"): "380x414+892+208",
+    ("1k draft", "mid-left"): "380x414+8+8",
+    ("50k draft", "bottom-left"): "380x414+8+208",
+    ("50k draft", "bottom-right"): "380x414+892+208",
+    ("50k draft", "mid-left"): "380x414+8+8",
+    ("4k reply", "top-left"): "380x656+8+8",
+    ("4k reply", "top-middle"): "380x656+336+8",
+    ("4k reply", "top-right"): "380x656+892+8",
+    ("4k reply", "bottom-left"): "380x656+8+8",
+    ("4k reply", "bottom-right"): "380x656+892+8",
+    ("4k reply", "mid-left"): "380x656+8+8",
+    ("12k artifact reply", "top-left"): "380x656+8+8",
+    ("12k artifact reply", "top-middle"): "380x656+336+8",
+    ("12k artifact reply", "top-right"): "380x656+892+8",
+    ("12k artifact reply", "bottom-left"): "380x656+8+8",
+    ("12k artifact reply", "bottom-right"): "380x656+892+8",
+    ("12k artifact reply", "mid-left"): "380x656+8+8",
+}
+
+
+class TestTheBubbleOpensBelowWhenAboveHasNoRoom(unittest.TestCase):
+    """A fallback, not a mode — tooltip behaviour, and item 42's desk check found the need.
+
+    With the pill dragged to the top of the work area there is no "above" left, so the
+    bubble clamped to the top edge and was drawn **over the pill it is anchored to**.
+    Nothing clipped and nothing was unreachable — item 42 guarantees that and this must not
+    take it away — but an anchor pointing at something it covers is not an anchor.
+
+    Above is tried first and used whenever it fits. Below is used only when above does not
+    fit *and* below does. When **neither** fits — a window as tall as the desktop, which is
+    what a full reply is — the arithmetic is today's exactly and the bubble clamps to the top
+    over the pill. That case is not fixed here, deliberately: no anchor can place a window
+    taller than the space either side of it, and pretending otherwise would be a third rule.
+    """
+
+    def states(self):
+        return [
+            ("1k draft", {"_text": draft(1_000)}),
+            ("50k draft", {"_text": draft(50_000)}),
+            ("4k reply", {"_reply": draft(4_000)}),
+            ("12k artifact reply", {"_reply": draft(12_000)}),
+        ]
+
+    def test_a_pill_along_the_top_opens_the_bubble_below_it(self):
+        # The defect, stated as geometry: the bubble's top must not be above the pill's
+        # bottom. Red at all three positions before this item, where it sat at y=8 with the
+        # pill occupying y=0..40.
+        _left, top, _right, _bottom = WORK
+        for label, state in self.states()[:2]:  # the draft sizes; a reply cannot fit below
+            for name, (px, py) in along_the_top().items():
+                with self.subTest(state=label, at=name):
+                    _x1, y1, _x2, _y2 = placed(bubble(**state), px, py)
+                    self.assertGreaterEqual(
+                        y1, py + ui.PILL_H,
+                        "the bubble is drawn over the pill it is anchored to",
+                    )
+
+    def test_every_other_placement_is_byte_identical(self):
+        for (label, name), before in GEOMETRY_BEFORE.items():
+            state = dict(self.states())[label]
+            places = dict(along_the_top())
+            places.update(corners())
+            places["mid-left"] = (WORK[0], (WORK[1] + WORK[3]) // 2)
+            with self.subTest(state=label, at=name):
+                self.assertEqual(geometry_of(bubble(**state), *places[name]), before)
+
+    def test_above_is_still_the_default_wherever_it_fits(self):
+        # The other direction. A pill in its usual place has room above it, and the bubble
+        # must still be there — a fallback that fired whenever it could would be a mode.
+        b = bubble(_text=draft(1_000))
+        _x1, y1, _x2, y2 = placed(b, *corners()["bottom-right"])
+        self.assertLessEqual(y2, WORK[3] - ui.PILL_H,
+                             "the bubble should sit above the pill, not below it")
+
+    def test_when_neither_side_fits_the_clamp_is_todays(self):
+        # A full reply is as tall as the desktop, so there is no room on either side. This
+        # is the case the fallback deliberately does not fix, and it is pinned so nobody
+        # reads its absence as an oversight.
+        _left, top, _right, _bottom = WORK
+        for name, (px, py) in along_the_top().items():
+            with self.subTest(at=name):
+                _x1, y1, _x2, _y2 = placed(bubble(_reply=draft(12_000)), px, py)
+                self.assertEqual(y1, top + ui.EDGE_AIR)
+
+    def test_the_work_area_guarantee_survives_the_second_anchor(self):
+        # Item 42's property, re-asserted against the new placements: a second way to
+        # choose y is a second way to leave the desktop.
+        left, top, right, bottom = WORK
+        for label, state in self.states():
+            for name, (px, py) in along_the_top().items():
+                with self.subTest(state=label, at=name):
+                    x1, y1, x2, y2 = placed(bubble(**state), px, py)
+                    self.assertGreaterEqual(y1, top)
+                    self.assertLessEqual(y2, bottom)
+                    self.assertGreaterEqual(x1, left)
+                    self.assertLessEqual(x2, right)
 
 
 if __name__ == "__main__":

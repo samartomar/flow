@@ -795,10 +795,21 @@ and a 12 000-character artifact **4 179 px**, both pinned at `top + 8` on a 672 
 area, so the chip row landed at screen y **1 427** and **4 147**. After: **0 of 36**, every
 edge inside, the chip row at 624. The top edge was never the breach and never has been —
 worth recording, because the decision this fix comes from reads the owner's screenshot the
-other way round. The honest residue: past what fits, the tail of a very long artifact is now
-clipped by a window instead of running off the display, and the chip row sits over its last
-lines. A reply that *scrolls* is the real cure and is a proposal in NEEDS_YOU, not a claim
-made here.
+other way round.
+
+**Above by default, below when above has no room.** Fitting the height exposed the next
+thing, and the desk found it: with the pill dragged to the top of the work area there is no
+"above" left, so the bubble clamped to the top edge and was drawn *over the pill it is
+anchored to*. Nothing clipped — that guarantee holds — but an anchor pointing at something it
+covers is not an anchor. `reposition` now tries above first and uses it whenever it fits,
+which is every ordinary placement; below is used only when above does not fit **and** below
+does. Measured at three x positions along the top edge, `GetWindowRect`: a 414 px draft
+bubble moves from `(…,8)` to `(…,50)`, clear of a pill occupying y 0–40, and every other
+placement in the harness is byte-identical to what it produced before. When **neither** side
+fits — a window as tall as the desktop, which is what a full reply is — the arithmetic is the
+old one and the bubble clamps to the top over the pill. That is not an oversight and there is
+a check saying so: no anchor can place a window taller than the space on either side of it,
+and a third rule for that case would be pretending otherwise.
 
 ### Converse
 
