@@ -3,6 +3,13 @@ name = "flow"
 version = "0.1.0"
 description = "Local English dictation with a talk-to-it refine loop"
 requires-python = ">=3.12"
+# A public repo with no licence is all-rights-reserved: nobody may legally use what
+# they can read. MIT, chosen 2026-08-01, because the audience is developers who will
+# vendor a piece of this into their own tooling and the licence should not be the thing
+# they have to think about.
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Samar Tomar" }]
 # R16: keep this list at three. GUI, global hotkeys and text injection all come
 # from the stdlib (tkinter, ctypes) precisely so this table does not grow.
 dependencies = [
@@ -13,6 +20,13 @@ dependencies = [
 
 [project.scripts]
 flow = "flow.__main__:main"
+
+# `uv tool install git+…/flow` is the documented install, so the repository URL is not
+# decoration — it is the address in the command people are asked to run. The second is
+# where Flow is listed for the audience it was published for.
+[project.urls]
+Repository = "https://github.com/samartomar/flow"
+Listing = "https://github.com/samartomar/ai-harness"
 
 # R16 is about *runtime* dependencies, and this does not touch them: hatchling is fetched
 # into an isolated build environment and never enters the venv Flow runs in. Checked, not
