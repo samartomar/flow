@@ -69,7 +69,7 @@ mode-switch note) are transient signals for persistent state, the same
 lesson already paid for twice (the converse marker, the editor's countdown hold).
 Two fixes, one decision:
 1. **The moment of egress names the ground.** The asking note becomes
-   "asking codex · syntegris…" (workspace leaf name, bounded length), and the
+   "asking codex · acme…" (workspace leaf name, bounded length), and the
    converse countdown's final state carries it too — visible at the only moment it
    matters, when the question leaves.
 2. **Settings ▸ Workspace ▸** — a recents submenu, radio-checked like the trigger
