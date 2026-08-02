@@ -27,6 +27,7 @@ module that could send anything anywhere.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections import Counter
 from pathlib import Path
@@ -47,6 +48,24 @@ MAX_MISROUTES = 32
 PROMOTE_AFTER = 2
 
 SCHEMA = 1
+
+#: How many workspaces the recents submenu may carry. The same budget that caps the
+#: correction offers at three and the trigger presets at six: the menu is a native
+#: modal loop with a measured stall, so nothing offered in it may grow with usage.
+MAX_WORKSPACES = 5
+
+
+def path_key(path: str | None) -> str | None:
+    """One identity for one folder, however it was spelled.
+
+    `D:\\dev\\flow`, `D:/dev/flow` and a trailing slash are the same workspace, and on
+    Windows so is a different casing — `normcase+normpath` is the OS's own answer.
+    Identity only, never display: the stored spelling stays the user's. None passes
+    through so "no workspace" compares like any other value.
+    """
+    if not path:
+        return None
+    return os.path.normcase(os.path.normpath(path))
 
 
 def resolve_workspace(flag: str | None, profile) -> tuple[str | None, str]:
@@ -122,6 +141,12 @@ class Profile:
         #: startup and the mode-switch note both name it, so a wrong grounding is on
         #: screen rather than in a file.
         self.workspace: str | None = None
+        #: The workspaces this person has actually used, most recent first — the menu's
+        #: recents list (item 36). Fed by every `--cwd` arrival and by every menu tap;
+        #: there is deliberately no other way in, because a path that never resolved on
+        #: this machine has no business being one tap from grounding a question.
+        #: Additive, schema stays 1, bounded at MAX_WORKSPACES on save *and* load.
+        self.workspaces: list[str] = []
         #: "wrong -> right", counted. Counted rather than listed so a one-off does not
         #: become a permanent bias.
         self.pairs: Counter[str] = Counter()
@@ -161,6 +186,10 @@ class Profile:
             (raw.get("send_enter_word") or "").strip() or edits.SEND_ENTER_WORD
         )
         self.workspace = raw.get("workspace") or None
+        # Bounded on load, not only on save: the cap is a menu-stall budget, and a
+        # hand-grown file must not buy a longer menu than the flag can.
+        self.workspaces = [str(w) for w in (raw.get("workspaces") or [])
+                           if str(w).strip()][:MAX_WORKSPACES]
         self.pairs = Counter(raw.get("pairs") or {})
         self.misroutes = Counter(raw.get("misroutes") or {})
         self.dismissed = {str(k) for k in (raw.get("dismissed") or [])}
@@ -179,6 +208,7 @@ class Profile:
             "send_word": self.send_word,
             "send_enter_word": self.send_enter_word,
             "workspace": self.workspace,
+            "workspaces": list(self.workspaces[:MAX_WORKSPACES]),
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's
@@ -333,6 +363,24 @@ class Profile:
         rewrites nothing. Only the substitution did.
         """
         self.dismissed.add(f"{wrong.lower()} -> {right}")
+
+    def note_workspace(self, path: str) -> None:
+        """A workspace was chosen — by `--cwd` or by a menu tap. Most recent first.
+
+        Deduplicated by `path_key`, so a relaunch with the same flag spelled
+        differently moves the entry to the front instead of growing the list; stored
+        as `normpath` so the menu shows one canonical spelling in the user's own case.
+        A tap counts as an arrival on purpose: the daily driver switched to from the
+        menu must not be evicted by a run of one-off flags. The oldest falling off the
+        end is what "recents" means, not a loss.
+        """
+        path = os.path.normpath((path or "").strip()) if (path or "").strip() else ""
+        if not path:
+            return
+        key = path_key(path)
+        self.workspaces = [w for w in self.workspaces if path_key(w) != key]
+        self.workspaces.insert(0, path)
+        del self.workspaces[MAX_WORKSPACES:]
 
     def note_misroute(self, utterance: str) -> None:
         """An appended utterance the user immediately undid.

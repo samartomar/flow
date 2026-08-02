@@ -16,6 +16,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
@@ -44,6 +45,7 @@ from .edits import (
 #: a different word; lower-casing marks it as ordinary prose, which is the one thing not
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
+from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
 from .refine import ask, available, refine, tail_sent
@@ -70,6 +72,12 @@ WORKSHOP = (
 #: The workspace clause, empty when there is none, so an ungrounded ask does not claim
 #: a project it has not got.
 WORKSHOP_WHERE = "\nWORKSPACE: {path} - assume the prompt will be run there."
+
+#: The moment of egress names the ground (decisions.md "Workspace grounding"): the
+#: leaf, not the path, because the note is glanced at as the question leaves — and
+#: bounded, because it is the one word in that note the user's filesystem wrote.
+#: `help.MAX_HEAD`'s figure, `help._fit`'s idiom.
+WORKSPACE_LEAF_MAX = 24
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
 #: worker-idle check below, this is what bounds partial latency.
@@ -1141,6 +1149,65 @@ class Session:
         """
         return self._refine_cwd
 
+    def _workspace_leaf(self) -> str:
+        """The workspace's own name, cut to WORKSPACE_LEAF_MAX. "" when none is set."""
+        if not self._refine_cwd:
+            return ""
+        # A drive root has an empty `.name`; the path itself is the only name it has.
+        leaf = Path(self._refine_cwd).name or self._refine_cwd
+        if len(leaf) > WORKSPACE_LEAF_MAX:
+            leaf = leaf[: WORKSPACE_LEAF_MAX - 1] + "…"
+        return leaf
+
+    def set_workspace(self, path: str | None) -> bool:
+        """Switch the project questions are asked from, mid-session. True if it moved.
+
+        A workspace switch is a topic switch (decisions.md "Workspace grounding"):
+        the thread is cleared and the note says both things in one line, because
+        carrying one project's conversation into another project's grounding is the
+        contamination the switch exists to end. The refusals are the honest edges,
+        each with its own sentence:
+
+        - the **same** workspace, by path identity rather than spelling, is a no-op —
+          the one tap that clears a conversation is one that changes the ground;
+        - a folder that is **gone** is refused with the reason and switches nothing —
+          `resolve_workspace`'s stale-path honesty, at the menu instead of startup;
+        - an **ask in flight** refuses the way send() does: `_pump_ask` records the
+          answer as a turn and its op id would still match, so the old project's
+          reply would land as the first turn of the new project's thread.
+
+        The draft is deliberately untouched (R5): the words are the user's, whatever
+        ground they stand on. Persisted like the trigger word — on the tap, because a
+        choice made just before closing the app is still a choice — and a save that
+        fails is said, since next launch would then ground the old project, which is
+        exactly the trap this exists to end.
+        """
+        path = (path or "").strip() or None
+        if path_key(path) == path_key(self._refine_cwd):
+            return False
+        if path is not None and not Path(path).is_dir():
+            self.diag.write("workspace", ok=False, reason="missing")
+            self._emit("note", f"workshop: {path} no longer exists - keeping "
+                               f"{self._workspace_leaf() or 'no workspace'}")
+            return False
+        if self._ask_op is not None:
+            self._emit("note",
+                       "still waiting on the last answer - switch after it lands")
+            return False
+        self._refine_cwd = path
+        self.thread.clear()
+        self.diag.write("workspace", ok=True)
+        self._emit("note",
+                   f"workshop: {self._workspace_leaf() or 'not set'} — new conversation")
+        if self.profile is not None:
+            self.profile.workspace = path
+            if path is not None:
+                self.profile.note_workspace(path)
+            if not self.profile.save():
+                self._emit("note", f"could not save {self.profile.path} - "
+                                   "the switch lasts this session only")
+        return True
+
     @property
     def can_take_reply(self) -> bool:
         """True when there is an answer on screen to move into the draft."""
@@ -1493,7 +1560,12 @@ class Session:
             return
         if time.perf_counter() - self._settled_at < AUTO_ASK_SEC:
             return
-        self._emit("note", "no more speech - asking")
+        # The countdown's final state carries the ground too: auto-ask is the one
+        # path where words leave with no press, so its firing note is the last thing
+        # standing between a stale workspace and a question asked from it.
+        where = self._workspace_leaf()
+        self._emit("note", f"no more speech - asking · {where}" if where
+                   else "no more speech - asking")
         self.send()
 
     # -- semantic refine (off-thread: ~7 s measured) ------------------------
@@ -1721,7 +1793,15 @@ class Session:
                         sent=len(kept), mode=self.mode, artifact=artifact)
         self._cli_started = time.perf_counter()
         self._set_state(State.ASKING)
-        self._emit("note", f"asking {self._provider() or 'nobody — no CLI on PATH'}…")
+        # The moment of egress names the ground. The startup line and the mode-switch
+        # note both name the workspace and both had scrolled away by the time the
+        # misfire that decided this was asked; this note is on screen at exactly the
+        # moment the name is worth reading. No workspace → the note is unchanged, not
+        # suffixed: the absence of a name is itself legible, and "· (not set)" would
+        # be noise on the common case.
+        who = self._provider() or "nobody — no CLI on PATH"
+        where = self._workspace_leaf()
+        self._emit("note", f"asking {who} · {where}…" if where else f"asking {who}…")
         sent = len(kept)
         if sent < len(question):
             # Worse than the Refine case and worded to say so: `ask()` sends the tail

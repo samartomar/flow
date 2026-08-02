@@ -83,7 +83,8 @@ class Menu(unittest.TestCase):
     def profile(self) -> Profile:
         return Profile(self.folder / "profile.json")
 
-    def build(self, profile=None, *, speaker=None, converse=False, clis=()) -> FakeMenu:
+    def build(self, profile=None, *, speaker=None, converse=False, clis=(),
+              workspace=None) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -98,7 +99,7 @@ class Menu(unittest.TestCase):
         pill.session = mock.Mock(
             mode=ui.State.DRAFT if converse else ui.DICTATE,
             speaker=speaker, profile=profile, muted=False, auto_ask=True, cli=None,
-            send_words=(SEND_WORD, SEND_ENTER_WORD), workspace=None,
+            send_words=(SEND_WORD, SEND_ENTER_WORD), workspace=workspace,
         )
         pill.session.voices.return_value = []
         pill.settings_path = self.folder / "lexicon.txt"
@@ -273,6 +274,115 @@ class TestTheTapStoresBothWords(Menu):
         with mock.patch.object(Profile, "save", return_value=False):
             self.tap(p, "rocket")
         self.assertIn("could not save", " | ".join(self.notes))
+
+
+class TestTheWorkspaceIsARecentsList(Menu):
+    """Item 36: where converse questions are asked from, as places already chosen.
+
+    Recents rather than a browse dialog or a text field, because a path typed into a
+    dialog is free text with separators and the no-settings-dialog stance stands. New
+    paths enter once via `--cwd`; after that they are a tap. "(not set)" is a real
+    entry because running without a project is a real choice.
+    """
+
+    def workspaces(self, profile, workspace=None):
+        settings = self.build(profile, workspace=workspace).cascades["Settings"]
+        return settings.cascades.get("Workspace")
+
+    def test_recents_are_offered_radio_checked_with_not_set_last(self):
+        p = self.profile()
+        a, b = self.folder / "acme", self.folder / "globex"
+        a.mkdir()
+        b.mkdir()
+        p.note_workspace(str(a))
+        p.note_workspace(str(b))
+        sub = self.workspaces(p, workspace=str(b))
+        self.assertEqual([v for _l, v in sub.radios], [str(b), str(a), "(not set)"])
+        self.assertEqual(sub.radios[-1][0], "(not set)")
+        self.assertEqual(self.pill._workspace_var.get(), str(b))
+
+    def test_no_workspace_means_the_not_set_row_is_the_one_ticked(self):
+        # The row's value is the label itself, never "": measured on real Tk, an
+        # empty radiobutton -value reads as *unset* and falls back to the label, so a
+        # var holding "" matches no row and the tick silently never draws. What this
+        # pins is the agreement — the var's no-workspace value IS a row's value.
+        p = self.profile()
+        a = self.folder / "acme"
+        a.mkdir()
+        p.note_workspace(str(a))
+        sub = self.workspaces(p, workspace=None)
+        self.assertEqual(self.pill._workspace_var.get(), "(not set)")
+        self.assertIn(("(not set)", "(not set)"), sub.radios)
+
+    def test_a_current_workspace_off_the_list_is_shown_rather_than_dropped(self):
+        # The hand-set trigger word's rule, same reason: the menu must never open
+        # with nothing ticked, and `--cwd` wins over the profile without joining it.
+        p = self.profile()
+        cur = self.folder / "current"
+        cur.mkdir()
+        sub = self.workspaces(p, workspace=str(cur))
+        self.assertEqual(sub.radios[0], (str(cur), str(cur)))
+        self.assertEqual(self.pill._workspace_var.get(), str(cur))
+
+    def test_a_missing_folder_is_shown_and_marked_rather_than_hidden(self):
+        # The stale-path honesty resolve_workspace applies at startup, extended to
+        # the menu: a project on a detached drive is still a place the user knows.
+        p = self.profile()
+        gone = self.folder / "moved-away"
+        p.note_workspace(str(gone))
+        sub = self.workspaces(p)
+        label, value = sub.radios[0]
+        self.assertIn("missing", label)
+        self.assertEqual(value, str(gone))
+
+    def test_a_tap_hands_the_path_to_the_session(self):
+        p = self.profile()
+        a = self.folder / "acme"
+        a.mkdir()
+        p.note_workspace(str(a))
+        sub = self.workspaces(p)
+        sub.commands[str(a)]()
+        self.pill.session.set_workspace.assert_called_once_with(str(a))
+
+    def test_the_not_set_tap_hands_over_none(self):
+        p = self.profile()
+        a = self.folder / "acme"
+        a.mkdir()
+        p.note_workspace(str(a))
+        sub = self.workspaces(p)
+        sub.commands["(not set)"]()
+        self.pill.session.set_workspace.assert_called_once_with(None)
+
+    def test_no_profile_and_nothing_to_offer_both_mean_no_submenu(self):
+        # An entry that silently forgets is worse than one that is not there — and a
+        # menu of only "(not set)" is a control with nothing to switch between.
+        self.assertIsNone(self.workspaces(None))
+        self.assertIsNone(self.workspaces(self.profile()))
+
+    def test_every_entry_is_a_stored_path_or_not_set_and_nothing_invites_typing(self):
+        p = self.profile()
+        a = self.folder / "a"
+        a.mkdir()
+        p.note_workspace(str(a))
+        sub = self.workspaces(p)
+        self.assertEqual([v for _l, v in sub.radios], [str(a), "(not set)"])
+        for label in sub.commands:
+            with self.subTest(label=label):
+                self.assertNotIn("...", label)
+
+    def test_a_long_path_is_cut_from_the_left_so_the_leaf_survives(self):
+        # A path's discriminating half is its tail; the tap still gets the whole
+        # path, because the label is presentation and the value is the choice.
+        p = self.profile()
+        deep = self.folder.joinpath(*["x" * 12] * 8)
+        deep.mkdir(parents=True)
+        p.note_workspace(str(deep))
+        sub = self.workspaces(p)
+        label, value = sub.radios[0]
+        self.assertLessEqual(len(label), 60)
+        self.assertTrue(label.startswith("…"))
+        self.assertTrue(str(deep).endswith(label[1:]))
+        self.assertEqual(value, str(deep))
 
 
 if __name__ == "__main__":

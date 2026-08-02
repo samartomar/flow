@@ -29,7 +29,7 @@ from flow.clean import (  # noqa: E402
     invented_reason,
 )
 from flow.lexicon import NUL_PATH, Lexicon  # noqa: E402
-from flow.profile import Profile  # noqa: E402
+from flow.profile import MAX_WORKSPACES, Profile, path_key  # noqa: E402
 
 
 def tmp_profile() -> Profile:
@@ -713,3 +713,79 @@ class TestTheMicCanNameItself(unittest.TestCase):
         from flow.audio import Mic
 
         self.assertEqual(Mic(device=99_999).device_name, "")
+
+
+class TestTheWorkspaceRecents(unittest.TestCase):
+    """Item 36: every path that arrives via --cwd joins a bounded recents list.
+
+    Additive like `voice` and `workspace` before it — an older profile loads with an
+    empty list and the schema stays 1. The dedup key is the OS's own idea of path
+    identity, so a relaunch with the same flag spelled differently moves the entry to
+    the front instead of growing the list, and the cap is the menu-stall budget that
+    already bounds the offers and the presets: the submenu must not grow with usage.
+    """
+
+    def test_a_path_joins_the_list_exactly_once(self):
+        p = tmp_profile()
+        p.note_workspace(r"D:\dev\acme")
+        p.note_workspace(r"D:\dev\acme")
+        self.assertEqual(p.workspaces, [r"D:\dev\acme"])
+
+    def test_a_respelt_path_is_the_same_workspace(self):
+        # Separators, case and a trailing slash are spelling, not identity, on this
+        # OS — and the stored form is the canonical spelling of the latest arrival.
+        p = tmp_profile()
+        p.note_workspace(r"D:\dev\acme")
+        p.note_workspace("D:/DEV/acme/")
+        self.assertEqual(p.workspaces, [r"D:\DEV\acme"])
+
+    def test_most_recent_first_and_the_sixth_evicts_the_oldest(self):
+        p = tmp_profile()
+        for i in range(MAX_WORKSPACES + 1):
+            p.note_workspace(rf"D:\dev\p{i}")
+        self.assertEqual(len(p.workspaces), MAX_WORKSPACES)
+        self.assertEqual(p.workspaces[0], rf"D:\dev\p{MAX_WORKSPACES}")
+        self.assertNotIn(r"D:\dev\p0", p.workspaces)
+
+    def test_a_re_noted_workspace_moves_to_the_front_rather_than_duplicating(self):
+        # A tap is a use: the daily driver must not be evicted by one-off flags.
+        p = tmp_profile()
+        for name in ("a", "b", "c"):
+            p.note_workspace(rf"D:\dev\{name}")
+        p.note_workspace(r"D:\dev\a")
+        self.assertEqual(p.workspaces[0], r"D:\dev\a")
+        self.assertEqual(len(p.workspaces), 3)
+
+    def test_the_list_survives_a_reload(self):
+        p = tmp_profile()
+        p.note_workspace(r"D:\dev\acme")
+        self.assertTrue(p.save())
+        self.assertEqual(Profile(p.path).workspaces, [r"D:\dev\acme"])
+
+    def test_an_older_profile_loads_with_an_empty_list(self):
+        p = tmp_profile()
+        p.path.write_text('{"schema": 1}', encoding="utf-8")
+        self.assertTrue(p.load())
+        self.assertEqual(p.workspaces, [])
+
+    def test_a_hand_grown_file_is_bounded_on_load_not_just_on_save(self):
+        # The cap is a menu-stall budget, so it has to hold against the file too — a
+        # list grown by hand must not buy a longer menu than the flag can.
+        p = tmp_profile()
+        p.path.write_text(json.dumps({
+            "schema": 1,
+            "workspaces": [rf"D:\dev\p{i}" for i in range(20)],
+        }), encoding="utf-8")
+        self.assertTrue(p.load())
+        self.assertEqual(len(p.workspaces), MAX_WORKSPACES)
+
+    def test_blank_never_joins(self):
+        p = tmp_profile()
+        p.note_workspace("")
+        p.note_workspace("   ")
+        self.assertEqual(p.workspaces, [])
+
+    def test_path_key_is_the_os_identity_and_none_stays_none(self):
+        self.assertEqual(path_key(r"D:\dev\X"), path_key("D:/DEV/x/"))
+        self.assertIsNone(path_key(None))
+        self.assertIsNone(path_key(""))

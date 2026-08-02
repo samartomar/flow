@@ -227,7 +227,11 @@ class TestTheMenuCarriesTheOffers(Temp):
             return m
 
         pill = ui.Pill.__new__(ui.Pill)
-        pill.session = mock.Mock(mode=ui.DICTATE, speaker=None, profile=profile)
+        # `workspace` set for the reason item 34 recorded about Mock parents: an
+        # auto-created attribute is truthy, and the Workspace submenu (item 36) would
+        # read it as a current path and try to measure it.
+        pill.session = mock.Mock(mode=ui.DICTATE, speaker=None, profile=profile,
+                                 workspace=None)
         pill.settings_path = self.path
         self._notes: list[str] = []
         pill.bubble = mock.Mock()

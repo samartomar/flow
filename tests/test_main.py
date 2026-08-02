@@ -20,6 +20,7 @@ import contextlib
 import importlib
 import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -237,6 +238,59 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
             code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite"])
         self.assertEqual(code, 0)
         self.assertIn("found gemini, not yet verified", out.getvalue())
+
+
+class TestACwdLaunchFeedsTheRecents(unittest.TestCase):
+    """Item 36, asserted at the wiring: main() records a resolved --cwd.
+
+    The profile-level add-once contract lives in `test_profile.py`; what only this can
+    catch is a launch that resolves the workspace and never records it. The profile is
+    real and lives in a temp dir, and the trace is patched out, so a test launch
+    cannot write to the real `~/.flow` (Rule 5).
+    """
+
+    def setUp(self) -> None:
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name)
+        self.ws = self.dir / "acme"
+        self.ws.mkdir()
+
+    def launch(self, argv) -> int:
+        import flow.asr
+        import flow.diag
+        import flow.profile
+        import flow.ui
+
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(flow.profile, "DEFAULT_PATH",
+                                  self.dir / "profile.json"), \
+                mock.patch.object(flow.diag, "Diag"), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill"), \
+                contextlib.redirect_stdout(out):
+            return mod.main(["--no-speak", "--no-lexicon", "--lite", *argv])
+
+    def profile_on_disk(self):
+        from flow.profile import Profile
+
+        return Profile(self.dir / "profile.json")
+
+    def test_the_same_flag_across_relaunches_joins_exactly_once(self):
+        self.assertEqual(self.launch(["--cwd", str(self.ws)]), 0)
+        self.assertEqual(self.launch(["--cwd", str(self.ws)]), 0)
+        self.assertEqual(self.profile_on_disk().workspaces, [str(self.ws)])
+
+    def test_no_flag_and_a_typo_both_record_nothing(self):
+        # A path that never resolved would be a stale recents entry from birth.
+        self.assertEqual(self.launch(["--cwd", str(self.ws)]), 0)
+        self.assertEqual(self.launch([]), 0)
+        self.assertEqual(self.launch(["--cwd", str(self.dir / "typo")]), 0)
+        self.assertEqual(self.profile_on_disk().workspaces, [str(self.ws)])
 
 
 if __name__ == "__main__":

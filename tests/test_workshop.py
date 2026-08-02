@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
 
 from flow.profile import Profile, resolve_workspace  # noqa: E402
 from flow.refine import MAX_CHARS  # noqa: E402
-from flow.session import CONVERSE, WORKSHOP, Session  # noqa: E402
+from flow.session import AUTO_ASK_SEC, CONVERSE, WORKSHOP, Session  # noqa: E402
 from flow.thread import CONTEXT_CHARS  # noqa: E402
 from cli_env import cli_on_path  # noqa: E402
 
@@ -224,6 +224,211 @@ class TestTheWorkspaceIsVisible(Temp):
         s.events()
         s.toggle_mode()
         self.assertNotIn(str(self.dir), notes(s))
+
+
+class TestTheGroundIsNamedAtEgress(Temp):
+    """Item 36's first half: the moment a question leaves names the workspace leaf.
+
+    The misfire that decided this asked about one project while grounded in another,
+    and both signals that were supposed to catch it — the startup line, the mode-switch
+    note — had scrolled away hours before. The asking note fires at the one moment the
+    name is worth reading; the countdown's firing note is the path where words leave
+    with no press at all.
+    """
+
+    def asked(self, refine_cwd=None) -> list[str]:
+        with cli_on_path(), mock.patch("flow.session.ask",
+                                       return_value=("a", "codex")):
+            s = session(refine_cwd=refine_cwd)
+            s.toggle_mode()
+            s.events()
+            s._start_ask("q")
+            said = [e.text for e in s.events() if e.kind == "note"]
+            s.close()
+        return [n for n in said if n.startswith("asking")]
+
+    def test_the_asking_note_carries_the_workspace_leaf(self):
+        ws = self.dir / "acme"
+        ws.mkdir()
+        self.assertEqual(self.asked(str(ws)), ["asking codex · acme…"])
+
+    def test_with_no_workspace_the_note_is_what_it_has_always_been(self):
+        # Byte-for-byte. A "· (not set)" suffix is noise nobody asked for: the absence
+        # of a name is itself legible, and the ungrounded case is the common one.
+        self.assertEqual(self.asked(None), ["asking codex…"])
+
+    def test_the_leaf_is_bounded_like_every_string_nobody_here_wrote(self):
+        long = self.dir / ("x" * 60)
+        long.mkdir()
+        (note,) = self.asked(str(long))
+        self.assertIn("x" * 23 + "…", note)
+        self.assertNotIn("x" * 24, note)
+
+    def fired(self, refine_cwd=None) -> list[str]:
+        with cli_on_path(), mock.patch("flow.session.ask",
+                                       return_value=("a", "codex")):
+            s = session(refine_cwd=refine_cwd)
+            s.toggle_mode()
+            s.draft.set("can you hear me")
+            s._after_draft_change()
+            s.events()
+            s._settled_at -= AUTO_ASK_SEC + 0.1
+            s._pump_auto_ask()
+            said = [e.text for e in s.events() if e.kind == "note"]
+            s.close()
+        return [n for n in said if "no more speech" in n]
+
+    def test_the_countdown_final_state_carries_it_too(self):
+        # Auto-ask is the one path where words leave with no press, which is exactly
+        # why its firing note cannot stay anonymous about where they are going.
+        ws = self.dir / "acme"
+        ws.mkdir()
+        self.assertEqual(self.fired(str(ws)),
+                         ["no more speech - asking · acme"])
+
+    def test_and_without_a_workspace_the_countdown_note_is_untouched(self):
+        self.assertEqual(self.fired(None), ["no more speech - asking"])
+
+
+class TestSwitchingTheGround(Temp):
+    """Item 36's second half: one tap switches, and a switch is a topic switch.
+
+    The nailed behaviour comes from the decision entry, not from taste: carrying one
+    project's conversation into another project's grounding is precisely the
+    contamination the switch exists to end, so switching clears the thread and the
+    note says both things in one line. The refusals are the honest edges: a folder
+    that is gone, an answer still in flight, a profile that will not save.
+    """
+
+    def grounded(self, ws, profile=None) -> Session:
+        s = session(refine_cwd=ws, profile=profile)
+        s.toggle_mode()
+        s.events()
+        return s
+
+    def test_a_switch_reaches_the_next_ask_and_its_preamble(self):
+        old, new = self.dir / "old", self.dir / "new"
+        old.mkdir()
+        new.mkdir()
+        seen: list[str] = []
+        s = self.grounded(str(old))
+        self.assertTrue(s.set_workspace(str(new)))
+        self.assertEqual(s.workspace, str(new))
+
+        def fake_invoke(cli, prompt, **kw):
+            seen.append(prompt)
+            return "an answer", ""
+
+        with cli_on_path(), mock.patch("flow.refine._invoke", fake_invoke):
+            s._start_ask("q")
+            s.wait_idle(timeout=5.0)
+        s.close()
+        self.assertTrue(seen, "the CLI was never invoked")
+        self.assertIn(str(new), seen[0])
+        self.assertNotIn(str(old), seen[0])
+
+    def test_a_switch_clears_the_thread_and_says_both_things_in_one_line(self):
+        new = self.dir / "acme"
+        new.mkdir()
+        s = self.grounded(str(self.dir))
+        s.thread.add("about the old project")
+        s.events()
+        self.assertTrue(s.set_workspace(str(new)))
+        self.assertEqual(len(s.thread), 0)
+        self.assertIn("workshop: acme — new conversation", notes(s))
+
+    def test_a_same_workspace_tap_is_a_no_op_and_clears_nothing(self):
+        s = self.grounded(str(self.dir))
+        s.thread.add("still mine")
+        s.events()
+        self.assertFalse(s.set_workspace(str(self.dir)))
+        self.assertEqual(s.thread.turns, ["still mine"])
+        self.assertEqual(notes(s), "")
+
+    def test_the_same_workspace_spelt_differently_is_still_the_same(self):
+        # Path identity, not string identity: a separator or a trailing slash must
+        # not be able to clear somebody's conversation.
+        s = self.grounded(str(self.dir))
+        s.thread.add("still mine")
+        s.events()
+        respelt = str(self.dir).replace("\\", "/") + "/"
+        self.assertFalse(s.set_workspace(respelt))
+        self.assertEqual(len(s.thread), 1)
+
+    def test_unsetting_the_workspace_is_a_switch_too(self):
+        # "(not set)" is a real entry, so choosing it is a real topic switch — one
+        # rule, no special case.
+        s = self.grounded(str(self.dir))
+        s.thread.add("grounded talk")
+        s.events()
+        self.assertTrue(s.set_workspace(None))
+        self.assertIsNone(s.workspace)
+        self.assertEqual(len(s.thread), 0)
+        self.assertIn("workshop: not set — new conversation", notes(s))
+
+    def test_a_missing_path_is_refused_with_the_reason_and_switches_nothing(self):
+        # resolve_workspace's stale-path honesty, extended to the menu: shown, said,
+        # and nothing cleared on the strength of a folder that is not there.
+        gone = self.dir / "moved-away"
+        s = self.grounded(str(self.dir))
+        s.thread.add("kept")
+        s.events()
+        self.assertFalse(s.set_workspace(str(gone)))
+        self.assertEqual(s.workspace, str(self.dir))
+        self.assertEqual(len(s.thread), 1)
+        self.assertIn("no longer exists", notes(s))
+
+    def test_a_switch_mid_ask_is_refused_like_send_is(self):
+        # The answer in flight would land in a thread about a different project —
+        # `_pump_ask` adds the reply as a turn, and the op id would still match.
+        new = self.dir / "new"
+        new.mkdir()
+        s = self.grounded(str(self.dir))
+        s._ask_op = 1  # the in-flight fact itself, as send() reads it
+        self.assertFalse(s.set_workspace(str(new)))
+        self.assertEqual(s.workspace, str(self.dir))
+        self.assertIn("waiting", notes(s).lower())
+
+    def test_a_switch_is_stored_and_survives_a_reload(self):
+        # Saved on the tap like the trigger word: a choice made just before closing
+        # the app is still a choice — and next launch grounds the new project.
+        new = self.dir / "acme"
+        new.mkdir()
+        p = self.profile()
+        s = self.grounded(str(self.dir), profile=p)
+        self.assertTrue(s.set_workspace(str(new)))
+        self.assertEqual(p.workspace, str(new))
+        self.assertEqual(p.workspaces[0], str(new))
+        self.assertEqual(Profile(p.path).workspace, str(new))
+
+    def test_a_switch_that_cannot_be_saved_says_so_and_still_switches(self):
+        # The session state moved; what failed is persistence, and next launch will
+        # ground the old project — which is exactly the trap this item exists to end,
+        # so it is said rather than swallowed.
+        new = self.dir / "acme"
+        new.mkdir()
+        p = self.profile()
+        s = self.grounded(str(self.dir), profile=p)
+        with mock.patch.object(Profile, "save", return_value=False):
+            self.assertTrue(s.set_workspace(str(new)))
+        self.assertEqual(s.workspace, str(new))
+        self.assertIn("could not save", notes(s))
+
+    def test_no_profile_still_switches_for_this_session(self):
+        new = self.dir / "new"
+        new.mkdir()
+        s = self.grounded(str(self.dir))
+        self.assertTrue(s.set_workspace(str(new)))
+        self.assertEqual(s.workspace, str(new))
+
+    def test_the_draft_survives_a_switch(self):
+        # R5: the words are the user's, whatever ground they stand on.
+        new = self.dir / "new"
+        new.mkdir()
+        s = self.grounded(str(self.dir))
+        s.draft.set("half a prompt")
+        self.assertTrue(s.set_workspace(str(new)))
+        self.assertEqual(s.draft.text, "half a prompt")
 
 
 class TestP9SaysWhatItNowIs(unittest.TestCase):

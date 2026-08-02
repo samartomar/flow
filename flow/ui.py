@@ -29,7 +29,7 @@ from .lexicon import (
     ensure as ensure_lexicon,
     pairs,
 )
-from .profile import resolve_workspace
+from .profile import path_key, resolve_workspace
 from .refine import available
 from .session import DICTATE, Session, State
 
@@ -544,6 +544,7 @@ class Pill(tk.Tk):
             for candidate in clis:
                 choice(candidate.name, candidate)
             sub.add_cascade(label="Agent CLI", menu=picker)
+        self._workspace_menu(sub)
         if getattr(self.session, "speaker", None) is not None:
             sub.add_command(
                 label="Mute replies" if not self.session.muted else "Speak replies",
@@ -628,6 +629,67 @@ class Pill(tk.Tk):
         else:
             self._flash = 12
             self.bubble.note(f"could not save {profile.path}")
+
+    #: What fits in a menu row. A path is the one label here the user's filesystem
+    #: wrote, so it is cut like `edits.removed_text` cuts — and from the *left*,
+    #: because a path's discriminating half is its tail.
+    WORKSPACE_LABEL_MAX = 60
+
+    #: The "(not set)" row's label *and* its radio value. A stored path can never
+    #: equal it: every entry in the list went through `normpath`, and this is not a
+    #: path anybody's `--cwd` resolves to.
+    WORKSPACE_NOT_SET = "(not set)"
+
+    def _workspace_menu(self, parent: tk.Menu) -> None:
+        """Where questions are asked from, as a list of places already chosen.
+
+        Recents rather than a browse dialog or a text field: a path typed into a
+        dialog is free text with separators, and the no-settings-dialog stance stands.
+        New paths enter once, via `--cwd`; after that they are a tap. "(not set)" is a
+        real entry because running without a project is a real choice, and the switch
+        itself — thread cleared, note saying so — is the session's
+        (`Session.set_workspace`), so the menu stays a dispatcher like the CLI picker.
+
+        A current workspace missing from the list is shown at the top rather than
+        dropped — the hand-set trigger word's rule, for the same reason: the menu must
+        never open with nothing ticked. A folder that is gone is shown and marked
+        rather than hidden (a project on a detached drive is still a place the user
+        knows); the tap on it is refused with the reason, one layer down.
+
+        No profile, or nothing to offer, means no submenu: there is nothing to switch
+        between, and an entry that silently forgets is worse than one that is absent.
+        """
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            return
+        current = getattr(self.session, "workspace", None)
+        recents = list(getattr(profile, "workspaces", ()) or ())
+        if current and all(path_key(w) != path_key(current) for w in recents):
+            recents.insert(0, current)
+        if not recents:
+            return
+        sub = tk.Menu(parent, tearoff=0)
+        # Held on self for the reason `_voice_var` is: a Tk variable that goes out of
+        # scope stops driving the tick, and the tick is the answer to "which one".
+        # The no-workspace value is the label itself, never "": measured on real Tk,
+        # an empty radiobutton -value is read as *unset* and falls back to the label,
+        # so a var holding "" matches no row and the tick silently never draws.
+        self._workspace_var = tk.StringVar(value=current or self.WORKSPACE_NOT_SET)
+        for w in recents:
+            label = (w if len(w) <= self.WORKSPACE_LABEL_MAX
+                     else "…" + w[-(self.WORKSPACE_LABEL_MAX - 1):])
+            if not Path(w).is_dir():
+                label += "  (missing)"
+            sub.add_radiobutton(
+                label=label, value=w, variable=self._workspace_var,
+                command=lambda p=w: self.session.set_workspace(p),
+            )
+        sub.add_radiobutton(
+            label=self.WORKSPACE_NOT_SET, value=self.WORKSPACE_NOT_SET,
+            variable=self._workspace_var,
+            command=lambda: self.session.set_workspace(None),
+        )
+        parent.add_cascade(label="Workspace", menu=sub)
 
     def _voice_menu(self, parent: tk.Menu) -> None:
         """A submenu of the voices this machine actually has.

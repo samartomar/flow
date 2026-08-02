@@ -261,6 +261,14 @@ def main(argv: list[str] | None = None) -> int:
     # accepted it in exchange for.
     workspace, workspace_note = resolve_workspace(args.cwd, profile)
     say(workspace_note)
+    # Every path that arrives via the flag joins the recents the menu offers — the
+    # flag is how a new workspace enters, the list is where it lives after (item 36).
+    # Only a *resolved* flag: a typo'd --cwd in the recents would be a stale entry
+    # from birth, and a stored workspace re-resolved at launch is not an arrival.
+    # Saved now rather than at the next Send: a launch that never Sends still arrived.
+    if profile is not None and args.cwd and workspace is not None:
+        profile.note_workspace(workspace)
+        profile.save()
 
     session = Session(
         asr=WhisperTranscriber(

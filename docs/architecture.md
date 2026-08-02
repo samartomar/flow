@@ -496,6 +496,27 @@ wrong grounding is on screen rather than clever. A stored path that no longer ex
 reported and dropped, because a startup that refuses over a stale setting is worse than
 an ungrounded ask.
 
+The first real workshop session priced that bargain (decisions.md "Workspace
+grounding"): a question about one project was asked against a workspace still set to
+another, and both mitigations had scrolled away hours earlier — transient signals for
+persistent state. So **the moment of egress names the ground**: the asking note reads
+`asking codex · acme…` — the workspace *leaf*, cut at `WORKSPACE_LEAF_MAX` = 24 —
+and the auto-ask firing note carries the same suffix, because auto-ask is the one path
+where words leave with no press. No workspace set → both notes are byte-for-byte what
+they always were, deliberately unsuffixed: `· (not set)` would be noise on the common
+case. And the ground is switchable without a relaunch: `Session.set_workspace`, driven
+by the **Settings ▸ Workspace ▸** recents submenu, treats a switch as a topic switch —
+the thread is cleared and one line says both things (`workshop: acme — new
+conversation`), because carrying one project's conversation into another project's
+grounding is the contamination the decision exists to end. A same-workspace tap
+(compared by `normcase+normpath` identity, not spelling) is a no-op and clears nothing;
+a folder that is gone refuses with the reason and switches nothing; a switch while an
+ask is in flight refuses the way `send()` does, since `_pump_ask` would land the old
+project's reply as the first turn of the new project's thread. The draft is never
+touched (R5), and a successful switch persists on the tap, with a failed save said out
+loud — a switch that lasts one session grounds the *old* project next launch, which is
+the trap this exists to end.
+
 **The send triggers.** `send_trigger` is checked first of all and with no draft condition, because it presses a button and a button that works only when the router likes the draft is one that sometimes does nothing. It is also ahead of the snapping passes: a trigger is an exact word by construction, and letting a verb snap *toward* one would be edit distance deciding to execute something. Section 7 has the rest. Note that `plan()` takes the words as an argument -- the session passes the profile's, and `_route` calls `plan()` twice, which is how a renamed trigger briefly turned the shipped word into an unhandled plan that `_escalate` spent a ~7 s CLI call on.
 
 **The thread verbs.** `recall` brings the last sent prompt back, `followup` marks the
@@ -769,6 +790,8 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `CONTEXT_CHARS` | 1500 | What a CLI rewrite may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |
 | `Lexicon.MAX_TERMS` | 64 | The library truncates its prompt at 223 tokens *silently, mid-term*, which would bias toward a fragment. Terms and corrections share it: one file, one person filling it, and counting them apart would let 64 corrections buy 64 hotwords past the budget |
 | `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern. Two consumers now: it promotes a term to a hotword, and it decides when a pair is worth *offering* in the menu — the same bar for suggesting a substitution as for biasing toward a spelling, though only one of them rewrites what somebody said |
+| `Profile.MAX_WORKSPACES` | 5 | The workspace recents the menu offers (item 36). The same modal-stall budget that caps the offers at three and the presets at six: nothing offered in the menu may grow with usage. Bounded on load as well as save, deduped by `normcase+normpath` so a respelt `--cwd` moves an entry to the front instead of growing the list |
+| `session.WORKSPACE_LEAF_MAX` | 24 | The workspace's own name in the egress notes (`asking codex · acme…`), cut with `help._fit`'s idiom — it is the one word in that note the user's filesystem wrote, and the note is glanced at as the question leaves |
 | `Draft.MAX_HISTORY` / `MAX_HISTORY_CHARS` | 30 / 200 000 | 30 snapshots of a very long draft is where undo quietly becomes megabytes |
 
 ## 9. What is written to disk
@@ -776,7 +799,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | Path | When | What |
 |---|---|---|
 | `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. **The one other thing Flow may write is a single appended `wrong -> right` line, and only on an explicit tap in the right-click menu** (see below): it never edits, reorders, removes or reformats a line, so everything already in the file comes back byte for byte. Re-read by mtime on every decode, which is how a pair added from the menu reaches the very next utterance |
-| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, the two spoken send triggers (`send_word`, `send_enter_word`), and the `workspace` a converse question is asked from. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. The last three are additive and all read through a fallback — an older profile loads with no voice and with auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
+| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice or a trigger word, toggling auto-ask, switching the workspace, and a resolved `--cwd` (it joins the recents) | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, the two spoken send triggers (`send_word`, `send_enter_word`), the `workspace` a converse question is asked from, and the `workspaces` recents the menu offers (most recent first, bounded at `MAX_WORKSPACES` on save *and* load). The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. Everything from the voice down is additive and read through a fallback — an older profile loads with no voice, an empty recents list and auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, and — on each route — how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the cache revision of each model tier that run loaded -- a number is a measurement *of a build*, and until 2026-08-01 none of these said which |
@@ -794,7 +817,16 @@ folder** writes `lexicon.txt` if it is missing and hands the folder to Explorer 
 pairs Flow has inferred twice straight into the menu, where one tap appends the arrow line
 and a **Never offer** submenu records a no that survives a restart. At most three are shown,
 most-seen first: the menu is a native modal loop that already costs a measured ~16 s stall
-at worst, and it must not grow with the profile. Offering is as far as it goes — an inferred
+at worst, and it must not grow with the profile. **Settings ▸ Workspace ▸** follows the
+same discipline for the workshop's ground (item 36): a radio recents list over the
+profile's `workspaces` — new paths enter once via `--cwd`, then live in the list, so there
+is still no free text and no browse dialog — with `(not set)` as a real entry, a folder
+that is gone shown and marked `(missing)` rather than hidden, and the switch itself done
+by `Session.set_workspace`, which clears the thread and says so, because a workspace
+switch is a topic switch. One Tk fact is load-bearing there, measured on this machine: an
+empty radiobutton `-value` is read as *unset* and falls back to the label, so the
+no-workspace row's value is the literal `(not set)` — a var holding `""` would match no
+row and the tick would silently never draw. Offering is as far as it goes — an inferred
 pair is a guess from a word-level diff, and nothing turns one into a substitution without
 being told to. The template's
 comments are the documentation for both files, including the measured cost of biasing, on
@@ -978,7 +1010,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (926 tests, ~16 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (976 tests, ~17 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
