@@ -135,6 +135,49 @@ Two things the sweep turned up that you have not ruled on, kept here rather than
 
 ## At the desk
 
+- [ ] **A workshop turn through kiro-cli, in a workspace with MCP servers — and then
+  decide whether you want it.** Item 41 removed the wall: the exact call you watched fail
+  ran again on purpose, kiro-cli pinned with `--cwd D:\dev\ai-continuum\ai-continuum-product`
+  (whose `.kiro/settings/mcp.json` declares four uvx/npx servers), and it **answered in
+  38.9 s** where the old global 20 s executed it at second twenty. So it works. What only
+  you can judge is whether ~39 s a turn is a workshop or a wait:
+  `uv run flow --converse --cli kiro-cli --cwd <a project with .kiro MCP servers>`, ask two
+  or three real questions, and see how it feels against the same questions through codex
+  (`--cli codex`, seconds rather than tens of them). The residue is not Flow's to fix —
+  kiro-cli spawns the project's MCP servers cold on every `chat` and there is no flag to
+  skip it, `--require-mcp-startup` exists and its inverse does not — so the honest choices
+  are: live with ~39 s, or use **Settings ▸ CLI** to put codex on the workspaces that are
+  MCP-heavy. If you find yourself always tapping codex, say so and the *default* preference
+  order per workspace becomes a decision rather than a habit.
+  Two things worth watching while you are there: the pill's marker should read `kiro` (the
+  entry below), and a genuine timeout note should now say **60s**, not 20.
+
+- [ ] **The pill dragged high with a long draft — the eye half.** The mechanical half is
+  done and passes through the app's own construction path: pill dragged to the top of the
+  work area, a 50 000-character dictation, both windows read back from `GetWindowRect` —
+  pill `(1100,0)-(1252,40)`, bubble `(872,8)-(1252,422)`, chips at 382..408, nothing
+  outside the 1280×672 desktop. Item 42 pins the same property at all four corners in five
+  states. What is left is what a rect cannot say: **when the pill is at the very top, the
+  bubble is drawn over it.** Nothing clips and nothing is unreachable — the bubble anchors
+  above the pill and there is no "above" left, so it clamps to the top edge and the pill
+  ends up underneath it. Look at that once and say whether it is fine (it is only reachable
+  by dragging the pill to the very top, which is not where it lives) or whether the bubble
+  should flip to hanging *below* the pill when there is no room above. The second is a real
+  change with a real question inside it — which way it should flip on a side-anchored pill
+  — so it is a decision, not a tweak.
+
+- [ ] **The artifact reply, now that the window stops at the desktop edge.** Item 42 found
+  that a 12 000-character answer sized the bubble **4 179 px** on a 672 px screen and was
+  simply placed off the bottom, chips and all — the long-draft incident's unreachable Send,
+  alive on the reply path. It is **656 px** now and the chips are at 624..650, which is the
+  fix. The cost is visible and is yours to accept or reject: past what fits, the tail of a
+  long artifact is **clipped by the window**, and the chip row sits over its last lines.
+  Ask for something long in converse mode — "give me a complete reusable prompt for X" —
+  and look. `Use this` and `Copy` both still work on the whole answer, so nothing is lost;
+  what you cannot do is *read* the end of it in the bubble. If that matters, the cure is a
+  reply that scrolls, which is the proposal at the bottom of this file rather than a fix
+  somebody guesses at.
+
 - [ ] **Run the long draft on purpose, and watch the chips stay put.** Items 37 and 38
   shipped from the incident at your desk (decisions.md, "The long-draft incident"). The
   numbers say it is fixed — a 50 000-character draft renders in **4.3 ms** instead of
@@ -175,16 +218,17 @@ Two things the sweep turned up that you have not ruled on, kept here rather than
   with it on, because turning it on for a CLI is a measurement — run that CLI reading a
   multi-line prompt from stdin, on the machine that has it, then set the flag.
 
-- [ ] **Eyeball the pill's marker with kiro-cli answering.** `kiro-cli` is 8 characters and
-  `MARKER_MAX` is 6, so the pill draws **`ASK`** while kiro-cli is the CLI that would
-  answer. That rule is right as written — a clipped name reads as a different CLI — but
-  this is the first time it hides a CLI that is genuinely about to be called (`opencode`
-  reached the same limit while inert, so nothing could ever be asked of it). Run
-  `uv run flow --converse --cli kiro-cli`, look at the pill, and say which you prefer:
-  leave it as `ASK` (honest, and the notes name the CLI anyway), or give the slot a
-  measured widening. Item 15's precedent — whether `codex` at 6 pt collides with a tall
-  level bar — is the entry above; this is the same kind of question and the same kind of
-  answer, and both are cheap to change once you have looked.
+- [ ] **Eyeball the pill's marker now that it reads `kiro`.** You answered the old version
+  of this question — `ASK` while kiro-cli was the CLI about to answer read to you as "Kiro
+  is not captured" — and item 41 shipped the alias from that. Run
+  `uv run flow --converse --cli kiro-cli` and look at the slot under the mic glyph: it
+  should say **`kiro`**, four characters where the name is eight. Two things are yours to
+  say and neither has a measurement behind it. **One:** does `kiro` at 6 pt read cleanly
+  beside the level bars, or does it want the same widening item 15's entry above asks about
+  for `codex`? **Two:** is a *nickname* the right idea at all? The slot now shows a name
+  that appears nowhere else — the menu, the notes and the Help sheet all say `kiro-cli` —
+  and the alternative was widening the slot so the real name fits everywhere. Both are one
+  small change; the alias is what shipped because it needed no new measurement.
 
 - [ ] **On a macOS machine: install uv, run
   `uv tool install git+https://github.com/samartomar/flow`, grant microphone permission
@@ -417,4 +461,26 @@ sessions away.
   buffer in `_pump_ask`, late chunks gated by the operation ids that now exist. The
   felt gain is on-screen only (SAPI cannot append to an utterance), which is why this
   waits.
+
+- [ ] **P10 — a reply that actually scrolls.** Found while building item 42, and it is a
+  claim the reference had been making without anybody checking it: §8's
+  `ASK_ARTIFACT_MAX_CHARS` row said "the bubble scrolls", and it does not — no path does.
+  That assumption is why the reply kept an unbounded full-text probe while the draft got a
+  cap, and it is how a 12 000-character answer came to size the window **4 179 px** on a
+  672 px desktop with its chip row at screen y 4 147. Item 42 fitted the window to the
+  desktop, which makes the chips reachable and leaves the tail clipped; the row is
+  corrected to say what is true.
+  The real cure is a reply the eye can move through, and it is a *proposal* because the
+  shape is a genuine choice and item 37 already rejected the obvious one for the draft: a
+  scrollback has to lay out what it scrolls to, which is the cost the cap exists to bound.
+  Three candidates, and the difference matters. **(a)** A tail window like the draft's —
+  cheapest, reuses `body_window`, and exactly wrong here, because an artifact is read from
+  the *top* and its first lines are the ones you want. **(b)** A head window with a
+  `… N more lines` foot and Copy/Use this as the way to get the rest — nearly as cheap and
+  probably right, since a bubble is not where a two-page prompt gets read. **(c)** A real
+  scrolling viewport like the Help sheet's (item 32 already built one: drag or wheel, a
+  thumb, bounded row layout) — the most work and the only one that makes the bubble a place
+  you can read an artifact in. Which of those is right is a taste question about what the
+  bubble is *for*, so it is yours; the measurement each would need is the same one item 37
+  ran, and the instrument exists.
 

@@ -9,6 +9,44 @@ full entry with its before/after evidence live in
 items came from are in [docs/decisions.md](docs/decisions.md); what only the owner can
 do is in [NEEDS_YOU.md](NEEDS_YOU.md).
 
+## Round seven — the kiro-cli round, closed 2026-08-02
+
+**Both landed.** Items 41 and 42, spec'd and executed the same day from decisions.md
+"kiro-cli's 20-second wall, the six-character marker, and the cut bubble". Suite **1050 →
+1067**, every gate green, [selfdrive] 64/64 on the one item that needed it. Commits
+`40a3660`, `1273920`.
+
+- **41, the wall and the slot.** One measurement earned two fields on one dataclass. `Cli`
+  entries carry `timeout_sec` — a **floor** under the wait rather than a replacement for it,
+  so `--cli-timeout` still means what §8 says it means and a lowered global cannot re-create
+  the incident on the one CLI measured needing the most time — and kiro-cli ships 60 against
+  the 35.8 the decision sized it from. The proof is the incident run on purpose: the same
+  call, kiro-cli pinned in the MCP workspace, **answered in 38.9 s**, past the old 20 s wall
+  by 18.9. The same entry carries `marker="kiro"`, because 8 characters had the pill drawing
+  `ASK` while kiro-cli was the CLI about to answer. Item 15's marker rule has now been
+  sharpened by three different names and it still says the same thing: the badge may decline
+  to name a CLI, and may never name a different one — an alias is a shorter name for the
+  same one, so agreement is computed from the entry rather than from a literal.
+- **42, the window.** The instrument disagreed with the decision and the disagreement is the
+  entry's most useful part. The top edge was **never** the breach — held at `top + 8` in all
+  36 placements, every state, every corner, confirmed against `GetWindowRect` and not just
+  Tk. What leaves the desktop is the **bottom**, on the **reply** path: a 4 000-character
+  answer sized the window 1 459 px and a 12 000-character artifact 4 179 px on a 672 px
+  screen, putting the chip row at screen y 1 427 and 4 147. Item 37's own Evidence line had
+  predicted it in one sentence and nobody had measured it. `_render` fits the height to the
+  work area before anything reads it, so the chip row comes inside with it and the position
+  clamp stops being a best effort: **12 of 36 outside before, 0 of 36 after**. The reply's
+  rendering is untouched and asserted so.
+
+**What waits:** four desk checks in NEEDS_YOU — the workshop turn through kiro-cli now that
+39 s is the real cost of an MCP workspace, the marker eyeball again (it says `kiro` now, and
+whether a nickname is the right idea at all is the question the alias raises), the bubble
+drawn *over* the pill when the pill is dragged to the very top, and the artifact tail that is
+now clipped rather than off-screen. And one proposal, **P10**: §8 claimed "the bubble
+scrolls" and no path did — the assumption that left the reply probe unbounded. Three shapes
+for a reply that genuinely scrolls, and which one is a taste question about what the bubble
+is for.
+
 ## Round six — the incident round, closed 2026-08-02
 
 **All four landed.** Items 37–40, spec'd and executed the same day from decisions.md's
@@ -1238,6 +1276,215 @@ rejection stands and was about a different binary: `kiro` on PATH is the IDE lau
   - Suite **1031 → 1050**, OK, 16.6 s. [selfdrive] **64/64**, including the live codex
     converse round trip. Commit `26e2b43`.
 - Status: **done** — with the marker eyeball on the desk list.
+
+### 41. A CLI that needs longer says so, and the marker learns a short name for it
+Owner-decided 2026-08-02 (decisions.md "kiro-cli's 20-second wall, the six-character
+marker, and the cut bubble", fixes 1 and 2). Two fields on one dataclass, because they are
+the same finding read twice: kiro-cli is a CLI the module's global constants were not
+written for. The identical one-line call measured **4.3 s in a bare directory and 35.8 s
+inside a workspace whose `.kiro` settings declare MCP servers** — kiro-cli spawns the
+project's MCP servers on every `chat` invocation, uvx-resolved and cold — so `TIMEOUT_SEC`
+= 20 executes the call at second twenty, every time, in exactly the workspaces the workshop
+is for. And `kiro-cli` at 8 characters overflows item 15's 6-character slot, so the pill
+draws `ASK` while kiro-cli is the CLI that would answer; item 40 put that on the desk list
+and the owner's reading came back — "Kiro is not captured".
+- Files: `flow/refine.py`, `flow/ui.py`, `tests/test_refine.py`, `tests/test_lifecycle.py`,
+  `tests/test_indicator.py`, `tests/test_converse.py`, `docs/architecture.md`.
+- **`timeout_sec`, and the one thing it must not become.** `Cli` gains it; kiro-cli ships
+  **60**, which is 35.8 measured plus headroom, and every other entry defaults to the
+  global. It is a **floor, not a replacement** — `_invoke` waits `max(caller, cli)` — and
+  that is a decision worth stating rather than a shortcut: `--cli-timeout` is documented
+  as the knob that *raises* the wait, so a per-CLI value that simply won would mean the
+  one CLI measured needing the most time is the one the flag cannot reach. Read the other
+  way round it is the same sentence: a global lowered below what a CLI was measured to
+  need would re-create this incident on the only entry that has ever had it.
+- **The note keeps naming the CLI and the seconds it actually waited.** It already
+  interpolates the timeout, so this is a check rather than a change — and it is worth a
+  check, because the number in that message is now per-CLI and a hardcoded 20 would look
+  right on three entries out of four.
+- **`marker`, the display alias.** `Cli` gains it, empty for everything that already fits;
+  kiro-cli ships `"kiro"`. `_marker()` draws the alias where there is one, the full name
+  where it fits the bound, and `ASK` as the unchanged fallback — so the rule item 35 pinned
+  at `opencode` is extended, not rewritten, and an inert 8-character name with no alias
+  still falls back. The bound is asserted **over every shipped entry** rather than over the
+  one alias that exists, because the next alias is where a 7-character one gets typed.
+- **The full name is what every other surface keeps.** The menu, the notes and the Help
+  sheet name CLIs in prose, where 8 characters cost nothing; only the 6 pt slot beside the
+  level bars has a wall. Asserted, so "the marker learned a nickname" cannot spread into
+  the places a user is reading rather than glancing.
+- Instrument first, both inverted:
+  1. A slow child through a fake `Cli` dies at the global timeout today and completes on
+     its own after — `test_lifecycle.py`'s idiom, a real process because a per-CLI wait is
+     a wait, with the seconds sized to the suite. **Never gated on a live 36-second call**:
+     the property is that the number `_invoke` waits comes from the entry, and a real
+     kiro-cli would only prove that this machine is slow.
+  2. `_marker()` for a `Cli` named `kiro-cli` reads `ASK` today and `kiro` after.
+- Acceptance: suite green; [selfdrive] **64/64**; and **one live ask through Flow's own
+  path** with kiro-cli pinned and `cwd=D:\dev\ai-continuum\ai-continuum-product` — the
+  incident run on purpose, in the workspace whose `.kiro/settings/mcp.json` declares the
+  uvx-resolved servers that cause it — completing under the new timeout, with its duration
+  in the Evidence line.
+- [selfdrive] **required** — the invoke path changed.
+- Doc sync: §8's `refine.TIMEOUT_SEC` row gains the reason a CLI may need more than the
+  constant and what the floor means for `--cli-timeout`; the `refine.CANDIDATES` row gains
+  both fields and kiro-cli's two values with the measurement behind each.
+- Evidence:
+  - **The incident, run on purpose, through Flow's own `ask()`** — kiro-cli pinned,
+    `cwd=D:\dev\ai-continuum\ai-continuum-product`, whose `.kiro/settings/mcp.json`
+    declares four uvx/npx-resolved servers. Resolved at
+    `C:\Users\samar\AppData\Local\Kiro-Cli\kiro-cli.exe`, entry reading
+    `timeout_sec=60, marker='kiro'`, and the answer came back in **38.9 s** — grounded in
+    that workspace, not generic. **Past the old global 20 s by 18.9 s**: this exact call is
+    the one the owner watched fail, and it is now the one that answers. 38.9 against the
+    35.8 the decision sized 60 from, so the headroom is real and it is not large — which is
+    the residue the entry states rather than hides.
+  - **The instrument, red before the build:** 10 of 24 checks across the three modules
+    failed against the tree as it stood — three of the four `timeout_sec` checks (the field
+    did not exist), both entry-shape checks, five of the six alias checks, and the shipped-
+    names rule, which flipped from `ASK` to `kiro`. The **14 green** are the regression
+    guards and stayed green: an entry *without* a declared timeout still dies at the
+    caller's number, a name that fits is still drawn as itself, a name that overflows with
+    no alias still falls back to `ASK`, and every pre-existing kiro-cli entry check.
+  - **The floor is asserted in both directions**, because "the entry wins" and "the entry
+    is a floor" pass the same happy-path check: an entry declaring 1.2 s carries a 0.8 s
+    child through a 0.4 s caller budget, *and* an entry declaring 0.2 s cannot shorten a
+    5.0 s caller. The second is what keeps `--cli-timeout` meaning what §8 says it means.
+  - **The note quotes the wait, not the constant.** `slow timed out after 1s` from an entry
+    declaring 1.0 against a caller's 0.4 — asserted as the whole string, so a message that
+    went back to naming the global cannot pass by containing the right words.
+  - **The marker/note agreement check had to be restated rather than relaxed**, and that is
+    the third time item 15's rule has been sharpened by a new name. It read "equal, or
+    `ASK`"; an alias is a shorter name for the *same* CLI, so agreement now reads "the
+    entry's alias where it has one, the name where it fits, `ASK` where neither does" —
+    computed from the entry, because a literal `"kiro"` there would have passed whatever
+    the pill drew.
+  - **The bound is on the slot, not on the field.** An alias of 8 characters falls back to
+    `ASK` like any other name that does not fit, and every shipped alias is asserted against
+    `Pill.MARKER_MAX` over the whole table — the next alias is where a seven-character one
+    gets typed.
+  - Suite **1050 → 1062**, OK, 25.9 s. [selfdrive] **64/64**, including the live codex
+    converse round trip. Commit `40a3660`.
+  - **One process note, recorded rather than left in the reflog:** the first commit landed
+    with a stray `@` as its subject — PowerShell here-string syntax typed into a POSIX
+    shell — and was amended in place. Rule 3 forbids amending, and it also requires a plain
+    imperative subject; leaving `@` would have broken the second to obey the first, on an
+    unpushed tip commit whose content nobody had seen. The content is byte-identical.
+- Status: **done**
+
+### 42. The bubble is clamped inside the work area by position, not only by size
+Owner-decided 2026-08-02 (same entry, fix 3). Item 37 capped the *draft* body and left
+placement to `reposition`'s clamp; the owner's screenshots show a bubble whose border runs
+off the display edge. The cap bounds one path's size, and nothing bounds the window.
+- Files: `flow/ui.py`, `tests/test_bubble.py`, `tests/test_editor.py`,
+  `docs/architecture.md`.
+- **Instrument first, item 37's style and the same four corners.** A real `tk.Tk`, a real
+  `Bubble`, the pill placed at each corner of the work area, and every edge of the window
+  read back — from `GetWindowRect` as well as from Tk, because `winfo_y()` reports what was
+  *asked for* and a screenshot can only disagree with where the window actually is. Before:
+  the breaches and their sizes. After: every edge inside the work area, at every corner, in
+  every state.
+- **What the instrument found, and it is not what the entry read off the screenshot.** The
+  top edge is already held — `max(top + 8, …)` has been there since item 24 and no state at
+  any corner puts the window above the work area. The breach is the **bottom**, and it is
+  the reply path: a 4 000-character answer sizes the window **1 459 px** and a 12 000-
+  character artifact **4 179 px**, both pinned at `top + 8` on a 672 px desktop, so the chip
+  row lands at screen y **1 427** and **4 147**. The entry's *diagnosis* moves to the other
+  edge; its *finding* stands exactly as written — the bubble leaves the screen by position,
+  the chips go with it, and this is the long-draft incident's own principle alive on the one
+  path item 37 deliberately did not touch. Recorded rather than quietly corrected, because
+  the decision is the authority and this is the measurement disagreeing with one word of it.
+- **One bound, not two numbers that must agree.** `_render` fits the height it computes to
+  the work area before anything reads it, so `self._h` is *already* inside the desktop, and
+  the existing position clamp becomes a proof rather than a hope: with `h ≤ work − 2·air`,
+  `max(top + air, min(y, bottom − h − air))` cannot put either edge outside. The air is
+  `EDGE_AIR` in both places rather than four literal `8`s — the note that used to land on
+  the chip row was two numbers that had to agree and nothing made them.
+- **The chips come with it, because they are drawn from `self._h`.** That is the same
+  sentence item 37 wrote about the draft, and it is why the fix belongs on the height rather
+  than on the geometry string: bounding only what is *placed* would leave the row drawn
+  below the visible window, which looks fixed and is not.
+- **The reply/artifact path is asserted unchanged** — item 37's guard, kept: the answer
+  keeps its full-text probe, its `ASK_ARTIFACT_MAX_CHARS` bound and its single drawn item,
+  and a long reply still sizes the bubble larger than a short one. What changes is that the
+  window stops at the desktop edge. The honest residue, stated: past what fits, the tail of
+  a very long artifact is now clipped by a window instead of being off the screen entirely,
+  and the chip row sits over its last lines. A reply that *scrolls* is the real cure and is
+  a proposal, not this item — §8's `ASK_ARTIFACT_MAX_CHARS` row currently claims "the bubble
+  scrolls", which this measurement shows is not true of any path, and the doc sync fixes it.
+- Instrument first, each its own check in `tests/test_bubble.py`:
+  1. Every edge inside the work area with the pill at all four corners, for a 1k draft, a
+     50k draft, a 4k reply and a 12k artifact reply — the geometry `reposition` computes,
+     against `pill.work`. Red today on the two reply cases at all four corners.
+  2. The chip row's band is inside the work area in the same matrix — the property the
+     window bound exists for, and the one a placed-only clamp would fake.
+  3. A reply taller than the desktop no longer sizes the window past it, and a reply that
+     fits is untouched — both directions, so a constant cannot pass this.
+  4. The reply path unchanged: a 4k reply is still drawn as one whole item and still sizes
+     the bubble larger than a short one.
+- Acceptance: suite green; the before/after corner tables recorded in Evidence.
+- [selfdrive] not required — geometry only; `plan()`, the router and asr text handling are
+  untouched, and no send or chip *binding* moves.
+- Doc sync: §7's "The bubble under a long draft" paragraph gains the placement bound and
+  says what is now true of the reply path; §8 gains `EDGE_AIR` and corrects
+  `ASK_ARTIFACT_MAX_CHARS`'s "the bubble scrolls" to what the window actually does.
+- Evidence:
+  - **The corners, before and after** (`scratchpad/bubble_place.py`, a real `tk.Tk` and a
+    real `Bubble`, nine states × four corners, every edge compared against the work area
+    the app itself computed — 1280 × 672 here):
+
+    | state | before | after |
+    |---|---|---|
+    | 1k draft, all four corners | inside | inside |
+    | 50k draft, all four corners | inside | inside |
+    | 4k reply, all four corners | h **1 459**, **795 px past the bottom** | h **656**, inside |
+    | 12k artifact reply, all four corners | h **4 179**, **3 515 px past the bottom** | h **656**, inside |
+    | 12k reply + a long note | h 4 261, **3 597 px past** | h 656, inside |
+
+    **12 of 36 placements outside the work area before, 0 of 36 after.** The draft states
+    were inside at every corner both times, which is item 37's cap holding.
+  - **Read back from Windows, not from Tk** (`scratchpad/bubble_rect.py`): `winfo_y()`
+    reports what was *asked for*, and a screenshot can only disagree with where the window
+    actually is. `GetWindowRect` agreed with Tk in every case, which is what makes the
+    numbers above the screen's and not the toolkit's. The figure that names the defect is
+    the chip row: **screen y 1 427** on an ordinary answer and **4 147** on an artifact, on
+    a 672 px desktop. After: **624**, on both.
+  - **The measurement disagrees with one word of the decision, and it is recorded rather
+    than quietly fixed.** The entry reads the owner's screenshot as a top edge gone
+    negative. It has not: `max(top + EDGE_AIR, …)` held the top at 8 in **all 36
+    placements**, in every state including the editor, the sent card, a long note and the
+    float-up animation's own frames. The breach is the **bottom**, and the path is the
+    reply — the one item 37 deliberately did not touch, whose own Evidence line predicted
+    exactly this ("a window taller than that cannot be placed with its chip row visible,
+    whatever the clamp does"). The decision's finding stands as written: the bubble leaves
+    the screen by position and takes the chips with it. The edge is the other one.
+  - **The instrument, red before the build:** 5 of the 6 new checks failed against the tree
+    as it stood — 16 subTest failures across the two corner matrices, all on the two reply
+    states at all four corners, plus 3 errors for `EDGE_AIR` not existing. The **14
+    pre-existing checks stayed green**, including both artifact-reply guards, which is what
+    says this fix did not move the reply's rendering.
+  - **One bound, not two numbers that must agree.** `EDGE_AIR` is the air the height is
+    fitted to (`work − 2 × air`) *and* the air the position is clamped by, and a check
+    pins that a 12k reply lands exactly at `top + air` and `bottom − air`. That is the
+    lesson from the note that used to land on the chip row: `52` and `PAD + CHIP_H` were
+    two numbers nothing made agree.
+  - **A fixture gap fell out of it, and the failure was the right shape.** `_render` now
+    reads `pill.work`, so three checks in `test_editor.py` raised `TypeError: cannot unpack
+    non-iterable Mock` — loud, immediate, and naming the line. `WORK` moved next to
+    `MeasuringCanvas` and `test_bubble.py` borrows both, for the reason it already borrowed
+    the canvas: two files disagreeing about how tall the desktop is would be two layout
+    answers, both passing.
+  - **The residue is stated rather than hidden.** Past what fits, the tail of a very long
+    artifact is now clipped by a window instead of running off the display, and the chip row
+    sits over its last lines. That is strictly better than unreachable — the incident's own
+    principle is that a reply must not disable its own exits — and it is not the cure. A
+    reply that genuinely *scrolls* is a NEEDS_YOU proposal, and §8's claim that "the bubble
+    scrolls" is corrected in the same commit, because it was the assumption that let the
+    reply path keep an unbounded probe in the first place.
+  - Suite **1062 → 1067**, OK, 25.9 s. [selfdrive] not run — geometry only; `plan()`, the
+    router and asr text handling are untouched and no send or chip binding moved. Its own
+    `the bubble is inside the work area` check was green on the previous run and is the
+    same property this item now asserts at four corners instead of one. Commit `1273920`.
+- Status: **done**
 
 ## Backlog — "prepare" tier
 
