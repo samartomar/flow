@@ -14,12 +14,14 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
 
 from flow.audio import BLOCK  # noqa: E402
 from flow.edits import plan  # noqa: E402
 from flow.refine import refine  # noqa: E402
 from flow.session import Session  # noqa: E402
 from flow.thread import CONTEXT_CHARS, MAX_CHARS, MAX_TURNS, Thread  # noqa: E402
+from cli_env import cli_on_path  # noqa: E402
 
 
 def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
@@ -282,7 +284,7 @@ class TestSessionThread(unittest.TestCase):
 class TestContextInThePrompt(unittest.TestCase):
     def test_prior_turns_are_labelled_background(self):
         fake = fake_popen("REVISED", stderr="")
-        with mock.patch("subprocess.Popen", return_value=fake) as run_:
+        with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run_:
             refine("and a rollback", "make it formal",
                    context=["write the migration"])
         sent = run_.call_args.args[0][-1]
@@ -292,7 +294,7 @@ class TestContextInThePrompt(unittest.TestCase):
 
     def test_no_context_means_no_extra_prompt(self):
         fake = fake_popen("REVISED", stderr="")
-        with mock.patch("subprocess.Popen", return_value=fake) as run_:
+        with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run_:
             refine("and a rollback", "make it formal")
         self.assertNotIn("EARLIER IN THIS THREAD", run_.call_args.args[0][-1])
 

@@ -906,6 +906,19 @@ every commit passes, and a bundle that builds but cannot start does not reach a 
 page. Measured on the first build (2026-08-01): 323 MB unpacked, 125 MB zipped, models
 excluded — they download to the HF cache on first decode exactly as a dev install does.
 
+**And the suite is machine-independent, which it was not until CI said so.** The first
+release run failed the gate with 14 tests that had never failed on the development
+machine: 13 mock the process layer and assert on the prompt that reached it, but
+`refine.available()` filters `CANDIDATES` through `shutil.which`, so on a runner with no
+`codex` or `claude` the code refused before the mock was ever touched — the tests were
+reading a developer's PATH as a premise. They now declare the CLI they assume
+(`tests/cli_env.py` patches `which`, not `available`, because `session.py` binds its own
+reference to the latter). The 14th asserts a model's cache revision, which is a fact
+about a warm cache rather than about an installation, and it skips with a stated reason
+where there is none. Reproduced locally before the fix by running the suite with both
+CLIs hidden and `HF_HOME` pointed at an empty directory: **10 failures + 4 errors,
+exactly the runner's tally; `OK (skipped=1)` after.**
+
 The boundary, loading and invariant corrections dated 2026-08-01 were read from source
 (`refine.py`, `session.py`, `asr.py`, `inject.py`), not re-measured. One number moved
 stages rather than changing: the 450 MB reading sat at "preload done" instead of "first

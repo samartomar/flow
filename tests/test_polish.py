@@ -14,11 +14,13 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
 
 from flow.audio import BLOCK  # noqa: E402
 from flow.edits import plan  # noqa: E402
 from flow.refine import _POLISH_PROMPT, refine  # noqa: E402
 from flow.session import Session, State  # noqa: E402
+from cli_env import cli_on_path  # noqa: E402
 
 
 def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
@@ -113,7 +115,7 @@ class TestPrompt(unittest.TestCase):
         # The user said "make it a proper prompt"; that phrase must not end up inside
         # the prompt sent to the CLI, or the CLI is being asked to interpret it.
         fake = fake_popen("POLISHED", stderr="")
-        with mock.patch("subprocess.Popen", return_value=fake) as run:
+        with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run:
             out, note = refine(RAMBLE, "make it a proper prompt", polish=True)
         sent = run.call_args.args[0][-1]
         self.assertEqual(out, "POLISHED")
@@ -122,7 +124,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_a_normal_refine_still_carries_its_instruction(self):
         fake = fake_popen("REVISED", stderr="")
-        with mock.patch("subprocess.Popen", return_value=fake) as run:
+        with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run:
             refine(RAMBLE, "make it more formal")
         self.assertIn("make it more formal", run.call_args.args[0][-1])
 
@@ -132,7 +134,7 @@ class TestPrompt(unittest.TestCase):
         short = "fix the login bug " * 20  # 360 chars
         grown = "Context: " + "x" * (5 * len(short))
         fake = fake_popen(grown, stderr="")
-        with mock.patch("subprocess.Popen", return_value=fake):
+        with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake):
             polished, _ = refine(short, "make it a proper prompt", polish=True)
             revised, reason = refine(short, "make it more formal")
         self.assertEqual(polished, grown)
@@ -141,7 +143,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_runaway_output_is_still_refused(self):
         fake = fake_popen("y" * 20000, stderr="")
-        with mock.patch("subprocess.Popen", return_value=fake):
+        with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake):
             out, reason = refine("fix the login bug", "x", polish=True)
         self.assertIsNone(out)
         self.assertIn("commentary", reason)

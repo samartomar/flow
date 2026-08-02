@@ -21,11 +21,13 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
 
 from flow.profile import Profile, resolve_workspace  # noqa: E402
 from flow.refine import MAX_CHARS  # noqa: E402
 from flow.session import CONVERSE, WORKSHOP, Session  # noqa: E402
 from flow.thread import CONTEXT_CHARS  # noqa: E402
+from cli_env import cli_on_path  # noqa: E402
 
 
 class FakeMic:
@@ -145,7 +147,11 @@ class TestTheQuestionCarriesTheWorkshop(Temp):
             seen.append(prompt)
             return "an answer", ""
 
-        with mock.patch("flow.refine._invoke", fake_invoke):
+        # `cli_on_path` because `_invoke` is only reached once `_invoke_any` has found
+        # a CLI to reach it with, and that lookup is a PATH lookup. Without it this
+        # asserts nothing on a machine with no agent CLI installed — which is how a
+        # clean CI runner found it.
+        with cli_on_path(), mock.patch("flow.refine._invoke", fake_invoke):
             s._start_ask(question)
             s.wait_idle(timeout=5.0)
         s.close()
@@ -195,15 +201,20 @@ class TestTheWorkspaceIsVisible(Temp):
     """The visibility that pays for the stale-path risk the owner accepted."""
 
     def test_the_mode_switch_note_names_it(self):
-        s = session(refine_cwd=r"D:\dev\products\acme")
-        s.toggle_mode()
-        self.assertEqual(s.mode, CONVERSE)
-        self.assertIn(r"D:\dev\products\acme", notes(s))
+        # The note names the provider as well as the workspace, and `_provider()` is a
+        # PATH lookup — so with no agent CLI installed this note is a different
+        # sentence. The workspace half is what is under test; the CLI is declared.
+        with cli_on_path():
+            s = session(refine_cwd=r"D:\dev\products\acme")
+            s.toggle_mode()
+            self.assertEqual(s.mode, CONVERSE)
+            self.assertIn(r"D:\dev\products\acme", notes(s))
 
     def test_and_says_so_when_there_is_none(self):
-        s = session()
-        s.toggle_mode()
-        said = notes(s)
+        with cli_on_path():
+            s = session()
+            s.toggle_mode()
+            said = notes(s)
         self.assertIn("converse mode", said)
         self.assertIn("no project", said.lower())
 

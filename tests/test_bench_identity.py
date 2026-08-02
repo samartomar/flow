@@ -81,7 +81,17 @@ class TestTheBlockItself(unittest.TestCase):
         self.assertRegex(block["faster-whisper"], r"^\d+\.\d+")
         self.assertRegex(block["ctranslate2"], r"^\d+\.\d+")
         self.assertRegex(block["date"], r"^\d{4}-\d{2}-\d{2}$")
-        self.assertRegex(block["models"]["base.en"], r"^[0-9a-f]{8,}$")
+        # The revision is the one part of this block that is a fact about the *cache*
+        # rather than about the installation, and a machine that has never decoded has
+        # no cache to read — a clean CI runner is exactly that machine. Skipped there
+        # rather than failed, and skipped loudly: the sibling test below owns the cold
+        # case, and asserting "uncached" here would quietly stop checking the hash on
+        # the machine where a hash exists, which is the whole reason the block is
+        # recorded (docs/decisions.md, model revision pinning).
+        revision = block["models"]["base.en"]
+        if revision == "uncached":
+            self.skipTest("base.en is not in this machine's HF cache — nothing to hash")
+        self.assertRegex(revision, r"^[0-9a-f]{8,}$")
 
     def test_a_model_that_is_not_cached_says_so_instead_of_lying(self):
         block = bench_identity(models=("no-such-model-anywhere",))
