@@ -197,6 +197,33 @@ and the trigger words live in `profile.json` — defaults must therefore work ou
 box, and re-wording them is the one step that still needs an editor. Spec'd as
 LOOP_PLAN item 22.
 
+### 2026-08-01 — Distribution: public via ai-harness, uv install; installer and Mac parked
+
+Flow goes public and is listed in the owner's public
+[ai-harness](https://github.com/samartomar/ai-harness) ("Enterprise AI Bootstrapping
+Harness" — claude-code/codex/cli topics), whose audience is terminal-comfortable
+developers already running agent CLIs. For them the dependency-free story is `uv`
+(a single static binary) plus `uv tool install git+…/flow` — no bundler, no code
+signing, no SmartScreen. **Widened same day by the owner:** a public **binary
+release on the flow repo itself** — a PyInstaller onedir zip attached to GitHub
+Releases, built by CI on tag push, so people outside ai-harness download and run
+`flow.exe` with no Python at all (LOOP_PLAN item 28). Ships unsigned with the README
+stating the one-time SmartScreen "Run anyway" honestly; **code signing and a proper
+installer stay parked** until real non-developer demand exists (signing is a
+subscription — a cost with no buyer today). The **macOS port waits for actual Mac users
+asking, plus Mac hardware** — measured 2026-08-01: the three runtime deps all have Mac
+wheels and the brain (asr, routing, session, lexicon, diag) is portable, but the body is
+**96 Win32 call sites** (inject.py 61, ui.py 18, hotkey.py 17, SAPI via PowerShell), §7
+and §8 are Windows-*measured* behaviour, and the live harnesses that verified them are
+Windows-bound — a port re-takes those measurements or ships claims the repo's own rules
+forbid. Prerequisites before the visibility flip (LOOP_PLAN item 27 + owner steps in
+NEEDS_YOU): a LICENSE (none exists — a public repo without one is all-rights-reserved),
+pyproject license/author metadata, a README install section, a friendly `sys.platform`
+guard so a Mac user's first impression is one honest sentence instead of a ctypes
+traceback, and the consent paragraph in recording-kit.md, which public visibility
+converts from desk item to mandatory. The agent CLI stays unbundled by design (R9):
+dictation works without it and the notes say so.
+
 ### 2026-08-01 — P9 decided from use: converse is a prompt workshop, grounded in a workspace setting
 
 The scoping session this waited for happened at the desk instead: the owner tried

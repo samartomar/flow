@@ -17,6 +17,25 @@ entries are further down)
 (resolved — the `Session._provider()` pin mismatch became LOOP_PLAN item 24 and is
 done, commit `a18b619`: the notes now name the CLI the call will actually make)
 
+## Going public — the steps only you can take (2026-08-01, decisions.md "Distribution")
+
+In order; items 27 and 28 are the loop's mechanical half and item 27 is blocked on the
+first step here:
+
+1. **Say the license word.** Recommendation on record: MIT. One word unblocks item 27.
+2. **Write the consent paragraph** in `docs/recording-kit.md` (the standing desk item
+   below — public visibility makes it mandatory): where volunteer recordings live (a
+   private folder outside the repo; the repo's *history* no longer), and that going
+   public does not change that.
+3. **Skim `NEEDS_YOU.md`, `docs/decisions.md` and `docs/history/` with public eyes.**
+   Your name, your accent, your working notes are throughout — it is the best
+   documentation the project has and my recommendation is to ship it as-is, but that
+   is your call to make once, consciously.
+4. **Flip the repo public** (Settings → visibility). The loop never touches remotes.
+5. **List Flow in ai-harness** with the uv one-liner and the Releases link.
+6. After item 28's first release: **run the zip on a machine with no Python** — the
+   one thing no harness here can prove.
+
 ## At the desk
 
 - [ ] **Record more L1 anchor groups** per `docs/recording-kit.md` — two groups exist,
