@@ -20,6 +20,11 @@ import traceback
 from collections import deque
 from pathlib import Path
 
+from .help import (
+    open_file as open_help_file,
+    open_guide,
+    write as write_help_sheet,
+)
 from .inject import foreground_hwnd, owned_by_flow, take_warnings
 from .lexicon import (
     DEFAULT_PATH as LEXICON_PATH,
@@ -27,6 +32,7 @@ from .lexicon import (
     ensure as ensure_lexicon,
     pairs,
 )
+from .profile import resolve_workspace
 from .refine import available
 from .session import DICTATE, Session, State
 
@@ -385,6 +391,7 @@ class Pill(tk.Tk):
         self._offer_pairs(m)
         m.add_command(label="Clear draft", command=self._clear)
         m.add_command(label="Open settings folder", command=self._open_settings)
+        self._help_menu(m)
         m.add_separator()
         m.add_command(label="Quit", command=self.quit_app)
 
@@ -564,6 +571,54 @@ class Pill(tk.Tk):
                 f"created {self.settings_path.name} - the comments in it say what "
                 "each kind of line does"
             )
+
+    def _help_menu(self, parent: tk.Menu) -> None:
+        """Help — a sheet about this machine, and the guide about the product.
+
+        Nothing in the app named a single command or the hotkey that arms the mic, which
+        was the first thing asked for once other people had it. Two entries rather than
+        one because they answer different questions: what does *this* copy do right now,
+        and what is this thing.
+        """
+        sub = tk.Menu(parent, tearoff=0)
+        sub.add_command(label="Commands & shortcuts", command=self._open_commands)
+        sub.add_command(label="Open the guide", command=self._open_guide)
+        parent.add_cascade(label="Help", menu=sub)
+
+    def _open_commands(self) -> None:
+        """Regenerate the sheet for this machine, then hand it to Explorer.
+
+        Written on every open, not cached, and that is the feature: the combos in it are
+        the ones `RegisterHotKey` accepted this launch rather than the first alternative
+        in the table, and the trigger words are the ones stored rather than the ones
+        shipped. A cached sheet is the stale help file this replaces.
+
+        The workshop line is worded by `resolve_workspace`, the same function the startup
+        line uses, and it is asked about the path the *session* holds — `--cwd` outranks
+        the profile and never reaches it.
+        """
+        try:
+            path = write_help_sheet(
+                self.settings_path.parent,
+                hotkeys=self.hotkeys,
+                send_words=self.session.send_words,
+                workspace_note=resolve_workspace(
+                    getattr(self.session, "workspace", None), None
+                )[1],
+            )
+            open_help_file(path)
+        except OSError as exc:
+            # Same treatment as the settings folder: the menu item did nothing visible,
+            # and the bubble is the only place a user would look for the reason.
+            self._flash = 12
+            self.bubble.note(f"could not open the command sheet: {exc}")
+
+    def _open_guide(self) -> None:
+        try:
+            open_guide()
+        except OSError as exc:
+            self._flash = 12
+            self.bubble.note(f"could not open the guide: {exc}")
 
     def _clear(self) -> None:
         # Clear is the cheapest "stop" the user has, and with the microphone gated while

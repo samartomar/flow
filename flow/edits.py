@@ -198,8 +198,14 @@ def _trigger(utterance: str, words: tuple[str, str]) -> str | None:
 #:
 #: The chip on the bubble does the same thing and is the floor: it cannot be mis-decoded,
 #: and the workshop loop has to work for somebody this decoder keeps mis-hearing.
+#: Lifted out of the pattern so the generated help sheet can read the grammar instead of
+#: restating it: a verb added here reaches `commands.txt` on the next open, and a sheet
+#: listing a verb the router does not have is the product lying to the person who went
+#: looking for it (`flow/help.py`).
+TAKE_VERBS = ("use", "take", "keep", "grab")
+
 _TAKE_REPLY = re.compile(
-    "^" + _LEAD + r"(?:use|take|keep|grab)"
+    "^" + _LEAD + r"(?:" + "|".join(TAKE_VERBS) + r")"
     r"(?: that| the| this)?(?: last)?"
     r"(?: answer| reply| response)"
     r"[.!?]*$",

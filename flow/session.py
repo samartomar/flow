@@ -1124,6 +1124,18 @@ class Session:
                 getattr(self.profile, "send_enter_word", SEND_ENTER_WORD))
 
     @property
+    def workspace(self) -> str | None:
+        """The project a converse question is asked from, as this session resolved it.
+
+        Read by the generated help sheet, which has to name the workshop the CLI is
+        actually being run in. Re-deriving it from the profile would be wrong on the one
+        run where it matters: `--cwd` wins over the stored value and never reaches the
+        file, so a sheet that consulted `profile.workspace` would print a path this
+        session is not using.
+        """
+        return self._refine_cwd
+
+    @property
     def can_take_reply(self) -> bool:
         """True when there is an answer on screen to move into the draft."""
         return bool(self.reply)

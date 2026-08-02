@@ -264,7 +264,7 @@ class TestTheMenuCarriesTheOffers(Temp):
         p = tmp_profile()
         for _ in range(PROMOTE_AFTER):
             p.learn_pair("semir", "Samir")
-        top, _never = self._menu(p)
+        top = self._menu(p)[0]
         self._command(top, "semir")()
         self.assertEqual(pairs(self.path.read_text(encoding="utf-8")),
                          [("semir", "Samir")])
@@ -273,7 +273,7 @@ class TestTheMenuCarriesTheOffers(Temp):
         p = tmp_profile()
         for _ in range(PROMOTE_AFTER):
             p.learn_pair("semir", "Samir")
-        top, _never = self._menu(p)
+        top = self._menu(p)[0]
         self._command(top, "semir")()
         self.assertEqual(self._offer_labels(self._menu(p)), [],
                          "still asking about a decision already made")
@@ -282,7 +282,7 @@ class TestTheMenuCarriesTheOffers(Temp):
         p = tmp_profile()
         for _ in range(PROMOTE_AFTER):
             p.learn_pair("semir", "Samir")
-        _top, never = self._menu(p)
+        never = self._menu(p)[0].cascades["Never offer"]
         self._command(never, "semir")()
         self.assertEqual(p.offered_pairs(), [])
         self.assertEqual(Profile(p.path).offered_pairs(), [], "not written to disk")
@@ -295,7 +295,7 @@ class TestTheMenuCarriesTheOffers(Temp):
         p = tmp_profile()
         for _ in range(PROMOTE_AFTER):
             p.learn_pair("semir", "Samir")
-        top, _never = self._menu(p)
+        top = self._menu(p)[0]
         pill_note = None
         self._command(top, "semir")()
         for call in self._notes:
