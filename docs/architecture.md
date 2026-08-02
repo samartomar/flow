@@ -807,9 +807,11 @@ next narrowed invariant belongs here rather than in a commit message.
 The last entry to leave said the provider was named in words and not on the pill: a note
 is read once, and a badge is read every time somebody looks at the window. It closed
 without a redesign, because the pill was already drawing a standing converse marker and
-only its text was at issue — the slot now reads `codex` or `claude` (§1). What no unit
-test can settle is whether it *looks* right at 6 pt, so that eyeball is on the desk list
-in NEEDS_YOU rather than asserted here.
+only its text was at issue — the slot now reads `codex` or `claude` (§1), and the words
+obey the pin: `Session._provider` used to walk the preference order while the call
+itself took `cli=`, so a pinned claude answered under a note saying codex, one line from
+a badge that had it right. What no unit test can settle is whether it *looks* right at
+6 pt, so that eyeball is on the desk list in NEEDS_YOU rather than asserted here.
 
 A second entry used to sit here — a clipboard-restore warning recorded 0.6 s after its
 paste was drained by nobody until the *next* Send, and shown against the wrong one.

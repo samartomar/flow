@@ -564,6 +564,108 @@ class TestTheProviderIsNamedBeforeTheFact(unittest.TestCase):
         self.assertIn("asking codex", self.notes(s))
 
 
+class TestTheNotesObeyThePin(unittest.TestCase):
+    """The pin moved the call and the marker; the words beside them stayed put.
+
+    Found while building item 15 and outside that item's files: `_provider()` returned
+    `available()[0].name` while `_start_refine` and `_start_ask` both passed
+    `cli=self._cli`. So after **Agent CLI -> claude** in the menu, claude answered, the
+    pill drew `claude`, and every note beside it said codex — a warning about where the
+    words go, naming the wrong destination, printed one line from the badge that had it
+    right.
+    """
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def clis(self):
+        # Real `Cli`s: `name` is reserved in Mock's constructor, and item 11 shipped a
+        # Mock repr into a note before a test caught it.
+        from flow.refine import Cli
+
+        return Cli("codex", ("codex",)), Cli("claude", ("claude",))
+
+    def test_the_mode_switch_note_names_the_pin_and_not_the_first_on_path(self):
+        codex, claude = self.clis()
+        s = session(cli=claude)
+        with mock.patch("flow.session.available", return_value=[codex, claude]):
+            s.toggle_mode()
+        note = self.notes(s)
+        self.assertIn("claude", note)
+        self.assertNotIn("codex", note, "the note named a CLI that will not be called")
+
+    def test_the_asking_note_names_the_pin(self):
+        codex, claude = self.clis()
+        s = session(cli=claude)
+        with mock.patch("flow.session.available", return_value=[codex, claude]), \
+             mock.patch("flow.session.ask", return_value=("yes", "claude")):
+            s._start_ask("can you hear me")
+            s.wait_idle(timeout=5.0)
+        self.assertIn("asking claude", self.notes(s))
+
+    def test_the_refining_note_names_the_pin(self):
+        codex, claude = self.clis()
+        s = session(cli=claude)
+        s.draft.set("widen the column")
+        with mock.patch("flow.session.available", return_value=[codex, claude]), \
+             mock.patch("flow.session.refine", return_value=("x", "claude")):
+            s._start_refine("make it formal")
+            s.wait_idle(timeout=5.0)
+        self.assertIn("refining via claude", self.notes(s))
+
+    def test_a_pin_taken_mid_session_carries_the_notes_with_it(self):
+        # The menu is the only way most people will ever pin one, and it pins into a
+        # live session — so the fix has to hold for a `set_cli` after startup, not just
+        # for a `--cli` flag read once.
+        codex, claude = self.clis()
+        s = session()
+        with mock.patch("flow.session.available", return_value=[codex, claude]):
+            s.toggle_mode()
+            s.toggle_mode()
+            s.set_cli(claude)
+            s.events()
+            s.toggle_mode()
+        self.assertIn("claude", self.notes(s))
+
+    def test_with_no_pin_the_preference_order_still_decides(self):
+        # None is a preference, not a decision: unpinned has to keep walking the order.
+        codex, claude = self.clis()
+        s = session()
+        with mock.patch("flow.session.available", return_value=[codex, claude]):
+            s.toggle_mode()
+        self.assertIn("codex", self.notes(s))
+
+    def test_a_pin_that_is_not_on_path_is_still_what_gets_named(self):
+        # `_invoke_any` never re-checks PATH for an explicit `cli=` — a pin is a
+        # decision and is never second-guessed — so the pinned CLI is what will be run
+        # and what will fail. Naming the one that happens to be installed instead would
+        # report a call that is not made, which is the defect this class exists for, and
+        # a note is not the place to invent a fallback the caller does not have.
+        codex, claude = self.clis()
+        s = session(cli=claude)
+        with mock.patch("flow.session.available", return_value=[codex]):
+            s.toggle_mode()
+        self.assertIn("claude", self.notes(s))
+
+    def test_the_marker_and_the_note_cannot_disagree(self):
+        # The two are read together — the badge on the pill and the note drawn beside
+        # it — and item 15 gave the badge the pin. Same inputs, same answer, or the
+        # window contradicts itself.
+        import flow.ui as ui
+
+        codex, claude = self.clis()
+        for pinned, resolved in ((claude, [codex, claude]), (None, [codex, claude]),
+                                 (claude, [codex])):
+            with self.subTest(pinned=pinned, resolved=[c.name for c in resolved]):
+                pill = ui.Pill.__new__(ui.Pill)
+                pill._clis = None
+                pill.session = mock.Mock(cli=pinned)
+                s = session(cli=pinned)
+                with mock.patch("flow.session.available", return_value=resolved), \
+                     mock.patch.object(ui, "available", return_value=resolved):
+                    self.assertEqual(s._provider(), pill._marker())
+
+
 class TestTheReplyCanBecomeTheDraft(unittest.TestCase):
     """P9 promised the verb and the loop dead-ended without it.
 

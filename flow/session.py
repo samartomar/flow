@@ -623,12 +623,21 @@ class Session:
         moment somebody is about to press Ask, that the question is leaving the machine.
         Naming it after the fact is a receipt, not a warning.
 
+        The pin comes first, because the pin is what `_start_refine` and `_start_ask`
+        hand to `refine`/`ask` — reading the preference order here named codex while
+        claude answered, and printed that one line under a marker that had it right.
+        A pin that is no longer on PATH is still named: `_invoke_any` does not
+        second-guess an explicit `cli=`, so it is what gets run and what fails.
+
         `available()` is two PATH lookups and is only reached from note paths — a mode
         switch and the start of a CLI call — each of which is already paying for a user
-        action or a process start.
+        action or a process start; a pin skips even that.
         """
-        found = available()
-        return found[0].name if found else ""
+        cli = self._cli
+        if cli is None:
+            found = available()
+            cli = found[0] if found else None
+        return cli.name if cli is not None else ""
 
     def _next_op(self) -> int:
         """Identity for one CLI call.
