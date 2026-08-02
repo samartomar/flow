@@ -77,9 +77,11 @@ the three dependencies itself, and `uv tool install` puts `flow` on your PATH (r
 
 Download `flow-windows-x64.zip` from
 [Releases](https://github.com/samartomar/flow/releases), unzip it anywhere, and run
-`flow.exe`. Nothing to install and no Python on the machine. The two speech models are
-*not* in the zip — they download to your Hugging Face cache on the first decode, exactly
-as they do for every other install, and the startup line names the path.
+`flow.exe`. Nothing to install and no Python on the machine. **125 MB zipped, 323 MB
+unpacked** (measured on the first build). The two speech models are *not* in the zip —
+they download to your Hugging Face cache on the first decode, exactly as they do for
+every other install, and the startup line names the path. Bundling them would have made
+this a 730 MB download and frozen two files `--model` is meant to swap.
 
 The download is **unsigned**, and the honest version of that is telling you what you will
 see rather than letting it look like a virus alert: the first launch shows Windows

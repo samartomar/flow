@@ -897,6 +897,15 @@ is the point — measured: of the four names the benchmarks actually use, `base.
 `small.en` and `medium` resolve in this cache and `distil-large-v3` reads `uncached`.
 See NEEDS_YOU.md.
 
+**Where a release comes from.** `.github/workflows/release.yml` runs on a pushed `v*`
+tag only, and in this order: the tag's number must equal `pyproject.toml`'s or the run
+stops, then the full unit suite, then the PyInstaller build from `packaging/flow.spec`,
+then `flow.exe --help` against the bundle it just made, then the zip is attached to the
+release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
+every commit passes, and a bundle that builds but cannot start does not reach a Releases
+page. Measured on the first build (2026-08-01): 323 MB unpacked, 125 MB zipped, models
+excluded — they download to the HF cache on first decode exactly as a dev install does.
+
 The boundary, loading and invariant corrections dated 2026-08-01 were read from source
 (`refine.py`, `session.py`, `asr.py`, `inject.py`), not re-measured. One number moved
 stages rather than changing: the 450 MB reading sat at "preload done" instead of "first

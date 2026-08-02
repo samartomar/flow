@@ -115,5 +115,67 @@ class TestTheInstallSection(unittest.TestCase):
                         self.readme.index("## Running it"))
 
 
+class TestTheReleaseWorkflow(unittest.TestCase):
+    """The three files that have to agree about one download.
+
+    The README names an artifact, the workflow builds it, and the spec says what goes
+    inside — and none of them imports the others, so nothing but a check like this
+    notices when one is renamed. The failure it prevents is quiet and total: a Releases
+    page whose only asset is called something the README never mentions.
+    """
+
+    WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+    SPEC = ROOT / "packaging" / "flow.spec"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.yml = cls.WORKFLOW.read_text(encoding="utf-8")
+
+    def test_the_workflow_and_the_spec_are_both_committed(self):
+        self.assertTrue(self.WORKFLOW.is_file())
+        self.assertTrue(self.SPEC.is_file())
+
+    def test_it_builds_the_artifact_the_readme_sends_people_to(self):
+        self.assertIn("flow-windows-x64.zip", self.yml)
+        self.assertIn("flow-windows-x64.zip",
+                      README.read_text(encoding="utf-8"))
+
+    def test_and_builds_it_from_the_spec_that_is_in_the_repo(self):
+        self.assertIn("packaging/flow.spec", self.yml)
+
+    def test_the_suite_runs_before_the_build(self):
+        # Order, not presence. A gate after the build is a gate that reports on a zip
+        # already sitting in the release.
+        gate = self.yml.index("unittest discover")
+        build = self.yml.index("pyinstaller --noconfirm")
+        self.assertLess(gate, build)
+
+    def test_the_version_is_read_rather_than_typed(self):
+        # The tag and pyproject have to be the same number, and the workflow is where
+        # that is enforced — hand-typing it into the workflow is the mistake this
+        # prevents, not the one it catches.
+        self.assertIn("pyproject.toml", self.yml)
+        self.assertIn("GITHUB_REF_NAME", self.yml)
+        self.assertNotIn(pyproject()["project"]["version"], self.yml)
+
+    def test_only_a_tag_triggers_it(self):
+        self.assertIn('tags: ["v*"]', self.yml)
+
+    def test_the_bundle_is_onedir_and_unsquashed(self):
+        # onefile trips AV heuristics and pays an unpack per launch; UPX is the single
+        # strongest AV signal there is, and this build is already unsigned.
+        spec = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn("exclude_binaries=True", spec)
+        self.assertNotIn("upx=True", spec)
+
+    def test_and_the_models_are_not_in_it(self):
+        # 605 MiB of weights that every other install downloads on first use. If a
+        # future spec starts bundling them, the README's "not in the zip" paragraph is
+        # a lie and this is where that gets caught.
+        spec = self.SPEC.read_text(encoding="utf-8")
+        for name in ("base.en", "small.en"):
+            self.assertNotIn(f'"{name}"', spec, name)
+
+
 if __name__ == "__main__":
     unittest.main()

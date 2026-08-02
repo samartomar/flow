@@ -1,0 +1,77 @@
+# Where the downloadable Flow comes from.
+#
+# Push a tag, get a zip on the Releases page. Nothing else triggers this: a release is a
+# deliberate act, and a workflow that also ran on every push would eventually publish a
+# commit nobody meant to publish.
+#
+# Two things this refuses to do. It will not release a bundle the tests have not passed —
+# the gate runs before the build, so a red suite costs a tag and not a download. And it
+# will not release a tag whose number disagrees with `pyproject.toml`: a zip whose name
+# and contents disagree about which version they are is a bug report nobody can act on,
+# so the mismatch stops the run loudly instead of shipping quietly. The version is read
+# out of pyproject here and never typed into this file — which is also why no literal
+# version number appears anywhere below, and a test asserts that.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # `gh release create` writes to the repo's Releases
+
+jobs:
+  release:
+    runs-on: windows-latest # the only platform Flow runs on, so the only one it builds on
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+
+      - name: The tag and the version have to be the same number
+        shell: bash
+        run: |
+          version=$(uv run --no-project --python 3.12 python -c \
+            "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "pyproject says $version, the tag says $tag"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject version $version"
+            exit 1
+          fi
+
+      # Before the build, not after. The suite is the same one the loop gates every
+      # commit on, run the same way.
+      - name: The gate
+        run: uv run python -m unittest discover -s tests
+
+      # `--with` keeps PyInstaller out of the venv Flow runs in, exactly as it is built
+      # locally. packaging/flow.spec explains every collector it needs.
+      - name: Build the bundle
+        run: uv run --with pyinstaller pyinstaller --noconfirm packaging/flow.spec
+
+      # A bundle that builds is not a bundle that runs: a missing DLL is invisible until
+      # launch. `--help` is what CI can prove without a microphone or a desktop — it
+      # starts the bootloader and imports the Win32 layer, since the platform guard and
+      # the three ctypes imports both sit above argparse in main().
+      - name: Run it
+        run: |
+          dist/flow/flow.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "the bundled exe did not run" }
+
+      - name: Zip it
+        run: Compress-Archive -Path dist/flow -DestinationPath flow-windows-x64.zip
+
+      # Uploaded with the CLI the runner already has rather than a third-party action,
+      # for the same reason the app has three dependencies. `--clobber` so a re-run of a
+      # failed release replaces the artifact instead of erroring on it.
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME flow-windows-x64.zip --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME flow-windows-x64.zip `
+              --title $env:GITHUB_REF_NAME --generate-notes
+          }
