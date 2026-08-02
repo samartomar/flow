@@ -26,6 +26,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cli_env import no_off_path_installs  # noqa: E402
 
 #: The three modules that reach for Win32. `inject` and `hotkey` still bind it at import
 #: and are never imported in Lite; `ui` binds it behind a `sys.platform` check, because a
@@ -202,10 +205,37 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         self.assertNotIn("not on PATH", out)
 
     def test_a_name_nobody_knows_lists_the_ones_it_does(self):
+        # `kiro` is the useful case rather than a made-up one: it is a real thing on this
+        # machine, it is the IDE launcher, and the CLI beside it is called `kiro-cli`. The
+        # list is what turns a wrong name into the right one.
         code, out = self.run_main(["--cli", "kiro"])
         self.assertEqual(code, 2)
         self.assertIn("not a known CLI", out)
         self.assertIn("codex", out)
+        self.assertIn("kiro-cli", out)
+
+    def test_a_verified_pin_that_is_found_off_path_is_accepted(self):
+        # kiro-cli is on PATH after the MSI, and not in a shell that predates it. The pin
+        # must agree with the probe, or `--cli kiro-cli` would be refused on the machine
+        # the entry was verified on.
+        import flow.asr
+        import flow.ui
+
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch("shutil.which", lambda *a, **kw: None), \
+                mock.patch("os.path.isfile",
+                           lambda p: str(p).endswith("kiro-cli.exe")), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill"), \
+                contextlib.redirect_stdout(out):
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite",
+                             "--cli", "kiro-cli"])
+        self.assertEqual(code, 0)
+        self.assertIn("refine CLI: kiro-cli", out.getvalue())
 
     def test_a_verified_pin_that_is_absent_still_blames_the_path(self):
         import flow.__main__ as mod
@@ -228,7 +258,10 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         import flow.__main__ as mod
 
         out = io.StringIO()
-        with mock.patch.object(sys, "platform", "win32"), \
+        # `no_off_path_installs` because this test declares what is installed, and a
+        # machine that happens to have kiro-cli would otherwise answer instead — the
+        # exact lesson `cli_env.py` was written for, one seam along.
+        with mock.patch.object(sys, "platform", "win32"), no_off_path_installs(), \
                 mock.patch("shutil.which", lambda cmd, *a, **kw:
                            "/somewhere/gemini" if cmd == "gemini" else None), \
                 mock.patch.object(mod, "Session"), \
@@ -238,6 +271,7 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
             code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite"])
         self.assertEqual(code, 0)
         self.assertIn("found gemini, not yet verified", out.getvalue())
+        self.assertIn("refine CLI: NONE", out.getvalue())
 
 
 class TestACwdLaunchFeedsTheRecents(unittest.TestCase):

@@ -25,8 +25,25 @@ import contextlib
 import shutil
 from unittest import mock
 
+import flow.refine as refine
+
 #: Captured at import, before any patch is in place, so the fake can defer to it.
 _REAL_WHICH = shutil.which
+
+
+@contextlib.contextmanager
+def no_off_path_installs():
+    """No entry's off-PATH probe fires, whatever this machine happens to have installed.
+
+    The same lesson as this module's docstring, one seam along. `kiro-cli` is found by an
+    AppData probe as well as by PATH — because the MSI's PATH entry does not reach a shell
+    that predates it — so on a machine with it installed, a test that carefully declared
+    what PATH holds would still be answered by the developer's disk. Patched at `resolve`'s
+    own helper rather than at `os.path.isfile`, which half the suite uses for its own
+    reasons.
+    """
+    with mock.patch.object(refine, "probed", return_value=None):
+        yield
 
 
 @contextlib.contextmanager
@@ -38,18 +55,18 @@ def cli_on_path(name: str = "codex"):
             return f"C:\\fake\\{name}.exe"
         return _REAL_WHICH(cmd, *args, **kwargs)
 
-    with mock.patch("shutil.which", which):
+    with mock.patch("shutil.which", which), no_off_path_installs():
         yield
 
 
 @contextlib.contextmanager
 def no_cli_on_path():
-    """The other half: neither CLI is installed, whatever this machine has."""
+    """The other half: no agent CLI is installed, whatever this machine has."""
 
     def which(cmd, *args, **kwargs):
-        if cmd in ("codex", "claude"):
+        if cmd in [c.name for c in refine.CANDIDATES]:
             return None
         return _REAL_WHICH(cmd, *args, **kwargs)
 
-    with mock.patch("shutil.which", which):
+    with mock.patch("shutil.which", which), no_off_path_installs():
         yield

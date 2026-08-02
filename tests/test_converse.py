@@ -667,9 +667,14 @@ class TestTheNotesObeyThePin(unittest.TestCase):
         # marker refuses anything over six characters while the note has no such budget:
         # the two can only agree by both falling back, and nothing but a test says so.
         opencode, gemini = named("opencode"), named("gemini")
+        # `kiro-cli` is the first *verified* name to overflow the slot, which is the case
+        # that matters: `opencode` proved the rule while being inert, so nothing could
+        # ever have been asked of it. This one answers.
+        kiro = named("kiro-cli")
         for pinned, resolved in ((claude, [codex, claude]), (None, [codex, claude]),
                                  (claude, [codex]),
                                  (opencode, [codex, opencode]), (None, [opencode]),
+                                 (kiro, [codex, kiro]), (None, [kiro]),
                                  (None, [gemini])):
             with self.subTest(pinned=pinned, resolved=[c.name for c in resolved]):
                 pill = ui.Pill.__new__(ui.Pill)

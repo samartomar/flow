@@ -67,6 +67,24 @@ class TestItNamesWhatRegistered(unittest.TestCase):
         self.assertIn("--no-hotkeys", rendered(hotkeys=None))
 
 
+class TestTheSheetOutlivesTheAdapter(unittest.TestCase):
+    """It names no agent CLI, and that is why a new entry costs it nothing.
+
+    Asserted rather than assumed. Every other surface that touches a CLI name — the pin,
+    the startup lines, the pill's marker, the menu's picker — had to be extended when the
+    adapter grew, and this one did not. A sheet that had picked up "codex" in an example
+    would have gone stale the first time somebody ran Flow with something else.
+    """
+
+    def test_no_candidate_is_named_anywhere_in_it(self):
+        from flow.refine import CANDIDATES
+
+        text = rendered(hotkeys=FakeHotkeys(REGISTERED))
+        for cli in CANDIDATES:
+            with self.subTest(cli=cli.name):
+                self.assertNotIn(cli.name, text)
+
+
 class TestTheLineSaidWhenVoiceGoesDown(unittest.TestCase):
     """One sentence, built from the same source the sheet is built from.
 

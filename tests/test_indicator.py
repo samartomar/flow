@@ -394,6 +394,10 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
 
         self.assertEqual(self._draw(clis=[named("opencode")]), ["ASK"], "8 characters")
         self.assertEqual(self._draw(clis=[named("gemini")]), ["gemini"], "exactly 6")
+        # `kiro-cli` is 8 too, and unlike opencode it is verified — so this is the first
+        # time the pill declines to name a CLI that is genuinely about to answer. Whether
+        # `ASK` is the right thing to see there is an eye question and is on the desk list.
+        self.assertEqual(self._draw(clis=[named("kiro-cli")]), ["ASK"], "8 characters")
         for cli in CANDIDATES:
             with self.subTest(cli=cli.name):
                 drawn = self._draw(clis=[cli])

@@ -109,6 +109,10 @@ class Cli:
     #: additional input from stdin..." — which is exactly why this is per-CLI and not a
     #: switch for the module.
     stdin_ok: bool = False
+    #: Absolute paths (with `%VARS%` still in them) to look at when PATH does not have this
+    #: CLI. Empty for everything that installs onto PATH and stays there, which is most
+    #: things; see `probed` for the one measurement that earned this field.
+    probe: tuple[str, ...] = ()
 
 
 #: Order is the preference order — codex first, per R10.
@@ -137,9 +141,21 @@ class Cli:
 #: `--help` offers `--diff`, `--goto` and `--wait` and no headless prompt mode. Detecting
 #: it and saying "not yet verified" would be false, because it *is* verified; adding it
 #: would open an editor window instead of answering a question.
+#:
+#: **`kiro-cli` is verified live**, this machine, 2026-08-02, all four legs: `--version`
+#: reports `kiro-cli-chat 2.16.0`; `chat --no-interactive --trust-tools= "<prompt>"`
+#: answers in ~1 s at exit 0 with the answer on stdout; a SECRET on the last line of a
+#: three-line prompt came back **verbatim** through `Popen` list-argv — a native `.exe`, so
+#: none of the shim truncation below applies; and bad arguments exit 2, loudly.
+#: `--trust-tools=` empty is the courier default: no tool of its own runs without being
+#: asked, which is what an agent CLI used as a rewriter must never do. It meters (~0.10
+#: credits a call) and prints a status line for it, which `_clean` strips per CLI.
+#: Note the two names: this is `kiro-cli`, and the `kiro` above is the IDE launcher.
 CANDIDATES: tuple[Cli, ...] = (
     Cli("codex", ("codex", "exec", "--skip-git-repo-check")),
     Cli("claude", ("claude", "-p")),
+    Cli("kiro-cli", ("kiro-cli", "chat", "--no-interactive", "--trust-tools="),
+        probe=(r"%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe",)),
     Cli("opencode", ("opencode",), verified=False),
     Cli("copilot", ("copilot",), verified=False),
     Cli("gemini", ("gemini",), verified=False),
@@ -167,19 +183,51 @@ CANDIDATES: tuple[Cli, ...] = (
 SHIM_SUFFIXES = (".cmd", ".bat")
 
 
+def probed(cli: Cli) -> str | None:
+    """An install this entry knows how to find when PATH does not have it.
+
+    PATH is asked first and is the normal answer: the Kiro MSI adds
+    `%LOCALAPPDATA%\\Kiro-Cli\\` to the *user* PATH, so a fresh shell finds `kiro-cli` like
+    anything else. A process started from a shell that predates the install does not —
+    measured on this machine in exactly that state, `shutil.which("kiro-cli")` returned
+    `None` while the executable at the probe path answered a real prompt in a second. So
+    this is the difference between working and not until the next sign-in, rather than
+    insurance against nothing.
+
+    A list of paths and not a search, deliberately: a probe that went looking would be the
+    guessed shape `verified` exists to forbid, one directory along.
+    """
+    for candidate in cli.probe:
+        path = os.path.expandvars(candidate)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def resolve(cli: Cli) -> str | None:
+    """Where this CLI actually is, or None. The one answer detection and launch share.
+
+    They used to ask separately and could disagree — `shutil.which` honours `PATHEXT`
+    while `CreateProcess` appends only `.exe`, which is how startup once named a CLI that
+    every call then failed to start. One function now, so a second resolver cannot appear
+    without somebody noticing it.
+    """
+    return shutil.which(cli.argv[0]) or probed(cli)
+
+
 def available() -> list[Cli]:
-    """The CLIs that may be *invoked*: on PATH, and with a shape somebody has run.
+    """The CLIs that may be *invoked*: found here, and with a shape somebody has run.
 
     Keeps its old meaning exactly, which is what lets every existing caller —
     `_invoke_any`, `Session._provider`, the pill's marker, the menu's picker — stay
     correct without knowing `verified` exists.
     """
-    return [c for c in CANDIDATES if c.verified and shutil.which(c.argv[0])]
+    return [c for c in CANDIDATES if c.verified and resolve(c)]
 
 
 def detected() -> list[Cli]:
-    """Everything found on PATH, verified or not. The only thing that may name the rest."""
-    return [c for c in CANDIDATES if shutil.which(c.argv[0])]
+    """Everything found here, verified or not. The only thing that may name the rest."""
+    return [c for c in CANDIDATES if resolve(c)]
 
 
 def unverified() -> list[Cli]:
@@ -383,7 +431,7 @@ def _invoke(
     #
     # `or cli.argv[0]` keeps the genuinely-absent case honest: nothing is fabricated,
     # the bare name goes to Popen, and the OSError below still says what is missing.
-    executable = shutil.which(cli.argv[0]) or cli.argv[0]
+    executable = resolve(cli) or cli.argv[0]
 
     # Refused before anything starts, because the failure it prevents has no symptom: the
     # shim exits 0 with a fluent answer to a prompt it never saw. See `SHIM_SUFFIXES`.
@@ -449,9 +497,52 @@ def tail_sent(text: str) -> int:
     return len(_split_tail(text)[1])
 
 
-def _clean(out: str) -> str:
-    """Light defensive tidy. Deliberately not a parser — stdout is already clean."""
-    s = out.strip()
+#: Every CSI sequence, which is all kiro-cli emits: colour resets (`\x1b[m`, `\x1b[0m`),
+#: cursor hide/show (`\x1b[?25l`), column moves (`\x1b[1G`).
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
+
+#: The metering line, matched as a *shape* rather than by the word "Credits" — an answer
+#: about billing is still an answer, and eating a sentence out of one would be this
+#: cleaner becoming the parser the module docstring argues against.
+_KIRO_STATUS = re.compile(r"^[ \t]*▸ Credits:.*$", re.MULTILINE)
+
+
+def _clean_kiro(out: str) -> str:
+    """Strip kiro-cli's chrome and leave the answer.
+
+    Measured on this machine, 2026-08-02, through the same `Popen` shape `_invoke` uses:
+    stdout is `\\x1b[m> \\x1b[0m` then the answer, with `\\x1b[0m\\x1b[0m` between lines of
+    a multi-line one — so the `> ` marker is on the **first line only**, and stripping it
+    per line would eat a quoted shell command or a diff out of a real answer.
+
+    The status line is stripped anyway and that is worth saying: with the streams apart —
+    which is this module's discipline and what `_invoke` does — `▸ Credits: … • Time: …`
+    goes to **stderr** and never arrives here at all. It is handled because it is what the
+    CLI prints when the two are together, and removing a line that is not there costs
+    nothing. Its stderr also carries a `WARNING:` about `--trust-tools` wanting an
+    `@{MCPSERVERNAME}/` prefix; the call exits 0 and answers, and nothing is done about a
+    warning on the stream this module already discards.
+    """
+    s = _KIRO_STATUS.sub("", _ANSI.sub("", out)).strip()
+    return s[2:].lstrip() if s.startswith("> ") else s
+
+
+#: Per CLI, keyed by name, and empty for everything that writes its answer alone. A tidy
+#: that ran for every entry would be a parser applied to output that does not need one —
+#: and would damage codex, whose answers legitimately contain `>` and the word Credits.
+_FURNITURE = {"kiro-cli": _clean_kiro}
+
+
+def _clean(out: str, cli: Cli | None = None) -> str:
+    """Light defensive tidy, after whatever `cli` needs stripped first.
+
+    Deliberately not a parser: for codex and claude stdout is already clean, and the only
+    reason this takes a `Cli` at all is that one entry meters and says so out loud.
+    """
+    s = out
+    if cli is not None and cli.name in _FURNITURE:
+        s = _FURNITURE[cli.name](s)
+    s = s.strip()
     if s.startswith("```"):
         lines = [ln for ln in s.splitlines() if not ln.strip().startswith("```")]
         s = "\n".join(lines).strip()
@@ -507,7 +598,7 @@ def refine(
     if out is None:
         return None, reason
 
-    revised = _clean(out)
+    revised = _clean(out, chosen)
     if not revised:
         return None, f"{chosen.name} returned nothing"
 
@@ -573,7 +664,7 @@ def ask(
     if out is None:
         return None, reason
 
-    answer = _clean(out)
+    answer = _clean(out, chosen)
     if not answer:
         return None, f"{chosen.name} returned nothing"
     cap = ASK_ARTIFACT_MAX_CHARS if artifact else ASK_MAX_CHARS

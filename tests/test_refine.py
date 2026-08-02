@@ -24,6 +24,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cli_env import no_off_path_installs  # noqa: E402
 from flow.refine import MAX_CHARS, Cli, _split_tail, refine  # noqa: E402
 from flow.session import Session  # noqa: E402
 
@@ -319,6 +322,155 @@ def only(*names):
     return lambda cmd, *a, **kw: f"/somewhere/{cmd}" if cmd in names else None
 
 
+#: What kiro-cli actually put on stdout here on 2026-08-02, captured through the same
+#: `Popen` shape `_invoke` uses. A cleaner is only as good as the furniture it was shown,
+#: and these are transcribed rather than imagined.
+KIRO_ANSWER = "\x1b[m> \x1b[0mThe deploy failed this morning because of the migration."
+KIRO_MULTILINE = "\x1b[m> \x1b[0mApples\x1b[0m\x1b[0m\nPears\x1b[0m\x1b[0m\nPlums"
+#: The same call with the streams merged, which is how the status line reaches stdout at
+#: all — `_invoke` keeps them apart, and there it stays on stderr.
+KIRO_MERGED = (
+    "\x1b[mWARNING: \x1b[0m--trust-tools arg for custom tool \x1b[m\x1b[0m needs to be "
+    "prepended with \x1b[m@{MCPSERVERNAME}/\x1b[0m\n\n\x1b[m\x1b[0m\x1b[?25l\x1b[m> "
+    "\x1b[0mPONG\x1b[0m\x1b[0m\n\x1b[m\n ▸ Credits: 0.05 • Time: 1s\n\n\x1b[0m\x1b[1G"
+    "\x1b[0m\x1b[0m\x1b[?25h"
+)
+
+
+class TestKiroCliIsWiredFromAMeasurement(unittest.TestCase):
+    """The fourth verified entry, and the first that prints anything but its answer.
+
+    Verified live on this machine on 2026-08-02, all four legs: `--version` →
+    `kiro-cli-chat 2.16.0`; a one-shot `chat --no-interactive --trust-tools= "<prompt>"`
+    answering in ~1 s at exit 0; and — the leg `opencode` failed — a SECRET on the last
+    line of a three-line prompt coming back **verbatim** through `Popen` list-argv, because
+    this is a native exe rather than a shim.
+
+    Round five's rejection of `kiro` stands and was about a different binary: the `kiro` on
+    PATH is the IDE launcher.
+    """
+
+    def kiro(self):
+        return refine_mod.named("kiro-cli")
+
+    def test_the_entry_carries_the_shape_that_was_run(self):
+        self.assertEqual(
+            self.kiro().argv,
+            ("kiro-cli", "chat", "--no-interactive", "--trust-tools="),
+        )
+        self.assertTrue(self.kiro().verified)
+
+    def test_kiro_the_ide_launcher_is_still_not_a_candidate(self):
+        # Two names, one of which opens an editor window instead of answering.
+        self.assertIsNone(refine_mod.named("kiro"))
+        self.assertIsNotNone(refine_mod.named("kiro-cli"))
+
+    def test_codex_is_still_first(self):
+        self.assertEqual([c.name for c in refine_mod.CANDIDATES][:2], ["codex", "claude"])
+
+
+class TestFindingAnInstallThatIsNotOnPath(unittest.TestCase):
+    """Detection is PATH first, with one probe behind it, and the probe earns its place.
+
+    The MSI adds `%LOCALAPPDATA%\\Kiro-Cli\\` to the *user* PATH, so a fresh shell finds
+    `kiro-cli` the ordinary way. A process started from a shell that predates the install
+    does not — measured here, in this session: `shutil.which("kiro-cli")` returned `None`
+    while the executable sat at the probe path and answered a real prompt. So the probe is
+    not hypothetical insurance; it is the difference between working and not in the
+    environment an installer leaves behind until the next sign-in.
+    """
+
+    def test_path_is_asked_first(self):
+        with mock.patch("shutil.which", only("kiro-cli")):
+            found = refine_mod.resolve(refine_mod.named("kiro-cli"))
+        self.assertEqual(found, "/somewhere/kiro-cli")
+
+    def test_the_probe_answers_when_path_does_not(self):
+        with mock.patch("shutil.which", only()), \
+                mock.patch("os.path.isfile", lambda p: p.endswith("kiro-cli.exe")):
+            found = refine_mod.resolve(refine_mod.named("kiro-cli"))
+        self.assertTrue(found and found.endswith("kiro-cli.exe"), found)
+
+    def test_a_missing_probe_target_is_not_a_resolution(self):
+        with mock.patch("shutil.which", only()), \
+                mock.patch("os.path.isfile", lambda p: False):
+            self.assertIsNone(refine_mod.resolve(refine_mod.named("kiro-cli")))
+
+    def test_entries_without_a_probe_are_unaffected(self):
+        # Every other entry resolves by PATH alone, and a probe that fired for them would
+        # be exactly the guessed shape `verified` exists to forbid.
+        with mock.patch("shutil.which", only()), \
+                mock.patch("os.path.isfile", lambda p: True):
+            for name in ("codex", "claude", "opencode"):
+                with self.subTest(cli=name):
+                    self.assertIsNone(refine_mod.resolve(refine_mod.named(name)))
+
+    def test_the_launch_uses_whatever_resolved_it(self):
+        # The invariant from `TestWhatWhichFindsIsWhatRuns`, extended to the probe: a CLI
+        # found off PATH must be *started* from where it was found, or detection and
+        # launch disagree again one seam along.
+        with mock.patch("shutil.which", only()), \
+                mock.patch("os.path.isfile", lambda p: p.endswith("kiro-cli.exe")), \
+                mock.patch("subprocess.Popen", side_effect=OSError("stopped")) as run:
+            refine_mod._invoke(refine_mod.named("kiro-cli"), "a prompt", timeout=30)
+        self.assertTrue(run.call_args.args[0][0].endswith("kiro-cli.exe"))
+
+
+class TestTheFurnitureIsStrippedForOneCliAndNoOther(unittest.TestCase):
+    """kiro-cli prints its answer inside a little chrome. Only its answer is the answer.
+
+    Keyed per CLI rather than applied to everything, because a cleaner that fires for
+    every entry is a parser — and this module's docstring is an argument against needing
+    one. codex and claude write the answer alone to stdout and must come through untouched.
+    """
+
+    def clean(self, out: str, name: str = "kiro-cli") -> str:
+        return refine_mod._clean(out, refine_mod.named(name))
+
+    def test_the_real_answer_comes_out_alone(self):
+        self.assertEqual(self.clean(KIRO_ANSWER),
+                         "The deploy failed this morning because of the migration.")
+
+    def test_a_multi_line_answer_keeps_its_lines(self):
+        self.assertEqual(self.clean(KIRO_MULTILINE), "Apples\nPears\nPlums")
+
+    def test_the_status_line_goes_when_the_streams_were_together(self):
+        cleaned = self.clean(KIRO_MERGED)
+        self.assertNotIn("Credits", cleaned)
+        self.assertNotIn("\x1b", cleaned)
+        self.assertIn("PONG", cleaned)
+
+    def test_the_word_credits_inside_an_answer_survives(self):
+        # The status line is a shape, not a word. An answer about billing is still an
+        # answer, and eating a sentence out of it would be the cleaner becoming a parser.
+        answer = "\x1b[m> \x1b[0mCredits are consumed per call, so batch the requests."
+        self.assertEqual(self.clean(answer),
+                         "Credits are consumed per call, so batch the requests.")
+
+    def test_an_angle_bracket_inside_an_answer_survives(self):
+        # Only the leading prompt marker goes. A quoted shell line or a diff is content.
+        answer = "\x1b[m> \x1b[0mRun it as:\n> git push --force-with-lease"
+        self.assertEqual(self.clean(answer),
+                         "Run it as:\n> git push --force-with-lease")
+
+    def test_codex_output_is_not_touched(self):
+        # The negative that makes this per-CLI rather than global. Both of these would be
+        # damaged by the kiro cleaner.
+        for out in ("> git status\n> git push", "Credits: see the billing page."):
+            with self.subTest(out=out):
+                self.assertEqual(self.clean(out, "codex"), out)
+                self.assertEqual(self.clean(out, "claude"), out)
+
+    def test_and_neither_is_output_from_a_cli_nobody_named(self):
+        # `_clean(out)` with no CLI is still the old defensive tidy and nothing more.
+        self.assertEqual(refine_mod._clean("> an answer"), "> an answer")
+
+    def test_the_generic_tidy_still_runs_afterwards(self):
+        # Fences and surrounding quotes were always stripped; the per-CLI pass is in
+        # front of that rather than instead of it.
+        self.assertEqual(self.clean("\x1b[m> \x1b[0m```\nShip it.\n```"), "Ship it.")
+
+
 class TestAnUnverifiedEntryIsInert(unittest.TestCase):
     """Detection ships everywhere; invocation shapes are run or they do not exist.
 
@@ -342,29 +494,33 @@ class TestAnUnverifiedEntryIsInert(unittest.TestCase):
                 self.assertEqual(cli.argv, (cli.name,))
 
     def test_available_never_offers_one_however_the_path_is_arranged(self):
-        with mock.patch("shutil.which", only("gemini", "copilot", "codex")):
-            self.assertEqual([c.name for c in refine_mod.available()], ["codex"])
-        with mock.patch("shutil.which", only("gemini", "copilot")):
-            self.assertEqual(refine_mod.available(), [])
+        # `no_off_path_installs` throughout this class: PATH is what these tests declare,
+        # and a machine that happens to have kiro-cli installed must not answer instead.
+        with no_off_path_installs():
+            with mock.patch("shutil.which", only("gemini", "copilot", "codex")):
+                self.assertEqual([c.name for c in refine_mod.available()], ["codex"])
+            with mock.patch("shutil.which", only("gemini", "copilot")):
+                self.assertEqual(refine_mod.available(), [])
 
     def test_and_no_process_is_started_for_one(self):
         # Asserted on `Popen` rather than on the return value: a check that only looked at
         # the answer would pass just as well if the call was made and failed.
-        with mock.patch("shutil.which", only("gemini")), \
+        with no_off_path_installs(), mock.patch("shutil.which", only("gemini")), \
                 mock.patch("subprocess.Popen") as started:
             answer, note = refine_mod.ask("q")
         self.assertIsNone(answer)
         started.assert_not_called()
 
     def test_the_reason_names_what_was_found_and_not_run(self):
-        with mock.patch("shutil.which", only("gemini")), mock.patch("subprocess.Popen"):
+        with no_off_path_installs(), mock.patch("shutil.which", only("gemini")), \
+                mock.patch("subprocess.Popen"):
             _answer, note = refine_mod.ask("q")
         self.assertIn("no agent CLI found on PATH", note)
         self.assertIn("gemini", note)
         self.assertIn("not yet verified", note)
 
     def test_detected_is_the_only_thing_that_names_them(self):
-        with mock.patch("shutil.which", only("gemini", "codex")):
+        with no_off_path_installs(), mock.patch("shutil.which", only("gemini", "codex")):
             self.assertEqual([c.name for c in refine_mod.detected()],
                              ["codex", "gemini"])
             self.assertEqual([c.name for c in refine_mod.unverified()], ["gemini"])
@@ -614,6 +770,12 @@ class TestStdinIsACapabilityAndNotAGuess(unittest.TestCase):
         self.assertEqual(argv, ["C:/npm/shimmed.cmd", "run"])
         self.assertEqual(started.call_args.kwargs["stdin"], subprocess.PIPE)
         self.assertEqual(proc.communicate.call_args.kwargs.get("input"), "a\nprompt")
+
+    def test_kiro_cli_is_not_the_exception(self):
+        # The newest verified entry is a native exe and takes its prompt on the argv like
+        # the other two. Named here so "the new one" cannot quietly become the first
+        # thing to carry an unmeasured flag.
+        self.assertFalse(refine_mod.named("kiro-cli").stdin_ok)
 
     def test_argv_clis_still_get_a_closed_stdin(self):
         # codex hangs on an open one, measured, which is the whole reason this is per-CLI.
