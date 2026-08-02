@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.edits import (  # noqa: E402
+    _MISHEARD_PROMPT,
     apply_local,
     describe_change,
     plan,
@@ -617,3 +618,59 @@ class TestRescueMatchesItsOwnButton(unittest.TestCase):
                      "was a command line tool that we used",
                      "the command failed"):
             self.assertEqual(plan(text, self.DRAFT).kind, "append", text)
+
+
+class TestTheMisHeardPromptTable(unittest.TestCase):
+    """One frame, and every noun the decoder has put where "prompt" was said.
+
+    The `--takes 3` run (2026-08-01) spoke "make it a proper prompt" three times into
+    the same microphone and got back "brown", "prompt" and **"font"**. Two of the three
+    carry no instruction the CLI can act on, and the frame around them survived intact
+    each time — which is what makes a table of heard nouns the right shape and a
+    similarity bar the wrong one: "font" scores 0.400 against "prompt", still under half
+    of `MATCH_THRESHOLD`, while "proper" (0.667), "problem" (0.615) and "drop" (0.600)
+    all sit above it and all mean something else in the very same frame.
+
+    The bounds are unchanged from the entry that came first: consulted only after the
+    exact reading fails, only inside `_POLISH_FRAME`, and it changes *which* instruction
+    a semantic plan carries, never whether one is sent. The other half of the bargain is
+    the rest of this class — fonts are an ordinary thing to talk about, and a table
+    keyed on the word must not reach the speech that means it.
+    """
+
+    DRAFT = "Meeting on Tuesday with Sameer about the release notes."
+
+    def routed(self, text: str) -> str:
+        p = plan(text, self.DRAFT)
+        return f"{p.kind}/{p.op}"
+
+    def test_the_newly_heard_noun_inside_the_frame_is_a_polish(self):
+        self.assertEqual(self.routed("Make it a proper font."), "semantic/polish")
+
+    def test_and_so_is_every_reading_recorded_before_it(self):
+        for s in ("Make it a proper prompt.", "Make it a proper brown."):
+            with self.subTest(s=s):
+                self.assertEqual(self.routed(s), "semantic/polish")
+
+    def test_talking_about_fonts_outside_the_frame_is_untouched(self):
+        # Both of these route exactly where they routed before the entry existed: the
+        # frame is what keeps the table off ordinary speech, not the noun.
+        self.assertEqual(self.routed("make the font bigger"), "append/")
+        self.assertEqual(self.routed("change the font to Arial"), "semantic/")
+
+    def test_and_a_different_request_in_the_same_frame_is_still_free_text(self):
+        for s in ("Make it a proper sentence.", "Make it a proper email.",
+                  "Make it a proper font size."):
+            with self.subTest(s=s):
+                p = plan(s, self.DRAFT)
+                self.assertEqual((p.kind, p.op), ("semantic", ""), s)
+
+    def test_the_table_stops_growing_before_five(self):
+        # LOOP_PLAN item 26's escalation tripwire, written as a check rather than a
+        # note so it cannot be forgotten: the edit that would make this five entries is
+        # the edit that must stop and write a NEEDS_YOU entry instead. At that size the
+        # mis-heard-noun family is measured to be open — three nouns from three takes of
+        # one sentence — and the honest fix is decode-time command bias, whose
+        # acceptance fixtures already wait in tests/test_live_replay.py.
+        self.assertLess(len(_MISHEARD_PROMPT), 5,
+                        "five heard nouns is Phase 3's evidence, not a sixth entry")

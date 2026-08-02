@@ -246,27 +246,35 @@ _POLISH = re.compile(
 #:
 #: Live run 1, item 9: "make it a proper prompt" decoded as **"Make it a proper brown"**
 #: and routed to a generic CLI rewrite instead of the prompt-shaping pass — the frame
-#: survived the accent and the one word carrying the meaning did not.
+#: survived the accent and the one word carrying the meaning did not. The `--takes 3`
+#: run said the same sentence three times and produced **"brown", "prompt", "font"** —
+#: so the frame holding while the noun moves is the measured behaviour, not one bad day.
 #:
 #: A list of what was heard, not a similarity bar, and the numbers are why: "brown"
-#: scores **0.36** against "prompt" (`phonetic.similarity`), less than half of
-#: `MATCH_THRESHOLD`, and they share no phonetic key at all — while "proper" itself
-#: scores 0.67 and "drop" 0.60. Any bar low enough to admit the mis-hearing admits
-#: words that mean something else in the very same frame, so there is no threshold to
-#: find. `_ALIASES` made this argument first.
+#: scores **0.36** against "prompt" (`phonetic.similarity`) and "font" **0.40**, both
+#: under half of `MATCH_THRESHOLD`, and neither shares a phonetic key with it — while
+#: "proper" itself scores 0.67, "problem" 0.62 and "drop" 0.60. Any bar low enough to
+#: admit the mis-hearings admits words that mean something else in the very same frame,
+#: so there is no threshold to find. `_ALIASES` made this argument first.
 #:
 #: Bounded three ways, which is what makes one observation enough to act on: it is
 #: consulted only after the exact reading fails, only inside a frame this specific, and
 #: it changes *which instruction* a semantic plan carries — never whether one is sent.
-#: "Make it a proper sentence" is a different request and stays a generic rewrite. And
-#: a polish ignores the instruction text entirely (`refine.refine(polish=True)` swaps in
-#: its own prompt), so the mis-heard word cannot reach the CLI even when this fires.
+#: "Make it a proper sentence" is a different request and stays a generic rewrite, and
+#: so does "make the font bigger", which never enters the frame at all. And a polish
+#: ignores the instruction text entirely (`refine.refine(polish=True)` swaps in its own
+#: prompt), so the mis-heard word cannot reach the CLI even when this fires.
+#:
+#: **At five entries this stops.** Five nouns heard for one word is a measurement that
+#: the family is open, and the honest fix is then decode-time command bias (Phase 3),
+#: whose acceptance fixtures already wait in `tests/test_live_replay.py` — the fifth
+#: edit writes a NEEDS_YOU entry instead, and `tests/test_edits.py` fails until it does.
 _POLISH_FRAME = re.compile(
     "^" + _LEAD + r"(?:make|turn)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+|an\s+)?"
     r"(?:proper|good|better|real|decent|clean|clear|nice)\s+(\w+)[.!?]*$",
     re.I,
 )
-_MISHEARD_PROMPT = {"brown"}
+_MISHEARD_PROMPT = {"brown", "font"}
 
 #: P9. The converse requests that ask for a piece of *work* rather than an answer.
 #: `ASK_SENTENCES` exists to keep a spoken reply carryable, and it is exactly wrong for

@@ -427,16 +427,26 @@ lead-in, because every command in the inventory is five words or fewer and a gue
 long utterance is a guess about a sentence.
 
 One noun is snapped the same way, and only one: inside "make/turn it (into) a *proper·good·
-better·…* X", a known mis-hearing of "prompt" is read as "prompt" (`_MISHEARD_PROMPT`). Live
-run 1 said "make it a proper prompt" and got back **"Make it a proper brown"**, which routed
-to a generic CLI rewrite instead of the prompt-shaping pass. A table rather than a threshold
-because the numbers leave no room for one: "brown" scores 0.36 against "prompt" and shares no
-phonetic key with it, while "proper" itself scores 0.67 — any bar that admits the mis-hearing
-admits words that mean something else in the same frame. It is bounded on all three sides: the
+better·…* X", a known mis-hearing of "prompt" is read as "prompt" (`_MISHEARD_PROMPT`, two
+entries — `brown`, `font`). Live run 1 said "make it a proper prompt" and got back **"Make it
+a proper brown"**, which routed to a generic CLI rewrite instead of the prompt-shaping pass;
+the `--takes 3` run said the same sentence three times and returned **"brown", "prompt",
+"font"** — the frame holding while the noun moves is measured behaviour now, not one bad
+decode. A table rather than a threshold because the numbers leave no room for one: "brown"
+scores 0.36 against "prompt" and "font" 0.40, neither sharing a phonetic key with it, while
+"proper" itself scores 0.67 and "problem" 0.62 — any bar that admits the mis-hearings admits
+words that mean something else in the same frame. It is bounded on all three sides: the
 exact reading is tried first, the frame has to match whole, and it changes *which* instruction
 a semantic plan carries, never whether one is sent — so the worst case is a prompt-shaping
 pass where a generic rewrite was wanted, and the mis-heard word never reaches the CLI at all
-(`refine(polish=True)` substitutes its own prompt).
+(`refine(polish=True)` substitutes its own prompt). "Make the font bigger" never enters the
+frame and is unaffected, which is what keeps a table keyed on a common noun honest.
+
+**The table stops at five, and a test says so.** Five nouns heard for one word would be a
+measurement that the family is open rather than a list of accidents, and the fix at that point
+is decode-time command bias (Phase 3) whose acceptance fixtures already sit in
+`tests/test_live_replay.py`. `tests/test_edits.py` asserts `len(_MISHEARD_PROMPT) < 5`, so the
+edit that would reach five fails the gate and writes a NEEDS_YOU entry instead of a sixth row.
 
 Spelling variants belong to the patterns rather than to either table: `lower case` is the
 same operation as `lowercase`, as `all caps` already was to `uppercase`. Runs 1 and 3 of the

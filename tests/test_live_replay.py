@@ -101,6 +101,22 @@ ROWS = [
 
 RUNS = ("run 1", "run 2", "run 3")
 
+#: The fourth measurement of the same sheet, and the first taken three takes at a time
+#: (2026-08-01, `live_check.py --takes 3`, `.bench/live/live-check.json` at `45ba125`):
+#: item 9 only, because item 9 is the one this round's fix comes from. The columns are
+#: ROWS' columns with the take standing where the run does — (take, what the microphone
+#: produced, what the sheet wanted, what the harness recorded, what Flow routes now).
+#:
+#: Three takes of one sentence, three different nouns, and only take 2 was the word. The
+#: two hits are here to be broken by a careless edit; the miss is what the entry fixes.
+ITEM_9_TAKES = [
+    (1, "Make it a proper brown.", "semantic/polish", "semantic/polish",
+     "semantic/polish"),
+    (2, "Make it a proper prompt", "semantic/polish", "semantic/polish",
+     "semantic/polish"),
+    (3, "Make it a proper font.", "semantic/polish", "semantic/", "semantic/polish"),
+]
+
 
 def routed(text: str) -> str:
     p = plan(text, DRAFT)
@@ -158,6 +174,44 @@ class TestWhatThisItemMoved(unittest.TestCase):
         for key, why in MOVED.items():
             with self.subTest(row=key):
                 self.assertTrue(why.strip())
+
+
+class TestTheFourthMeasurementOfItemNine(unittest.TestCase):
+    """The same frame spoken three times in one sitting.
+
+    The three single-take runs above each produced item 9 once, so "brown" read as one
+    speaker having one bad decode. Three takes of the same sentence on the same day
+    settled that: the noun is what varies, the frame is what holds, and a fix aimed at
+    the noun has to be a list because there is no bar between "font" (0.400 against
+    "prompt") and "proper" (0.667) that separates a mis-hearing from a real word.
+    """
+
+    def test_every_take_routes_where_the_table_says(self):
+        for take, heard, _want, _recorded, now in ITEM_9_TAKES:
+            with self.subTest(take=take):
+                self.assertEqual(routed(heard), now, heard)
+
+    def test_the_two_takes_that_already_worked_still_work(self):
+        # The regression half. "brown" was recorded as a hit because the first entry
+        # had already shipped when this run was taken — so it is evidence about the
+        # table, not about the decoder, and it is the first thing a careless edit loses.
+        hits = [t for t in ITEM_9_TAKES if t[3] == t[2]]
+        self.assertEqual([t[0] for t in hits], [1, 2])
+        for take, heard, want, _recorded, now in hits:
+            with self.subTest(take=take):
+                self.assertEqual(now, want)
+
+    def test_and_exactly_one_take_moved_from_a_miss_to_a_hit(self):
+        moved = [t for t in ITEM_9_TAKES if t[3] != t[4]]
+        self.assertEqual([t[0] for t in moved], [3])
+        take, heard, want, recorded, now = moved[0]
+        self.assertEqual((heard, recorded, now), ("Make it a proper font.",
+                                                  "semantic/", "semantic/polish"))
+        self.assertEqual(now, want)
+
+    def test_the_run_scored_two_of_three_on_this_item_and_now_scores_three(self):
+        self.assertEqual(sum(1 for t in ITEM_9_TAKES if t[3] == t[2]), 2)
+        self.assertEqual(sum(1 for t in ITEM_9_TAKES if t[4] == t[2]), 3)
 
 
 class TestTheScores(unittest.TestCase):
