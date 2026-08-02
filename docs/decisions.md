@@ -6,7 +6,34 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
-### 2026-08-02 — Help review: the sheet moves into Flow's own window, and goose leaves the presets
+### 2026-08-02 — Workspace grounding: proven by a misfire, so the ground becomes
+### switchable and named at egress
+
+First real workshop session, biggest prompt yet — asked about one project while the
+workspace was still grounded in another, set at the command line and forgotten. The
+answer was project-specific enough that the mismatch surfaced and the CLI asked for
+clarification. Two readings, both recorded: **the grounding works** — a grounded
+answer is concrete enough to be *wrong about the wrong project*, which is the
+opposite of generic and substantially answers the A/B desk question — and **the
+accepted stale-workspace cost came due on day one**: the mitigations (startup line,
+mode-switch note) are transient signals for persistent state, the same
+lesson already paid for twice (the converse marker, the editor's countdown hold).
+Two fixes, one decision:
+1. **The moment of egress names the ground.** The asking note becomes
+   "asking codex · syntegris…" (workspace leaf name, bounded length), and the
+   converse countdown's final state carries it too — visible at the only moment it
+   matters, when the question leaves.
+2. **Settings ▸ Workspace ▸** — a recents submenu, radio-checked like the trigger
+   presets, one tap to switch, "(not set)" included. Every path that arrives via
+   `--cwd` joins an additive `workspaces` recents list in the profile (bounded, most
+   recent first, cap small per the menu-stall budget). No free text — new paths
+   enter once via the flag, then live in the list.
+Nailed here so the spec cannot guess: **switching the workspace starts a fresh
+conversation** — the thread is cleared and the note says so. A workspace switch is a
+topic switch; carrying one project's conversation into another project's grounding
+is precisely the contamination this decision exists to end. Rejected again, same
+reason as the original decision: inferring the "right" project from the target
+window — a wrong guess is worse than a visible, tappable setting.
 
 Owner review of the shipped Help and menu (items 30/31): structure and presets
 approved, two changes, one ratification. **(1)** "goose" leaves the shipped preset
