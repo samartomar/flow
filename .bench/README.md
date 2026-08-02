@@ -36,7 +36,7 @@ categories are not, and both are in `.gitignore` with the reason next to them.
 | `live/live-check.json` | 1 KB | what `scripts/live_check.py` measured with a person at a real microphone — first run 2026-08-01 |
 | `commands/` | 2.4 MB | synthesised command audio for `command_bench.py`, plus its results |
 | `selfdrive/` | 2.2 MB | the SAPI WAVs `selfdrive.py` speaks, cached by utterance name, plus the throwaway profiles two scenarios write |
-| `*.wav`, `*.txt` at the top | 6 MB | room/fan/speech fixtures for the gate and calibration benchmarks, and the short/medium/long latency fixtures |
+| `*.wav`, `*.txt` at the top | 6 MB | room/fan/speech fixtures for the gate and calibration benchmarks, and the short/medium/long latency fixtures. **Four of them are the owner's own voice** — see below |
 | `polish.json`, `soak.log` | 4 KB | the polish check's output, and the long-session memory/latency log |
 
 ## What is deliberately not here
@@ -74,6 +74,24 @@ impossible. If a generated fixture is deleted, the harness that owns it makes it
 |---|---|
 | `selfdrive/*.wav` | `uv run python scripts/selfdrive.py` (SAPI, minutes on a cold cache) |
 | `commands/*.wav` | `uv run python scripts/command_bench.py` |
-| top-level `*.wav` | `uv run python scripts/gate_bench.py`, `asr_bench.py` |
+| top-level 22 kHz `*.wav` (`short`, `medium`, `long`) | `uv run python scripts/asr_bench.py` — SAPI, so genuinely remade |
+| top-level 48 kHz `*.wav` | **nothing remakes four of them** — see below |
 | `recorded/<group>/*.wav` | `uv run python scripts/ingest_recordings.py`, from `recorded/inbox/` |
 | `recorded/inbox/*` | **nothing** remakes a person. Copy from `D:\dev\flow-recordings\recorded\inbox\` — and if that is lost too, ask someone to record the sheet again |
+
+**The four that are a voice.** `acoustic.wav`, `fan45_speech.wav`, `fan55_speech.wav` and
+`setup_speech.wav` — 48 kHz, about 44 seconds in total — are the owner speaking into the
+machine's own microphone while the room and the fan were what they were. That is the
+whole point of them: the gate is measured against real speech in real noise, and SAPI
+played through a speaker measures a speaker, not a room. Two sentences, said each time:
+*"Refactor the OAuth middleware to use PKCE instead of the implicit grant, then redeploy
+to staging"* and *"The Kubernetes operator for Postgres needs an updated Helm chart"*.
+
+This row used to say `gate_bench.py` and `asr_bench.py` remade all the top-level WAVs.
+For four of them that was never true — a script does not remake a person, which is the
+argument this file already makes about the volunteer clips — and it went unnoticed until
+the repo was swept before going public. They are tracked deliberately: `gate_bench.py`'s
+numbers in `docs/architecture.md` are re-runnable by a stranger only if the audio they
+were measured on ships with them, and the owner chose to publish their own voice on that
+trade (2026-08-02). The volunteer clips got the opposite answer, and the difference is
+consent: one person can decide this about themselves and about nobody else.

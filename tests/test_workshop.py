@@ -154,9 +154,9 @@ class TestTheQuestionCarriesTheWorkshop(Temp):
 
     def test_the_draft_and_the_workspace_both_reach_the_cli(self):
         prompt = self.framed("write a migration for last_seen_at",
-                             workspace=r"D:\dev\products\syntegris")
+                             workspace=r"D:\dev\products\acme")
         self.assertIn("write a migration for last_seen_at", prompt)
-        self.assertIn(r"D:\dev\products\syntegris", prompt)
+        self.assertIn(r"D:\dev\products\acme", prompt)
 
     def test_it_says_what_the_conversation_is_for(self):
         prompt = self.framed("write a migration", workspace=str(self.dir))
@@ -195,10 +195,10 @@ class TestTheWorkspaceIsVisible(Temp):
     """The visibility that pays for the stale-path risk the owner accepted."""
 
     def test_the_mode_switch_note_names_it(self):
-        s = session(refine_cwd=r"D:\dev\products\syntegris")
+        s = session(refine_cwd=r"D:\dev\products\acme")
         s.toggle_mode()
         self.assertEqual(s.mode, CONVERSE)
-        self.assertIn(r"D:\dev\products\syntegris", notes(s))
+        self.assertIn(r"D:\dev\products\acme", notes(s))
 
     def test_and_says_so_when_there_is_none(self):
         s = session()

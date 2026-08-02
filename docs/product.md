@@ -101,7 +101,7 @@ the keyboard, and at no point did a word vanish without a trace (P2).
 
 Later, with a harder task ahead, the same developer flips the pill into converse mode
 (P9). The note names where they are: *converse mode - Ask sends the draft to codex, and
-the question leaves this machine, grounded in D:\dev\products\syntegris.* They talk a
+the question leaves this machine, grounded in D:\dev\products\acme.* They talk a
 rough prompt out loud — *"I need to add audit logging to every write path, but I don't
 want it in the hot loop"* — and the CLI comes back with what the prompt leaves ambiguous:
 which writes, what the log is read by, whether async is acceptable. They answer in

@@ -1298,7 +1298,7 @@ they only mean something together.
   field), `flow/session.py` (ask framing), tests.
 - Part 1, the wiring that was always missing: `refine_cwd` gets a value. Precedence
   matches `--voice`: `--cwd PATH` flag wins, else the profile's `workspace`, else
-  today's `None`. Startup says which ("workshop: D:\dev\products\syntegris" or
+  today's `None`. Startup says which ("workshop: D:\dev\products\acme" or
   "workshop: not set — Ask runs without a project"). A stored path that no longer
   exists: say so and run without it — a startup that refuses over a stale setting is
   worse than an ungrounded ask.

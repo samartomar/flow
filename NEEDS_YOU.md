@@ -77,7 +77,7 @@ ai-continuum at your pace; the repo keeps the engineering record. In order:
   once with the workspace set and once without, and keep both transcripts:
 
   ```bash
-  uv run python -m flow --converse --cwd D:\dev\products\syntegris
+  uv run python -m flow --converse --cwd D:\dev\products\acme
   ```
 
   Then the same again with no `--cwd`. Startup names which it got either way ("workshop:

@@ -217,6 +217,36 @@ split entry below stands as the record of a position held for one hour. Parked,
 owner-paced: migrating the live personal layer (NEEDS_YOU-style notes, future
 decisions) into ai-continuum — a workflow change, not a tonight change.
 
+**Corrected 2026-08-02, at the sweep, before the flip.** Two facts above were wrong, and
+the decision survived both — but a record that keeps the wrong reason is worth less than
+the decision it records, so here is what was measured.
+
+*"Rewritten out of history (P4, force-push verified)"* was true of every branch and false
+of GitHub. A force-push moves a ref; it does not remove objects. The pre-rewrite remote
+tip `50d16f5` was still served by the API at sweep time, and its tree still held
+`.bench/recorded/inbox/` — five clips, two of them named after a volunteer — and
+`manifest-recorded.jsonl`, the file that names people. Private, that cost nothing;
+public, it would have handed a stranger a volunteer's voice by SHA, three hours after
+this repo committed a paragraph telling volunteers that could not happen. **So the flip
+was done by deleting `samartomar/flow` and recreating it from the clean history**
+(owner-decided 2026-08-02, chosen over a GitHub Support purge for being certain rather
+than promised). Same name, same URL, one repo, nothing lost — 0 stars, 0 forks, one
+branch, one day old. "Public in place" survives intact; only the server-side object
+store did not.
+
+*"All 49 tracked WAVs are machine-synthesized or script-remade"* was true of 45. The four
+48 kHz speech fixtures are the owner at their own microphone, ~44 s, verified by
+transcribing them. **Owner-decided the same day: they ship**, because `gate_bench`'s
+published numbers are only re-runnable by a stranger if the audio ships with them, and
+the content is two sentences about OAuth and Kubernetes. `.bench/README.md` now says
+what they are instead of claiming a script remakes them. The volunteer clips keep the
+opposite answer, and the difference is consent, not sensitivity.
+
+One thing the sweep found that this entry never covered: `D:\dev\products\acme` reads
+that way in the docs and the workshop test because the real path named a client.
+**Owner-decided 2026-08-02: replaced everywhere.** "The working notes ship" is a decision
+the owner can make about their own notes; the client's name was never theirs to publish.
+
 ### 2026-08-01 — Distribution amendment, superseded same evening: split repos — private working, public snapshot
 
 Supersedes the single-repo flip below, on the owner's actual constraint surfacing: the
@@ -271,7 +301,7 @@ internet access, and hallucinated. So P9's "ChatGPT Voice mode against the CLI" 
 stale half, and converse mode becomes what the owner named: **dedicated prompt
 refinement, nothing more** — discuss and refine the prompt in conversation, take the
 result (item 21), send it (item 22). Grounding: an **explicit workspace setting** (e.g.
-`D:\dev\products\syntegris`) — the owner chose the explicit-path option over launch-dir
+`D:\dev\products\acme`) — the owner chose the explicit-path option over launch-dir
 and over reading the target window's directory. Its cost, argued once and accepted: a
 workspace set once goes stale silently when the project changes; the mitigation is
 visibility, not magic — the converse-mode note and the startup line name the workspace
