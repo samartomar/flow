@@ -24,12 +24,16 @@ import sys
 
 from .asr import FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
-from .hotkey import DEFAULT_BINDINGS, Hotkeys
-from .inject import paste, take_warnings
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, available, named
 from .session import AUTO_ASK_SEC, Session
-from .ui import Pill
+
+# `.hotkey`, `.inject` and `.ui` are imported inside main(), under the platform guard,
+# and that placement is the whole point of the guard: each of the three calls
+# `ctypes.WinDLL("user32")` at import time, so on a Mac this file cannot even be read
+# into memory. A check at the top of a function that is never reached says nothing. The
+# rest of the package — session, asr, lexicon, refine, audio — is portable and stays up
+# here, which is also the honest summary of what a port would have to do.
 
 
 def say(msg: str) -> None:
@@ -44,6 +48,22 @@ def say(msg: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # First, and above argparse: a Mac user's first impression of this product should be
+    # a sentence they can act on, not a stack trace from ctypes about a DLL they have
+    # never heard of. Above the flags too — being told the flag is wrong when the
+    # platform is the problem is the smaller answer to the larger question. The port is
+    # parked on Mac users existing and Mac hardware to re-measure on, not on the code
+    # being unportable (docs/decisions.md, "Distribution").
+    if sys.platform != "win32":
+        say("Flow's paste and hotkey layer is Windows-only today, so it cannot run "
+            f"on {sys.platform} - see the README's Install section for what a port "
+            "would take.")
+        return 2
+
+    from .hotkey import DEFAULT_BINDINGS, Hotkeys
+    from .inject import paste, take_warnings
+    from .ui import Pill
+
     ap = argparse.ArgumentParser(prog="flow", description=__doc__)
     ap.add_argument(
         "--partial-model", default=PARTIAL_MODEL,
