@@ -1,7 +1,7 @@
 # Flow — build progress & budget
 
 Loop state file. Each `/loop` iteration reads this first, does one stage, then
-appends its own log entry. Spec lives in [docs/analysis.md](docs/analysis.md).
+appends its own log entry. Spec lives in [docs/analysis.md](../../docs/analysis.md).
 
 ## Budget (R17 — hard cap 5 hr)
 
@@ -103,7 +103,7 @@ unmeasured concept risk.
 ### Iteration 2 — 2026-07-30 00:11 — stage 2b, ASR spike
 
 `uv sync` installed in **6.3 s**; 3 declared deps resolve to **28 packages**.
-Benchmark script: [scripts/asr_bench.py](scripts/asr_bench.py), driven by SAPI-synthesised
+Benchmark script: [scripts/asr_bench.py](../../scripts/asr_bench.py), driven by SAPI-synthesised
 WAVs so latency is repeatable without a person at a microphone.
 
 **R4 gate — PASSED, with a finding that simplifies stage 3 substantially:**
@@ -162,9 +162,9 @@ time is spent budget.
 
 Confirmed a usable mic (OBSBOT Tiny 3 Lite, default index 1, natively 44.1 kHz stereo —
 `sounddevice` is asked for 16 kHz mono directly so the driver resamples and we ship no
-resampler). Wrote [flow/audio.py](flow/audio.py) (`Mic`, `SpeechGate`),
-[flow/asr.py](flow/asr.py) (`WhisperTranscriber` behind a two-method interface) and
-[scripts/listen.py](scripts/listen.py), which runs the identical code path from either the
+resampler). Wrote [flow/audio.py](../../flow/audio.py) (`Mic`, `SpeechGate`),
+[flow/asr.py](../../flow/asr.py) (`WhisperTranscriber` behind a two-method interface) and
+[scripts/listen.py](../../scripts/listen.py), which runs the identical code path from either the
 mic or a WAV.
 
 **Chose an RMS gate over Silero VAD.** Silero means carrying `onnxruntime` to answer a
@@ -215,9 +215,9 @@ from synthesised speech and is optimistic. To settle it, run:
 
 ### Iteration 3 — 2026-07-30 00:40 — stages 4, 5a, 5b
 
-Wrote [flow/session.py](flow/session.py) (state machine, `DecodeWorker`, `Draft`),
-[flow/edits.py](flow/edits.py) (router + local ops), [flow/refine.py](flow/refine.py)
-(CLI adapter), and 23 tests across [tests/](tests). Whole suite runs in 0.7 s with no
+Wrote [flow/session.py](../../flow/session.py) (state machine, `DecodeWorker`, `Draft`),
+[flow/edits.py](../../flow/edits.py) (router + local ops), [flow/refine.py](../../flow/refine.py)
+(CLI adapter), and 23 tests across [tests/](../../tests). Whole suite runs in 0.7 s with no
 microphone, no model and no subprocess.
 
 **Defect 3 fixed.** `DecodeWorker` is one thread where partials are *latest-wins* — a
@@ -250,7 +250,7 @@ slow decode result in fewer than 10 decodes, and the newest snapshot is provably
 one dropped. That pattern — a green test that does not exercise the thing it names — has
 now appeared twice, so it is worth distrusting any test here that passed on the first try.
 
-**CLI refine verified live** via [scripts/refine_check.py](scripts/refine_check.py):
+**CLI refine verified live** via [scripts/refine_check.py](../../scripts/refine_check.py):
 
 | Instruction | Time | Result |
 |---|---|---|
@@ -267,15 +267,15 @@ can close it.
 
 ### Iteration 4 — 2026-07-30 01:10 — stages 6, 7, 8
 
-**Risk 3 retired first**, since it gated the whole UI. [scripts/tk_probe.py](scripts/tk_probe.py)
+**Risk 3 retired first**, since it gated the whole UI. [scripts/tk_probe.py](../../scripts/tk_probe.py)
 confirmed all five attributes the pill needs work on this Win 11 / Tk 8.6 build:
 `overrideredirect`, `-topmost`, `-alpha`, `-transparentcolor` (true rounded corners) and
 `-toolwindow` (stays out of the taskbar and alt-tab). Values read back rather than being
 silently ignored.
 
-Wrote [flow/ui.py](flow/ui.py) (pill + bubble), [flow/inject.py](flow/inject.py)
-(clipboard + `SendInput`), [flow/hotkey.py](flow/hotkey.py) (`RegisterHotKey` on its own
-message-loop thread) and [flow/\_\_main\_\_.py](flow/__main__.py). Still three declared
+Wrote [flow/ui.py](../../flow/ui.py) (pill + bubble), [flow/inject.py](../../flow/inject.py)
+(clipboard + `SendInput`), [flow/hotkey.py](../../flow/hotkey.py) (`RegisterHotKey` on its own
+message-loop thread) and [flow/\_\_main\_\_.py](../../flow/__main__.py). Still three declared
 dependencies — tkinter and ctypes are stdlib, so R16 held through the entire UI stage.
 
 **The UI was verified by looking at it, not by assuming.** That took three attempts, and
@@ -346,21 +346,21 @@ description of their coverage.
 **Test coverage went from 23 to 41**, and the additions target the code least likely to
 be exercised by hand:
 
-- [tests/test_longrun.py](tests/test_longrun.py) — history bounds, idle unload,
+- [tests/test_longrun.py](../../tests/test_longrun.py) — history bounds, idle unload,
   model *kept* while a draft is held, dead-device recovery, and paused-mic-not-reopened.
-- [tests/test_refine.py](tests/test_refine.py) — the R11 guards, which had none. Lossless
+- [tests/test_refine.py](../../tests/test_refine.py) — the R11 guards, which had none. Lossless
   tail splitting, commentary refusal, timeout, non-zero exit, empty output, fence
   stripping, missing CLI, and an explicit assertion that `stdin=DEVNULL` is passed
   (the thing that stops `codex` hanging).
 
-**Stage 10.** [README.md](README.md) written for someone who has never seen the project,
+**Stage 10.** [README.md](../../README.md) written for someone who has never seen the project,
 including a **Known limitations** section that states the unflattering things plainly:
 ~1 s partial bursts rather than per-word, nonsense in partials at word boundaries, UIPI
 blocking paste into elevated windows, ~6 s semantic rewrites, ~384 MB installed, and that
 accuracy on the user's own voice is still unmeasured.
 
 **Soak result — memory half of proof criterion 5 passes.** 11 minutes, 58 utterances
-decoded, [scripts/soak.py](scripts/soak.py) driving a real model with looped speech in real time:
+decoded, [scripts/soak.py](../../scripts/soak.py) driving a real model with looped speech in real time:
 
 | | |
 |---|---|
@@ -415,7 +415,7 @@ did this number actually come from, and does that count make sense for the inter
 claims to describe. The `n` column existed only because of lesson 2; it is what caught
 lesson 3.
 
-**Real capture path verified** via [scripts/mic_check.py](scripts/mic_check.py). Until now
+**Real capture path verified** via [scripts/mic_check.py](../../scripts/mic_check.py). Until now
 every audio test came from a WAV or a fake, so PortAudio had never actually run:
 
 | | |
@@ -485,7 +485,7 @@ With all ten stages done and the only blocker being something a user has to answ
 remaining budget went to two improvements that are correct either way.
 
 **1. Whisper invents text on silence, and it was reaching the draft.**
-[scripts/hallucination_probe.py](scripts/hallucination_probe.py) measured what the model
+[scripts/hallucination_probe.py](../../scripts/hallucination_probe.py) measured what the model
 emits when there is nothing to hear:
 
 | Input | `no_speech_prob` | Emitted |
@@ -499,7 +499,7 @@ emits when there is nothing to hear:
 
 For a tool that pastes into someone's document, an invented word is a defect. The gap
 between a real fragment (0.099) and a hallucination (0.691) is wide, so
-[flow/clean.py](flow/clean.py) filters on `no_speech_prob` rather than on a blocklist of
+[flow/clean.py](../../flow/clean.py) filters on `no_speech_prob` rather than on a blocklist of
 phrases.
 
 The design bias is stated in the module and enforced in the tests: **dropping a real word
@@ -614,7 +614,7 @@ Tested in a throwaway venv rather than by reasoning:
 | `av` replaced by a stub | 137.1 MB | ok |
 
 Then ran the **full 69-test suite using the slimmed interpreter** — all passing. Wrapped it
-in [scripts/slim.py](scripts/slim.py), which dry-runs by default and has `--undo`;
+in [scripts/slim.py](../../scripts/slim.py), which dry-runs by default and has `--undo`;
 exercising the script end to end gave **243.5 MB → 137.3 MB, saving 106.2 MB**. With the
 model that is 384 MB → ~278 MB, a 28% reduction.
 
@@ -643,7 +643,7 @@ The absent summary line here is the same lesson as the absent `n` column in stag
 ### Iteration 9 — 2026-07-30 03:40 — the seams between iterations
 
 Every module had unit tests, but the pieces were added across eight iterations and the
-*seams* between them had none. Wrote [tests/test_integration.py](tests/test_integration.py)
+*seams* between them had none. Wrote [tests/test_integration.py](../../tests/test_integration.py)
 to cover where the hallucination filter meets the state machine, and where the new local
 edit ops meet undo and send. Two real bugs came out of tracing the filtered-utterance path:
 
@@ -676,7 +676,7 @@ launches.
 ### Iteration 10 — 2026-07-30 04:07 — doc/code alignment, and stopping
 
 Nine iterations of measurement changed several decisions recorded in
-[docs/analysis.md](docs/analysis.md), and a design doc that contradicts the code is worse
+[docs/analysis.md](../../docs/analysis.md), and a design doc that contradicts the code is worse
 than none. Audited it against the implementation and corrected every divergence found:
 
 | Claimed in §3–§5 | Actually built |
@@ -728,8 +728,8 @@ denominator, and check the run finished.**
 ## Log — accuracy & product track (from 2026-07-31)
 
 The v0.1 build above answered "does the loop work". This track answers the question it
-left open: does it work for the user in [docs/product.md](docs/product.md) — a developer
-speaking accented English. Plan and phases in [docs/roadmap.md](docs/roadmap.md).
+left open: does it work for the user in [docs/product.md](../../docs/product.md) — a developer
+speaking accented English. Plan and phases in [docs/roadmap.md](../../docs/roadmap.md).
 
 ### 2026-07-31 — Phase 0: the R4 partial-latency gate, measured on accented speech
 
