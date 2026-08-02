@@ -233,5 +233,138 @@ class TestOverflowIsSurfaced(unittest.TestCase):
         s.close()
 
 
+class FakeHotkeys:
+    """What registered this launch, which is the only thing worth naming to a user."""
+
+    def __init__(self, chosen: dict | None = None) -> None:
+        self.chosen = chosen if chosen is not None else {"send": "ctrl+alt+enter"}
+        self.failed: list[str] = []
+
+
+class TestWhenVoiceGoesDownFlowSaysWhatStillWorks(unittest.TestCase):
+    """The half of the long-draft incident that had nothing to do with rendering.
+
+    Once the stall had overflowed the microphone, every *spoken* rescue was impossible:
+    "boom" needs a decode, a decode needs the models, and the models needed the mic the
+    render had killed. The one thing that still worked — the send hotkey — had been
+    announced once, at startup, in a console the user was not looking at. So the moment
+    Flow stops being able to hear is the moment it has to say what is left.
+    """
+
+    def _session(self, hotkeys=None):
+        mic = CountingMic()
+        s = Session(asr=TrackingAsr(), mic=mic)
+        s.hotkeys = hotkeys if hotkeys is not None else FakeHotkeys()
+        s.start()
+        s.events()
+        return s, mic
+
+    def _notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def test_an_overflow_with_a_draft_names_the_exits(self):
+        s, mic = self._session()
+        s.draft.set("a long dictation nobody wants to lose")
+        mic.dropped = 256
+        s.tick()
+        notes = self._notes(s)
+        self.assertIn("voice is down", notes)
+        # Beside the loss, not instead of it: invariant 4 owns "how much audio went",
+        # and this answers a different question.
+        self.assertIn("16.4 s", notes)
+        s.close()
+
+    def test_an_overflow_with_no_draft_says_nothing_extra(self):
+        # Nothing to rescue. A warning about a draft that does not exist is the noise
+        # that teaches people to ignore the real one.
+        s, mic = self._session()
+        mic.dropped = 256
+        s.tick()
+        notes = self._notes(s)
+        self.assertIn("overflow", notes)
+        self.assertNotIn("voice is down", notes)
+        s.close()
+
+    def test_it_is_said_once_and_not_on_every_tick(self):
+        s, mic = self._session()
+        s.draft.set("still here")
+        mic.dropped = 5
+        s.tick()
+        s.events()
+        mic.dropped = 40
+        for _ in range(5):
+            s.tick()
+        self.assertNotIn("voice is down", self._notes(s))
+        s.close()
+
+    def test_the_next_draft_gets_its_own_warning(self):
+        # The latch clears when there is nothing left to rescue, so a second incident in
+        # the same session is a second incident rather than a silence.
+        s, mic = self._session()
+        s.draft.set("first")
+        mic.dropped = 5
+        s.tick()
+        s.events()
+        s.draft.set("")
+        s.tick()
+        s.draft.set("second")
+        mic.dropped = 40
+        s.tick()
+        self.assertIn("voice is down", self._notes(s))
+        s.close()
+
+    def test_models_gone_under_a_held_draft_is_the_same_announcement(self):
+        """The other way voice dies, and it is a *state* rather than a call site.
+
+        `_pump_health` refuses to unload while a draft is held, so the idle path cannot
+        produce this today — which is exactly why the check reads the condition instead
+        of hanging off that branch. Whatever takes the models away, a draft with nothing
+        left to decode it is the thing the user has to be told about.
+        """
+        s, _mic = self._session()
+        s.draft.set("something worth keeping")
+        s.asr.unload()
+        s.tick()
+        self.assertIn("voice is down", self._notes(s))
+        s.close()
+
+    def test_the_note_carries_the_combo_that_actually_registered(self):
+        # The defect item 30 exists to prevent, one layer along: `ctrl+alt+enter` is the
+        # *first alternative* in DEFAULT_BINDINGS, not necessarily what the OS accepted.
+        s, mic = self._session(FakeHotkeys({"send": "ctrl+shift+enter"}))
+        s.draft.set("a draft")
+        mic.dropped = 5
+        s.tick()
+        notes = self._notes(s)
+        self.assertIn("ctrl+shift+enter", notes)
+        self.assertNotIn("ctrl+alt+enter", notes)
+        s.close()
+
+    def test_no_hotkeys_still_names_something_to_press(self):
+        # Lite, and `--no-hotkeys`. A sentence with the useful half missing is worse
+        # than no sentence: it reads as the app having nothing to offer.
+        s, mic = self._session(FakeHotkeys({}))
+        s.draft.set("a draft")
+        mic.dropped = 5
+        s.tick()
+        notes = self._notes(s)
+        self.assertIn("voice is down", notes)
+        self.assertIn("Send chip", notes)
+        s.close()
+
+    def test_a_session_nobody_wired_hotkeys_into_does_not_crash(self):
+        # Every fake in the suite predates the attribute; `Session` is built before the
+        # hotkeys exist, which is why `main()` assigns it afterwards.
+        mic = CountingMic()
+        s = Session(asr=TrackingAsr(), mic=mic)
+        s.start()
+        s.events()
+        s.draft.set("a draft")
+        mic.dropped = 5
+        s.tick()
+        self.assertIn("voice is down", self._notes(s))
+        s.close()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -735,6 +735,17 @@ for `ui.SENT_LINGER_SEC` under a `sent` label with a **Put it back** chip, which
 `Session.recall()` — the same path the spoken *"bring back my last prompt"* takes. Dictate
 mode only: in converse mode the bubble is already staying up for the answer.
 
+### Copy draft
+
+Lite's `Pill._copy` — Tk's own clipboard, three declared dependencies on every OS — is a
+top-level menu entry in the full body too, above Clear draft because one of them saves the
+words and the other destroys them. It is the exit that needs **no model, no decode and no
+target window**, which is what makes it the tap that would have ended the long-draft
+incident: by the time the render stall had overflowed the microphone, every spoken rescue
+needed a decoder that needed the mic. It deliberately does not go through `send()` — that
+clears the draft and hands it to the paste layer, and the value here is that nothing
+changes. An empty draft is answered rather than copied silently.
+
 ### The bubble under a long draft
 
 `Bubble._render` measured and laid out the whole draft on every partial, and both things
@@ -752,9 +763,9 @@ words are always the visible ones, which is what tail-following means for a draf
 ever grows at the end.
 
 **No scrollback, deliberately.** Scrolling back would have to lay out what it scrolls to,
-which re-grows the cost the cap exists to bound. The whole draft stays reachable by a route
-that already exists and costs nothing: **Edit** opens all of it in a `tk.Text` that scrolls
-itself.
+which re-grows the cost the cap exists to bound. The whole draft stays reachable by two
+routes that cost nothing: **Edit** opens all of it in a `tk.Text` that scrolls itself, and
+**Copy draft** puts every character on the clipboard.
 
 The reply path is **not** part of this. An answer is bounded where it is produced
 (`ASK_ARTIFACT_MAX_CHARS`) and is read rather than dictated into, so it keeps its full-text
@@ -917,8 +928,9 @@ a different thing to look at and has not been looked at.
 The menu is split into those two submenus because a flat list that grows with every
 feature is one nobody scans, and this one is also a modal loop that stalls the UI thread
 while it is open. The split is by **how often a tap is the answer**, not by category:
-Send, the mode toggle, the correction offers and Clear draft are things somebody does
-mid-sentence and stay at the top with Quit; the trigger word, the CLI, the voice, the
+Send, the mode toggle, the correction offers, **Copy draft** and Clear draft are things
+somebody does mid-sentence and stay at the top with Quit; the trigger word, the CLI, the
+voice, the
 auto-ask toggle, **Never offer** and the settings folder are things somebody does once and
 moved under **Settings ▸**. Still not a settings dialog — every entry under it writes to
 `lexicon.txt` or `profile.json`, the two files that were always the settings; what stays
@@ -948,6 +960,15 @@ policy here; it is enforced by absence.
    watching the pill while it happens. What is still *not* promised is that the audio
    comes back: the queue drops oldest-first and those blocks are gone. The undo stack
    holds words; nothing holds sound.
+   Saying how much audio went is only half of the promise when the words that are *left*
+   have no way out. Live at the desk on 2026-08-02 the overflow arrived with a long draft
+   held, and every spoken rescue died with the microphone: "boom" needs a decode, a decode
+   needs the models, the models need the mic. So an overflow with a draft on screen — or a
+   draft held with no models resident, which is the same state arriving by another road —
+   also says what still works: `help.exits_note()`, built from `hotkeys.chosen` so it names
+   the combo that actually registered rather than the first alternative in
+   `DEFAULT_BINDINGS`. Once per draft, never on an empty one, and never twice for the same
+   incident.
    The two *deliberate* deafnesses are the same promise kept a different way. While a
    reply plays, and while the hand editor is open, `_pump_audio` drains the device and
    discards every block — and both say so, in a note and on the indicator, which is what
@@ -1044,7 +1065,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (993 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1013 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

@@ -539,6 +539,9 @@ class Pill(tk.Tk):
             command=self.session.toggle_mode,
         )
         offered = self._offer_pairs(m)
+        # Above Clear draft, because one of them saves the words and the other destroys
+        # them, and this menu is where the long-draft incident would have ended.
+        m.add_command(label="Copy draft", command=self._copy_draft)
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
         self._settings_menu(m, offered)
@@ -815,6 +818,28 @@ class Pill(tk.Tk):
         except tk.TclError as exc:
             return f"could not copy: {exc}"
         return ""
+
+    def _copy_draft(self) -> None:
+        """The exit that needs no model, no decode and no target window.
+
+        Lite built `_copy` for a body with no hands; full mode gets it because that is
+        exactly what is left when a render stall has taken the microphone and the spoken
+        triggers with it (decisions.md, "The long-draft incident"). One tap, and the words
+        are somewhere else.
+
+        Deliberately not `send()`: that clears the draft and hands it to the paste layer,
+        and the whole value of this one is that it changes nothing. Reading the draft is
+        the only thing it asks the session for.
+        """
+        draft = getattr(self.session, "draft", None)
+        text = getattr(draft, "text", "") if draft is not None else ""
+        if not text:
+            # Surfaced rather than noted: with no draft there is no bubble to note into,
+            # and a menu entry that does nothing visible reads as broken.
+            self.bubble.surface("nothing to copy — the draft is empty")
+            return
+        problem = self._copy(text)
+        self.bubble.note(problem or "draft copied — paste it where you need it")
 
     def _send(self, submit: bool = False) -> None:
         """R5: hand the draft over, and leave it recoverable either way.

@@ -127,6 +127,29 @@ def _hotkey_rows(hotkeys) -> list[tuple[str, str, str]]:
                      "work.", "")]
 
 
+def exits_note(hotkeys=None) -> str:
+    """One line for the moment Flow stops being able to hear, with a draft still held.
+
+    Live at the desk on 2026-08-02: a render stall overflowed the microphone, and with the
+    mic dead every *spoken* rescue was impossible — "boom" needs a decode, a decode needs
+    the models, the models need the mic. What still worked was the send hotkey, announced
+    once, at startup, in a console nobody was looking at. So the app says it at the moment
+    it becomes the only thing left.
+
+    Built here, beside `_hotkey_rows`, and from `hotkeys.chosen` for the same reason the
+    sheet is: the combo is whatever `RegisterHotKey` accepted this launch, and a sentence
+    written where `DEFAULT_BINDINGS` is in scope is a sentence that will one day name a key
+    nobody on that machine can press.
+
+    With no combo — Lite, `--no-hotkeys`, or every alternative for `send` taken — it names
+    the chip instead of trailing off. Both other exits need no microphone either, which is
+    the only reason they are worth listing at the moment the microphone is the problem.
+    """
+    send = (getattr(hotkeys, "chosen", {}) or {}).get("send")
+    press = f"{send} still sends" if send else "the Send chip still works"
+    return f"voice is down — {press}; click the draft to edit, or right-click to copy it"
+
+
 def _arming_rows(hotkeys, lite: bool) -> list[tuple[str, str, str]]:
     """How the microphone is armed on this machine, which in Lite is not a combo.
 

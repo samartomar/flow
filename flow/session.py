@@ -45,6 +45,7 @@ from .edits import (
 #: a different word; lower-casing marks it as ordinary prose, which is the one thing not
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
+from .help import exits_note
 from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
@@ -486,6 +487,14 @@ class Session:
         #: fresh counter with it, and is the number the diagnostics trace wants.
         self.mic_dropped = 0
         self._last_mic_dropped = getattr(self.mic, "dropped", 0)
+        #: What registered this launch, assigned by `main()` after `Hotkeys.start()` —
+        #: which is after this object exists, hence an attribute rather than an argument.
+        #: Read only to say what still works when voice stops working (`_say_exits`).
+        self.hotkeys = None
+        #: Whether the voice-down note has already been said for the draft currently on
+        #: screen. Cleared the moment there is nothing left to rescue, so one incident
+        #: produces one note and the next incident produces the next.
+        self._said_exits = False
         #: The device a mismatch has already been reported for, so a mic that keeps
         #: being reopened does not say the same thing every five seconds.
         self._noted_device: str | None = None
@@ -784,9 +793,29 @@ class Session:
         for drop in take():
             self._emit("drop", drop.describe())
 
+    def _say_exits(self) -> None:
+        """Name the ways out that still work — once per draft, and never for no draft.
+
+        The four fixes the long-draft incident produced share one principle: a draft must
+        never disable its own exits. This is the one that only has to *say* something,
+        because the exits were all still there — the send hotkey worked the whole time and
+        had been named once, at startup, in a console.
+
+        Nothing is said with an empty draft. There is nothing to rescue, and a warning
+        about a draft that does not exist is the noise that teaches people to ignore the
+        real one. The latch is what keeps a burst of ticks to a single note; it clears in
+        `_pump_health` the moment the draft is empty again.
+        """
+        if self._said_exits or not self.draft.text:
+            return
+        self._said_exits = True
+        self._emit("note", exits_note(self.hotkeys))
+
     def _pump_health(self) -> None:
         """Long-session upkeep (R8): overflow, device liveness, idle model unload."""
         now = time.perf_counter()
+        if not self.draft.text:
+            self._said_exits = False
         self._pump_overflow()
 
         if now - self._last_mic_check >= MIC_CHECK_SEC:
@@ -815,6 +844,13 @@ class Session:
         ):
             self.asr.unload()
             self._emit("note", f"idle {idle / 60:.0f} min — model unloaded")
+
+        # The other way voice dies, written as a *state* rather than as a callback on the
+        # unload above: that branch refuses to unload while a draft is held, so it cannot
+        # produce this itself. What matters to the person holding the draft is that there
+        # is nothing left to decode their rescue with, whatever took the models away.
+        if not getattr(self.asr, "loaded", True):
+            self._say_exits()
 
     def _pump_overflow(self) -> None:
         """Say when the microphone queue threw audio away.
@@ -845,6 +881,9 @@ class Session:
                 f"microphone overflowed — about {amount} of audio was lost while the "
                 "UI was held",
             )
+            # Beside the loss rather than instead of it. Invariant 4 owns "how much audio
+            # went"; this answers the question the user asks next, which is what is left.
+            self._say_exits()
         # Rebased even when it went backwards: a reopened device brings a fresh counter,
         # and counting that as recovered audio would be the opposite of the truth.
         self._last_mic_dropped = raw

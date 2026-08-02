@@ -107,6 +107,9 @@ class Menu(unittest.TestCase):
         pill.hotkeys = None
         pill.bubble = mock.Mock()
         pill.bubble.note = self.notes.append
+        #: `surface` is the same line shown with no draft behind it, which is how the
+        #: menu answers a tap that has nothing to act on.
+        pill.bubble.surface = self.notes.append
         pill._clis = []
         pill._flash = 0
         with mock.patch.object(tk, "Menu", make), \
@@ -122,7 +125,7 @@ class Menu(unittest.TestCase):
 class TestWhatStaysOneTap(Menu):
     """The split is by how often a tap is the answer, not by category."""
 
-    ESSENTIALS = ("Send", "Converse mode", "Clear draft", "Quit")
+    ESSENTIALS = ("Send", "Converse mode", "Copy draft", "Clear draft", "Quit")
 
     def test_the_essentials_are_still_at_the_top(self):
         top = self.build(self.profile())
@@ -149,6 +152,59 @@ class TestWhatStaysOneTap(Menu):
     def test_the_mode_toggle_names_the_mode_it_switches_to(self):
         self.assertIn("Converse mode", self.build(self.profile()).commands)
         self.assertIn("Dictate mode", self.build(self.profile(), converse=True).commands)
+
+    def test_copy_draft_sits_above_clear_draft(self):
+        # One saves the words and one destroys them; the order is which hand reaches
+        # which first during an incident, and this menu is where an incident ends.
+        order = self.build(self.profile()).order
+        self.assertLess(order.index("Copy draft"), order.index("Clear draft"))
+
+
+class TestCopyDraftIsTheExitThatNeedsNothing(Menu):
+    """The tap that would have ended the long-draft incident.
+
+    Lite built `Pill._copy` for a body with no hands; full mode gets it as the universal
+    exit — no model, no decode, no target window — which is exactly what is left when the
+    render stall has taken the microphone and the spoken triggers with it.
+    """
+
+    def _tap(self, draft: str, copy=None):
+        top = self.build(self.profile())
+        self.pill.session.reset_mock()  # the menu build itself asked the session things
+        self.pill.session.draft = mock.Mock(text=draft)
+        self.pill.lite = False
+        self.pill._copy = copy if copy is not None else mock.Mock(return_value="")
+        top.commands["Copy draft"]()
+        return self.pill
+
+    def test_the_draft_goes_to_the_clipboard_verbatim(self):
+        copy = mock.Mock(return_value="")
+        self._tap("line one\nline two  ", copy)
+        copy.assert_called_once_with("line one\nline two  ")
+
+    def test_it_does_not_go_through_send(self):
+        # `send()` clears the draft and hands it to the paste layer. Copy changes
+        # nothing, which is what makes it safe to reach for mid-incident.
+        pill = self._tap("a draft")
+        pill.session.send.assert_not_called()
+        self.assertEqual(pill.session.draft.text, "a draft")
+
+    def test_it_asks_the_session_for_nothing_at_all(self):
+        # The whole point, asserted on the collaborator rather than on the outcome: this
+        # path reads the draft and copies it. Nothing it calls can need a model, a
+        # decode or a CLI, because it calls nothing.
+        pill = self._tap("a draft")
+        self.assertEqual(pill.session.method_calls, [])
+
+    def test_an_empty_draft_says_so_rather_than_copying_nothing(self):
+        copy = mock.Mock(return_value="")
+        self._tap("", copy)
+        copy.assert_not_called()
+        self.assertTrue(self.notes, "an empty draft copied silently")
+
+    def test_a_refusing_clipboard_is_reported(self):
+        self._tap("a draft", mock.Mock(return_value="could not copy: busy"))
+        self.assertIn("could not copy", " | ".join(self.notes))
 
 
 class TestWhatMovedInside(Menu):

@@ -342,6 +342,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             say("hotkey thread did not start; continuing without hotkeys")
             hotkeys = None
+    # Assigned rather than passed: the session is built before `RegisterHotKey` has been
+    # asked for anything, and what the session needs is the answer, not the request. It
+    # reads this only to say what still works when voice stops working.
+    session.hotkeys = hotkeys
 
     def on_send(text: str, target: int | None = None, submit: bool = False) -> str:
         """Paste the draft into `target`, and return what went wrong, or "".

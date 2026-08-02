@@ -66,6 +66,52 @@ class TestItNamesWhatRegistered(unittest.TestCase):
         # in the help rather than as a choice the user made at launch.
         self.assertIn("--no-hotkeys", rendered(hotkeys=None))
 
+
+class TestTheLineSaidWhenVoiceGoesDown(unittest.TestCase):
+    """One sentence, built from the same source the sheet is built from.
+
+    It lives here rather than in `session.py` for the reason the sheet does: the combos
+    are whatever `RegisterHotKey` accepted this launch, and a note written where the
+    defaults are visible is a note that will one day name a key nobody can press. The
+    session emits it; this decides what it says.
+    """
+
+    def test_it_names_the_combo_that_registered(self):
+        note = helpfile.exits_note(FakeHotkeys({"send": "ctrl+shift+enter"}))
+        self.assertIn("ctrl+shift+enter", note)
+
+    def test_and_not_the_default_it_may_have_fallen_back_from(self):
+        self.assertNotIn("ctrl+alt+enter",
+                         helpfile.exits_note(FakeHotkeys({"send": "ctrl+shift+enter"})))
+
+    def test_it_says_the_voice_is_the_thing_that_is_down(self):
+        # The note arrives while nothing else is happening on screen. If it does not say
+        # why it is there, it reads as an error somebody has to diagnose.
+        self.assertIn("voice is down", helpfile.exits_note(FakeHotkeys(REGISTERED)))
+
+    def test_with_no_combo_it_names_the_chip_instead_of_trailing_off(self):
+        # Lite, `--no-hotkeys`, and the case where every alternative for `send` was
+        # taken. A sentence missing its useful half is worse than no sentence.
+        for hotkeys in (None, FakeHotkeys({}), FakeHotkeys({"toggle": "ctrl+alt+space"})):
+            with self.subTest(hotkeys=hotkeys):
+                note = helpfile.exits_note(hotkeys)
+                self.assertIn("Send chip", note)
+                self.assertIn("voice is down", note)
+
+    def test_it_names_the_two_exits_that_need_no_microphone(self):
+        # Edit and Copy: one puts the words under a keyboard, the other puts them on the
+        # clipboard. Neither needs a decode, which is the whole point of saying them here.
+        note = helpfile.exits_note(FakeHotkeys(REGISTERED))
+        self.assertIn("edit", note)
+        self.assertIn("copy", note)
+
+    def test_it_stays_one_glance_long(self):
+        # It is drawn at the bubble's foot at 8 pt, where a line holds ~63 characters.
+        # Two lines is a note; four is a paragraph nobody reads mid-incident.
+        for hotkeys in (None, FakeHotkeys(REGISTERED)):
+            with self.subTest(hotkeys=hotkeys):
+                self.assertLessEqual(len(helpfile.exits_note(hotkeys)), 126)
+
     def test_every_action_that_registered_gets_a_line(self):
         text = rendered(hotkeys=FakeHotkeys(REGISTERED))
         for action, combo in REGISTERED.items():
