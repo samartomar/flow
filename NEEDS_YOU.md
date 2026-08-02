@@ -12,6 +12,32 @@ what is live: desk work, and the two decisions parked on evidence.
 (none — the record is [docs/decisions.md](docs/decisions.md); two evidence-parked
 entries are further down)
 
+## The selfdrive tripwire has fired — `capitalize sameer`, second sighting
+
+- [ ] **Quarantine or fix `spoken: 'capitalize sameer'` in `scripts/selfdrive.py`.** Rule 2's
+  same-check tripwire, written into policy on 2026-08-01 (decisions.md, "Selfdrive flake"),
+  says two sightings of the *same* check flaking in two different runs stops being noise —
+  even when both rerun green, which both of these did. This is sighting two.
+  - **Sighting one:** item 2's run, 2026-08-01 — 63/64, `spoken: 'capitalize sameer'`,
+    64/64 on the rerun, four green runs after it (loop-rounds-1-3.md).
+  - **Sighting two:** item 39's run, 2026-08-02 — 63/64, the same check, decoded
+    `sameer is writing the…` with the capital never applied; 64/64 on the automatic rerun.
+  - **The load question the decision told us to ask first, answered: yes.** This run
+    followed two full unit suites back to back (1031 tests, ~15 s each) plus three real-Tk
+    render-cost measurements, so the fan was ramped and the room was not the idle one
+    `--calibrate` measured. That is consistent with the mechanism already on record —
+    `capitalize sameer` is marginal by design, and `asr.py`'s temperature fallback samples
+    once `avg_logprob` crosses −1.0 — and it is *not* evidence that anything regressed:
+    nothing in items 37–39 touches the decoder, the gate or the router.
+  - **What is left for you, because it is a taste call rather than a measurement:** either
+    quarantine the check (mark it advisory so a flip cannot cost a rerun) or make it
+    non-marginal (a longer utterance, or a word the decoder is not on the edge about).
+    Fixing it by loosening the *decoder* is the one option to refuse — the marginality is
+    real and the check is the only place the suite sees it.
+  - Cheapest thing that would settle the load half properly: run selfdrive twice from a
+    cold machine before any suite has run, and twice straight after a suite. Four runs, no
+    new instrument.
+
 ## Found while building, out of the item's scope
 
 - [ ] **A `.cmd` shim truncates every prompt Flow sends at the first newline — and both
@@ -108,6 +134,57 @@ Two things the sweep turned up that you have not ruled on, kept here rather than
   argument already written down.
 
 ## At the desk
+
+- [ ] **Run the long draft on purpose, and watch the chips stay put.** Items 37 and 38
+  shipped from the incident at your desk (decisions.md, "The long-draft incident"). The
+  numbers say it is fixed — a 50 000-character draft renders in **4.3 ms** instead of
+  476.7, and the bubble is **414 px** instead of 15 153 — but the thing the incident was
+  actually about is whether the window is usable, and that is eyes.
+  1. Dictate, or paste through Edit, until the draft is *long* — a few minutes of speech,
+     or open Edit and paste a few pages in and press Done.
+  2. Look at the bubble. It should stop growing, show the **end** of the draft, carry a
+     muted `… N earlier lines` above it, and keep Refine / Continue / Edit / Send on
+     screen. Newly spoken words should appear at the bottom with nothing to scroll.
+  3. **There is no scroll back through the draft, deliberately** — scrolling back would
+     have to lay out what it scrolls to, which is the cost the cap exists to bound. The
+     whole draft is in **Edit**, and now in **Copy draft** (right-click, above Clear
+     draft). If reading the middle of a long draft in the bubble turns out to be something
+     you actually want, say so and it becomes a decision rather than a guess.
+  4. Worth a look while there: is `… N earlier lines` a number you would trust? It is
+     wraps plus explicit breaks from a measured 56.4 characters a line, not a layout — an
+     estimate by construction, because counting exactly means laying the text out.
+  If you can get the mic to overflow again (the right-click menu held open is the one
+  known way, ~16 s), the note beside "microphone overflowed" should now read
+  **"voice is down — <your send combo> still sends; click the draft to edit, or
+  right-click to copy it"**, once, with the combo that actually registered.
+
+- [ ] **Read the shim refusal on a machine where a CLI *is* an npm shim** — a work laptop
+  with `npm i -g @openai/codex` or the Claude equivalent, or install one deliberately
+  somewhere disposable. Item 39 ships the refusal and everything about it is verified here
+  *except how it reads to somebody who did nothing wrong*. Flow will say, before starting
+  anything:
+  `codex is a codex.cmd launcher - cmd.exe cuts its argument at the first newline, so it
+  would answer a prompt it never saw. Install the native codex build rather than npm -g.`
+  Two questions only you can answer: is that enough for you to know what to do next, and
+  does it name the right thing to blame? The alternative shape — let the call through and
+  get a fluent answer to a question the CLI never received — is the one this replaces, and
+  it is worth seeing the refusal once to be sure the trade is right. If the wording is
+  wrong, it is one string in `flow/refine.py`.
+  The repair is already built and switched off: `Cli(..., stdin_ok=True)` sends the prompt
+  on stdin, where `%*` is never involved, and a `.cmd` is then not refused. Nothing ships
+  with it on, because turning it on for a CLI is a measurement — run that CLI reading a
+  multi-line prompt from stdin, on the machine that has it, then set the flag.
+
+- [ ] **Eyeball the pill's marker with kiro-cli answering.** `kiro-cli` is 8 characters and
+  `MARKER_MAX` is 6, so the pill draws **`ASK`** while kiro-cli is the CLI that would
+  answer. That rule is right as written — a clipped name reads as a different CLI — but
+  this is the first time it hides a CLI that is genuinely about to be called (`opencode`
+  reached the same limit while inert, so nothing could ever be asked of it). Run
+  `uv run flow --converse --cli kiro-cli`, look at the pill, and say which you prefer:
+  leave it as `ASK` (honest, and the notes name the CLI anyway), or give the slot a
+  measured widening. Item 15's precedent — whether `codex` at 6 pt collides with a tall
+  level bar — is the entry above; this is the same kind of question and the same kind of
+  answer, and both are cheap to change once you have looked.
 
 - [ ] **On a macOS machine: install uv, run
   `uv tool install git+https://github.com/samartomar/flow`, grant microphone permission

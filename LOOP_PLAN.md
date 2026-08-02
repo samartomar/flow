@@ -9,6 +9,46 @@ full entry with its before/after evidence live in
 items came from are in [docs/decisions.md](docs/decisions.md); what only the owner can
 do is in [NEEDS_YOU.md](NEEDS_YOU.md).
 
+## Round six — the incident round, closed 2026-08-02
+
+**All four landed.** Items 37–40, spec'd and executed the same day from decisions.md's
+long-draft and npm-shim entries plus NEEDS_YOU's kiro-cli verification. Suite **979 →
+1050**, every gate green, [selfdrive] 64/64 on both items that needed it. Commits
+`4fa12b2`, `1d20961`, `094f42e`, `26e2b43`.
+
+- **37, the bubble.** The whole draft was measured and laid out on every partial, so a
+  50 000-character dictation cost **476.7 ms a frame** and sized the window **15 153 px
+  tall in a 672 px work area** — the Send chip twenty screens below the display. Only the
+  tail is laid out now, under a cap, with `… N earlier lines` above it: **4.3 ms and
+  414 px**. Flat from 10k on, and a 1k draft is untouched because it still fits. No
+  scrollback, deliberately — scrolling back would have to lay out what it scrolls to.
+- **38, the exits.** By the time the stall had killed the mic, every spoken rescue needed a
+  decoder that needed the mic, and the one thing that worked had been announced once, in a
+  console. One note now names the living exits with the combo that actually registered —
+  never on an empty draft, once per incident — and **Copy draft** joins the top of the menu:
+  no model, no decode, no target window, and it asks the session for nothing at all.
+  The decision's second trigger had to be re-derived: the idle unload refuses to run under
+  a held draft, so hanging the note off it would have been a line that never fires. It
+  reads the state instead.
+- **39, the shim.** A `.cmd` launcher truncates every multi-line prompt at the first
+  newline, and the CLI then **exits 0 and answers fluently about nothing**. Refused before
+  a process starts, with the cure in the message; the repair ships as `stdin_ok`, off on
+  every entry, because turning it on is a measurement. A test that pinned "a shim starts"
+  now pins "a shim is refused", and the truncation itself stays measured — a claim about
+  another program becomes folklore the day it stops being checked.
+- **40, kiro-cli.** Wired from the verification, found by PATH *and* an AppData probe —
+  which was not insurance: `which` returned `None` in this session while the probe path
+  answered. Its furniture is stripped by a cleaner keyed to that one name. One live refine
+  through Flow's own path came back in 2.7 s with the answer alone.
+
+**What waits:** three desk checks in NEEDS_YOU — the long draft run on purpose, the shim
+refusal read on a machine that has one, and the marker eyeball now that a verified CLI
+overflows the slot. And one thing that is not a desk check: **Rule 2's selfdrive tripwire
+fired.** `spoken: 'capitalize sameer'` is the same check that flaked on 2026-08-01, so two
+sightings in two different runs makes it a quarantine-or-fix entry rather than more noise.
+Both rerun green; the load question the decision told us to ask first is answered (yes,
+this run followed two full suites back to back).
+
 ## Round five — the Lite round, closed 2026-08-02
 
 **All three landed.** Items 33, 34 and 35, spec'd and executed the same day from
@@ -822,6 +862,382 @@ a switch starts a fresh conversation.**
     handling untouched — naming in notes is not routing.
 - Status: **done (desk check pending)** — the misfire that motivated the item, run on
   purpose through the menu, waits at the desk (NEEDS_YOU).
+
+### 37. The bubble stops growing — a cap, a tail that follows, and a bounded layout
+Owner-decided 2026-08-02 (decisions.md "The long-draft incident: no draft may disable its
+own rescue", fixes 1 and 2). A very long dictation took down five layers in a chain at the
+desk, and this item is the first link: `Bubble._render` measures and lays out the **whole**
+draft on every partial, so render cost grows with the draft until the UI thread stalls —
+and the bubble it sizes grows past the screen, taking the Send chip with it. Two fixes,
+one item, because they are the same measurement: cap the height, and stop laying out what
+the cap cannot show.
+- Files: `flow/ui.py`, new `tests/test_bubble.py`, `docs/architecture.md`.
+- **Instrument first, and the decision names the instrument**: render time vs draft size at
+  **1k / 10k / 50k characters**, on a real `tk.Tk` with the real canvas — a fake that
+  cannot wrap cannot measure wrapping, and the cost being bounded is a cost claim, not a
+  layout claim. Before: the curve must *grow* (that is the stall, reproduced). After: flat.
+  Both curves go in the Evidence line. The permanent guard is the unit-level half — how
+  many characters `_render` hands the canvas for the body — which a `MeasuringCanvas` can
+  see and which fails before the change at 10k and 50k.
+- **The tail window.** Only a bounded window of the draft's end is laid out per event:
+  `BODY_TAIL_CHARS`, sized from the cap (lines that fit × measured characters per line)
+  with overshoot, cut at a whitespace boundary so no word is halved. Above it, one muted
+  line `… N earlier lines`, where N is the elided head's line count — explicit newlines
+  plus wraps estimated from a **measured** characters-per-line constant, recorded with the
+  measurement beside it. A `str.count` over 50k is microseconds; it is Tk's text layout
+  that is the cost, and that is what the window bounds.
+- **The cap and the pinned chips.** `BODY_MAX_H` bounds the body slot, so `self._h` stops
+  being a function of the draft; the chip row keeps drawing from `self._h` and therefore
+  stays on screen at any draft size. The editor's box height falls out of the same probe
+  and needs no separate rule — it is measured from the window, and `tk.Text` scrolls
+  itself.
+- **Tail-following, and no scrollback — stated rather than assumed.** The body is a
+  viewport on the end of the draft: an append moves the text up and the newest words are
+  visible with no manual scroll, which is what "like a terminal" means for an append-only
+  stream. A user-driven scrollback is deliberately *not* added: it would have to lay out
+  what it scrolls to, which re-grows the cost this item exists to bound, and the whole
+  draft is already reachable through Edit — and, from item 38, through Copy draft.
+- **The artifact-reply path is not touched.** `self._reply` keeps its full-text probe and
+  its `ASK_ARTIFACT_MAX_CHARS` character bound; a test asserts a long reply renders exactly
+  as it does today, so "the draft path joins the artifact path" cannot quietly become
+  "both paths changed".
+- Instrument first, each its own check in `tests/test_bubble.py`:
+  1. The body text handed to the canvas is bounded — 1k renders whole, 10k and 50k render
+     a window of the same order, and all three carry the **last** words of the draft.
+  2. `… N earlier lines` appears exactly when something was elided, and never on a draft
+     that fits.
+  3. At 50k the chip row's top and bottom sit inside the work area (`_lay_out`'s geometry
+     read back off the canvas, against `pill.work`), and `self._h` is within a bound
+     derived from `BODY_MAX_H` rather than from the draft.
+  4. An append is visible without scrolling: render, append, render, and the new words are
+     in the drawn body both times.
+  5. The reply path unchanged: a 4k reply's drawn item is byte-identical before and after.
+- Acceptance: suite green; the before/after curves recorded; the geometry checks green at
+  50k.
+- [selfdrive] not required — rendering only; `plan()`, the router and asr text handling are
+  untouched. Run it if anything inside the send or chip *bindings* moves.
+- Doc sync: §7's bubble paragraph gains the cap and the tail window; §8's constants table
+  gains `BODY_MAX_H` and `BODY_TAIL_CHARS` with the measurement behind each; invariant 7
+  ("everything is bounded") gains rendering, which is the extension the decision names.
+- Evidence:
+  - **The curve, on the real canvas, before and after** (`scratchpad/render_cost.py`, a
+    real `tk.Tk` and a real `tk.Canvas` — a fake that cannot wrap cannot measure wrapping;
+    median of 12 renders after a warm-up, since font metrics cache on first use):
+
+    | draft | before | after |
+    |---|---|---|
+    | 1 000 chars | 2.4 ms | 2.5 ms |
+    | 10 000 chars | 32.7 ms | 4.2 ms |
+    | 50 000 chars | **476.7 ms** | **4.3 ms** |
+
+    Flat from 10k on, which is the claim. A 1k draft is unchanged because it still fits
+    under the cap and is drawn whole — the fix is a window, not a truncation.
+  - **The other half of the same defect, and the one the incident was actually about:** at
+    50 000 characters the bubble sized itself **15 153 px tall in a 672 px work area** and
+    the script said so — `OFF SCREEN — the chips are unreachable`. After: **414 px**, `on
+    screen`. `reposition` clamps into the work area with 8 px of air, so a window taller
+    than that cannot be placed with its chip row visible, whatever the clamp does.
+  - **The constants are measurements, not taste.** On the real canvas at the body font and
+    the 352 px the bubble wraps to: line height **17 px**, and 3 160 characters of ordinary
+    prose wrapped to **56 lines** — 56.4 characters a line. So the cap is 20 lines and the
+    window is about 28 of them, which is what keeps the visible tail full even where the
+    text wraps early.
+  - **The instrument, red before the build:** 14 checks in the new `tests/test_bubble.py`,
+    **8 red** against the tree as it stood — the body handed to the canvas unbounded at 10k
+    and 50k, the height tracking the draft (3 474 px vs 17 074 px on the measuring canvas),
+    the chip row outside the work area, and no elision line anywhere. The **6 green** are
+    the regression guards and stayed green: a short draft drawn whole, the window ending at
+    the draft's end, an append visible with no scroll, no elision on a draft that fits, and
+    both artifact-reply checks.
+  - **The reply path was asserted rather than assumed.** A 4 000-character reply is still
+    drawn as one whole item and still sizes the bubble — the decision says the draft path
+    *joins* the artifact path, and this is what stops that becoming "both paths moved".
+  - **`MeasuringCanvas` is borrowed from `test_editor.py`, not copied.** A second fake that
+    wraps slightly differently is a second thing to keep true, and the drift would be
+    invisible because both would pass.
+  - Suite **979 → 993**, OK, 14.4 s. [selfdrive] not run: rendering only — `plan()`, the
+    router and asr text handling are untouched. Commit `4fa12b2`.
+- Status: **done**
+
+### 38. The exits announce themselves, and one of them joins the menu
+Owner-decided 2026-08-02 (same entry, fixes 3 and 4). The other half of the incident: once
+the mic overflowed and the models unloaded, **every spoken rescue was impossible** — "boom"
+needs a decode, a decode needs the models, the models need the mic the render killed — and
+the one thing that still worked, the send hotkey, had been announced once, at startup, in a
+console. So Flow says what still works at the moment it stops hearing, and gains the exit
+that needs neither a decode nor a target.
+- Files: `flow/session.py`, `flow/help.py`, `flow/ui.py`, `flow/__main__.py`,
+  `tests/test_longrun.py` (where `TestOverflowIsSurfaced` already lives — the spec first
+  said `test_resilience.py` and was corrected before a line was written, not after),
+  `tests/test_menu.py`, `tests/test_help.py`, `docs/architecture.md`.
+- **The note, and where its words come from.** `help.exits_note(hotkeys)` builds one line
+  from `hotkeys.chosen` — **what registered**, never `DEFAULT_BINDINGS`, which is item 30's
+  defect exactly and the reason that function lives in `help.py` beside `_hotkey_rows`
+  rather than being written inline in a note. `hotkeys=None` (`--no-hotkeys`, Lite) is not
+  a blank: it names the chip and the menu, because those are what still works there.
+  `Session` gains a plain `hotkeys` attribute, assigned by `main()` after the hotkey block
+  — a callable indirection would buy nothing, and the session already holds injected
+  collaborators this way.
+- **When it fires, and only then.** Mic overflow with a non-empty draft, or the idle model
+  unload with a non-empty draft. **No note on an empty draft** — there is nothing to rescue,
+  and a warning about a draft that does not exist is the noise that teaches people to
+  ignore the real one. **No spam:** a latch, cleared in `_pump_health` whenever the draft is
+  empty, so one voice-down stretch produces one note and the next one produces the next.
+  The overflow note itself stays exactly as it is (invariant 4 — how much audio went); this
+  is added beside it, because "audio was lost" and "here is what still works" answer
+  different questions.
+- **Copy draft.** Lite built `Pill._copy`; full mode gets it as a menu entry at the **top
+  level**, beside Clear draft and before it — the universal, model-free, target-free exit
+  that would have ended this incident in one tap, and a tap somebody makes mid-incident is
+  by the menu's own rule (§9) not a tap that goes inside Settings. It reads
+  `session.draft.text` and copies it; it does **not** go through `send()`, which would
+  clear the draft and hand it to the paste layer. Empty draft → the entry says so rather
+  than silently copying nothing.
+- Instrument first:
+  1. Two overflow bursts with a draft produce **one** exits note; clearing the draft and
+     overflowing again produces a second. An overflow with an empty draft produces none.
+  2. An idle unload with a draft produces the note; the existing unload note is unchanged.
+  3. The note carries the combo `hotkeys.chosen` holds, and a fake whose `chosen` says
+     `ctrl+shift+enter` renders `ctrl+shift+enter` — with `ctrl+alt+enter` appearing
+     nowhere, which is the leg that catches a hardcoded default.
+  4. `hotkeys=None` renders a sentence naming the chip, not an empty half-sentence.
+  5. Copy draft: the clipboard holds the draft **verbatim** afterwards, `session.send` is
+     never called, the draft is still there, and — the leg the decision cares about — the
+     path touches no transcriber and no CLI (asserted on the fakes never being reached, not
+     on the return value).
+- Acceptance: suite green; the menu test sees Copy draft above Clear draft at the top level.
+- [selfdrive] not required: no routing change, and the note is a note. Run it if anything
+  in `plan()` moves.
+- Doc sync: invariant 4's paragraph gains the exits note (the microphone saying what went
+  is only half of "no words are dropped silently" when the words that are left have no way
+  out); §7's Send section gains Copy draft; §9's menu paragraph gains the top-level entry.
+- Evidence:
+  - **The instrument, red before the build:** 20 new checks across three modules — longrun
+    **6 of 8 red**, help **6 of 6 red** (behind the `AttributeError` for a function that
+    did not exist), menu **7 of 7 red**. The two longrun greens are the ones true by
+    absence and kept as regression guards: an overflow with no draft saying nothing extra,
+    and the note not repeating on a steady counter.
+  - **The leg that catches a hardcoded default, and it is item 30's defect one layer
+    along:** a `Hotkeys` whose `chosen` says `ctrl+shift+enter` renders `ctrl+shift+enter`,
+    and `ctrl+alt+enter` — the *first alternative* in `DEFAULT_BINDINGS`, already owned by
+    another app on this machine — appears **nowhere**. Before the build the same assertion
+    read `'ctrl+shift+enter' not found in 'microphone overflowed — about 320 ms of audio
+    was lost while the UI was held'`, which is the whole gap in one line.
+  - **The second trigger was re-derived rather than transcribed, and the spec was wrong
+    about it.** The decision names "model unload with a non-empty draft"; `_pump_health`'s
+    unload branch carries `and not self.draft.text` and `test_model_is_kept_while_a_draft_
+    is_held` pins it, so that branch **cannot** produce the state. Hanging the note off it
+    would have been a line that never fires. It is written as a condition instead — a draft
+    held with `asr.loaded` false, whatever took the models away — which is reachable, is
+    tested by unloading directly, and stays true if the guard above it ever changes.
+  - **Copy draft asks the session for nothing.** Asserted on `session.method_calls == []`
+    after the tap rather than on the outcome: a rescue that needs a decode is not a rescue
+    from a dead microphone, and the strongest form of that claim is that the path calls
+    nothing at all. `send()` is separately asserted un-called, and the draft is still there
+    afterwards.
+  - Startup on this machine is unmoved — `session.hotkeys = hotkeys` sits after the hotkey
+    block and `--lite --no-profile --no-hotkeys` prints its eleven lines unchanged.
+  - Suite **993 → 1013**, OK, 15.3 s. [selfdrive] not run: no routing change, and a note is
+    a note. Commit `1d20961`.
+- Status: **done**
+
+### 39. A shim is refused before it can answer about nothing — and stdin becomes a capability
+Owner-decided 2026-08-02 (decisions.md "The npm-shim defect: refuse loudly now, repair
+per-CLI when measured"). Found by item 35's live verification: a `.cmd` launcher — the shape
+`npm -g` writes on Windows — forwards `%*` through cmd.exe, which stops at the first
+newline. **Every prompt `refine.py` sends is multi-line**, so a CLI installed the way both
+CLIs document receives the framing and none of the user's text, **exits 0, and answers
+fluently about nothing** — the silent-wrong-answer class this project ranks above every
+other failure. The repair cannot be picked here (this machine's codex and claude are native
+builds and there is no real npm shim of either to verify against), so the decision stages it:
+refusal ships now, the repair ships as a capability that is off until somebody measures it.
+- Files: `flow/refine.py`, `tests/test_refine.py`, `tests/test_lifecycle.py`, `README.md`,
+  `docs/architecture.md`.
+- **Instrument first, with NEEDS_YOU's four-line repro**: a test-built `.cmd` that echoes
+  `%*`, invoked through `refine._invoke` with a two-line prompt, asserting the second line
+  never arrives. Windows-only — `.cmd` is a Windows shape and `cmd.exe` is the mechanism —
+  and **skipped elsewhere with the reason stated**, never silently passed, because a green
+  check that cannot exercise the path proves nothing (Rule 1).
+- **The refusal.** A CLI whose resolved executable ends `.cmd`/`.bat` is refused **before
+  any process starts** — asserted on `Popen` never being called, not on the return value.
+  The message names the CLI, states the cause in one plain sentence, and gives the cure
+  (install the native build). It returns `(None, reason)` like every other failure, so
+  refine and ask degrade non-destructively per invariant 3 and the draft is untouched.
+- **The capability.** `Cli` gains `stdin_ok: bool = False`. When True, `_invoke` delivers
+  the prompt on stdin — pipe, write, close — and a `.cmd` resolution is **not** refused for
+  that CLI, because a shim that reads stdin never sees `%*`. `communicate(input=…)` is what
+  pipes-writes-closes, and it may carry `input` exactly once: the poll loop passes it on the
+  first call only, or CPython raises "Cannot send input after starting communication" on the
+  first timeout — the kind of defect that only appears on a slow call.
+- **codex and claude stay argv + `stdin=DEVNULL`**, with the measured hang recorded beside
+  the flag: codex waits on stdin ("Reading additional input from stdin…") and would hang to
+  the timeout on an open one. **No shipped entry flips `stdin_ok` True in this session** —
+  that is item 35's verify-per-machine discipline, and a flag flipped from memory is the
+  thing `verified` already exists to forbid.
+- Prove the stdin path with a test-built executable that reads stdin and echoes it
+  (`test_lifecycle.py`'s idiom — `sys.executable` is a real `.exe`, which is what makes it a
+  proof rather than a mock).
+- Acceptance: suite green; the shim test red before the refusal and green after; the stdin
+  round trip returns the prompt verbatim; `refine CLI: codex` at startup is unchanged.
+- [selfdrive] **required** — the resolution path every live call travels changed.
+- Doc sync: §8's `refine.CANDIDATES` row gains `stdin_ok` and what it means; invariant 3
+  gains the refusal (a failure that is loud is still non-destructive); the Verification
+  section's "Verifying a candidate" subsection gains the shim leg, since it is now a thing a
+  candidate can fail on. README's agent-CLI paragraph gains one sentence: native builds, not
+  `npm -g`; Flow refuses a shim and says why.
+- Evidence:
+  - **The defect, reproduced with the four lines NEEDS_YOU asked for, and kept.** A
+    test-built `echoer.cmd` carrying `echo %*`, handed the exact argv `_invoke` builds —
+    `['line one\nline two\nline three']` as one element — returns `line one` on stdout,
+    **no `line three`, and exit code 0**. That last assertion is the point: the silence is
+    the defect, not the truncation. Windows-only and skipped elsewhere with the reason
+    stated (`.cmd` is a Windows shape and cmd.exe is what truncates it); it stays in the
+    suite after the refusal, because a claim about another program's behaviour becomes
+    folklore the day it stops being measured.
+  - **The instrument, red before the build:** 16 red in `test_refine.py` and 4 in
+    `test_lifecycle.py`. The one that mattered most was a *pinned green being inverted* —
+    `test_a_cmd_shim_is_found_and_actually_starts` asserted `'SHIMMED\n' is not None`
+    against the tree as it stood, which was the right answer to the earlier `WinError 2`
+    defect and the wrong answer to this one. It is now
+    `test_a_cmd_shim_is_found_and_then_refused`.
+  - **Refused before anything starts**, asserted on `Popen` never being called rather than
+    on the return value — a call that was made and then failed would satisfy a check that
+    only read the answer. `.cmd` and `.BAT` (case-insensitively) refuse; `.EXE` and an
+    extensionless path start normally, so macOS, Linux and WinGet installs are untouched.
+  - **Non-destructive, per invariant 3:** `refine()` and `ask()` each come back
+    `(None, reason)` with the reason naming the CLI, and no process is started for either.
+  - **The stdin path is proved on real processes**, in the module that is allowed to start
+    them: a child that echoes stdin gets the multi-line prompt back **verbatim**, including
+    `marmalade-42` on the last line — the exact leg a shim loses. The prompt leaves the
+    argv when it travels that way (`len(sys.argv)` comes back **1**), an argv CLI still
+    gets `stdin=DEVNULL` with nothing written, and a **`.cmd` shim that reads stdin is
+    usable again end to end**, which is the whole claim of the capability.
+  - **Found while wiring it, and it would only ever have appeared on a slow call:**
+    `_invoke` polls `communicate` in a loop, and `communicate` may carry `input` exactly
+    once — a second call with it raises `ValueError: Cannot send input after starting
+    communication`. The prompt goes on the first pass only, and `test_a_slow_reader_still_
+    gets_its_input` (a child that sleeps past the first poll) is what holds it.
+  - **A pinned test had to be split rather than deleted.** `test_the_launch_uses_the_path_
+    the_lookup_returned` drove a real `.cmd` on a real PATH into `Popen`, which the refusal
+    now makes impossible. Its two halves are both still true and are now two checks: what
+    `which` finds is what `available()` reports (real PATH, real `PATHEXT`), and the launch
+    uses the resolved path rather than the bare name (no `PATHEXT` dependency).
+  - **No shipped entry flips `stdin_ok`**, asserted over the whole of `CANDIDATES` — the
+    same mechanical discipline `verified` already carries.
+  - Suite **1013 → 1031**, OK, 15.2 s. [selfdrive] **63/64 then 64/64 on the automatic
+    rerun** — the failing check was `spoken: 'capitalize sameer'`, which is Rule 2's
+    **second sighting of the same check** and therefore fires the tripwire: a NEEDS_YOU
+    quarantine-or-fix entry is written, with the load question the decision names answered
+    (yes — this run followed two full suites and three real-Tk measurements back to back).
+    Nothing in this item touches the decoder, the gate or the router. Commit `094f42e`.
+- **Deviation, recorded rather than quiet:** §11's test count was not updated in this
+  commit and is carried into item 40's doc sync, which touches the same file and moves the
+  number again.
+- Status: **done**
+
+### 40. kiro-cli, wired — and a cleaner for the furniture it prints
+The measurement is NEEDS_YOU's entry "kiro-cli — verified, all four legs, 2026-08-02, this
+machine", which is item 35's gate paid in full: `--version` → `kiro-cli-chat 2.16.0`;
+one-shot `chat --no-interactive --trust-tools= "<prompt>"` → answer, exit 0, ~1 s; and the
+leg that matters — a SECRET on the last line of a three-line prompt came back **verbatim**
+through `Popen` list-argv, because this is a native exe and not a shim. Round five's `kiro`
+rejection stands and was about a different binary: `kiro` on PATH is the IDE launcher.
+- Files: `flow/refine.py`, `tests/test_refine.py`, `tests/test_indicator.py`,
+  `tests/test_converse.py`, `tests/test_main.py`, `tests/test_help.py`,
+  `docs/architecture.md`.
+- **The entry.** `Cli("kiro-cli", ("kiro-cli", "chat", "--no-interactive",
+  "--trust-tools="))`, verified, prompt appended as the final argv element — the shape
+  `Cli` already describes. `--trust-tools=` empty is the right courier default: no tool runs
+  without asking, which is what an agent CLI being used as a rewriter must never do.
+- **Detection.** By PATH, because the MSI adds `%LOCALAPPDATA%\Kiro-Cli\` to the user PATH
+  (verified in the registry; this session's first "off-PATH" impression was its own stale
+  environment). `%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe` is kept as a **fallback probe** for
+  stale environments only — cheap insurance, and the reason is in the code so the next
+  reader does not take it for a second source of truth. Resolution moves into one helper
+  both `available()`/`detected()` and `_invoke` use, so detection and launch cannot disagree
+  about where the executable is — the class of defect §7 already records for
+  `shutil.which` vs `CreateProcess`.
+- **The cleaner, per CLI and nowhere else.** kiro-cli's stdout carries furniture: ANSI
+  colour, a `> ` answer prefix, and a `▸ Credits: … • Time: …` status line (it meters, ~0.10
+  credits/call). `_clean` takes the `Cli` that answered and applies that CLI's furniture
+  stripper before the generic tidy; **codex and claude pass through untouched**, asserted,
+  because a cleaner that fires for everybody is a parser, and this module's docstring is an
+  argument against needing one.
+- Instrument first: a fixture of the **real captured output** from this machine — escapes,
+  prefix, credits line and all — asserted to clean down to the answer alone, red before the
+  cleaner exists. Plus the negatives: codex output with a `>` in it (a shell prompt inside a
+  quoted answer) is unchanged, and a kiro-cli answer that contains the word "Credits"
+  mid-sentence keeps it.
+- **Naming, the pin, the marker and the sheet all handle the new name** — extend the tests
+  that already enumerate the shipped names rather than writing new ones. `kiro-cli` is 8
+  characters, so `_marker()` falls back to `ASK` by the rule item 35 pinned at `opencode`;
+  that rule is not changed, it is extended, and **whether ASK is the right thing to see when
+  kiro-cli is the CLI that would answer is an eye question** — desk list, per item 15's
+  precedent for the 6 pt marker.
+- Acceptance: suite green; [selfdrive] **64/64**; and **one live call through Flow's own
+  refine path** — kiro-cli is installed and authenticated on this machine — refining a
+  two-line draft, with the cleaned result in the Evidence line and the credits furniture
+  gone.
+- [selfdrive] **required** — `available()` and the resolution path are what every CLI round
+  trip goes through.
+- Doc sync: §8's `refine.CANDIDATES` row gains the entry and the cleaner; §1's "What leaves
+  the machine" paragraph, which names the cloud-backed CLIs; the Verification section's
+  provenance line gains the kiro-cli version this was measured with.
+- Evidence:
+  - **The fixture is transcribed, not imagined.** Captured through the same `Popen` shape
+    `_invoke` uses, before a line of the cleaner existed:
+    stdout `'\x1b[m> \x1b[0mThe deploy failed this morning because of the migration.'`;
+    a multi-line answer `'\x1b[m> \x1b[0mApples\x1b[0m\x1b[0m\nPears\x1b[0m\x1b[0m\nPlums'`
+    — so the `> ` marker is on the **first line only**, and stripping it per line would
+    have eaten a quoted shell command out of a real answer.
+  - **The verification note was right about the furniture and wrong about which stream it
+    is on, and the capture is what found it.** With the streams apart — this module's
+    discipline, and what `_invoke` does — `▸ Credits: 0.05 • Time: 1s` goes to **stderr**
+    and never reaches `_clean` at all; it only lands on stdout when the two are merged,
+    which is the shape an interactive terminal shows. Stripped anyway, because that is what
+    the CLI prints when they are together and removing an absent line costs nothing — and
+    recorded as measured rather than left as an assumption. Also on stderr and left alone:
+    a `WARNING:` that `--trust-tools` wants an `@{MCPSERVERNAME}/` prefix. Exit 0, answer
+    correct, and nothing is done about a warning on a stream this module discards.
+  - **The probe is doing real work here, not standing by.** `shutil.which("kiro-cli")`
+    returned **`None`** in this session while `%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe`
+    existed and answered — the MSI's PATH entry does not reach a shell that predates the
+    install. NEEDS_YOU's "detection by PATH works, keep the probe as cheap insurance" is
+    true of a *fresh* shell; in the environment an installer leaves behind, the probe is
+    the difference between working and not.
+  - **The instrument, red before the build:** 21 new checks in `test_refine.py` — the
+    entry's shape, the four resolution cases, and eight cleaner cases including the two
+    negatives that make it per-CLI (a codex answer containing `> git status` and the word
+    "Credits" comes through byte-identical; a kiro-cli answer *about* credits keeps the
+    word, because the status line is matched as a shape and not as a word).
+  - **One live call through Flow's own `refine()`**, pinned to kiro-cli — the entry, the
+    resolution, the argv, the cleaner and the commentary guard all the ones that ship:
+    - resolved at `C:\Users\samar\AppData\Local\Kiro-Cli\kiro-cli.exe`
+    - `available()` → `['codex', 'claude', 'kiro-cli']`, `detected()` → those plus
+      `opencode`
+    - a **two-line** draft in, back in **2.7 s** from `'kiro-cli'`:
+      `The deploy failed this morning roughly ten minutes after the migration ran, and no
+      one noticed until the alerts fired.`
+    - the `repr` of that result carries **no escape, no `> `, no credits line** — the
+      furniture is gone and the answer is the whole of what came back.
+  - **The Help sheet needed nothing, and now says so.** Every other surface that touches a
+    CLI name had to be extended; the sheet names none, and a new check over `CANDIDATES`
+    asserts that rather than leaving it a coincidence somebody could break with one
+    example.
+  - **`kiro-cli` at 8 characters is the first *verified* name the marker declines**, so the
+    pill draws `ASK` while kiro-cli is the CLI that would answer. `opencode` proved the
+    rule while inert — nothing could ever be asked of it — so this is the first time the
+    slot's refusal has a live call behind it. The rule is unchanged and extended in
+    `test_indicator.py` and `test_converse.py`; whether `ASK` is the right thing to see
+    there is an eye question and is on the desk list, per item 15's precedent.
+  - **A machine-dependence was closed while wiring it, and it is the defect `cli_env.py`
+    was written for, one seam along:** the probe made `available()` answer from the
+    developer's disk in tests that had carefully declared what PATH holds. `cli_env` gains
+    `no_off_path_installs()`, and `no_cli_on_path()` now covers every candidate rather than
+    the two names it was written with.
+  - Suite **1031 → 1050**, OK, 16.6 s. [selfdrive] **64/64**, including the live codex
+    converse round trip. Commit `26e2b43`.
+- Status: **done** — with the marker eyeball on the desk list.
 
 ## Backlog — "prepare" tier
 
