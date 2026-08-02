@@ -113,6 +113,12 @@ than at the moment you first ask for a rewrite. No API key is read, stored or pa
 anywhere in this codebase — see [Requirements](#requirements) for exactly what a CLI call
 does and does not send.
 
+**Install the native build, not `npm -g`.** A `.cmd` launcher — what a global npm install
+writes on Windows — passes its arguments through `cmd.exe`, which stops at the first
+newline, and every prompt Flow sends is multi-line: the CLI would receive the framing,
+none of your words, and answer confidently about nothing. Flow refuses a CLI that resolves
+to a `.cmd` or `.bat` before it starts anything, and says so with the cure in the message.
+
 ### Slimming it down (optional, ~106 MB)
 
 Two of those packages are unreachable from this app:

@@ -429,26 +429,40 @@ class TestWhatWhichFindsIsWhatRuns(unittest.TestCase):
         p.write_text(f"@echo {says}\n", encoding="utf-8")
         return str(p)
 
-    def test_a_cmd_shim_is_found_and_actually_starts(self):
+    def test_a_cmd_shim_is_found_and_then_refused(self):
+        # This used to assert the shim *ran*, which was the right answer to the WinError 2
+        # defect and the wrong answer to the one underneath it: a `.cmd` starts fine and
+        # then truncates the prompt at the first newline. Resolution is still the thing
+        # being pinned — `which` finds it and the launch would use what `which` returned —
+        # and what changed is that finding it is now a reason to stop.
         self._shim("faketool")
         cli = Cli("faketool", ("faketool",))
         self.assertIsNotNone(shutil.which("faketool"), "which must find the shim")
         out, reason = refine_mod._invoke(cli, "a prompt", timeout=30)
-        self.assertIsNotNone(out, reason)
-        self.assertIn("SHIMMED", out)
+        self.assertIsNone(out)
+        self.assertIn("faketool", reason)
 
-    def test_the_launch_uses_the_path_the_lookup_returned(self):
-        # The invariant the defect broke, stated once: presence and launch must not use
-        # two different resolvers. Asserted on the argv rather than by running anything,
-        # because on a machine that has a real codex.EXE further down PATH the bare name
-        # *does* start something — just not the shim `which` found, which is a quieter
-        # version of the same bug and would have made a launch-based test pass here.
+    def test_what_which_finds_is_what_available_reports(self):
+        # The first half of the invariant, on a real PATH: `which` honours `PATHEXT`, so a
+        # `.cmd` on PATH *is* a CLI that has been found — which is what made the old
+        # "not on PATH" answer a lie. Whether it may then be called is the refusal's
+        # question, one class down, and a different one.
         shim = self._shim("codex")
         self.assertIn("codex", [c.name for c in refine_mod.available()])
-        with mock.patch("subprocess.Popen", side_effect=OSError("stopped here")) as run:
+        self.assertEqual(shutil.which("codex").lower(), shim.lower())
+
+    def test_the_launch_uses_the_path_the_lookup_returned(self):
+        # The second half, stated once: presence and launch must not use two different
+        # resolvers. Asserted on the argv rather than by running anything, because on a
+        # machine that has a real codex.EXE further down PATH the bare name *does* start
+        # something — just not the one `which` found, which is a quieter version of the
+        # same bug and would have made a launch-based test pass here.
+        found = str(Path(self.dir) / "codex.exe")
+        with mock.patch("shutil.which", resolves_to(found)), \
+                mock.patch("subprocess.Popen", side_effect=OSError("stopped here")) as run:
             refine_mod._invoke(refine_mod.named("codex"), "a prompt", timeout=30)
-        self.assertEqual(run.call_args.args[0][0], shutil.which("codex"))
-        self.assertEqual(run.call_args.args[0][0].lower(), shim.lower())
+        self.assertEqual(run.call_args.args[0][0], found)
+        self.assertNotEqual(run.call_args.args[0][0], "codex", "the bare name was launched")
 
     def test_a_cli_that_is_genuinely_absent_still_reports_absent(self):
         # The fix must not paper over the real not-found case with a fabricated path.
@@ -457,3 +471,156 @@ class TestWhatWhichFindsIsWhatRuns(unittest.TestCase):
         out, reason = refine_mod._invoke(cli, "a prompt", timeout=30)
         self.assertIsNone(out)
         self.assertIn("nosuchtool", reason)
+
+
+def resolves_to(path: str):
+    """A `shutil.which` that resolves every name to `path`, whatever PATH says."""
+    return lambda cmd, *a, **kw: path
+
+
+class TestAShimAnswersAboutNothing(unittest.TestCase):
+    """The defect the refusal exists for, proved rather than described.
+
+    A `.cmd` launcher — the shape `npm -g` writes on Windows, and the install both agent
+    CLIs document — forwards `%*` through cmd.exe, which stops at the first newline. Every
+    prompt this module sends is multi-line, so the CLI receives the framing and none of the
+    user's text, **exits 0, and answers fluently about nothing**.
+
+    Kept after the refusal ships, and that is the point of it: the refusal is a claim about
+    what cmd.exe does, and a claim about another program's behaviour has to keep being
+    measured or it becomes folklore. Windows only, because `.cmd` and cmd.exe are.
+    """
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "a .cmd shim is a Windows shape and cmd.exe is what truncates it")
+    def test_a_cmd_forwards_only_the_first_line_of_its_argument(self):
+        folder = tempfile.mkdtemp(prefix="shim-repro-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        shim = Path(folder) / "echoer.cmd"
+        shim.write_text("@echo off\necho %*\n", encoding="utf-8")
+
+        # The exact argv `_invoke` builds: the executable, then the prompt as one element.
+        proc = subprocess.Popen(
+            [str(shim), "line one\nline two\nline three"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace",
+        )
+        out, _err = proc.communicate(timeout=30)
+        self.assertIn("line one", out)
+        self.assertNotIn("line three", out,
+                         "cmd.exe stopped forwarding at the newline — that is the defect")
+        self.assertEqual(proc.returncode, 0, "and it exits 0, which is what makes it silent")
+
+
+class TestAShimIsRefusedBeforeAnythingStarts(unittest.TestCase):
+    """Loud beats fluent-and-wrong (decisions.md, "The npm-shim defect").
+
+    The repair that would actually fix this is per-CLI and cannot be picked on a machine
+    with no npm shim of either CLI to verify against, so what ships now is the refusal —
+    which is verifiable here, today, with four lines of batch file.
+    """
+
+    def _invoke_resolving_to(self, path: str, cli=None):
+        with mock.patch("shutil.which", resolves_to(path)), \
+                mock.patch("subprocess.Popen", return_value=fake_proc("ok")) as started:
+            out, reason = refine_mod._invoke(
+                cli or Cli("codex", ("codex", "exec")), "a\nprompt", timeout=30
+            )
+        return out, reason, started
+
+    def test_no_process_is_started_for_a_cmd(self):
+        # Asserted on `Popen` rather than on the return value: a call that was made and
+        # then failed would satisfy a check that only read the answer.
+        out, _reason, started = self._invoke_resolving_to("C:/npm/codex.cmd")
+        self.assertIsNone(out)
+        started.assert_not_called()
+
+    def test_nor_for_a_bat(self):
+        _out, _reason, started = self._invoke_resolving_to("C:/npm/codex.BAT")
+        started.assert_not_called()
+
+    def test_the_reason_names_the_cli_the_cause_and_the_cure(self):
+        _out, reason, _started = self._invoke_resolving_to("C:/npm/codex.cmd")
+        self.assertIn("codex", reason)
+        self.assertIn("npm", reason)  # the cause, in the words of what produced it
+        self.assertIn("native", reason)  # the cure
+
+    def test_a_real_executable_is_not_refused(self):
+        _out, _reason, started = self._invoke_resolving_to("C:/winget/codex.EXE")
+        started.assert_called_once()
+
+    def test_nor_is_an_extensionless_one(self):
+        # macOS and Linux, and Windows shims that are not batch files.
+        _out, _reason, started = self._invoke_resolving_to("/usr/local/bin/codex")
+        started.assert_called_once()
+
+    def test_refine_fails_non_destructively_the_way_everything_else_does(self):
+        # Invariant 3. A refusal is still a `(None, reason)`, so the caller keeps the
+        # pre-edit draft and a loud failure costs nobody their words.
+        with mock.patch("shutil.which", resolves_to("C:/npm/codex.cmd")), \
+                mock.patch("subprocess.Popen", return_value=fake_proc("ok")) as started:
+            revised, reason = refine_mod.refine("the draft", "make it formal",
+                                                cli=Cli("codex", ("codex", "exec")))
+        self.assertIsNone(revised)
+        self.assertIn("codex", reason)
+        started.assert_not_called()
+
+    def test_and_so_does_ask(self):
+        with mock.patch("shutil.which", resolves_to("C:/npm/codex.cmd")), \
+                mock.patch("subprocess.Popen", return_value=fake_proc("ok")) as started:
+            answer, reason = refine_mod.ask("a question",
+                                            cli=Cli("codex", ("codex", "exec")))
+        self.assertIsNone(answer)
+        self.assertIn("codex", reason)
+        started.assert_not_called()
+
+
+class TestStdinIsACapabilityAndNotAGuess(unittest.TestCase):
+    """The repair, shipped off by default because nothing here can measure it on.
+
+    A shim that reads its prompt from stdin never sees `%*`, so `stdin_ok` is what makes a
+    `.cmd` usable — on a machine where somebody has run that CLI that way. codex is
+    measured *hanging* on an open stdin ("Reading additional input from stdin..."), which
+    is why `_invoke` pins `stdin=DEVNULL` and why this cannot be a global switch.
+    """
+
+    def test_it_is_off_unless_somebody_says_otherwise(self):
+        self.assertFalse(Cli("anything", ("anything",)).stdin_ok)
+
+    def test_no_shipped_entry_has_it_on(self):
+        # The same discipline `verified` carries: a flag flipped from memory is exactly
+        # what the shape rule already forbids. It goes on when a machine has run it.
+        for cli in refine_mod.CANDIDATES:
+            with self.subTest(cli=cli.name):
+                self.assertFalse(cli.stdin_ok)
+
+    def test_a_stdin_cli_is_not_refused_for_being_a_cmd(self):
+        cli = Cli("shimmed", ("shimmed",), stdin_ok=True)
+        with mock.patch("shutil.which", resolves_to("C:/npm/shimmed.cmd")), \
+                mock.patch("subprocess.Popen", return_value=fake_proc("ok")) as started:
+            out, _reason = refine_mod._invoke(cli, "a\nprompt", timeout=30)
+        self.assertEqual(out, "ok")
+        started.assert_called_once()
+
+    def test_the_prompt_leaves_the_argv_when_it_travels_on_stdin(self):
+        # Both halves matter. Sending it twice would hand a CLI the prompt as an argument
+        # *and* on stdin, which is the truncation plus a duplicate.
+        cli = Cli("shimmed", ("shimmed", "run"), stdin_ok=True)
+        proc = fake_proc("ok")
+        with mock.patch("shutil.which", resolves_to("C:/npm/shimmed.cmd")), \
+                mock.patch("subprocess.Popen", return_value=proc) as started:
+            refine_mod._invoke(cli, "a\nprompt", timeout=30)
+        argv = started.call_args.args[0]
+        self.assertEqual(argv, ["C:/npm/shimmed.cmd", "run"])
+        self.assertEqual(started.call_args.kwargs["stdin"], subprocess.PIPE)
+        self.assertEqual(proc.communicate.call_args.kwargs.get("input"), "a\nprompt")
+
+    def test_argv_clis_still_get_a_closed_stdin(self):
+        # codex hangs on an open one, measured, which is the whole reason this is per-CLI.
+        proc = fake_proc("ok")
+        with mock.patch("shutil.which", resolves_to("/usr/bin/codex")), \
+                mock.patch("subprocess.Popen", return_value=proc) as started:
+            refine_mod._invoke(Cli("codex", ("codex", "exec")), "a\nprompt", timeout=30)
+        self.assertEqual(started.call_args.args[0][-1], "a\nprompt")
+        self.assertEqual(started.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIsNone(proc.communicate.call_args.kwargs.get("input"))

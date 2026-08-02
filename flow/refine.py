@@ -101,6 +101,14 @@ class Cli:
     #: somebody ran on a machine that had the CLI — and an entry whose shape has not been
     #: run would otherwise sit here looking exactly like one that has.
     verified: bool = True
+    #: True means this CLI takes its prompt on **stdin** rather than as the last argument,
+    #: which is what makes it usable behind a `.cmd` launcher (see `SHIM_SUFFIXES`). Off
+    #: by default and off for everything shipped, on the same discipline `verified`
+    #: carries: it goes on when somebody has run that CLI that way on a machine that has
+    #: it, never from memory. codex is measured *hanging* on an open stdin — "Reading
+    #: additional input from stdin..." — which is exactly why this is per-CLI and not a
+    #: switch for the module.
+    stdin_ok: bool = False
 
 
 #: Order is the preference order — codex first, per R10.
@@ -136,6 +144,27 @@ CANDIDATES: tuple[Cli, ...] = (
     Cli("copilot", ("copilot",), verified=False),
     Cli("gemini", ("gemini",), verified=False),
 )
+
+
+#: Launcher suffixes that cannot carry a multi-line prompt on the argv, and so are refused
+#: before a process starts.
+#:
+#: A `.cmd`/`.bat` forwards `%*` through cmd.exe, which **stops at the first newline**.
+#: Every prompt this module sends is multi-line — `_PROMPT`, `_POLISH_PROMPT`,
+#: `_ASK_PROMPT`, `_ASK_ARTIFACT_PROMPT` all are — so a CLI installed as an `npm -g` shim,
+#: which is the install both agent CLIs document, receives the framing and none of the
+#: user's text, **exits 0, and answers fluently about nothing**. There is no error
+#: anywhere: the reply is confident and about a question nobody asked. Measured directly
+#: on 2026-08-02 against a shim of that shape — `['line one']` arrived where
+#: `['line one\nline two\nline three']` was sent — and `tests/test_refine.py` keeps
+#: measuring it, because a claim about what another program does becomes folklore the day
+#: it stops being checked.
+#:
+#: Refusing is what ships rather than repairing, and the reason is that the repair cannot
+#: be picked here: the candidate that matters is stdin delivery, that is per-CLI (codex
+#: hangs on an open stdin), and this machine has no npm shim of either CLI to verify
+#: against. Loud beats fluent-and-wrong. `stdin_ok` is the repair, off until measured.
+SHIM_SUFFIXES = (".cmd", ".bat")
 
 
 def available() -> list[Cli]:
@@ -356,14 +385,26 @@ def _invoke(
     # the bare name goes to Popen, and the OSError below still says what is missing.
     executable = shutil.which(cli.argv[0]) or cli.argv[0]
 
+    # Refused before anything starts, because the failure it prevents has no symptom: the
+    # shim exits 0 with a fluent answer to a prompt it never saw. See `SHIM_SUFFIXES`.
+    # A CLI that takes its prompt on stdin never meets `%*`, so it is not refused.
+    if not cli.stdin_ok and os.path.splitext(executable)[1].lower() in SHIM_SUFFIXES:
+        return None, (
+            f"{cli.name} is a {os.path.basename(executable)} launcher - cmd.exe cuts its "
+            f"argument at the first newline, so it would answer a prompt it never saw. "
+            f"Install the native {cli.name} build rather than npm -g."
+        )
+
     try:
         proc = subprocess.Popen(
-            [executable, *cli.argv[1:], prompt],
+            # The prompt leaves the argv entirely when it travels on stdin. Sending it
+            # both ways would be the truncation plus a duplicate.
+            [executable, *cli.argv[1:]] + ([] if cli.stdin_ok else [prompt]),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             # codex waits on stdin ("Reading additional input from stdin..."), so it
             # must be closed explicitly or the call can hang until the timeout.
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if cli.stdin_ok else subprocess.DEVNULL,
             text=True,
             cwd=cwd,
             encoding="utf-8",
@@ -373,6 +414,11 @@ def _invoke(
         return None, f"{cli.name} failed to start: {exc}"
 
     deadline = time.monotonic() + timeout
+    # `communicate` is what pipes, writes and closes stdin — and it may carry `input`
+    # exactly once: a second call with it raises "Cannot send input after starting
+    # communication". Since this polls, the prompt goes on the first pass and the rest of
+    # the loop waits. A defect that would only ever appear on a slow call.
+    to_send: str | None = prompt if cli.stdin_ok else None
     while True:
         if cancel is not None and cancel.is_set():
             return _abandon(proc, f"{cli.name} was cancelled")
@@ -380,8 +426,9 @@ def _invoke(
         if left <= 0:
             return _abandon(proc, f"{cli.name} timed out after {timeout:.0f}s")
         try:
-            out, err = proc.communicate(timeout=min(_POLL_SEC, left))
+            out, err = proc.communicate(input=to_send, timeout=min(_POLL_SEC, left))
         except subprocess.TimeoutExpired:
+            to_send = None
             continue  # retrying communicate loses no output; the docs promise that
         break
 

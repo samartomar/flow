@@ -10,7 +10,9 @@ report itself finished 0.8 s after it starts, which is most of what this module 
 the suite, and it buys the one guarantee no other layer can see.
 """
 
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -218,6 +220,69 @@ class TestTheOrdinaryCallIsUnchanged(Temp):
         out, reason = _invoke(big, "prompt", timeout=15.0)
         self.assertEqual(reason, "")
         self.assertEqual(len(out), 200000)
+
+
+#: Reads the whole of stdin and writes it back. The other half of a `stdin_ok` CLI, and
+#: it has to be a real process for the same reason everything else in this module does:
+#: a pipe that is opened, written and closed is not something a mock can be wrong about.
+_ECHOES_STDIN = "import sys; sys.stdout.write(sys.stdin.read())"
+
+MULTILINE = ("Repeat the SECRET below verbatim and nothing else.\n\n"
+             "SECRET:\nmarmalade-42")
+
+
+class TestThePromptCanTravelOnStdin(Temp):
+    """`stdin_ok`, proved on a real executable rather than on a patched `Popen`.
+
+    A `.cmd` shim truncates an argv prompt at the first newline (`test_refine.py`), and
+    the repair the decision stages is per-CLI stdin delivery. This is the delivery half:
+    pipe, write, close, and the whole multi-line prompt arrives.
+    """
+
+    def test_the_whole_multi_line_prompt_arrives(self):
+        reader = Cli("reader", (sys.executable, "-c", _ECHOES_STDIN), stdin_ok=True)
+        out, reason = _invoke(reader, MULTILINE, timeout=15.0)
+        self.assertEqual(reason, "")
+        self.assertEqual(out, MULTILINE)
+        # The leg that matters, named the way NEEDS_YOU names it: the last line of a
+        # multi-line prompt is what a shim loses, and losing it is silent.
+        self.assertIn("marmalade-42", out)
+
+    def test_the_prompt_is_not_also_passed_as_an_argument(self):
+        # Sent twice is the truncation plus a duplicate. This child prints its argv, so
+        # what it says is what it actually received.
+        argv_printer = Cli("argv", (sys.executable, "-c",
+                                    "import sys; print(len(sys.argv))"), stdin_ok=True)
+        out, reason = _invoke(argv_printer, MULTILINE, timeout=15.0)
+        self.assertEqual(reason, "")
+        self.assertEqual(out.strip(), "1", "the prompt was passed on the argv as well")
+
+    def test_a_slow_reader_still_gets_its_input(self):
+        # `_invoke` polls `communicate` in a loop, and `communicate` may carry `input`
+        # exactly once — a second call with it raises "Cannot send input after starting
+        # communication". A child that outlives the first poll is what finds that.
+        slow = Cli("slow", (sys.executable, "-c",
+                            "import sys, time; time.sleep(0.6);"
+                            " sys.stdout.write(sys.stdin.read())"), stdin_ok=True)
+        out, reason = _invoke(slow, MULTILINE, timeout=15.0)
+        self.assertEqual(reason, "")
+        self.assertEqual(out, MULTILINE)
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "a .cmd shim is a Windows shape; there is nothing to rescue "
+                         "elsewhere")
+    def test_a_cmd_shim_that_reads_stdin_is_usable_again(self):
+        # The whole point of the capability, end to end: the same launcher shape that
+        # loses everything after the first newline on the argv gets the prompt whole.
+        folder = tempfile.mkdtemp(prefix="stdin-shim-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        shim = Path(folder) / "reader.cmd"
+        shim.write_text(f'@echo off\n"{sys.executable}" -c "{_ECHOES_STDIN}"\n',
+                        encoding="utf-8")
+        cli = Cli("reader", (str(shim),), stdin_ok=True)
+        out, reason = _invoke(cli, MULTILINE, timeout=20.0)
+        self.assertEqual(reason, "", "a stdin CLI must not be refused for being a .cmd")
+        self.assertIn("marmalade-42", out)
 
 
 if __name__ == "__main__":
