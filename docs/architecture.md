@@ -799,8 +799,16 @@ to the *focused* window; this one is never focused, so the wheel reaches it only
 switch off. That is the same shape as the two defects already recorded here (the `Esc`
 binding that could not fire once the windows stopped taking focus, and the popup menu that
 received nothing until it borrowed the foreground), so the body also scrolls by
-press-and-drag, which is delivered by hit-test and cannot depend on focus. Whether the
-wheel actually arrives is a desk check, not a claim.
+press-and-drag, which is delivered by hit-test and cannot depend on focus.
+
+**Checked at the desk 2026-08-02, and the drag stays anyway.** The wheel arrives, the
+window reads as one of Flow's, and — the check that mattered — it stays put while the user
+keeps typing in another window, which is the confirmation that the `WS_EX_NOACTIVATE`
+read-back means what it says. The wheel works *because that mouse setting is on here*; it
+is a default, not a guarantee, so removing the drag path would leave a machine with it
+switched off holding a window it cannot scroll. The approval is also of a 1280×672 work
+area, where 22 rows sit below the fold — a display tall enough to show the whole sheet is
+a different thing to look at and has not been looked at.
 
 The menu is split into those two submenus because a flat list that grows with every
 feature is one nobody scans, and this one is also a modal loop that stalls the UI thread
