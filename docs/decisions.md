@@ -6,6 +6,26 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-02 — Help review: the sheet moves into Flow's own window, and goose leaves the presets
+
+Owner review of the shipped Help and menu (items 30/31): structure and presets
+approved, two changes, one ratification. **(1)** "goose" leaves the shipped preset
+list — taste, not measurement; its gate numbers stand, and the thirteen passed-but-
+unshipped words remain swappable without new measurement. **(2)** Commands &
+shortcuts stops opening a text file in Notepad — the owner's words: "which is not
+help" — and renders inside Flow itself: a read-only window in the app's own visual
+idiom (the bubble's palette), fed by the *same* generated data — `help.COMMANDS`,
+the live `hotkeys.chosen`, the currently configured trigger words — regenerated on
+every open, with item 30's route-checked tests surviving unchanged. Presentation
+moves; the guarantees do not. Constraints that survive: R16 (tkinter only), Flow's
+windows stay out of the activation chain (a help window needs no keyboard — mouse
+scroll and a click-to-close are the whole interaction), and the text-file path is
+removed rather than kept as a second surface. "Open the guide" still opens the
+README in the browser — the long-form guide belongs where links work. **(3)**
+Ratified: the round's flagged deviation stands — "Was a command" stays a chip on the
+bubble beside the utterance it rescues, with no menu duplicate. Spec'd and built as
+item 32 by the next session, from this entry.
+
 ### 2026-08-02 — Flow Lite: a cross-platform clipboard-out mode; the native port waits on its evidence
 
 Flow's value — accented dictation, the correction loop, the workshop — is welded to
