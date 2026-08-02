@@ -14,8 +14,31 @@ entries are further down)
 
 ## Found while building, out of the item's scope
 
-(resolved — the `Session._provider()` pin mismatch became LOOP_PLAN item 24 and is
-done, commit `a18b619`: the notes now name the CLI the call will actually make)
+- [ ] **A `.cmd` shim truncates every prompt Flow sends at the first newline — and both
+  CLIs document the install that produces one.** Found while trying to verify `opencode`
+  for item 35, and it is not about opencode. Measured directly, against a batch shim of
+  the shape `npm -g` writes: `['line one']` arrived where `['line one\nline two\nline
+  three']` was sent, and the identical argument through a real executable arrived whole.
+  A `.cmd` forwards `%*` through cmd.exe, which stops at the newline. **Every prompt in
+  `refine.py` is multi-line** — `_PROMPT`, `_POLISH_PROMPT`, `_ASK_PROMPT`,
+  `_ASK_ARTIFACT_PROMPT` all are — so on a machine where `codex` or `claude` was installed
+  with `npm -g`, the CLI receives the framing and none of the user's text, exits 0, and
+  answers a question it never saw. There is no error anywhere: the reply is fluent and
+  about nothing.
+  Not fixed here because it is outside item 35 (Rule 4) and because the fix is a design
+  choice rather than a patch — the shapes are, roughly: hand the prompt on **stdin**
+  (`_invoke` sets `stdin=DEVNULL` deliberately, because codex hangs on an open one, so
+  this is a per-CLI variation the seam does not have today); write the prompt to a temp
+  file and pass the path; or refuse a `.cmd` target with a message telling the user to
+  install the real binary. **The measurement that picks one** is which CLIs actually
+  behave differently — on this machine codex and claude are WinGet `.EXE`s and are
+  unaffected, so nothing here can distinguish "shim breaks everything" from "shim breaks
+  opencode". Reproduce with
+  `C:\Users\samar\AppData\Local\Temp\claude\…\scratchpad\shim_probe.py`, or in four lines:
+  a `.cmd` that echoes `%*`, invoked through `refine._invoke` with a two-line prompt.
+
+- [x] (resolved — the `Session._provider()` pin mismatch became LOOP_PLAN item 24 and is
+  done, commit `a18b619`: the notes now name the CLI the call will actually make)
 
 ## Going public — done 2026-08-02, except two steps that are not on this machine
 
@@ -69,6 +92,105 @@ Two things the sweep turned up that you have not ruled on, kept here rather than
 
 ## At the desk
 
+- [ ] **On a macOS machine: install uv, run
+  `uv tool install git+https://github.com/samartomar/flow`, grant microphone permission
+  when asked, and use Lite for real work. After sustained use, record the one number the
+  port decision waits on: how often the clipboard hop made you wish Flow had hands.**
+  Lite starts itself off Windows — no flag needed — and says so on the first line. That is
+  the whole instrument; there is no harness for this and there cannot be, because the
+  question is how much a working day notices a keystroke (product.md, "Flow Lite").
+  Nothing else about this is a decision waiting on you: the fence is written, the body is
+  built, and a native macOS port stays unfunded until this number exists.
+
+- [ ] **First, though: does the pill draw at all on macOS?** The one thing no Windows
+  machine can answer, and the reason item 34 is `done (macOS check pending)`. Every Lite
+  path is unit-tested here and `uv run flow --lite` runs the same code on Windows, but
+  three Tk questions are genuinely open on the other platform: whether
+  `overrideredirect(True)` gives a borderless always-on-top window that behaves (macOS
+  treats it differently from Windows), whether `-alpha` is honoured, and whether the pill
+  and bubble land inside the work area — `_work_area` falls back to the full screen
+  off-Windows, so the pill will sit against the very bottom-right corner, under the Dock
+  if the Dock is there. **If it is behind the Dock, that is the first fix and it is a
+  small one** (an inset, or NSScreen's visible frame via whatever is already on the
+  machine). Report what you see; do not work around it silently, because a Lite that is
+  awkward for a reason nobody wrote down is the version this decision would be measured
+  on.
+
+- [ ] **Verify `copilot` — the four commands, then one line back here.** It is an inert
+  entry in `refine.CANDIDATES` today: Flow will find it on PATH, say
+  `found copilot, not yet verified`, and never call it. What settles it, on a machine that
+  has it:
+  1. `copilot --help` — does it have a headless, one-shot, prompt-in mode at all? (If it
+     only opens a UI, say so and it comes *out* of the candidate list, the way `kiro`
+     did.)
+  2. the one-shot call with a **single-line** prompt, e.g.
+     `copilot -p "Reply with exactly: PONG"` — record the exact flag, whether stdout
+     carries the answer alone, whether the banner is on stderr, and the exit code;
+  3. **the same call with a multi-line prompt** — this is the leg that matters and the one
+     that failed for opencode. Use
+     `"Repeat the SECRET below verbatim and nothing else.\n\nSECRET:\nmarmalade-42"` and
+     require `marmalade-42` back. Every prompt Flow sends is multi-line;
+  4. `echo $?` / `$LASTEXITCODE` after a deliberately bad call, so a failure is
+     distinguishable from an empty answer.
+  Write the answer into `flow/refine.py`'s `CANDIDATES` comment as the measurement, then
+  flip the entry to `Cli("copilot", (<the argv you ran>,))` with no `verified=False`.
+
+- [ ] **Verify `gemini`** — the same four commands, the same place to record it. Likely
+  `gemini -p "<prompt>"`, but that is a guess and guessing is the thing this entry exists
+  to refuse.
+
+- [x] **`kiro-cli` — verified, all four legs, 2026-08-02, this machine.** The round's
+  kiro rejection was measured against the wrong binary: `kiro` on PATH is the IDE
+  launcher, but the owner's MSI install put a real headless agent **off-PATH** at
+  `%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe`. Measured: `--version` →
+  `kiro-cli-chat 2.16.0`; one-shot
+  `chat --no-interactive --trust-tools= "<prompt>"` → answer, exit 0, ~1 s;
+  **multi-line through Popen list-argv (the `_invoke` mechanism): a SECRET on the
+  last line of a three-line prompt came back verbatim** — native exe, no shim, no
+  truncation; bad args exit 2, loudly. Shape facts for the wiring: stdout carries
+  furniture (ANSI colour, a `> ` answer prefix, a `▸ Credits: … • Time: …` status
+  line — the CLI meters, ~0.10 credits/call) that the adapter must strip; detection
+  cannot be PATH-only — probe the default install directory too; `--trust-tools=`
+  (empty) is the right courier default, no tool runs without asking. Wiring is in
+  the next session's prompt (the shim item's session, second item).
+- [ ] **Verify `opencode` on a machine where it is not an npm `.cmd` shim** (a Mac, or a
+  Windows box with the real binary). Its single-line call already passes here — exit 0 in
+  8.2 s, `PONG` alone on stdout, banner on stderr — and its multi-line call already fails
+  here, for a reason that is the shim's rather than opencode's (see the `.cmd` entry
+  above). So this is one command: leg 3 of the copilot list, with `opencode run`. If
+  `marmalade-42` comes back, the entry becomes
+  `Cli("opencode", ("opencode", "run"))` and the whole thing was an install artefact.
+
+- [x] **The help window reads as part of Flow — checked and approved 2026-08-02.** All
+  four questions came back good: the bubble's palette and spacing, the `Close` chip where
+  a hand goes, **the window stays put while you keep typing in another one** (which was
+  the one that mattered — `WS_EX_NOACTIVATE` read back `True` when it was built, and this
+  is the confirmation that the style is doing what the read-back claimed), and **the wheel
+  arrives**. Two things stay true anyway and are worth keeping in the record: the wheel
+  works here because *Scroll inactive windows when I hover over them* is on, which is a
+  Windows 11 default and a user preference — so the press-and-drag path stays, because a
+  machine with that switched off would otherwise have a window it cannot scroll. And this
+  approval is of a **1280×672 work area**, where the window comes up 600×624 with ~22 rows
+  below the fold; a taller display shows the whole sheet with no thumb and no drag hint,
+  which is a different thing to look at and has not been looked at.
+- [x] **The six preset trigger words decode — checked at the mic 2026-08-02, all good.**
+  `boom, tango, mango, falcon, rocket, banana`. So nothing comes out of
+  `edits.SEND_WORD_PRESETS`, and no `wrong -> right` line is needed in `lexicon.txt` for
+  any of them. This is the half the corpus gate structurally cannot measure — it prices
+  false fires, and this priced recognition — so the list is now good on both counts for
+  this voice. Fourteen gate-passing words remain unshipped and swappable on a word from
+  you, `goose` among them: `pelican`, `zulu`, `kilo`, `jupiter`, `otter`, `thunder`,
+  `comet`, `pixel`, `walrus`, `badger`, `cobra`, `domino`, `harbour`.
+- [ ] **Run `uv run python scripts/send_check.py --live` once, now that the menu is two
+  levels deep.** Not run in the loop session, deliberately: it drives the real mouse and
+  steals the foreground, and you were not at the desk. The reason it is worth a run is
+  narrow and specific — the menu now has a cascade *inside* a cascade (Settings ▸ Trigger
+  word ▸), and the foreground borrow-and-return around `tk_popup` was measured for a
+  single-level popup under `WS_EX_NOACTIVATE`. Single cascades already worked (Voice,
+  Agent CLI, Never offer), so this is the depth being new rather than the mechanism. The
+  harness's own check is "the right-click menu opens and dismisses"; open the nested one
+  by hand while it runs and confirm the submenu takes a click rather than hanging the
+  pump.
 - [ ] **Record more L1 anchor groups** per `docs/recording-kit.md` — two groups exist,
   the smoke benchmark wants 3–5 speakers per anchor group. New clips go to
   `D:\dev\flow-recordings\recorded\inbox\`, then copy into `.bench/recorded/` and run
