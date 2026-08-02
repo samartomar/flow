@@ -6,6 +6,30 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-02 — Flow Lite: a cross-platform clipboard-out mode; the native port waits on its evidence
+
+Flow's value — accented dictation, the correction loop, the workshop — is welded to
+Windows only by the hands: 96 Win32 call sites in `inject`/`hotkey`/`ui`, while the
+brain and ear are portable Python with cross-platform wheels. **Lite** ships the
+portable part everywhere: dictate, correct by voice, refine in the workshop, then the
+draft is *copied* — Tk's own clipboard, OS-agnostic — and the user pastes. No
+injection, no global hotkeys, no synthesized keystrokes, and therefore no OS
+permission beyond the microphone; arming is a click on the pill instead of a global
+combo. Demand starts with the design-center user, whose own environments include
+macOS. What Lite deliberately is not: there is no "boom", no "enter boom", no
+auto-paste, no target-window awareness — the hands-free magic is the price, and
+paying it knowingly is the point, because **the clipboard hop is the measurement**:
+sustained Lite use is what decides whether a native macOS body (weeks, plus re-taking
+every §7/§8 measurement per OS) is ever funded. The CLI adapter generalizes beyond
+`codex`/`claude` to the agent CLIs users actually have (candidates: `kiro`,
+`copilot`, `gemini`, `opencode`) — detection ships everywhere, but invocation shapes
+are verified on a machine that has the CLI, never asserted; an unverified entry stays
+inert with a note. Development and the full test suite run on Windows — clipboard-out
+is OS-agnostic, and item 27's platform guard relaxes to "non-Windows runs Lite, and
+says so" instead of refusing outright. product.md gains an Environments paragraph and
+a one-page Lite definition whose fence is explicit: features land in full Flow first,
+and reach Lite only if they survive without hands.
+
 ### 2026-08-01 — Suite split: declined
 
 All 616 tests stay in the commit gate, `test_lifecycle.py` included. The 15.0 s is an
