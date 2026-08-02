@@ -735,6 +735,32 @@ for `ui.SENT_LINGER_SEC` under a `sent` label with a **Put it back** chip, which
 `Session.recall()` — the same path the spoken *"bring back my last prompt"* takes. Dictate
 mode only: in converse mode the bubble is already staying up for the answer.
 
+### The bubble under a long draft
+
+`Bubble._render` measured and laid out the whole draft on every partial, and both things
+that grew out of that were the same defect: the time a render costs, and the window it
+sizes. Live at the desk on 2026-08-02 a very long dictation reached **476.7 ms a frame and
+15 153 px of window on a 672 px desktop**, which stalled the UI thread until the microphone
+queue overflowed, and put the Send chip twenty screens below the bottom of the display at
+the one moment the spoken exits were already gone — a draft had disabled its own rescue.
+
+The body is now a viewport on the end of the draft: `ui.BODY_MAX_H` caps its height, only
+`ui.BODY_TAIL_CHARS` of the tail is handed to the canvas, and one muted `… N earlier lines`
+sits above it (§8 carries both numbers and the before/after curve). The chip row is drawn
+from `self._h`, so bounding the body is what keeps the chips on screen — and the newest
+words are always the visible ones, which is what tail-following means for a draft that only
+ever grows at the end.
+
+**No scrollback, deliberately.** Scrolling back would have to lay out what it scrolls to,
+which re-grows the cost the cap exists to bound. The whole draft stays reachable by a route
+that already exists and costs nothing: **Edit** opens all of it in a `tk.Text` that scrolls
+itself.
+
+The reply path is **not** part of this. An answer is bounded where it is produced
+(`ASK_ARTIFACT_MAX_CHARS`) and is read rather than dictated into, so it keeps its full-text
+measurement; `tests/test_bubble.py` asserts that, so "the draft path joined the artifact
+path" cannot quietly become "both paths moved".
+
 ### Converse
 
 `Session.send()` returns `""` in converse mode by construction, so the question can never be
@@ -767,6 +793,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `FORCE_NEXT_TTL_SEC` | 30 s | A Refine/Continue chip means "the next thing I say"; after this long the next thing someone says is a different thought. The chips also toggle, because a one-way door that lasts 30 s reads as the app being stuck |
 | `AUTO_ASK_SEC` | 4 s | Converse mode only. Measured: the pauses a speaker leaves between separate spoken items run 1.4–3.3 s (median 2.5 s) on the one recording where every item was located, and each gap also contains a spoken item number, so real silence is shorter — under ~3.3 s fires mid-thought. R5 still holds where it matters: pasting into a window is irreversible and stays manual, asking is not |
 | `ui.SENT_LINGER_SEC` | 4 s | How long the bubble holds what a dictate-mode Send just handed over, with the chip that puts it back. Deliberately **not** `AUTO_ASK_SEC`, which is also 4 s and is a different four seconds: that one is how long a settled draft waits before asking itself, this is how long words stay recoverable after they have gone, and either could move without the other. The number it replaces was zero — the bubble was withdrawn on Send, so a Send that went nowhere and a Send that worked left the same empty screen |
+| `ui.BODY_MAX_H` / `BODY_TAIL_CHARS` | 340 px / 1600 chars | How tall the draft may draw, and how much of it is laid out per event. Measured on the real canvas before the fix: **2.4 ms at 1 000 characters, 32.7 ms at 10 000, 476.7 ms at 50 000** — per partial, on the UI thread — and a 50 000-character draft sized the bubble **15 153 px tall inside a 672 px work area**, which is where the Send chip was at the one moment the spoken exits had already died with the microphone. Only the tail is laid out now, with `… N earlier lines` above it; the cap is 20 lines at the 17 px the body font measures, and 1600 characters is about 28 of them, so the visible window is always full. After: **2.5 / 4.2 / 4.3 ms**, and 414 px at 50 000. The line count is wraps plus explicit breaks from `BODY_CHARS_PER_LINE` = 56 (measured: 3 160 characters wrapped to 56 lines at 352 px) — an average rather than a layout, because the layout is the cost |
 | `ui.DOT_SEC` | 0.4 s | One dot of the indeterminate-wait animation. The bubble renders on events and a wait has no events, so the frame is computed and compared before anything is drawn — at this cadence that is ~2.5 repaints a second instead of the 33 that redrawing every pump would cost. Same discipline as the auto-ask countdown |
 | `DEAF_DB` | −120.0 | What `level_db` reports while the microphone is not evidence. Below any real room — a quiet room with a good USB mic measures −96.7 dB — so every meter maps it to silence without having to know why |
 | `speak.HOSTS` | `pwsh`, then `powershell` | Which PowerShell speaks. Not a style choice: `System.Speech` is a .NET API with two implementations that do not enumerate the same voices. Windows PowerShell 5.1 reads only the legacy SAPI5 token store; PowerShell 7 also reads OneCore, where Windows registers everything modern — natural voices included. Measured: **2 voices under `powershell`, 9 under `pwsh`** on the same machine. The same executable must list *and* speak, or the menu offers names `SelectVoice` will quietly refuse |
@@ -953,7 +980,14 @@ policy here; it is enforced by absence.
    correctly while the level meter animated to the discarded blocks, so the app told the
    truth about what it did and lied about what it heard.
 7. **Everything is bounded.** Mic queue, undo history, drop log, decode timings, thread turns,
-   lexicon terms, profile pairs, CLI input. A long session must cost what a short one costs.
+   lexicon terms, profile pairs, CLI input — **and rendering**. A long session must cost what
+   a short one costs. Rendering is the newest member and the one that had never held: the
+   bubble laid out the whole draft on every partial, so a 50 000-character dictation cost
+   476.7 ms a frame and sized itself 15 153 px tall, and both halves of that are the same
+   defect wearing different clothes — a stalled UI thread overflows the microphone, and a
+   window taller than the screen puts the chip row where no hand can reach it. Only the
+   visible tail is laid out now (§8), so the cost and the height are flat past the point
+   anybody can read anyway.
 8. **Three declared dependencies.** GUI, hotkeys, injection, DPI awareness and speech all come
    from `tkinter` and `ctypes` precisely so that list does not grow.
 9. **`decode_options()` is the only place decode parameters live**, so the benchmarks measure
@@ -1010,7 +1044,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (976 tests, ~17 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (993 tests, ~14 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

@@ -271,6 +271,47 @@ COPIED_ENTER = "copied — Enter is yours to press"
 #: on Send, so a Send that went nowhere looked exactly like one that worked.
 SENT_LINGER_SEC = 4.0
 
+#: How tall the draft may draw before the rest of it goes above the fold.
+#:
+#: Live at the desk on 2026-08-02 a very long dictation sized this window **15 153 px tall
+#: inside a 672 px work area**, which put the Send chip — the last exit still working, once
+#: the mic had overflowed and the models had unloaded — twenty screens below the bottom of
+#: the display. A draft must never disable its own exits, and the chip row is drawn from
+#: `self._h`, so bounding the body is what keeps the chips reachable.
+#:
+#: 340 px is 20 lines at the 17 px the body font measures, and it is sized against the work
+#: area rather than against taste: with a partial, an indicator and a two-line note above
+#: the chips, the whole window comes to ~500 px on the 1280×672 desktop this was measured
+#: on, which leaves the pill its own room underneath.
+BODY_MAX_H = 340
+
+#: Characters a line of body text holds, measured on the real canvas at the body font and
+#: `BUBBLE_W - 2 * PAD` = 352 px: 3 160 characters of ordinary prose wrapped to 56 lines,
+#: so 56.4. Two things read it, and neither may cost a layout — how much draft is worth
+#: handing the canvas, and how many lines are above what it shows.
+BODY_CHARS_PER_LINE = 56
+
+#: The window of draft actually laid out per event, and the reason render cost stops
+#: growing: `BODY_MAX_H` holds 20 lines, this is enough characters for about 28 of them, so
+#: the visible tail is always full even where the text wraps early — and a two-hour
+#: dictation is laid out at the same cost as a two-minute one (invariant 7, extended to
+#: rendering). Measured before and after on the real canvas: 2.4 / 32.7 / 476.7 ms at
+#: 1k / 10k / 50k characters, and flat afterwards.
+BODY_TAIL_CHARS = 1600
+
+#: How far past the cut to look for a space before giving up and cutting mid-word.
+#: Bounded, because a scan that can run the length of the draft is the cost being avoided.
+BODY_BOUNDARY_SCAN = 200
+
+#: The line above the window saying what is not in it, at the note's font plus its gap.
+BODY_ELIDED_H = 17
+
+#: How many times the window may be measured and shrunk before it is drawn. Each probe is
+#: over at most `BODY_TAIL_CHARS`, so the ceiling on one render is a small multiple of a
+#: fixed cost rather than anything to do with the draft. Two is what it takes in practice;
+#: the third is there so the loop has an end that does not depend on the text.
+BODY_PROBES = 3
+
 #: The help window. Wider than the bubble because it has two columns and does not wrap:
 #: a row is one line, so the width is what the widest row costs rather than a taste.
 #: `HELP_RIGHT_X` is the gutter both columns are measured against in `help.MAX_*`.
@@ -319,6 +360,30 @@ def chip_tag(key: str) -> str:
     "Was a command" chip could be drawn and could not be clicked.
     """
     return "chip-" + key.replace(" ", "-")
+
+
+def body_window(text: str, budget: int) -> tuple[str, int]:
+    """The last `budget` characters of `text`, and how many lines were left above them.
+
+    The cut walks forward to the next whitespace so the window opens on a whole word
+    rather than mid-syllable, which is the difference between a draft that scrolled and
+    one that looks corrupted.
+
+    The line count is wraps plus explicit breaks, from `BODY_CHARS_PER_LINE` — a measured
+    average, not a layout. Laying the head out to count it exactly is precisely the cost
+    this function exists to avoid, and the number's job is to tell somebody how much is
+    above them rather than to be re-derivable to the line.
+    """
+    if len(text) <= budget:
+        return text, 0
+    cut = len(text) - budget
+    nudge = next((i for i, ch in enumerate(text[cut:cut + BODY_BOUNDARY_SCAN])
+                  if ch.isspace()), -1)
+    if nudge >= 0:
+        cut += nudge + 1
+    head = text[:cut]
+    earlier = head.count("\n") + max(1, -(-len(head) // BODY_CHARS_PER_LINE))
+    return text[cut:], earlier
 
 
 def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
@@ -1586,6 +1651,41 @@ class Bubble(tk.Toplevel):
 
     # -- painting ----------------------------------------------------------
 
+    def _body_slot(self, body: str) -> tuple[str, int, int]:
+        """What of the draft is drawn, how many lines are above it, and how tall it is.
+
+        The two halves of the long-draft fix are one measurement, which is why they are
+        one function. The bubble may not grow past `BODY_MAX_H` — the chip row is drawn
+        from `self._h`, so an unbounded height is an unreachable Send — and the canvas may
+        not be asked to lay out more than `BODY_TAIL_CHARS`, because that layout is what
+        costs: 476.7 ms for a 50 000-character draft on this machine, on every partial,
+        which is a stalled UI thread and then an overflowing microphone.
+
+        A window that overshoots the cap is shrunk in proportion and measured again,
+        deliberately not a line at a time: the loop has to end in a fixed number of probes
+        rather than in a number that depends on the draft, or the fix would carry the
+        defect. 0.95 undershoots, so the second pass is the last one in practice.
+
+        The height returned is the height that will be *drawn*, never a clamp — a clamped
+        height with taller text under it is how a note came to land on the chip row.
+        """
+        c = self.canvas
+        shown, earlier = body_window(body, BODY_TAIL_CHARS)
+        text_h = 0
+        for _ in range(BODY_PROBES):
+            probe = c.create_text(
+                PAD, PAD, anchor="nw", text=shown or " ", fill=TEXT,
+                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
+            )
+            _x1, y1, _x2, y2 = c.bbox(probe)
+            text_h = y2 - y1
+            if text_h <= BODY_MAX_H:
+                break
+            shown, earlier = body_window(
+                body, max(1, int(len(shown) * BODY_MAX_H * 0.95 / text_h))
+            )
+        return shown, earlier, text_h
+
     def _render(self) -> None:
         c = self.canvas
         accent = self.pill.accent
@@ -1594,13 +1694,9 @@ class Bubble(tk.Toplevel):
         body = self._sent or self._text
         c.delete("all")
 
-        # Measure first: the window has to be sized to the wrapped text.
-        probe = c.create_text(
-            PAD, PAD, anchor="nw", text=body or " ", fill=TEXT,
-            font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
-        )
-        x1, y1, x2, y2 = c.bbox(probe)
-        text_h = y2 - y1
+        # Measure first: the window has to be sized to the wrapped text. Only the tail of
+        # it, though, and that is the whole of the long-draft fix — see `_body_slot`.
+        shown, earlier, text_h = self._body_slot(body)
         reply_h = 0
         if self._reply:
             rprobe = c.create_text(
@@ -1629,6 +1725,10 @@ class Bubble(tk.Toplevel):
         extra = reply_h
         if edit_h:
             extra += edit_h - text_h + 8
+        elif earlier:
+            # Only outside the editor: the box holds the whole draft and scrolls itself,
+            # so a line saying part of it is above the fold would be about nothing.
+            extra += BODY_ELIDED_H
         if self._sent:
             extra += 16  # the "sent" label above the words
         if self._partial:
@@ -1665,9 +1765,17 @@ class Bubble(tk.Toplevel):
             )
             y += edit_h + 6
         elif body:
+            if earlier:
+                # Said rather than implied: a window with nothing above it reads as the
+                # whole draft, and somebody would go looking for words that are there.
+                c.create_text(
+                    PAD, y, anchor="nw", text=f"… {earlier} earlier lines", fill=MUTED,
+                    font=("Segoe UI", 8, "italic"),
+                )
+                y += BODY_ELIDED_H
             # Muted once it has gone: these are no longer the words being worked on.
             c.create_text(
-                PAD, y, anchor="nw", text=body, fill=MUTED if self._sent else TEXT,
+                PAD, y, anchor="nw", text=shown, fill=MUTED if self._sent else TEXT,
                 font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
             )
             y += text_h + 6
