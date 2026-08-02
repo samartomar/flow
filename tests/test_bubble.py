@@ -193,30 +193,203 @@ class TestTheSentCardIsTheSameSlot(unittest.TestCase):
         self.assertLessEqual(b._h, WORK[3] - WORK[1] - 16)
 
 
-class TestTheArtifactReplyPathIsUnchanged(unittest.TestCase):
-    """The decision says the draft path *joins* the artifact path, not that both move.
+def drawn_reply(b) -> str:
+    """What actually reached the canvas as the answer, ignoring probes and furniture."""
+    hits = [i["text"] for i in b.canvas.items if i["text"] and i["text"] in b._reply]
+    return hits[-1] if hits else ""
 
-    A reply is bounded where it is produced — `refine.ASK_ARTIFACT_MAX_CHARS` — and it is
-    read rather than dictated into, so it keeps its full-text probe. Asserted here so
-    "both paths changed" cannot happen quietly.
+
+def more_line(b) -> str:
+    return next((i["text"] for i in b.canvas.items
+                 if i["text"].startswith("…") and "more lines" in i["text"]), "")
+
+
+class TestTheAnswerShowsItsHead(unittest.TestCase):
+    """P10, shape (b). An artifact is read from the top, so the window holds the top.
+
+    Item 42 fitted the window to the desktop, which made the chips reachable and left a
+    12 000-character answer clipped by the window edge with **no sign anything was missing**
+    — the same silence the draft had before item 37 gave it `… N earlier lines`. The reply
+    gets the same treatment pointing the other way.
     """
 
-    def test_a_long_reply_is_drawn_whole(self):
-        reply = draft(4_000)
-        b = bubble()
-        b._reply = reply
+    def test_a_long_reply_shows_its_first_lines(self):
+        reply = draft(12_000)
+        b = bubble(_reply=reply)
         b._render()
-        drawn = [i["text"] for i in b.canvas.items if i["text"] == reply]
-        self.assertTrue(drawn, "the reply was windowed or truncated")
+        shown = drawn_reply(b)
+        self.assertTrue(reply.startswith(shown), "the reply was windowed from the wrong end")
+        self.assertLess(len(shown), len(reply))
+
+    def test_it_is_not_the_tail(self):
+        # Both directions, so a window cannot pass this by being a window: the last words
+        # of a 12k answer must *not* be what is drawn.
+        reply = draft(12_000)[:-20] + "the very last words"
+        b = bubble(_reply=reply)
+        b._render()
+        self.assertNotIn("the very last words", drawn_reply(b))
+
+    def test_no_word_is_cut_in_half(self):
+        b = bubble(_reply=draft(12_000))
+        b._render()
+        shown = drawn_reply(b)
+        self.assertTrue(b._reply[len(shown)].isspace(),
+                        "the window closed mid-word")
+
+    def test_a_reply_that_fits_is_drawn_whole_and_says_nothing(self):
+        # Item 37's guard, kept: nothing changes for the answers people actually get.
+        reply = draft(200)
+        b = bubble(_reply=reply)
+        b._render()
+        self.assertEqual(drawn_reply(b), reply)
+        self.assertEqual(more_line(b), "")
+
+    def test_the_count_is_measured_and_exact(self):
+        # The draft's `… N earlier lines` is an *estimate* from a characters-per-line
+        # average, because laying the head out to count it exactly is the cost item 37
+        # exists to avoid — on every partial. A reply is laid out once, and it already
+        # carries a full-text probe, so here N can be the truth and is: total lines minus
+        # shown lines, both off the canvas.
+        b = bubble(_reply=draft(12_000))
+        b._render()
+        line = more_line(b)
+        self.assertRegex(line, r"^… \d+ more lines$")
+        # Read what was drawn *before* adding probes of our own: the probes are
+        # `create_text` calls too, and one carrying the whole reply would be picked up as
+        # the drawn body by anything looking for the last match.
+        shown_text = drawn_reply(b)
+        full = b.canvas.create_text(
+            ui.PAD, ui.PAD, anchor="nw", text=b._reply, font=("Segoe UI", 10),
+            width=ui.BUBBLE_W - 2 * ui.PAD,
+        )
+        one = b.canvas.create_text(
+            ui.PAD, ui.PAD, anchor="nw", text="M", font=("Segoe UI", 10),
+            width=ui.BUBBLE_W - 2 * ui.PAD,
+        )
+        shown = b.canvas.create_text(
+            ui.PAD, ui.PAD, anchor="nw", text=shown_text, font=("Segoe UI", 10),
+            width=ui.BUBBLE_W - 2 * ui.PAD,
+        )
+        h = lambda i: b.canvas.bbox(i)[3] - b.canvas.bbox(i)[1]  # noqa: E731
+        expected = round(h(full) / h(one)) - round(h(shown) / h(one))
+        self.assertEqual(int(line.split()[1]), expected)
+
+    def test_the_count_grows_with_the_answer(self):
+        counts = []
+        for n in (6_000, 12_000):
+            b = bubble(_reply=draft(n))
+            b._render()
+            counts.append(int(more_line(b).split()[1]))
+        self.assertLess(counts[0], counts[1])
 
     def test_the_reply_still_sizes_the_bubble(self):
-        short = bubble()
-        short._reply = draft(200)
+        short = bubble(_reply=draft(200))
         short._render()
-        long_ = bubble()
-        long_._reply = draft(4_000)
+        long_ = bubble(_reply=draft(4_000))
         long_._render()
         self.assertGreater(long_._h, short._h)
+
+    def test_the_window_is_inside_the_work_area_at_every_corner(self):
+        # Item 42's guarantee, re-asserted: a second windowing rule is a second way to get
+        # the height wrong.
+        left, top, right, bottom = WORK
+        for corner, (px, py) in corners().items():
+            with self.subTest(corner=corner):
+                x1, y1, x2, y2 = placed(bubble(_reply=draft(12_000)), px, py)
+                self.assertGreaterEqual(y1, top)
+                self.assertLessEqual(y2, bottom)
+                self.assertGreaterEqual(x1, left)
+                self.assertLessEqual(x2, right)
+
+
+class TestHeadForRepliesAndTailForDrafts(unittest.TestCase):
+    """The asymmetry is deliberate, and it is stated here so nobody unifies it later.
+
+    They point opposite ways for different reasons. A draft grows at the end and the newest
+    words are the ones being worked on, so its window follows the **tail**. An artifact is
+    read from its first line and that is where triage happens, so its window holds the
+    **head**. `body_window` and `head_window` are separate functions rather than one
+    function with a direction flag, because a flag is a thing somebody flips.
+    """
+
+    def test_the_draft_still_windows_its_tail(self):
+        b = bubble(draft(50_000))
+        b._text = b._text[:-20] + "the last words here"
+        b._render()
+        self.assertTrue(drawn_body(b).endswith("the last words here"))
+
+    def test_the_reply_windows_its_head(self):
+        reply = "the first words here" + draft(12_000)[20:]
+        b = bubble(_reply=reply)
+        b._render()
+        self.assertTrue(drawn_reply(b).startswith("the first words here"))
+
+    def test_the_two_lines_say_opposite_things(self):
+        # `… N earlier lines` above a draft, `… N more lines` below an answer. The wording
+        # is the only thing telling a reader which way the window points.
+        d = bubble(draft(50_000))
+        d._render()
+        r = bubble(_reply=draft(12_000))
+        r._render()
+        earlier = next((i["text"] for i in d.canvas.items
+                        if i["text"].startswith("…")), "")
+        self.assertIn("earlier lines", earlier)
+        self.assertIn("more lines", more_line(r))
+
+    def test_the_functions_are_separate(self):
+        # Not a style point: one function with a direction argument is one call site away
+        # from a draft that windows its head, which is the defect item 37 fixed.
+        self.assertNotEqual(ui.head_window(draft(500), 100),
+                            ui.body_window(draft(500), 100)[0])
+        self.assertTrue(draft(500).startswith(ui.head_window(draft(500), 100)))
+        self.assertTrue(draft(500).endswith(ui.body_window(draft(500), 100)[0]))
+
+
+class TestTheExitsCarryTheWholeAnswer(unittest.TestCase):
+    """A head window that also truncated Copy would be this item causing the loss it signals.
+
+    `Use this` goes through `session.take_reply()`, which reads `session.reply`. Neither it
+    nor the clipboard path has ever read the bubble's rendered string, and neither may start.
+    """
+
+    def test_take_reply_reads_the_session_not_the_drawn_window(self):
+        from flow.session import Session
+
+        class FakeAsr:
+            def load(self, final=None) -> None: ...
+
+            def text(self, a, *, final=False, hotwords="") -> str:
+                return ""
+
+        class FakeMic:
+            level_db = -60.0
+
+            def start(self) -> None: ...
+
+            def stop(self) -> None: ...
+
+            @property
+            def active(self) -> bool:
+                return True
+
+            def restart(self) -> None: ...
+
+            def drain(self) -> list:
+                return []
+
+        whole = draft(12_000)
+        s = Session(asr=FakeAsr(), mic=FakeMic())
+        s.reply = whole
+        self.assertTrue(s.take_reply())
+        self.assertEqual(s.draft.text, whole, "the exit carried a window, not the answer")
+
+    def test_the_bubble_draws_less_than_the_session_holds(self):
+        # The two halves of the same sentence, side by side: the card shows a window and
+        # the answer behind it is whole.
+        b = bubble(_reply=draft(12_000))
+        b._render()
+        self.assertLess(len(drawn_reply(b)), len(b._reply))
+        self.assertEqual(len(b._reply), 12_000)
 
 
 #: The four corners of the work area a pill can be dragged to. The bubble anchors above and
@@ -323,11 +496,23 @@ class TestTheWindowIsInsideTheWorkAreaWhereverThePillIs(unittest.TestCase):
         # `EDGE_AIR` is what makes the clamp a proof rather than a best effort — the height
         # is fitted to `work - 2 * air` and the position is clamped by `air`, and the two
         # have to be the same number. A literal in either place is how they drift apart.
+        #
+        # Asserted against `reposition` directly rather than through a state that happens to
+        # fill the desktop: item 45 gave the reply a head window, so nothing renders to
+        # exactly `work_h` any more and a check that relied on one would have been pinning a
+        # coincidence.
         _left, top, _right, bottom = WORK
-        b = bubble(_reply=draft(12_000))
-        x1, y1, _x2, y2 = placed(b, *corners()["bottom-right"])
-        self.assertEqual(y1, top + ui.EDGE_AIR)
-        self.assertEqual(y2, bottom - ui.EDGE_AIR)
+        b = bubble()
+        b._h = bottom - top  # taller than the fit allows, which is what a clamp is for
+        box: list[str] = []
+        b.geometry = box.append
+        b.pill.x, b.pill.y = corners()["bottom-right"]
+        ui.Bubble.reposition(b)
+        self.assertEqual(box[-1].partition("+")[2], f"{892}+{top + ui.EDGE_AIR}")
+        b._h = bottom - top - 2 * ui.EDGE_AIR  # exactly the fit
+        ui.Bubble.reposition(b)
+        _size, _, offset = box[-1].partition("+")
+        self.assertEqual(int(offset.partition("+")[2]) + b._h, bottom - ui.EDGE_AIR)
 
 
 #: Three x positions along the top edge of the work area — the pill dragged where there is
@@ -350,6 +535,13 @@ def along_the_top() -> dict[str, tuple[int, int]]:
 #: pill along the top, where "above" has no room. Everything else must come through byte for
 #: byte, including the reply-sized windows at the top, which are taller than either side of
 #: the pill and so keep today's clamp.
+#:
+#: **The reply rows were re-captured for item 45 and the change is a height, not a
+#: placement.** The head window sizes a long answer to 643 px where the full-text probe
+#: sized it to 656, so every `380x656…` here became `380x643…` with the offsets untouched.
+#: Recorded rather than silently re-baselined: a regression table that is quietly rewritten
+#: whenever it fails is a table that pins nothing. The draft rows — which are what item 44's
+#: fallback is actually about — are byte-identical to the day they were captured.
 GEOMETRY_BEFORE = {
     ("1k draft", "bottom-left"): "380x414+8+208",
     ("1k draft", "bottom-right"): "380x414+892+208",
@@ -357,18 +549,18 @@ GEOMETRY_BEFORE = {
     ("50k draft", "bottom-left"): "380x414+8+208",
     ("50k draft", "bottom-right"): "380x414+892+208",
     ("50k draft", "mid-left"): "380x414+8+8",
-    ("4k reply", "top-left"): "380x656+8+8",
-    ("4k reply", "top-middle"): "380x656+336+8",
-    ("4k reply", "top-right"): "380x656+892+8",
-    ("4k reply", "bottom-left"): "380x656+8+8",
-    ("4k reply", "bottom-right"): "380x656+892+8",
-    ("4k reply", "mid-left"): "380x656+8+8",
-    ("12k artifact reply", "top-left"): "380x656+8+8",
-    ("12k artifact reply", "top-middle"): "380x656+336+8",
-    ("12k artifact reply", "top-right"): "380x656+892+8",
-    ("12k artifact reply", "bottom-left"): "380x656+8+8",
-    ("12k artifact reply", "bottom-right"): "380x656+892+8",
-    ("12k artifact reply", "mid-left"): "380x656+8+8",
+    ("4k reply", "top-left"): "380x643+8+8",
+    ("4k reply", "top-middle"): "380x643+336+8",
+    ("4k reply", "top-right"): "380x643+892+8",
+    ("4k reply", "bottom-left"): "380x643+8+8",
+    ("4k reply", "bottom-right"): "380x643+892+8",
+    ("4k reply", "mid-left"): "380x643+8+8",
+    ("12k artifact reply", "top-left"): "380x643+8+8",
+    ("12k artifact reply", "top-middle"): "380x643+336+8",
+    ("12k artifact reply", "top-right"): "380x643+892+8",
+    ("12k artifact reply", "bottom-left"): "380x643+8+8",
+    ("12k artifact reply", "bottom-right"): "380x643+892+8",
+    ("12k artifact reply", "mid-left"): "380x643+8+8",
 }
 
 

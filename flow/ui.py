@@ -303,7 +303,9 @@ BODY_TAIL_CHARS = 1600
 #: Bounded, because a scan that can run the length of the draft is the cost being avoided.
 BODY_BOUNDARY_SCAN = 200
 
-#: The line above the window saying what is not in it, at the note's font plus its gap.
+#: The line saying what is not in the window, at the note's font plus its gap. One number
+#: for both of them — `… N earlier lines` above a draft and `… N more lines` below an
+#: answer — because they are the same line in the same font pointing opposite ways.
 BODY_ELIDED_H = 17
 
 #: Air between the bubble and every edge of the work area — the same number the window is
@@ -398,6 +400,35 @@ def body_window(text: str, budget: int) -> tuple[str, int]:
     head = text[:cut]
     earlier = head.count("\n") + max(1, -(-len(head) // BODY_CHARS_PER_LINE))
     return text[cut:], earlier
+
+
+def head_window(text: str, budget: int) -> str:
+    """The first `budget` characters of `text`, cut back to a whole word.
+
+    The mirror of `body_window`, and deliberately a **separate function** rather than that
+    one with a direction argument: the two windows point opposite ways for different
+    reasons, and one function with a flag is one call site away from a draft that windows
+    its head — which is the defect item 37 fixed.
+
+    A draft grows at the end and the newest words are the ones being worked on, so its
+    window follows the tail. An answer is read from its first line and that is where triage
+    happens, so its window holds the head.
+
+    No line count comes back from here, unlike `body_window`. The reply's is *measured* off
+    the canvas rather than estimated — see `Bubble._reply_slot` for why it can be.
+    """
+    if len(text) <= budget:
+        return text
+    cut = budget
+    nudge = next((i for i, ch in enumerate(text[cut:cut + BODY_BOUNDARY_SCAN])
+                  if ch.isspace()), -1)
+    if nudge >= 0:
+        return text[:cut + nudge]
+    # No whitespace within reach: walk back instead, so the window still closes on a word
+    # rather than mid-syllable. A single unbroken run longer than the scan is a URL or a
+    # token, and cutting one of those anywhere is the same amount of wrong.
+    back = text.rfind(" ", max(0, cut - BODY_BOUNDARY_SCAN), cut)
+    return text[:back] if back > 0 else text[:cut]
 
 
 def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
@@ -1766,6 +1797,47 @@ class Bubble(tk.Toplevel):
             )
         return shown, earlier, text_h
 
+    def _probe_h(self, text: str, font=("Segoe UI", 10)) -> int:
+        """How tall `text` wraps to in the body column, measured rather than estimated."""
+        probe = self.canvas.create_text(
+            PAD, PAD, anchor="nw", text=text or " ", fill=TEXT,
+            font=font, width=BUBBLE_W - 2 * PAD,
+        )
+        _x1, y1, _x2, y2 = self.canvas.bbox(probe)
+        return y2 - y1
+
+    def _reply_slot(self, reply: str, cap: int) -> tuple[str, int, int]:
+        """What of the answer is drawn, how many lines are below it, and how tall it is.
+
+        The head, not the tail — see `head_window`. Item 42 fitted the window to the desktop,
+        which made the chips reachable and left a 12 000-character artifact clipped by the
+        window edge with no sign that anything was missing: the same silence the draft had
+        before item 37 gave it `… N earlier lines`.
+
+        **N is the truth here, and it is worth saying why it can be.** The draft's count is
+        wraps-plus-breaks from a measured characters-per-line average, because laying the
+        head out to count it exactly is the cost item 37 exists to avoid — *on every
+        partial*, thirty times a second. An answer is laid out once, when it arrives, and it
+        already carries the full-text probe item 37 deliberately kept. So the count comes off
+        that probe: total height over a measured line height, minus the lines shown. Two
+        measurements on the real canvas, no average anywhere.
+
+        Shrunk in proportion and measured again, like `_body_slot` and for the same reason:
+        the loop has to end in a fixed number of probes rather than in a number that depends
+        on the answer.
+        """
+        full_h = self._probe_h(reply)
+        if full_h <= cap:
+            return reply, 0, full_h
+        shown, shown_h = reply, full_h
+        for _ in range(BODY_PROBES):
+            shown = head_window(reply, max(1, int(len(shown) * cap * 0.95 / shown_h)))
+            shown_h = self._probe_h(shown)
+            if shown_h <= cap:
+                break
+        line_h = max(1, self._probe_h("M"))
+        return shown, round(full_h / line_h) - round(shown_h / line_h), shown_h
+
     def _render(self) -> None:
         c = self.canvas
         accent = self.pill.accent
@@ -1777,20 +1849,16 @@ class Bubble(tk.Toplevel):
         # Measure first: the window has to be sized to the wrapped text. Only the tail of
         # it, though, and that is the whole of the long-draft fix — see `_body_slot`.
         shown, earlier, text_h = self._body_slot(body)
-        reply_h = 0
-        if self._reply:
-            rprobe = c.create_text(
-                PAD, PAD, anchor="nw", text=self._reply, fill=REPLY,
-                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
-            )
-            rx1, ry1, rx2, ry2 = c.bbox(rprobe)
-            reply_h = ry2 - ry1 + 8
         # The note gets measured too, and did not until 2026-08-02. It reserved a flat
         # 18 px — one line — and drew at a fixed offset from the foot with `anchor="nw"`,
         # so every line past the first grew *downward* into the chip row. An Ask that
         # failed on a Hyper-V VM put its reason across Refine / Continue / Ask and the
         # owner could read neither. Errors are the longest strings this ever shows and
         # the ones it is least acceptable to hide.
+        #
+        # Measured *before* the reply now, which is the whole of the reordering: the reply's
+        # slot is what is left over rather than a constant of its own, so it has to be told
+        # how much of the card everything else has taken.
         note_h = 0
         if self._note:
             nprobe = c.create_text(
@@ -1802,7 +1870,28 @@ class Bubble(tk.Toplevel):
         # The box gets a floor of its own: a one-line draft measures ~18 px, and a
         # text box that size is a slot to squint into rather than something to work in.
         edit_h = max(text_h + 8, 44) if self._editor is not None else 0
-        extra = reply_h
+        # Everything on the card except the answer, so the answer can be given the rest.
+        # `BODY_MAX_H` is a taste number for the draft; this is arithmetic — the desktop,
+        # minus the chrome, minus whatever else is being drawn.
+        others = 0
+        if edit_h:
+            others += edit_h - text_h + 8
+        elif earlier:
+            others += BODY_ELIDED_H
+        if self._sent:
+            others += 16
+        if self._partial:
+            others += 34
+        if self._act is not None:
+            others += 20
+        if self._note:
+            others += note_h + 4
+        reply_h, more = 0, 0
+        if self._reply:
+            cap = self.work_h() - 74 - text_h - others - BODY_ELIDED_H
+            reply_shown, more, rh = self._reply_slot(self._reply, max(BODY_ELIDED_H, cap))
+            reply_h = rh + 8
+        extra = reply_h + (BODY_ELIDED_H if more else 0)
         if edit_h:
             extra += edit_h - text_h + 8
         elif earlier:
@@ -1830,10 +1919,20 @@ class Bubble(tk.Toplevel):
         y = PAD
         if self._reply:
             c.create_text(
-                PAD, y, anchor="nw", text=self._reply, fill=REPLY,
+                PAD, y, anchor="nw", text=reply_shown, fill=REPLY,
                 font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
             )
             y += reply_h
+            if more:
+                # Below the answer rather than above it, which is the window's direction
+                # said out loud: a reader who has reached the bottom of what is drawn is
+                # exactly the reader who needs to know there is more. Copy and Use this
+                # carry the whole thing — they read the session, never this string.
+                c.create_text(
+                    PAD, y - 4, anchor="nw", text=f"… {more} more lines", fill=MUTED,
+                    font=("Segoe UI", 8, "italic"),
+                )
+                y += BODY_ELIDED_H
         if self._sent:
             c.create_text(
                 PAD, y, anchor="nw", text="sent", fill=MUTED,
