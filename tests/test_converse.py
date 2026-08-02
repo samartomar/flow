@@ -658,6 +658,12 @@ class TestTheNotesObeyThePin(unittest.TestCase):
         # **decline** to name a CLI — a clipped name reads as a different CLI, so it draws
         # the mode instead — and what it may never do is name a *different* one. `ASK` is
         # the mode, and `opencode` at 8 characters is the first shipped name to reach it.
+        #
+        # Restated a second time when an entry gained a `marker` alias. A shorter name for
+        # the same CLI is not a different CLI, so the rule is still "declines or agrees" —
+        # what changes is what agreement looks like: the alias where the entry has one, the
+        # name where it fits, `ASK` where neither does. Written from the entry rather than
+        # from a literal, because a hardcoded "kiro" here would pass whatever the pill drew.
         import flow.ui as ui
 
         from flow.refine import named
@@ -684,8 +690,10 @@ class TestTheNotesObeyThePin(unittest.TestCase):
                 with mock.patch("flow.session.available", return_value=resolved), \
                      mock.patch.object(ui, "available", return_value=resolved):
                     who, marker = s._provider(), pill._marker()
-                if len(who) <= ui.Pill.MARKER_MAX:
-                    self.assertEqual(marker, who)
+                answering = next((c for c in resolved if c.name == who), None)
+                short = (answering.marker if answering is not None else "") or who
+                if len(short) <= ui.Pill.MARKER_MAX:
+                    self.assertEqual(marker, short)
                 else:
                     self.assertEqual(marker, "ASK", "it named a CLI that is not answering")
 

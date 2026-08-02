@@ -184,6 +184,62 @@ class TestKillingReachesWhatTheCliStarted(Temp):
         self.assertFalse(marker.exists(), "the CLI's own child survived the cancel")
 
 
+class TestACliMayNeedLongerThanTheGlobal(Temp):
+    """`Cli.timeout_sec`, proved against a real slow child rather than a patched clock.
+
+    kiro-cli spawns the project's MCP servers on every call — 4.3 s in a bare directory,
+    **35.8 s** inside a workspace whose `.kiro` settings declare them — so the global 20 s
+    killed the call at second twenty in exactly the workspaces the workshop is for. A wait
+    is a wait, so it is measured here where the other real processes are, at seconds the
+    suite can afford: this pins that the number `_invoke` waits comes from the entry, and
+    a live 36-second call would only prove that this machine is slow.
+    """
+
+    def child(self, sleep: float) -> tuple[Cli, Path]:
+        done = self.path(f"done-{sleep}")
+        return Cli("slow", (sys.executable, "-c", _SLEEPER, str(self.path("started")),
+                            str(sleep), str(done))), done
+
+    def test_an_entry_that_declares_longer_gets_it(self):
+        # The defect, inverted: 0.4 s of caller budget against a child that needs 0.8,
+        # and the entry's own 1.2 is what carries it. Before the field existed there was
+        # nowhere to say this, and the call died at the caller's number every time.
+        cli, done = self.child(0.8)
+        cli = Cli(cli.name, cli.argv, timeout_sec=1.2)
+        began = time.perf_counter()
+        out, reason = _invoke(cli, "prompt", timeout=0.4)
+        elapsed = time.perf_counter() - began
+        self.assertEqual(reason, "", "the entry's own timeout was not honoured")
+        self.assertIsNotNone(out)
+        self.assertGreater(elapsed, 0.4, "it cannot have waited out the child in 0.4 s")
+
+    def test_an_entry_without_one_still_takes_the_callers(self):
+        # The other direction, so the floor cannot pass this by being unconditional.
+        cli, done = self.child(10.0)
+        out, reason = _invoke(cli, "prompt", timeout=0.4)
+        self.assertIsNone(out)
+        self.assertIn("timed out after 0s", reason)
+
+    def test_the_floor_never_shortens_a_longer_caller(self):
+        # `--cli-timeout` is documented as the knob that *raises* the wait. An entry
+        # declaring 0.2 must not be able to take that away from the person who asked.
+        cli, done = self.child(0.6)
+        cli = Cli(cli.name, cli.argv, timeout_sec=0.2)
+        out, reason = _invoke(cli, "prompt", timeout=5.0)
+        self.assertEqual(reason, "", "a per-CLI value shortened the caller's budget")
+        self.assertIsNotNone(out)
+
+    def test_the_note_names_the_seconds_it_actually_waited(self):
+        # Not the constant and not the caller's number: with the wait per-CLI, a message
+        # quoting either would be right about most entries and wrong about the only one
+        # that ever needed saying.
+        cli, done = self.child(10.0)
+        cli = Cli(cli.name, cli.argv, timeout_sec=1.0)
+        out, reason = _invoke(cli, "prompt", timeout=0.4)
+        self.assertIsNone(out)
+        self.assertEqual(reason, "slow timed out after 1s")
+
+
 class TestTheOrdinaryCallIsUnchanged(Temp):
     """The helper is one call site for two functions, not a backend. These pin that
     the shape the guards depend on came through the rewrite intact."""

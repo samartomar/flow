@@ -368,6 +368,29 @@ class TestKiroCliIsWiredFromAMeasurement(unittest.TestCase):
     def test_codex_is_still_first(self):
         self.assertEqual([c.name for c in refine_mod.CANDIDATES][:2], ["codex", "claude"])
 
+    def test_it_is_the_one_entry_that_asks_for_longer(self):
+        # 35.8 s measured inside a workspace whose `.kiro` settings declare MCP servers,
+        # against 4.3 s in a bare directory — kiro-cli spawns them on every call, cold.
+        # 60 is that plus headroom, and it is the number in the entry rather than a
+        # widened global, because the other two answer in seconds.
+        self.assertEqual(self.kiro().timeout_sec, 60.0)
+        for cli in refine_mod.CANDIDATES:
+            if cli.name != "kiro-cli":
+                with self.subTest(cli=cli.name):
+                    self.assertIsNone(
+                        cli.timeout_sec,
+                        "an entry took the long way round to the global default",
+                    )
+
+    def test_it_is_also_the_one_entry_that_needs_a_short_name(self):
+        # The alias exists because 8 characters do not fit the pill's slot. The bound
+        # itself is asserted where the slot is, in `test_indicator.py`.
+        self.assertEqual(self.kiro().marker, "kiro")
+        for cli in refine_mod.CANDIDATES:
+            if cli.name != "kiro-cli":
+                with self.subTest(cli=cli.name):
+                    self.assertEqual(cli.marker, "", "an alias for a name that fits")
+
 
 class TestFindingAnInstallThatIsNotOnPath(unittest.TestCase):
     """Detection is PATH first, with one probe behind it, and the probe earns its place.

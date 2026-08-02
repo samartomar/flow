@@ -113,6 +113,21 @@ class Cli:
     #: CLI. Empty for everything that installs onto PATH and stays there, which is most
     #: things; see `probed` for the one measurement that earned this field.
     probe: tuple[str, ...] = ()
+    #: How long this CLI needs when the module's global is not enough. `None` — every other
+    #: entry — means the caller's number, which is `TIMEOUT_SEC` unless `--cli-timeout`
+    #: moved it.
+    #:
+    #: A **floor** on the wait rather than a replacement for it: `_invoke` waits
+    #: `max(caller, this)`. That is a decision and not a shortcut. `--cli-timeout` is
+    #: documented as the knob that *raises* the wait, so a per-CLI value that simply won
+    #: would put the one CLI measured needing the most time out of the reach of the only
+    #: flag for it. Read the other way it is the same sentence: a global lowered below what
+    #: a CLI was measured to need would re-create that CLI's incident on purpose.
+    timeout_sec: float | None = None
+    #: What the pill's marker slot draws for this CLI when the name will not fit it. Empty
+    #: for everything that already fits, which is most things — see `ui.Pill.MARKER_MAX`
+    #: for the wall and `CANDIDATES` for the one entry that has hit it.
+    marker: str = ""
 
 
 #: Order is the preference order — codex first, per R10.
@@ -151,11 +166,26 @@ class Cli:
 #: asked, which is what an agent CLI used as a rewriter must never do. It meters (~0.10
 #: credits a call) and prints a status line for it, which `_clean` strips per CLI.
 #: Note the two names: this is `kiro-cli`, and the `kiro` above is the IDE launcher.
+#:
+#: **kiro-cli is also the entry that needed both of the per-CLI fields**, and the same
+#: measurement earned them. The identical one-line call took **4.3 s in a bare directory
+#: and 35.8 s inside a workspace whose `.kiro` settings declare MCP servers**: kiro-cli
+#: spawns the project's MCP servers on every `chat` invocation, uvx-resolved and cold, so
+#: the global 20 s executed the call at second twenty every time — in exactly the
+#: workspaces this is used for. No flag skips the startup (`--require-mcp-startup` exists;
+#: its inverse does not), and rewriting the user's kiro settings is out of bounds: Flow
+#: does not reconfigure other tools. `timeout_sec=60` is 35.8 measured plus headroom. The
+#: honest residue is not Flow's to fix — ~36 s a turn in an MCP-heavy workspace is
+#: kiro-cli's startup cost, the cure is upstream (a persistent serve mode, or a shorter
+#: server list), and until then the pin menu makes "codex for this workspace" one tap.
+#: `marker="kiro"` is the other half: 8 characters do not fit the pill's slot, so without
+#: an alias the pill draws `ASK` while kiro-cli is the CLI that would answer.
 CANDIDATES: tuple[Cli, ...] = (
     Cli("codex", ("codex", "exec", "--skip-git-repo-check")),
     Cli("claude", ("claude", "-p")),
     Cli("kiro-cli", ("kiro-cli", "chat", "--no-interactive", "--trust-tools="),
-        probe=(r"%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe",)),
+        probe=(r"%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe",),
+        timeout_sec=60.0, marker="kiro"),
     Cli("opencode", ("opencode",), verified=False),
     Cli("copilot", ("copilot",), verified=False),
     Cli("gemini", ("gemini",), verified=False),
@@ -415,6 +445,12 @@ def _invoke(
     `cancel` is polled rather than waited on. The child's output has to be drained
     while we wait or a full pipe blocks it, and `communicate` is what drains it, so
     the wait has to be the one `communicate` is already doing.
+
+    `timeout` is the caller's budget and `cli.timeout_sec` is this CLI's floor under it,
+    so what is actually waited is the larger of the two — see `Cli.timeout_sec` for why it
+    is a floor. The failure note quotes that number rather than the constant: with the wait
+    now per-CLI, a message naming the global would be right about three entries out of four
+    and wrong about the only one that ever needed saying.
     """
     if cancel is not None and cancel.is_set():
         return None, f"{cli.name} was cancelled"
@@ -461,7 +497,8 @@ def _invoke(
     except OSError as exc:
         return None, f"{cli.name} failed to start: {exc}"
 
-    deadline = time.monotonic() + timeout
+    wait = timeout if cli.timeout_sec is None else max(timeout, cli.timeout_sec)
+    deadline = time.monotonic() + wait
     # `communicate` is what pipes, writes and closes stdin — and it may carry `input`
     # exactly once: a second call with it raises "Cannot send input after starting
     # communication". Since this polls, the prompt goes on the first pass and the rest of
@@ -472,7 +509,7 @@ def _invoke(
             return _abandon(proc, f"{cli.name} was cancelled")
         left = deadline - time.monotonic()
         if left <= 0:
-            return _abandon(proc, f"{cli.name} timed out after {timeout:.0f}s")
+            return _abandon(proc, f"{cli.name} timed out after {wait:.0f}s")
         try:
             out, err = proc.communicate(input=to_send, timeout=min(_POLL_SEC, left))
         except subprocess.TimeoutExpired:

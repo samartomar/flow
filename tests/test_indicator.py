@@ -394,17 +394,19 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
 
         self.assertEqual(self._draw(clis=[named("opencode")]), ["ASK"], "8 characters")
         self.assertEqual(self._draw(clis=[named("gemini")]), ["gemini"], "exactly 6")
-        # `kiro-cli` is 8 too, and unlike opencode it is verified — so this is the first
-        # time the pill declines to name a CLI that is genuinely about to answer. Whether
-        # `ASK` is the right thing to see there is an eye question and is on the desk list.
-        self.assertEqual(self._draw(clis=[named("kiro-cli")]), ["ASK"], "8 characters")
+        # `kiro-cli` is 8 too, and unlike opencode it is verified — so it was the first
+        # time the pill declined to name a CLI that was genuinely about to answer. The
+        # owner read `ASK` as Kiro not being captured, and the entry carries an alias now.
+        self.assertEqual(self._draw(clis=[named("kiro-cli")]), ["kiro"], "the alias")
         for cli in CANDIDATES:
             with self.subTest(cli=cli.name):
                 drawn = self._draw(clis=[cli])
+                want = cli.marker or cli.name
                 self.assertEqual(
-                    drawn, [cli.name if len(cli.name) <= 6 else "ASK"],
+                    drawn, [want if len(want) <= 6 else "ASK"],
                     "a shipped name that neither fits nor falls back",
                 )
+
 
     def test_dictate_mode_still_draws_no_marker_at_all(self):
         self.assertEqual(self._draw(mode=DICTATE, clis=[CODEX]), [])
@@ -470,6 +472,58 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         pill.canvas.texts.clear()
         pill._draw()
         self.assertEqual([t for _, _, t in pill.canvas.texts], ["codex"])
+
+
+class TestTheMarkerMayCarryAShortNameForACliThatDoesNotFit(unittest.TestCase):
+    """Item 15's 6-character wall is unchanged; what an entry may offer it is not.
+
+    kiro-cli is why: the slot beside the level bars cannot hold 8 characters without
+    overlapping them, so the pill drew `ASK` while kiro-cli was the CLI that would answer,
+    and the owner read that as Kiro not being captured. The rule item 35 pinned at
+    `opencode` is extended rather than rewritten — an alias where there is one, the name
+    where it fits, `ASK` otherwise — and the fallback is asserted here in both of the ways
+    it can still be reached.
+    """
+
+    #: Borrowed rather than rebuilt: a second pill fixture is a second thing to keep true.
+    _draw = TestTheConverseMarkerNamesItsCli._draw
+
+    def test_an_alias_is_drawn_instead_of_a_name_that_does_not_fit(self):
+        self.assertEqual(self._draw(clis=[Cli("kiro-cli", ("kiro-cli",),
+                                              marker="kiro")]), ["kiro"])
+
+    def test_a_name_that_fits_is_still_the_name(self):
+        # Both directions, so the alias branch cannot pass this by firing for everybody.
+        self.assertEqual(self._draw(clis=[Cli("codex", ("codex",))]), ["codex"])
+
+    def test_no_alias_still_means_the_fallback(self):
+        self.assertEqual(self._draw(clis=[Cli("gemini-cli", ("gemini",))]), ["ASK"])
+
+    def test_an_alias_that_does_not_fit_either_falls_back(self):
+        # The bound is the slot, not the field. An alias is a shorter name, not a licence
+        # to draw over the level bars.
+        self.assertEqual(self._draw(clis=[Cli("whatever", ("whatever",),
+                                              marker="verylong")]), ["ASK"])
+
+    def test_every_shipped_alias_fits_the_slot(self):
+        # Asserted over the whole table rather than over the one alias that exists today:
+        # the next alias is where a seven-character one gets typed.
+        import flow.ui as ui
+
+        from flow.refine import CANDIDATES
+
+        for cli in CANDIDATES:
+            if cli.marker:
+                with self.subTest(cli=cli.name):
+                    self.assertLessEqual(len(cli.marker), ui.Pill.MARKER_MAX)
+
+    def test_a_pinned_cli_draws_its_alias_too(self):
+        # The pin is what makes a wedged CLI recoverable, and the marker exists to say
+        # which CLI is about to answer. Both have to agree about kiro-cli.
+        from flow.refine import named
+
+        kiro = named("kiro-cli")
+        self.assertEqual(self._draw(clis=[named("codex"), kiro], pinned=kiro), ["kiro"])
 
 
 if __name__ == "__main__":

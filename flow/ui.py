@@ -1197,6 +1197,8 @@ class Pill(tk.Tk):
     #: What fits beside the level bars. The baseline is at y 33 and the bars run to
     #: y 32 from x 40, so a wider token overlaps them rather than being clipped —
     #: `codex` and `claude` are 5 and 6, and anything longer falls back to the mode.
+    #: A CLI whose name does not fit may carry a `marker` alias that does; the wall is
+    #: this number either way, and `test_indicator.py` asserts it of every shipped entry.
     MARKER_MAX = 6
 
     def _resolved(self) -> list:
@@ -1219,13 +1221,19 @@ class Pill(tk.Tk):
         Reads the pin first: `set_cli` is what makes a wedged CLI recoverable without a
         restart, and a marker still naming the one it was taken off would be the pin's
         only visible effect being wrong.
+
+        An entry may carry a shorter `marker` for this slot alone, and kiro-cli is why:
+        8 characters fell back to `ASK` while it was the CLI about to answer, and the
+        owner read that as Kiro not being captured at all. Only the slot is affected —
+        the menu, the notes and the Help sheet name CLIs in prose, where the full name
+        costs nothing and a nickname would be a second name for the same thing.
         """
         pinned = getattr(self.session, "cli", None)
         found = self._resolved()
         cli = pinned if pinned is not None else (found[0] if found else None)
         if cli is None:
             return "ASK"
-        name = cli.name.lower()
+        name = getattr(cli, "marker", "") or cli.name.lower()
         return name if len(name) <= self.MARKER_MAX else "ASK"
 
     def _draw(self) -> None:
