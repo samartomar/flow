@@ -197,6 +197,29 @@ and the trigger words live in `profile.json` — defaults must therefore work ou
 box, and re-wording them is the one step that still needs an editor. Spec'd as
 LOOP_PLAN item 22.
 
+### 2026-08-01 — First public feedback: Help in the menu, and trigger words become a
+### measured preset choice — still no settings dialog
+
+Same evening as the release, two asks: a Help surface (commands, shortcuts, the guide)
+and a way for users to change the trigger words ("goose" / "enter goose") without an
+editor. Help is a gap, plainly — nothing in-app names a single command or the hotkey
+that arms the mic — and ships as a menu section: "Commands & shortcuts" opens a
+*generated* text file (regenerated on every open, so it shows the hotkey combos that
+actually registered on this machine and the trigger words currently configured, not
+the defaults), and "Open the guide" opens the public README. The trigger setting had
+three shapes and the chosen one keeps two standing decisions intact: **a preset
+submenu** — a curated list of trigger words, each admitted only after the same 0/580
+corpus gate "boom" passed, one tap to select, the enter-variant derived automatically
+in the safe order. Rejected: a free-text micro-dialog (breaches the no-settings-dialog
+stance that has now survived four challenges, and free text cannot be pre-measured
+safe) and speak-to-set (writing config through an accented decoder is the failure
+class the product exists to fight). Fully custom words remain hand-editable in
+`profile.json`; Help displays whatever is current. The menu is reorganized under
+submenus (Settings ▸, Help ▸) with the one-tap essentials — mode toggle, pair offers,
+"Was a command" — staying top-level, inside the same modal-stall budget item 19
+bounded. Items 30 and 31 are spec'd into LOOP_PLAN and executed by the next session,
+from this entry as the authority.
+
 ### 2026-08-01 — Distribution, final: public in place, one repo — the split is superseded
 
 Third position in one evening, and the one that closed it deliberately rather than by
