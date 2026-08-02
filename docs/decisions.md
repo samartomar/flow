@@ -6,7 +6,33 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
-### 2026-08-02 — The npm-shim defect: refuse loudly now, repair per-CLI when measured
+### 2026-08-02 — The long-draft incident: no draft may disable its own rescue
+
+A very long dictation took down five layers in a chain, live at the owner's desk: the
+bubble re-lays-out the whole draft on every partial, so render cost grows with the
+draft until the UI thread stalls; the stall overflows the mic queue (the measured
+~16 s modal-menu stall, reproduced by rendering); the dead mic decodes nothing, so
+`IDLE_UNLOAD_SEC` unloads the models; now every spoken rescue is impossible — "boom"
+needs a decode, a decode needs the models, the models need the mic the render killed
+— while the visual rescue, the Send chip, sits below a bubble that grew past the
+screen because the draft path (unlike the artifact-reply path) has no height cap.
+The keyboard send hotkey worked the whole time and was announced once, at startup,
+in a console. Four fixes, one principle — a draft must never disable its own exits:
+1. **The chips never leave the screen.** The bubble gets a height cap; the draft
+   body scrolls inside it, tail-following like a terminal; the chip row is pinned
+   and always visible. The artifact path already scrolls — the draft path joins it.
+2. **Render cost stops growing with the draft.** Only the visible tail is laid out
+   per partial (a bounded window of characters, "… N earlier lines" above), so a
+   two-hour dictation costs what a two-minute one costs — invariant 7 extended to
+   rendering. Instrumented before fixing: render time vs draft size, the number
+   that proves the stall and then proves it gone.
+3. **When voice is down, Flow says what still works.** Mic overflow with a
+   non-empty draft, or a model unload with a non-empty draft, emits one note naming
+   the living exits with the *registered* combos ("voice is down — Ctrl+Alt+Enter
+   still sends; click the draft to edit"), from `hotkeys.chosen`, never hardcoded.
+4. **Copy joins the menu.** Lite built `_copy`; full mode gets it as a menu entry —
+   the universal, model-free, target-free exit that would have ended this incident
+   in one tap.
 
 Found by item 35's live verification and measured against a synthetic shim: a `.cmd`
 launcher — the shape `npm -g` writes on Windows — forwards `%*` through cmd.exe,
