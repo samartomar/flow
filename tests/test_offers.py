@@ -198,6 +198,11 @@ class FakeMenu:
     def add_command(self, label="", command=None, **kw) -> None:
         self.commands[label] = command
 
+    def add_radiobutton(self, label="", command=None, **kw) -> None:
+        # The trigger-word list is built on every open, so a menu fake that could not
+        # record a radio entry would stop the offers being testable at all.
+        self.commands[label] = command
+
     def add_separator(self) -> None: ...
 
     def add_cascade(self, label="", menu=None, **kw) -> None:
@@ -229,6 +234,7 @@ class TestTheMenuCarriesTheOffers(Temp):
         pill.bubble.note = self._notes.append
         pill._clis = []
         with mock.patch.object(tk, "Menu", make), \
+                mock.patch.object(tk, "StringVar", mock.Mock()), \
                 mock.patch.object(ui, "available", return_value=[]), \
                 mock.patch.object(ui, "foreground_hwnd", return_value=0), \
                 mock.patch.object(ui, "toplevel_hwnd", return_value=0), \
@@ -282,7 +288,10 @@ class TestTheMenuCarriesTheOffers(Temp):
         p = tmp_profile()
         for _ in range(PROMOTE_AFTER):
             p.learn_pair("semir", "Samir")
-        never = self._menu(p)[0].cascades["Never offer"]
+        # "Never offer" moved under Settings when the menu was split: the tap that
+        # matters is the one that says yes, and that one is still top-level.
+        settings = self._menu(p)[0].cascades["Settings"]
+        never = settings.cascades["Never offer"]
         self._command(never, "semir")()
         self.assertEqual(p.offered_pairs(), [])
         self.assertEqual(Profile(p.path).offered_pairs(), [], "not written to disk")

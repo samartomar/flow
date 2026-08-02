@@ -20,6 +20,7 @@ import traceback
 from collections import deque
 from pathlib import Path
 
+from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
 from .help import (
     open_file as open_help_file,
     open_guide,
@@ -345,52 +346,31 @@ class Pill(tk.Tk):
         self._draw()
 
     def _menu(self, e) -> None:
+        """The right-click menu: what is one tap stays one tap, the rest goes inside.
+
+        Two submenus rather than one flat list, because the list had grown past the point
+        where anybody scans it — and it grows again with every setting. The split is by
+        *how often a tap is the answer*, not by category: mode, the correction offers,
+        Send and Clear are things somebody does mid-sentence, so they stay at the top;
+        Voice, the CLI, the trigger word and the settings folder are things somebody does
+        once, so they go under Settings. Whatever is here is still bounded by the modal
+        stall the menu costs (§9), which is why the offers cap at three and this does not
+        become a page.
+
+        Not moved and not added: **Was a command**. It is already one tap, as a chip on
+        the bubble where the utterance it rescues is on screen — a menu copy would be a
+        second control for one action, in the place least connected to what it acts on.
+        """
         m = tk.Menu(self, tearoff=0)
         m.add_command(label="Send", command=self._send)
         m.add_command(
             label="Converse mode" if self.session.mode == DICTATE else "Dictate mode",
             command=self.session.toggle_mode,
         )
-        if self.session.mode != DICTATE:
-            m.add_command(
-                label="Ask only when I press it" if self.session.auto_ask
-                else "Ask after a pause",
-                command=self.session.toggle_auto_ask,
-            )
-        # Also the marker's refresh point: a CLI installed mid-session shows up here,
-        # where a press is already paying for the PATH walk `_resolved` will not repeat.
-        clis = self._clis = available()
-        if len(clis) > 1:
-            # Offered only when there is a choice to make. Automatic tries them in order,
-            # but a fallback only runs after the first one has failed — which for a
-            # timeout means paying the whole wait first. Anyone who already knows which
-            # CLI is answering today should be able to say so without restarting.
-            picker = tk.Menu(m, tearoff=0)
-            current = getattr(self.session, "cli", None)
-            here = current.name if current is not None else None
-
-            # Plain commands and a text marker rather than radiobuttons: a Tk variable
-            # needs a master and a lifetime, and this menu is rebuilt on every press.
-            def choice(label: str, cli) -> None:
-                name = cli.name if cli is not None else None
-                picker.add_command(
-                    label=label + ("   (current)" if name == here else ""),
-                    command=lambda c=cli: self.session.set_cli(c),
-                )
-
-            choice("Automatic", None)
-            for candidate in clis:
-                choice(candidate.name, candidate)
-            m.add_cascade(label="Agent CLI", menu=picker)
-        if getattr(self.session, "speaker", None) is not None:
-            m.add_command(
-                label="Mute replies" if not self.session.muted else "Speak replies",
-                command=self.session.toggle_speech,
-            )
-            self._voice_menu(m)
-        self._offer_pairs(m)
+        offered = self._offer_pairs(m)
         m.add_command(label="Clear draft", command=self._clear)
-        m.add_command(label="Open settings folder", command=self._open_settings)
+        m.add_separator()
+        self._settings_menu(m, offered)
         self._help_menu(m)
         m.add_separator()
         m.add_command(label="Quit", command=self.quit_app)
@@ -418,6 +398,122 @@ class Pill(tk.Tk):
             m.grab_release()  # the documented idiom; harmless, and cheap insurance
             if previous:
                 _user32.SetForegroundWindow(previous)
+
+    def _settings_menu(self, parent: tk.Menu, offered) -> None:
+        """Everything somebody sets once, in one place they can find it twice.
+
+        Still not a settings dialog: every entry here writes to `profile.json` or
+        `lexicon.txt`, the two files that were always the settings, and the menu is the
+        way to reach them without an editor. What is refused is a *page* — a surface that
+        invites options to be added to it.
+        """
+        sub = tk.Menu(parent, tearoff=0)
+        self._trigger_menu(sub)
+        # Also the CLI marker's refresh point: a CLI installed mid-session shows up here,
+        # where a press is already paying for the PATH walk `_resolved` will not repeat.
+        clis = self._clis = available()
+        if len(clis) > 1:
+            # Offered only when there is a choice to make. Automatic tries them in order,
+            # but a fallback only runs after the first one has failed — which for a
+            # timeout means paying the whole wait first. Anyone who already knows which
+            # CLI is answering today should be able to say so without restarting.
+            picker = tk.Menu(sub, tearoff=0)
+            current = getattr(self.session, "cli", None)
+            here = current.name if current is not None else None
+
+            # Plain commands and a text marker rather than radiobuttons: a Tk variable
+            # needs a master and a lifetime, and this menu is rebuilt on every press.
+            def choice(label: str, cli) -> None:
+                name = cli.name if cli is not None else None
+                picker.add_command(
+                    label=label + ("   (current)" if name == here else ""),
+                    command=lambda c=cli: self.session.set_cli(c),
+                )
+
+            choice("Automatic", None)
+            for candidate in clis:
+                choice(candidate.name, candidate)
+            sub.add_cascade(label="Agent CLI", menu=picker)
+        if getattr(self.session, "speaker", None) is not None:
+            sub.add_command(
+                label="Mute replies" if not self.session.muted else "Speak replies",
+                command=self.session.toggle_speech,
+            )
+            self._voice_menu(sub)
+        if self.session.mode != DICTATE:
+            sub.add_command(
+                label="Ask only when I press it" if self.session.auto_ask
+                else "Ask after a pause",
+                command=self.session.toggle_auto_ask,
+            )
+        if offered:
+            never = tk.Menu(sub, tearoff=0)
+            for wrong, right in offered:
+                never.add_command(
+                    label=f"{wrong} → {right}",
+                    command=lambda w=wrong, r=right: self._dismiss_pair(w, r),
+                )
+            sub.add_cascade(label="Never offer", menu=never)
+        sub.add_command(label="Open settings folder", command=self._open_settings)
+        parent.add_cascade(label="Settings", menu=sub)
+
+    def _trigger_menu(self, parent: tk.Menu) -> None:
+        """The word that presses Send, as a list rather than a text box.
+
+        A curated list is the whole design, argued and chosen over the two alternatives:
+        free text cannot be measured before it is live, and a spoken setting would write
+        config through the accented decoder this product exists to work around. Every
+        word here has passed the gate in `tests/test_triggers.py` — 0 hits across 580
+        real utterances, `command_bench` unmoved, and no meaning of its own in the
+        grammar.
+
+        The enter-variant is derived on every tap, in the safe order, with no special
+        case for a word that was already current. One rule is worth more than a clever
+        one here, and the note says what was written, so a hand-set `send_enter_word`
+        that this replaces is replaced *visibly*.
+
+        `--no-profile` gets no submenu at all: there is nothing to store into, and an
+        entry that silently forgets is worse than one that is not there.
+        """
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            return
+        current = getattr(profile, "send_word", SEND_WORD)
+        sub = tk.Menu(parent, tearoff=0)
+        # Held on self for the reason `_voice_var` is: a Tk variable that goes out of
+        # scope stops driving the indicator, and the tick is the answer to "which one am
+        # I using".
+        self._trigger_var = tk.StringVar(value=current)
+        # A word set by hand in profile.json is listed first rather than dropped, so the
+        # menu never opens with nothing selected — which would read as no word being set.
+        words = list(SEND_WORD_PRESETS)
+        if current not in words:
+            words.insert(0, current)
+        for word in words:
+            sub.add_radiobutton(
+                label=word, value=word, variable=self._trigger_var,
+                command=lambda w=word: self._set_trigger(w),
+            )
+        parent.add_cascade(label="Trigger word", menu=sub)
+
+    def _set_trigger(self, word: str) -> None:
+        """Store the pair, and say what was stored.
+
+        Saved now rather than at the next Send, for the reason `set_voice` gives: a
+        choice made just before closing the app is still a choice. Echoed because the
+        alternative is a setting that only exists inside a JSON file the owner has said
+        they will not open.
+        """
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            return
+        profile.send_word = word
+        profile.send_enter_word = enter_word(word)
+        if profile.save():
+            self.bubble.note(f'send: say "{word}", or "{enter_word(word)}" to submit')
+        else:
+            self._flash = 12
+            self.bubble.note(f"could not save {profile.path}")
 
     def _voice_menu(self, parent: tk.Menu) -> None:
         """A submenu of the voices this machine actually has.
@@ -482,7 +578,7 @@ class Pill(tk.Tk):
         # Nothing else: an empty `text` means send() refused and said why in a note, and
         # hiding the bubble here is what used to take that explanation off the screen.
 
-    def _offer_pairs(self, m: tk.Menu) -> None:
+    def _offer_pairs(self, m: tk.Menu) -> list[tuple[str, str]]:
         """Words Flow keeps seeing corrected, offered for the user to declare.
 
         Never silent. An inferred pair is a guess from a word-level diff, and turning
@@ -492,11 +588,16 @@ class Pill(tk.Tk):
         stays and the typing goes. One tap on the offer declares it.
 
         "Never" gets a submenu rather than a second tap on the offer, because the tap
-        that matters is the one that says yes.
+        that matters is the one that says yes — and it now sits under Settings, one
+        level away from the offer itself, for the same reason: saying no is a decision
+        somebody makes once, and saying yes is the one this menu is for.
+
+        Returns what it offered, so Settings can build the matching "Never" list without
+        reading the profile a second time.
         """
         profile = getattr(self.session, "profile", None)
         if profile is None:
-            return  # --no-profile: nothing was learned, so nothing is offered
+            return []  # --no-profile: nothing was learned, so nothing is offered
         # Everything that reads state is inside the guard, and the guard is wide on
         # purpose. This runs on the UI thread from a right-click binding, *not* from
         # `_tick` — so `_tick`'s catch cannot reach it, and an exception here would take
@@ -510,22 +611,13 @@ class Pill(tk.Tk):
             offers = profile.offered_pairs(declared=declared)
         except Exception as exc:
             self.bubble.note(f"could not read the corrections: {exc}")
-            return
-        if not offers:
-            return
+            return []
         for wrong, right in offers:
             m.add_command(
                 label=f"Add correction:  {wrong} → {right}",
                 command=lambda w=wrong, r=right: self._declare_pair(w, r),
             )
-        never = tk.Menu(m, tearoff=0)
-        for wrong, right in offers:
-            never.add_command(
-                label=f"{wrong} → {right}",
-                command=lambda w=wrong, r=right: self._dismiss_pair(w, r),
-            )
-        m.add_cascade(label="Never offer", menu=never)
-        m.add_separator()
+        return offers
 
     def _declare_pair(self, wrong: str, right: str) -> None:
         """Write the arrow line the user has just agreed to."""

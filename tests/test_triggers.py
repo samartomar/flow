@@ -25,7 +25,13 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
-from flow.edits import SEND_ENTER_WORD, SEND_WORD, plan  # noqa: E402
+from flow.edits import (  # noqa: E402
+    SEND_ENTER_WORD,
+    SEND_WORD,
+    SEND_WORD_PRESETS,
+    enter_word,
+    plan,
+)
 from flow.profile import Profile  # noqa: E402
 from flow.session import CONVERSE, Session  # noqa: E402
 
@@ -76,6 +82,11 @@ def sends(s) -> list[str]:
 
 def routed(text: str) -> str:
     p = plan(text, DRAFT)
+    return f"{p.kind}/{p.op}"
+
+
+def routed_with(text: str, triggers: tuple[str, str]) -> str:
+    p = plan(text, DRAFT, triggers)
     return f"{p.kind}/{p.op}"
 
 
@@ -186,6 +197,152 @@ class TestTheWordsAreNotThingsPeopleSay(unittest.TestCase):
 
         near = "YEAH WELL NOT I DON'T KNOW NOT NECESSARILY MAYBE ENTERING THERE BECAUSE "
         self.assertIsNone(_trigger(near, (SEND_WORD, SEND_ENTER_WORD)))
+
+
+def _bench():
+    """`scripts/command_bench.py` as a module, so the gate uses the shipped corpora.
+
+    Imported rather than restated: the adversarial sentences and the corruption classes
+    are the numbers a grammar change is checked against, and a copy of them in here would
+    start agreeing with itself the first time one of them moved.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import command_bench
+
+    return command_bench
+
+
+def _corpus() -> list[str]:
+    bench = Path(__file__).resolve().parent.parent / ".bench" / "accent"
+    refs: list[str] = []
+    for mf in sorted(bench.glob("manifest-edacc*.jsonl")):
+        with mf.open(encoding="utf-8") as fh:
+            refs += [json.loads(ln)["ref"] for ln in fh if ln.strip()]
+    return refs
+
+
+class TestEveryPresetIsAsSafeAsTheDefault(unittest.TestCase):
+    """The gate a word passes before the menu is allowed to offer it.
+
+    The menu makes the trigger a one-tap choice, which means the words in it ship with
+    the product and nobody measures them again. So each is put through the discipline
+    "boom" went through, and the check runs over `SEND_WORD_PRESETS` rather than over a
+    list written here — a word added to that tuple pays this price or fails the suite.
+
+    Four legs. The fourth is not decoration: legs 1-3 pass "undo" — its corpus hits are
+    0, and `command_bench`'s recall cases are whole commands like "delete Tuesday", never
+    a bare verb — while making "undo" a trigger would silently take undo away from the
+    person who said it.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cb = _bench()
+        cls.refs = _corpus()
+
+    #: No trigger at all, so `plan()` reads the word with the rest of the grammar. Asking
+    #: with the shipped pair installed would answer a different question: "boom" is a
+    #: `send_trigger` today, which says nothing about whether it means anything else.
+    NONE = ("", "")
+
+    def hits(self, word: str) -> list[str]:
+        from flow.edits import _trigger
+
+        trig = (word, enter_word(word))
+        return [r for r in self.refs if _trigger(r, trig) is not None]
+
+    def adversarial(self, word: str) -> int:
+        trig = (word, enter_word(word))
+        return sum(1 for u, d in self.cb.ADVERSARIAL
+                   if plan(u, d, trig).kind in ("local", "undo"))
+
+    def recall(self, word: str) -> tuple[int, int]:
+        """(routed correctly, cases) over every corruption class, with `word` installed."""
+        trig = (word, enter_word(word))
+        cases: list[tuple[str, str]] = []
+        for utterance, op in self.cb.COMMANDS:
+            cases.append((utterance, op))
+            cases += [(lead + utterance, op) for lead in self.cb.LEAD_INS]
+            cases.append((self.cb._suffix(utterance), op))
+            cases.append((self.cb._substitute(utterance), op))
+            cases.append((self.cb._transpose(utterance), op))
+            if (aliased := self.cb._alias(utterance)) is not None:
+                cases.append((aliased, op))
+        return sum(1 for u, op in cases if plan(u, self.cb.DRAFT, trig).op == op), len(cases)
+
+    def means_alone(self, word: str) -> str:
+        return plan(word, self.cb.DRAFT, self.NONE).kind
+
+    # -- the four legs, asked of every shipped preset -----------------------
+
+    def test_no_real_utterance_fires_any_preset(self):
+        if not self.refs:
+            self.skipTest("no EdAcc manifest in this tree")
+        self.assertGreaterEqual(len(self.refs), 500, "the corpus shrank")
+        for word in SEND_WORD_PRESETS:
+            with self.subTest(word=word):
+                self.assertEqual(self.hits(word), [])
+
+    def test_no_preset_moves_the_adversarial_count(self):
+        # 5/20 is the shipped number, and a trigger is matched ahead of every pattern in
+        # plan() — so a preset that is also a command word would eat it here.
+        for word in SEND_WORD_PRESETS:
+            with self.subTest(word=word):
+                self.assertLessEqual(self.adversarial(word), 5)
+
+    def test_no_preset_costs_a_single_point_of_recall(self):
+        for word in SEND_WORD_PRESETS:
+            with self.subTest(word=word):
+                hit, n = self.recall(word)
+                self.assertEqual(hit, n)
+
+    def test_no_preset_already_means_something(self):
+        for word in SEND_WORD_PRESETS:
+            with self.subTest(word=word):
+                self.assertEqual(self.means_alone(word), "append")
+
+    # -- and the gate can say no --------------------------------------------
+
+    def test_it_rejects_words_people_say_on_their_own(self):
+        # Rule 1: a gate that has never refused anything is not evidence. Measured on
+        # this corpus — "yeah" is a whole utterance 44 times, "okay" 10, "yes" 12.
+        if not self.refs:
+            self.skipTest("no EdAcc manifest in this tree")
+        for word in ("yeah", "okay", "yes"):
+            with self.subTest(word=word):
+                self.assertTrue(self.hits(word), f"{word} passed leg 1")
+                self.assertNotIn(word, SEND_WORD_PRESETS)
+
+    def test_it_rejects_a_word_the_grammar_already_owns(self):
+        # The case legs 1-3 are blind to, which is why leg 4 exists.
+        self.assertEqual(self.hits("undo"), [], "leg 1 was supposed to be blind here")
+        self.assertLessEqual(self.adversarial("undo"), 5, "as was leg 2")
+        self.assertEqual(self.means_alone("undo"), "undo")
+        self.assertNotIn("undo", SEND_WORD_PRESETS)
+
+
+class TestTheListIsTheOwnersToChooseFrom(unittest.TestCase):
+    def test_the_shipped_default_can_be_chosen_back(self):
+        # Otherwise the menu is a one-way door out of the word that works today.
+        self.assertIn(SEND_WORD, SEND_WORD_PRESETS)
+
+    def test_the_word_the_owner_named_is_in_the_list(self):
+        self.assertIn("goose", SEND_WORD_PRESETS)
+
+    def test_the_enter_variant_is_derived_in_the_order_that_degrades_safely(self):
+        for word in SEND_WORD_PRESETS:
+            with self.subTest(word=word):
+                self.assertEqual(enter_word(word), f"enter {word}")
+                # The safety argument, asserted per preset rather than described once:
+                # losing either word can never upgrade a paste into a submit.
+                pair = (word, enter_word(word))
+                self.assertEqual(routed_with("enter", pair), "append/")
+                self.assertEqual(routed_with(word, pair), "send_trigger/")
+                self.assertEqual(routed_with(enter_word(word), pair),
+                                 "send_trigger/enter")
+
+    def test_the_list_has_no_duplicates(self):
+        self.assertEqual(len(set(SEND_WORD_PRESETS)), len(SEND_WORD_PRESETS))
 
 
 class TestItPressesTheSameButton(unittest.TestCase):

@@ -167,6 +167,36 @@ _RECALL = re.compile(
 SEND_WORD = "boom"
 SEND_ENTER_WORD = "enter boom"
 
+#: The words the right-click menu will offer, and the whole list of them: there is no
+#: free-text entry anywhere, because a word typed into a dialog cannot be measured before
+#: it is live. Each of these has passed the gate `tests/test_triggers.py` applies to every
+#: entry in this tuple — 0 hits as a whole utterance across 580 real EdAcc references,
+#: `command_bench`'s adversarial count unmoved at 5/20, its recall unmoved at 100%, and
+#: **no meaning of its own in the grammar with the triggers taken away**. That last leg is
+#: not redundant: "undo" passes the first three (its corpus hits are 0, and the recall
+#: cases are whole commands like "delete Tuesday", never a bare verb) and making it a
+#: trigger would silently take undo off the user.
+#:
+#: Which of these actually *decodes* from a given accent is a different question and this
+#: list does not answer it — the corpus gate prices false fires, not recognition. The
+#: shapes are chosen with that in mind: two open syllables and no consonant clusters
+#: wherever possible, which is why "thunder" and "otter" are not here despite passing.
+#: `profile.json` remains the path for a word that is nobody's business but the speaker's.
+SEND_WORD_PRESETS: tuple[str, ...] = (
+    "boom", "goose", "tango", "mango", "falcon", "rocket", "banana",
+)
+
+
+def enter_word(word: str) -> str:
+    """The Send-then-Enter variant of a trigger word, in the order that degrades safely.
+
+    Derived rather than asked for, and always in this order: a decode that loses a word
+    from "enter goose" yields "enter" (no trigger at all) or "goose" (paste without
+    submit). Reversing it would make a lost word *upgrade* a paste into a submit, which
+    is the one direction a spoken execute trigger may not fail in.
+    """
+    return f"enter {word.strip()}".strip()
+
 
 def _trigger(utterance: str, words: tuple[str, str]) -> str | None:
     """"" for a plain Send, "enter" for Send-then-Enter, None for anything else.

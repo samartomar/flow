@@ -591,6 +591,29 @@ for the anchor accents. A lexicon arrow line repairs a consistent bend (`bhoom -
 if it will not decode at the desk, the fallback is renaming the default in code, not
 asking the owner to edit JSON.
 
+**Renaming it is a tap now, from a list nobody may add to for free.** The first public ask
+was for a different word ("goose"), and the fields item 22 shipped live in `profile.json`,
+which the owner has said they will not open. So `edits.SEND_WORD_PRESETS` is a curated
+list, offered as a radio submenu under **Settings ▸ Trigger word**, and the enter-variant
+is derived on every tap in the safe order — one rule, no special case for the word that
+was already current, and a note echoing both words so an overwrite is visible rather than
+silent. Free text was rejected because a word typed into a dialog cannot be measured
+before it is live, and speak-to-set because it writes configuration through the accented
+decoder this product exists to work around.
+
+Every word in that list has passed a **four-leg gate**, asserted by the suite over the
+tuple itself so a word added later pays the same price: 0 hits as a whole utterance across
+the 580 real EdAcc references; `command_bench`'s adversarial count unmoved at 5/20; its
+recall unmoved at 100% (180/180); and **no meaning of its own in the grammar with the
+triggers taken away**. The fourth leg is not redundant and was added because the first
+three were measured to have none of the teeth this question needs: "undo" passes all three
+— its corpus hits are 0, and the recall cases are whole commands like "delete Tuesday",
+never a bare verb — while making "undo" a trigger would silently take undo away from the
+person who said it. The gate is shown able to refuse rather than assumed to: "yeah" is a
+whole utterance 44 times in that corpus, "yes" 12, "okay" 10. What it does *not* price is
+whether a word decodes from a given accent — that is recognition, not false fires, and it
+is a desk question.
+
 ### The one window that deliberately takes the focus
 
 The Edit chip opens the draft in a real `tk.Text` inside the bubble, and to receive a
@@ -734,6 +757,19 @@ shortcuts** regenerates the sheet above and hands it to Explorer — the same
 README. Neither is a settings surface; they are the documentation the product was
 shipping without.
 
+The menu is split into those two submenus because a flat list that grows with every
+feature is one nobody scans, and this one is also a modal loop that stalls the UI thread
+while it is open. The split is by **how often a tap is the answer**, not by category:
+Send, the mode toggle, the correction offers and Clear draft are things somebody does
+mid-sentence and stay at the top with Quit; the trigger word, the CLI, the voice, the
+auto-ask toggle, **Never offer** and the settings folder are things somebody does once and
+moved under **Settings ▸**. Still not a settings dialog — every entry under it writes to
+`lexicon.txt` or `profile.json`, the two files that were always the settings; what stays
+refused is a *page*, a surface that invites options to be added to it. **Was a command**
+was deliberately not brought in: it is already one tap, as a chip on the bubble where the
+utterance it rescues is on screen, and a menu copy would be a second control for one
+action in the place least connected to what it acts on.
+
 There is no code in `profile.py` that could send anything anywhere. R9 is not enforced by
 policy here; it is enforced by absence.
 
@@ -840,7 +876,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (839 tests, ~16 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (869 tests, ~17 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

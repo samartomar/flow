@@ -254,7 +254,11 @@ not show a green pill that is quietly recording nothing.
 
 Combos already owned by another app fall back automatically, in that order. The startup
 log prints which one actually registered, so a dead shortcut is never a silent mystery;
-if every alternative for an action is taken, that is printed too.
+if every alternative for an action is taken, that is printed too. **Right-click ▸ Help ▸
+Commands & shortcuts** answers the same question after the log has scrolled away: it
+writes a text file listing the combos that registered on your machine this launch — not
+the primaries in the table above — along with your trigger words and one example of every
+command, and opens it.
 
 Quit used to be `Esc`, and `Esc` was a Tk key binding on the pill. The pill does not take
 keyboard focus any more — that is what makes Send land in the window you were working in
@@ -263,9 +267,12 @@ nothing is worse than no shortcut. It is a global hotkey now, like the rest.
 
 ### The pill and the bubble
 
-Right-click the pill for **Send**, **Converse/Dictate mode**, **Mute/Speak replies**
-(only when a speech engine was found), **Clear draft** and **Quit**. Drag it anywhere —
-it stays inside the desktop work area.
+Right-click the pill for **Send**, **Converse/Dictate mode**, **Clear draft** and
+**Quit**, plus any corrections Flow is offering. Everything you set once — **Trigger
+word**, **Agent CLI**, **Voice**, **Mute/Speak replies** (only when a speech engine was
+found), the auto-ask toggle and **Open settings folder** — lives under **Settings ▸**, and
+**Help ▸** has the command sheet and this guide. Drag the pill anywhere — it stays inside
+the desktop work area.
 
 **Neither window takes the focus while you are dictating.** Both carry
 `WS_EX_NOACTIVATE`, so clicking the pill, dragging it, or pressing Send leaves the
@@ -431,8 +438,18 @@ to submit rather than quietly doing nothing.
 Both words are stored in `profile.json` as `send_word` and `send_enter_word`, and both
 have shipped defaults that work out of the box. Recorded risk: "boom" is a short plosive
 and may decode as something else in a strong accent — a `wrong -> right` line in your
-lexicon repairs a consistent bend, and if it will not decode at your desk it is a default
+lexicon repairs a consistent bend, and if it will not decode at your desk it is a word
 worth changing rather than living with.
+
+**Changing it is a tap: right-click ▸ Settings ▸ Trigger word.** The list is short and
+closed on purpose — `boom`, `goose`, `tango`, `mango`, `falcon`, `rocket`, `banana` — and
+every word on it has been through the same measurement `boom` passed: zero hits as a whole
+utterance across those 580 real utterances, no movement in the command benchmark's
+adversarial or recall numbers, and no meaning of its own in the grammar. That last one is
+why the list is not longer: "undo" clears the first two checks and would have taken your
+undo away. The `enter` variant is derived for you, in the order that degrades safely. For
+a word that is nobody's business but yours, `profile.json` still takes anything — and
+**Help ▸ Commands & shortcuts** shows whatever is currently set.
 
 ## Talking to the draft
 
