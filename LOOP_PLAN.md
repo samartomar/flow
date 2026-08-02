@@ -713,6 +713,116 @@ that has the CLI ships **inert**: detection may find it and say so, and nothing 
 - Status: **done** — with three verifications at the desk (copilot, gemini, opencode on a
   non-shim install) and the `.cmd` defect in NEEDS_YOU.
 
+### 36. The ground is named as the question leaves, and switchable with a tap
+Owner-decided 2026-08-02 (decisions.md "Workspace grounding: proven by a misfire").
+The first real workshop session asked about one project while grounded in another —
+the flag set at the command line and forgotten. The grounding itself worked (the answer
+was concrete enough to be wrong about the wrong project); what failed is the pair of
+mitigations the original decision priced the risk with: startup line and mode-switch
+note are transient signals for persistent state, the same lesson already paid for twice
+(the converse marker, the editor's countdown hold). Two fixes, one item, and one nailed
+behaviour so this spec cannot guess: **egress names the ground, a tap switches it, and
+a switch starts a fresh conversation.**
+- Files: `flow/profile.py`, `flow/session.py`, `flow/ui.py`, `flow/__main__.py`,
+  `tests/test_profile.py`, `tests/test_workshop.py`, `tests/test_menu.py`,
+  `docs/architecture.md`.
+- **Egress naming.** `_start_ask`'s note becomes `asking codex · acme…` — the
+  workspace **leaf** name, bounded (`help._fit`'s idiom; the note is glanced at, not
+  read), never the full path. The countdown's final state carries it too: the
+  `_pump_auto_ask` firing note becomes `no more speech - asking · acme`, because
+  auto-ask is the one path where words leave with no press. **No workspace set → both
+  notes stay byte-for-byte what they are today** — a `· (not set)` suffix is noise
+  nobody asked for, and the absence of a name is itself legible.
+- **Settings ▸ Workspace ▸** — a recents submenu, radio-checked like the trigger
+  presets, `(not set)` included as a real entry, one tap switches. Backed by an
+  additive `workspaces` list in the profile (most recent first, `MAX_WORKSPACES = 5`
+  — the same modal-stall budget that caps the offers at three and the presets at six),
+  fed by every path that arrives via `--cwd` and promoted on every menu tap, deduped
+  by `normcase+normpath` so a relaunch cannot grow the list. **No free text anywhere**
+  — new paths enter once via the flag, then live in the list; a browse dialog would be
+  the settings dialog refused five times. A current workspace missing from the list is
+  shown at the top rather than dropped (the hand-set trigger word's rule, same
+  reason). No profile, or nothing to offer → no submenu, rather than one that forgets.
+- **The switch, nailed by the decision.** `Session.set_workspace(path | None)`:
+  switching clears the conversation thread and the note says both things in one line —
+  `workshop: acme — new conversation`. A switch to the **same** workspace
+  (compared by path identity, not by spelling) is a no-op and clears nothing. A recents
+  entry whose folder no longer exists is **shown but marked** in the menu, and tapping
+  it refuses with the reason and switches nothing — `resolve_workspace`'s stale-path
+  honesty, extended to the menu. A switch while an ask is in flight refuses like
+  `send()` does, because the answer would land in a thread about a different project.
+  A successful switch persists (`profile.workspace`, saved on the tap like the trigger
+  word); the draft is never touched (R5 — the words are the user's, whatever ground
+  they stand on).
+- Instrument first, each its own check, the before pinned by a script per item 32's
+  idiom:
+  1. **Today the asking note names only the CLI** — assert `asking codex…` exactly,
+     with a workspace set (green today), then invert: `asking codex · <leaf>…`. And
+     the guard that holds before *and* after: with no workspace, the note is
+     `asking codex…` byte-for-byte.
+  2. A `--cwd` launch adds to recents **exactly once** — a second call with the same
+     path (and with a case/separator variant of it) moves it to the front rather than
+     duplicating it.
+  3. The cap holds: a sixth workspace evicts the oldest, and a hand-grown file is
+     bounded on load, not just on save.
+  4. A tap switches `refine_cwd` for the next ask, and the workshop preamble of that
+     ask carries the **new** path (asserted at `_invoke`, the way
+     `TestTheQuestionCarriesTheWorkshop` does).
+  5. The thread is empty after a switch, and intact after a same-workspace tap.
+  6. A stale recents entry is shown and marked in the menu; `set_workspace` on it
+     says "no longer exists", keeps the current ground, clears nothing, crashes
+     nothing.
+- Acceptance: suite green; the before-script's inverted checks now fail for the stated
+  reason; the submenu builds through `tests/test_menu.py`'s `FakeMenu` with the radio
+  tick on the current workspace.
+- [selfdrive] **not required**: naming in notes is not routing, `plan()` and asr text
+  handling are untouched. Run it if either moves.
+- Doc sync: §8's constants table gains `Profile.MAX_WORKSPACES`; §9's `profile.json`
+  row gains `workspaces` and the switch as a save moment; the workshop paragraph
+  (§"Converse mode is a prompt workshop") gains egress naming and switch-clears-thread;
+  the Settings ▸ paragraph gains the Workspace submenu beside Trigger word.
+- Evidence:
+  - **Before, pinned by script — 6/6 green on the pre-change tree — then inverted.**
+    With a workspace set, the asking note was exactly `asking codex…` and the
+    countdown's firing note exactly `no more speech - asking`; `Profile` had no
+    `workspaces` and no `note_workspace`, `Session` no `set_workspace`. After the
+    change the same script fails 5 of 6 — the notes now read `asking codex · flow…`
+    and `no more speech - asking · flow`, and the three seams exist — while the check
+    that had to survive still passes: no workspace → `asking codex…` byte-for-byte.
+  - **The instrument, red before the build:** 35 new checks across four modules —
+    workshop 14/16 red (the two greens are the unchanged-when-unset guards, green by
+    design), menu 7/8 red (the green is no-submenu-by-absence), profile 9/9 behind
+    the ImportError, main 2/2 red. All green after.
+  - **Real Tk caught what the FakeMenu cannot, and it changed the code.** An empty
+    radiobutton `-value` is read as *unset* and falls back to the label — measured: a
+    row built with `value=""` read back `value='(not set)'` while the var held `""`,
+    so with no workspace set the tick would silently never draw. The no-workspace
+    row's value is now the literal `(not set)`, the var defaults to it, and the probe
+    confirms the tick in both states on real Tk. The same call shape in `_voice_menu`
+    ("Engine default", `value=""`) measures `ticked: False` today — out of scope
+    (Rule 4), written to NEEDS_YOU with the measurement.
+  - **The switch's edges, each its own check:** a same-workspace tap — even respelt,
+    `D:/dev/x/` against `D:\dev\x` — is a silent no-op with the thread intact; a
+    missing folder refuses with the reason and keeps ground and thread; a switch
+    mid-ask refuses the way send() does; the draft survives every switch (R5); a
+    failed save is said ("the switch lasts this session only") and the switch stands.
+  - **The wiring, at main():** two launches with the same `--cwd` leave exactly one
+    recents entry; a launch with no flag and one with a typo'd flag leave none. The
+    trace is patched out in that test, so it cannot write the real `~/.flow` (Rule 5).
+  - **Deviation, recorded rather than quiet:** `tests/test_main.py` and
+    `tests/test_offers.py` are in the commit and not in the Files line. The wiring
+    check belongs to the entry point (item 35's precedent, same file, same reason);
+    test_offers' menu builder now traverses the new submenu — the exact reason item
+    31's spec named test_offers when the trigger submenu appeared — and its session
+    mock gains `workspace=None`, the Mock-parent defect class item 34 recorded.
+  - Startup smoke on this machine: `--lite --no-profile --cwd D:/dev/flow` prints
+    `workshop: D:/dev/flow` and reaches the pill; nothing about the new imports moves
+    the full body.
+  - Suite **940 → 976**, OK, 17.4 s. [selfdrive] not run: `plan()` and asr text
+    handling untouched — naming in notes is not routing.
+- Status: **done (desk check pending)** — the misfire that motivated the item, run on
+  purpose through the menu, waits at the desk (NEEDS_YOU).
+
 ## Backlog — "prepare" tier
 
 (empty — the round-one proposals P1–P4 were all decided or parked; see

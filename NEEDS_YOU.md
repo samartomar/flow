@@ -37,6 +37,23 @@ entries are further down)
   `C:\Users\samar\AppData\Local\Temp\claude\…\scratchpad\shim_probe.py`, or in four lines:
   a `.cmd` that echoes `%*`, invoked through `refine._invoke` with a two-line prompt.
 
+- [x] **The Voice submenu can never tick "Engine default" — the defect item 36 just
+  fixed in the Workspace menu, measured on real Tk.** (Done, commit `cdb64b3`,
+  fast-forwarded onto main and re-gated there — 979 OK: `VOICE_ENGINE_DEFAULT`
+  sentinel exactly as prescribed below, pinned failing-first in
+  `TestTheVoiceMenuCanTickEngineDefault`, suite 976 → 979.) A menu radiobutton built with
+  `value=""` reads back with its *label* as the value — Tk treats an empty `-value` as
+  unset and falls back — so `_voice_var`, which holds `""` for the engine default,
+  matches no row and the Voice submenu opens with no tick anywhere when no voice is
+  chosen. Measured while probing item 36's submenu:
+  `add_radiobutton(label="Engine default", value="", variable=var)` read back
+  `value='Engine default'` with the var holding `''`. Cosmetic only — taps still work,
+  named voices still tick — and out of item 36's scope (Rule 4). The fix is the one the
+  Workspace menu now carries: a non-empty sentinel as both label and value, the var
+  defaulting to it (`ui.py`, `_voice_menu`'s "Engine default" row and the `_voice_var`
+  init above it), plus one var-equals-row-value test the way
+  `test_no_workspace_means_the_not_set_row_is_the_one_ticked` now pins Workspace.
+
 - [x] (resolved — the `Session._provider()` pin mismatch became LOOP_PLAN item 24 and is
   done, commit `a18b619`: the notes now name the CLI the call will actually make)
 
@@ -163,6 +180,26 @@ Two things the sweep turned up that you have not ruled on, kept here rather than
   above). So this is one command: leg 3 of the copilot list, with `opencode run`. If
   `marmalade-42` comes back, the entry becomes
   `Cli("opencode", ("opencode", "run"))` and the whole thing was an install artefact.
+
+- [ ] **Run the misfire on purpose — switch workspaces mid-session and watch the notes
+  name the ground.** Item 36 shipped from the day-one misfire (decisions.md "Workspace
+  grounding"): Settings ▸ Workspace ▸ now lists the places `--cwd` has taken you,
+  radio-ticked with "(not set)" included, and one tap switches. The desk check is the
+  misfire inverted, run deliberately:
+  1. `uv run flow --converse --cwd <project A>` — ask one question;
+  2. right-click ▸ Settings ▸ Workspace ▸ tap project B (it is in the list if any
+     launch ever used it; otherwise launch once with `--cwd <project B>` first);
+  3. confirm the switch note said both things in one line — `workshop: B — new
+     conversation` — then ask a second question and read nothing but the asking note:
+     `asking codex · B…` is the fix working; `asking codex · A…` is a bug report.
+  Worth an eye while there: re-open the menu and confirm the tick moved (the radio
+  value handling is the one thing real Tk broke during the build, fixed by
+  measurement), and the second answer should show no memory of question A — the
+  thread was cleared, and a reply that references A is the contamination coming back.
+  This is the purposeful re-run of the "Is a grounded answer actually less generic?"
+  entry below: the misfire already substantially answered its A/B half — a grounded
+  answer was concrete enough to be wrong about the *wrong* project — so what is left
+  to look at is the fix, not the effect.
 
 - [x] **The help window reads as part of Flow — checked and approved 2026-08-02.** All
   four questions came back good: the bubble's palette and spacing, the `Close` chip where
