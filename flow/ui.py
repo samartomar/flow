@@ -691,6 +691,14 @@ class Pill(tk.Tk):
         )
         parent.add_cascade(label="Workspace", menu=sub)
 
+    #: The "Engine default" row's label *and* its radio value, the workspace sentinel's
+    #: shape for the workspace sentinel's reason: never "", because on real Tk an empty
+    #: radiobutton -value reads back as the *label* — Tk treats it as unset and falls
+    #: back — so a var holding "" matches no row and the tick silently never draws. A
+    #: voice name cannot equal it: every named row's value is an engine's installed
+    #: voice name, and those name a person, not a fallback.
+    VOICE_ENGINE_DEFAULT = "Engine default"
+
     def _voice_menu(self, parent: tk.Menu) -> None:
         """A submenu of the voices this machine actually has.
 
@@ -708,10 +716,12 @@ class Pill(tk.Tk):
         # voice set by --voice or by a profile written in another session. Held on self
         # because a Tk variable that goes out of scope stops driving the indicator.
         self._voice_var = tk.StringVar(
-            value=getattr(self.session.speaker, "voice", None) or ""
+            value=getattr(self.session.speaker, "voice", None)
+            or self.VOICE_ENGINE_DEFAULT
         )
         sub.add_radiobutton(
-            label="Engine default", value="", variable=self._voice_var,
+            label=self.VOICE_ENGINE_DEFAULT, value=self.VOICE_ENGINE_DEFAULT,
+            variable=self._voice_var,
             command=lambda: self.session.set_voice(None),
         )
         sub.add_separator()

@@ -29,6 +29,7 @@ from flow.edits import (  # noqa: E402
     enter_word,
 )
 from flow.profile import Profile  # noqa: E402
+from flow.speak import Voice  # noqa: E402
 
 
 class FakeVar:
@@ -84,7 +85,7 @@ class Menu(unittest.TestCase):
         return Profile(self.folder / "profile.json")
 
     def build(self, profile=None, *, speaker=None, converse=False, clis=(),
-              workspace=None) -> FakeMenu:
+              workspace=None, voices=()) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -101,7 +102,7 @@ class Menu(unittest.TestCase):
             speaker=speaker, profile=profile, muted=False, auto_ask=True, cli=None,
             send_words=(SEND_WORD, SEND_ENTER_WORD), workspace=workspace,
         )
-        pill.session.voices.return_value = []
+        pill.session.voices.return_value = list(voices)
         pill.settings_path = self.folder / "lexicon.txt"
         pill.hotkeys = None
         pill.bubble = mock.Mock()
@@ -383,6 +384,42 @@ class TestTheWorkspaceIsARecentsList(Menu):
         self.assertTrue(label.startswith("…"))
         self.assertTrue(str(deep).endswith(label[1:]))
         self.assertEqual(value, str(deep))
+
+
+class TestTheVoiceMenuCanTickEngineDefault(Menu):
+    """Found while probing item 36: the Voice menu had the Workspace defect already.
+
+    A menu radiobutton built with `value=""` reads back with its *label* as the value —
+    measured on real Tk, an empty `-value` is treated as unset and falls back — so
+    `_voice_var`, holding "" for the engine default, matched no row and the submenu
+    opened with no tick anywhere until a voice was chosen. Same fix as Workspace: a
+    non-empty sentinel as both label and value, the var defaulting to it, and the tap
+    still handing the session None.
+    """
+
+    def voice_sub(self, *, chosen=None) -> FakeMenu:
+        speaker = mock.Mock(voice=chosen)
+        menu = self.build(self.profile(), speaker=speaker,
+                          voices=[Voice("Microsoft George", "Male", "en-GB")])
+        return menu.cascades["Settings"].cascades["Voice"]
+
+    def test_no_voice_chosen_means_the_engine_default_row_is_the_one_ticked(self):
+        # What this pins is the agreement the workspace test pins: the var's
+        # no-choice value IS a row's value, and that value is never "".
+        sub = self.voice_sub(chosen=None)
+        self.assertEqual(self.pill._voice_var.get(), "Engine default")
+        self.assertIn(("Engine default", "Engine default"), sub.radios)
+
+    def test_a_chosen_voice_still_ticks_its_own_row(self):
+        sub = self.voice_sub(chosen="Microsoft George")
+        self.assertEqual(self.pill._voice_var.get(), "Microsoft George")
+        self.assertIn(("Microsoft George (male, en-GB)", "Microsoft George"),
+                      sub.radios)
+
+    def test_the_engine_default_tap_still_hands_over_none(self):
+        sub = self.voice_sub(chosen=None)
+        sub.commands["Engine default"]()
+        self.pill.session.set_voice.assert_called_once_with(None)
 
 
 if __name__ == "__main__":
