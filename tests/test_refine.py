@@ -702,6 +702,9 @@ class TestAShimAnswersAboutNothing(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, "and it exits 0, which is what makes it silent")
 
 
+@unittest.skipUnless(sys.platform == "win32",
+                     "`.cmd`/`.bat` forwarding `%*` through cmd.exe is the defect, and "
+                     "cmd.exe is the Windows shell; there is nothing to refuse elsewhere")
 class TestAShimIsRefusedBeforeAnythingStarts(unittest.TestCase):
     """Loud beats fluent-and-wrong (decisions.md, "The npm-shim defect").
 

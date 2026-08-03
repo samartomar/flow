@@ -139,6 +139,9 @@ class TestQuittingDoesNotWaitForTheCli(Temp):
         self.assertFalse(started.exists(), "a process was started for nobody")
 
 
+@unittest.skipUnless(sys.platform == "win32",
+                     "the reap is `taskkill /T`, which is a Windows program; the POSIX "
+                     "equivalent is a process group and is not what ships")
 class TestKillingReachesWhatTheCliStarted(Temp):
     """`proc.kill()` reaches the launcher, not the launcher's child.
 

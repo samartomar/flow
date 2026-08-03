@@ -33,9 +33,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned, and the pin is the point. The first run of this workflow used whatever
+      # each runner happened to have: **CPython 3.12.3 from `/usr/bin/python3` on Ubuntu
+      # and 3.14.6 from Homebrew on macOS** — two minor versions past what this project
+      # targets, and three legs running three unrelated experiments rather than one.
+      # It also cost 137 of the 153 errors: Debian splits `tkinter` into `python3-tk`,
+      # and the suite reaches `flow.ui` in six modules. uv's own build is the same
+      # interpreter everywhere, which is the only way the matrix answers a question.
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: "3.12"
 
       # `flow.audio` imports sounddevice at module scope, and sounddevice is a ctypes
       # wrapper: it ships PortAudio for Windows and macOS and finds it on the system

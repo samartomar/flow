@@ -1399,7 +1399,9 @@ catches a syntax error in a module no test imports, the failure a green suite is
 structurally unable to see — then `flow --help`, which catches an entry point that cannot
 boot at all. Three platforms because §11's law is a claim about three of them (the
 platform decides what imports, `lite` decides what happens) and it had only ever been run
-on one. `release.yml` is untouched and still fires only on a `v*` tag: before this, that
+on one. **The interpreter is pinned** — the first run let each runner choose, and got
+3.12.3 from `/usr/bin/python3` on Ubuntu against 3.14.6 from Homebrew on macOS, which is
+three unrelated experiments rather than one matrix. `release.yml` is untouched and still fires only on a `v*` tag: before this, that
 tag-gated run was the *only* gate, so nothing was checked between releases and the first
 thing that could find a broken push was a release.
 

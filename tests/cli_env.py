@@ -22,6 +22,7 @@ may call, which is the question a PATH was accidentally answering.
 """
 
 import contextlib
+import os
 import shutil
 from unittest import mock
 
@@ -29,6 +30,33 @@ import flow.refine as refine
 
 #: Captured at import, before any patch is in place, so the fake can defer to it.
 _REAL_WHICH = shutil.which
+
+#: Absolute **on the platform the suite is running on**, which it has to be and was not.
+#:
+#: The same lesson as the docstring above, one predicate along, and found the same way —
+#: by CI on a machine that is not this one. This was the Windows literal everywhere, which
+#: nothing minded until `refine.trusted()` began requiring `os.path.isabs` (item 47).
+#: `ntpath.isabs("C:\\fake\\codex.exe")` is True and `posixpath.isabs` of the same string
+#: is **False**, so on the Linux and macOS legs every test that carefully declared a CLI
+#: got no CLI: `trusted()` refused the fake, `resolve()` returned None, the code refused
+#: correctly, and the mocked `Popen` sat untouched. 25 tests, and not one of them was
+#: about paths.
+#:
+#: The suffix stays `.exe` on every platform on purpose. It is a fake, and `SHIM_SUFFIXES`
+#: is the only thing that reads it — a per-platform suffix would quietly change what the
+#: `.cmd` refusal tests are testing.
+#:
+#: Chosen by asking `os.path.isabs` rather than by reading `sys.platform`, which is not
+#: pedantry: the property this needs is "absolute according to the predicate `trusted()`
+#: calls", and a platform check is a *guess* about what that predicate will say. The two
+#: agree today. They did not agree in the harness that reproduced this failure, and that
+#: disagreement is the whole bug in miniature.
+_FAKE_DIR = "C:\\fake" if os.path.isabs("C:\\fake") else "/fake"
+
+
+def fake_exe(name: str) -> str:
+    """Where a declared CLI pretends to live. Absolute, and never the working directory."""
+    return os.path.join(_FAKE_DIR, f"{name}.exe")
 
 
 @contextlib.contextmanager
@@ -52,7 +80,7 @@ def cli_on_path(name: str = "codex"):
 
     def which(cmd, *args, **kwargs):
         if cmd == name:
-            return f"C:\\fake\\{name}.exe"
+            return fake_exe(name)
         return _REAL_WHICH(cmd, *args, **kwargs)
 
     with mock.patch("shutil.which", which), no_off_path_installs():
