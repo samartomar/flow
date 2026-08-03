@@ -587,6 +587,35 @@ Three things now hold, and they are independent on purpose:
    window it was aimed at rather than the one it reached. A foreground of `0` is
    deliberately not a refusal: that is the OS declining to answer, not evidence that
    somebody else is holding it.
+5. **And so is a multi-line payload aimed at a terminal that does not bracket paste.**
+   P7's guarantee used to stop at "never submits for you" and hand the rest over as a
+   warning — *"cmd.exe may run each line as it arrives"*. That warning goes into
+   `take_warnings()` and reaches the bubble on the pill's next 30 ms frame, and by then
+   the shell has run line one and is working on line two. The Ctrl-V **is** the
+   execution, so any message about it is written after the fact by construction, however
+   promptly it paints. `runs_on_arrival` is now a refusal rather than a sentence, and the
+   guarantee reads: *Flow never lets a bare terminal execute interior lines on paste.*
+
+   Refused **after** the clipboard write, which is the whole recovery. Pasting by hand is
+   the same keystroke Flow just declined to synthesise, and doing it deliberately is
+   precisely the difference — Flow does not get to decide a script may never be pasted
+   into `cmd.exe`, only that it will not be the one to press the key. Same reason the
+   restore is skipped: it would take away the thing the hand needs. Bracketing terminals,
+   editors, unknown windows and every single-line paste are untouched, and each of those
+   is pinned, because a fail-closed rule is only as good as the list of things it does
+   not close on.
+
+   `runs_on_arrival` is one predicate asked by both `prepare` and `paste` rather than a
+   condition written twice. The probe scripts print the sentence without pasting
+   anything, so the description still has a caller; two copies of the rule would drift
+   the day a terminal joins `BRACKETED_PASTE`.
+
+   **What this does not decide**, and the boundary is deliberate: VS Code and JetBrains
+   integrated terminals classify as *editors* here, because the top-level window belongs
+   to the editor process. They are neither refused nor warned. Failing closed on an
+   ambiguous target would refuse every ordinary editor paste, and telling the two apart
+   means identifying the focused child through UI Automation — a dependency-shaped
+   decision against R16. It is in NEEDS_YOU with both shapes, and it is the owner's.
 
 ### Lite
 
@@ -1171,7 +1200,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1119 tests, ~27 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1130 tests, ~26 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

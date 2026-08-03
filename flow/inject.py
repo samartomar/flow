@@ -230,8 +230,6 @@ def paste(
         return False
 
     payload, warning = prepare(text, target)
-    if warning:
-        _warn(warning)
 
     # Text only, and that is a real limit rather than an oversight: a clipboard holding
     # an image or a file list reads as None here, so there is nothing to put back — and
@@ -243,6 +241,24 @@ def paste(
     if not set_clipboard_text(payload):
         _warn("not pasted: could not take the clipboard")
         return False
+    if runs_on_arrival(payload, target):
+        # P7's second half, and it is a refusal rather than the warning it used to be.
+        # The Ctrl-V *is* the execution here — a bare terminal runs line one while line
+        # two is still arriving — so a message about it is written after the fact by
+        # construction, however promptly the bubble paints it.
+        #
+        # Refused *after* the clipboard write, which is the whole recovery: pasting by
+        # hand is the same keystroke Flow just declined to synthesise, and doing it
+        # deliberately is exactly the difference between the two. Flow does not get to
+        # decide that a script may never be pasted into cmd.exe — only that it will not
+        # be the one to press the key. No restore, for the same reason it is skipped on a
+        # refused insertion: it would take away the thing the hand needs.
+        _warn(f"not pasted: {warning} - the text is on the clipboard, so Ctrl-V is yours")
+        return False
+
+    if warning:
+        _warn(warning)
+
     # Stamped the moment Flow's own text lands, so anything that moves the counter from
     # here on is somebody else.
     stamp = clipboard_sequence()
@@ -494,28 +510,49 @@ def resolve(hwnd: int | None = None) -> Target:
     return classify(hwnd)
 
 
+def runs_on_arrival(payload: str, target: Target) -> bool:
+    """True when pasting `payload` into `target` executes something as it lands.
+
+    A terminal with bracketed paste hands the whole block to the shell as literal text;
+    one without runs each line the moment it arrives. So an interior newline aimed at a
+    bare terminal is not a risk of execution, it *is* execution, and it happens during
+    the `SendInput` rather than after it.
+
+    One predicate, asked by both `prepare` — which describes the hazard for the probe
+    scripts that print it — and `paste`, which refuses on it. Two copies of this rule
+    would drift the day a terminal joins `BRACKETED_PASTE`, leaving one half of the pair
+    still acting on the old answer.
+    """
+    return target.is_terminal and not target.brackets_paste and "\n" in payload
+
+
 def prepare(text: str, target: Target) -> tuple[str, str]:
     """(payload, warning) for pasting `text` into `target`.
 
-    Two rules, and only the first is a guarantee:
+    Two rules, and both are now guarantees — the second one was not, and that is what
+    changed on 2026-08-03:
 
     **Never submit for the user.** A draft ending in a newline pastes as text plus
     Enter, which in a shell runs it. The trailing newline is always stripped for a
     terminal; the user presses Enter when they mean to.
 
-    **Say so when the rest cannot be guaranteed.** Interior newlines are the terminal's
-    business, not Flow's: a terminal with bracketed paste hands the whole block to the
-    shell as literal text, and one without runs each line as it arrives. Flow cannot
-    change that from outside — adding the bracket markers to the clipboard would be
-    doubly wrong, since the terminal adds its own. So it reports it instead of pretending.
+    **Never let a bare terminal execute interior lines on arrival.** This used to say
+    "report it instead of pretending", and reporting is what it did: the warning goes
+    into `take_warnings()` and reaches the bubble on the pill's next frame, by which time
+    the shell has run the first line. `paste` refuses on `runs_on_arrival` now; this
+    function still returns the sentence, because that sentence is the reason, and the two
+    probe scripts print it without pasting anything.
+
+    Flow still does not rewrite the text to make it safe. Adding bracket markers to the
+    clipboard would be doubly wrong — the terminal adds its own — and stripping interior
+    newlines would be Flow editing a draft to fit a window.
     """
     if not target.is_terminal:
         return text, ""
     payload = text.rstrip("\r\n")
-    multiline = "\n" in payload
-    if multiline and not target.brackets_paste:
+    if runs_on_arrival(payload, target):
         return payload, (
-            f"{target.process or 'this terminal'} may run each line as it arrives - "
+            f"{target.process or 'this terminal'} runs each line as it arrives - "
             "paste is not bracketed here"
         )
     return payload, ""

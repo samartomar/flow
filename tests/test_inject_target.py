@@ -254,8 +254,15 @@ class TestPasteUsesTheTarget(unittest.TestCase):
         self.assertEqual(written, "deploy it")
         self.assertEqual(warnings, [])
 
-    def test_a_multi_line_paste_into_a_legacy_console_warns(self):
-        _ok, written, warnings = self._paste("one\ntwo\n", CMD)
+    def test_a_multi_line_paste_into_a_legacy_console_is_refused(self):
+        # This asserted warn-**and-proceed** until 2026-08-03, and it was the audit's
+        # DESKTOP-01: the warning it checked for is delivered through a queue the UI
+        # drains on its next frame, while the Ctrl-V it did not prevent had already run
+        # the first line. A message that arrives after the thing it warns about is not a
+        # warning. The clipboard write survives the inversion on purpose — see the class
+        # below for why that is the whole recovery.
+        ok, written, warnings = self._paste("one\ntwo\n", CMD)
+        self.assertFalse(ok)
         self.assertEqual(written, "one\ntwo")
         self.assertEqual(len(warnings), 1)
         self.assertIn("each line", warnings[0])
@@ -586,3 +593,127 @@ class TestEnterHasItsOwnCount(unittest.TestCase):
         self.assertTrue(ok, "the text is in the window; only the Enter is missing")
         self.assertEqual(len(warnings), 1)
         self.assertIn("1 of 2", warnings[0])
+
+
+class TestABareTerminalIsRefusedRatherThanWarned(unittest.TestCase):
+    """DESKTOP-01: the warning arrived after the lines it warned about had run.
+
+    A terminal without bracketed paste hands each line to the shell as it arrives, so an
+    interior newline in a multiline payload is a command executing at the moment of the
+    Ctrl-V. Flow's warning goes into `take_warnings()`, which the pill drains on its next
+    30 ms frame and paints into the bubble — by which time the shell has run the first
+    line and is working on the second. Warn-and-proceed was never a mitigation here; it
+    was a description written after the fact.
+
+    So it inverts. The payload still reaches the clipboard, and that is the entire
+    recovery: pasting it by hand is the same keystroke Flow declined to synthesise, and
+    doing it deliberately is exactly the difference. Flow does not get to decide the user
+    may never paste a script into cmd.exe — only that it will not do it *for* them
+    without their hand on the key.
+    """
+
+    def _paste(self, text, target, **kw):
+        take_warnings()
+        with mock.patch("flow.inject.resolve", return_value=target), \
+                mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+                mock.patch("flow.inject.set_clipboard_text",
+                           return_value=True) as put, \
+                mock.patch("flow.inject._send", side_effect=all_inserted) as sent:
+            from flow.inject import paste
+
+            ok = paste(text, restore_clipboard=False, **kw)
+        written = put.call_args.args[0] if put.call_args else None
+        return ok, written, sent, take_warnings()
+
+    def test_multiline_into_a_bare_console_never_reaches_ctrl_v(self):
+        ok, _written, sent, warnings = self._paste("one\ntwo\n", CMD)
+        self.assertFalse(ok)
+        sent.assert_not_called()
+        self.assertIn("not pasted", warnings[0])
+
+    def test_the_payload_is_left_where_a_hand_can_reach_it(self):
+        _ok, written, _sent, warnings = self._paste("one\ntwo\n", CMD)
+        self.assertEqual(written, "one\ntwo")
+        self.assertIn("Ctrl-V", warnings[0])
+
+    def test_the_refusal_names_the_terminal_and_the_reason(self):
+        # A second bare terminal, so the refusal is shown reading the target rather than
+        # matching one name. `BASH` is the wrong fixture for this and picking it was the
+        # instrument's own mistake: mintty is *in* `BRACKETED_PASTE`, so it is the
+        # untouched case one class over, not a refusal.
+        console = Target("ConsoleWindowClass", "powershell.exe")
+        _ok, _written, _sent, warnings = self._paste("one\ntwo\n", console)
+        self.assertIn("powershell.exe", warnings[0])
+        self.assertIn("each line", warnings[0])
+
+    def test_mintty_brackets_and_so_is_not_refused(self):
+        ok, _written, sent, warnings = self._paste("one\ntwo\n", BASH)
+        self.assertTrue(ok)
+        self.assertEqual(sent.call_count, 1)
+        self.assertEqual(warnings, [])
+
+    def test_a_bracketing_terminal_is_untouched(self):
+        # Windows Terminal hands the whole block to the shell as literal text, so there
+        # is nothing to fail closed about. Refusing here would be Flow taking a working
+        # path away on a hazard that does not exist in it.
+        ok, written, sent, warnings = self._paste("one\ntwo\n", WT)
+        self.assertTrue(ok)
+        self.assertEqual(written, "one\ntwo")
+        self.assertEqual(sent.call_count, 1)
+        self.assertEqual(warnings, [])
+
+    def test_a_single_line_into_a_bare_console_is_untouched(self):
+        # The common case, and the one the whole feature exists for: one dictated
+        # sentence into cmd.exe, trailing newline stripped by P7, Ctrl-V sent.
+        ok, written, sent, warnings = self._paste("deploy the thing\n", CMD)
+        self.assertTrue(ok)
+        self.assertEqual(written, "deploy the thing")
+        self.assertEqual(sent.call_count, 1)
+        self.assertEqual(warnings, [])
+
+    def test_multiline_into_an_editor_is_untouched(self):
+        ok, written, sent, warnings = self._paste("a\nparagraph\n", EDITOR)
+        self.assertTrue(ok)
+        self.assertEqual(written, "a\nparagraph\n", "an editor keeps its newline too")
+        self.assertEqual(sent.call_count, 1)
+        self.assertEqual(warnings, [])
+
+    def test_the_refusal_holds_even_when_submit_was_asked_for(self):
+        # `submit=True` is the enter-variant trigger, and it is the worst version of this
+        # case rather than an exception to it: the payload would run its interior lines on
+        # arrival and then be submitted on top.
+        ok, _written, sent, _warnings = self._paste("one\ntwo\n", CMD, submit=True)
+        self.assertFalse(ok)
+        sent.assert_not_called()
+
+    def test_trailing_newlines_alone_are_not_multiline(self):
+        # "one\n\n\n" is a single line with P7's strip applied. Treating it as multiline
+        # would refuse the ordinary dictated sentence, which is the failure mode a
+        # fail-closed rule has to be checked against.
+        ok, written, _sent, warnings = self._paste("one\n\r\n\n", CMD)
+        self.assertTrue(ok)
+        self.assertEqual(written, "one")
+        self.assertEqual(warnings, [])
+
+
+class TestWhatRunsOnArrivalIsAskedInOnePlace(unittest.TestCase):
+    """`prepare` and `paste` must not each decide this, or they will drift apart.
+
+    `prepare` describes the hazard for the two probe scripts that print it; `paste` acts
+    on it. One predicate underneath both, so a terminal added to `BRACKETED_PASTE` cannot
+    stop the warning while leaving the refusal, or the reverse.
+    """
+
+    def test_the_predicate_agrees_with_the_warning(self):
+        from flow.inject import prepare, runs_on_arrival
+
+        for text, target in (("one\ntwo", CMD), ("one\ntwo", BASH), ("one\ntwo", WT),
+                             ("one", CMD), ("a\nb", EDITOR), ("", CMD)):
+            with self.subTest(text=text, target=target):
+                payload, warning = prepare(text, target)
+                self.assertEqual(bool(warning), runs_on_arrival(payload, target))
+
+    def test_an_unknown_window_is_not_a_terminal_and_not_refused(self):
+        from flow.inject import runs_on_arrival
+
+        self.assertFalse(runs_on_arrival("one\ntwo", UNKNOWN))
