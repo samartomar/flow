@@ -11,7 +11,11 @@ the one thing that does not work. So the commands are asserted to be exact, here
 a change to either side has to move both.
 """
 
+import shutil
+import subprocess
 import sys
+import tarfile
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -179,3 +183,158 @@ class TestTheReleaseWorkflow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+#: What the sdist may weigh, compressed. The product is 19 files and 536 KB; the bound is
+#: generous against that and still an order of magnitude under what was shipping.
+SDIST_MAX_BYTES = 2_000_000
+
+
+class TestTheSdistCarriesOnlyWhatAnInstallNeeds(unittest.TestCase):
+    """RELEASE-07: `.bench/` is the owner's decoded speech, and it shipped.
+
+    Measured on the tree of 2026-08-03, before this: **15,603,458 B compressed, 384
+    files**, of which `.bench/` was 82 files and 14.7 MB and `.claude/` was 185 files and
+    16.7 MB — the two of them 93% of the bytes, against 19 files and 536 KB of `flow/`.
+    The audit filed it as a size complaint. The size is the smaller half: a benchmark
+    corpus of recorded speech is a recording of the person who recorded it, and an sdist
+    is the artifact `uv tool install git+...` builds.
+
+    This builds the real thing rather than reading the config, because the config is a
+    claim about what hatchling will do and this is what it did. It costs about a second,
+    which is what the only instrument that can be wrong about the answer is worth.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        uv = shutil.which("uv")
+        if uv is None:  # the suite is run through `uv run`, so this is theoretical
+            raise unittest.SkipTest("uv is not on PATH; nothing can build an sdist")
+        cls._tmp = tempfile.TemporaryDirectory()
+        out = subprocess.run(
+            [uv, "build", "--sdist", "--out-dir", cls._tmp.name],
+            cwd=ROOT, capture_output=True, text=True, timeout=300,
+        )
+        if out.returncode != 0:
+            cls._tmp.cleanup()
+            raise unittest.SkipTest(f"uv build failed: {out.stderr[-300:]}")
+        cls.tarball = next(Path(cls._tmp.name).glob("*.tar.gz"))
+        with tarfile.open(cls.tarball) as t:
+            cls.names = [m.name for m in t.getmembers() if m.isfile()]
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, "_tmp"):
+            cls._tmp.cleanup()
+
+    def carried(self, fragment: str) -> list[str]:
+        return [n for n in self.names if fragment in n]
+
+    def test_the_recorded_speech_is_not_in_it(self):
+        self.assertEqual(self.carried("/.bench/"), [])
+
+    def test_nor_is_the_agent_working_directory(self):
+        # Bigger than `.bench/` and nobody's business: transcripts, settings and
+        # whatever a session wrote. Found by the item 46 validation rebuild, not by the
+        # audit, which is why it is named here rather than inferred from a pattern.
+        self.assertEqual(self.carried("/.claude/"), [])
+
+    def test_nor_the_two_files_that_are_this_round_talking_to_itself(self):
+        for name in ("LOOP_PLAN.md", "NEEDS_YOU.md"):
+            with self.subTest(name=name):
+                self.assertEqual(self.carried(f"/{name}"), [])
+
+    def test_the_thing_being_installed_is_still_in_it(self):
+        # The half a whitelist gets wrong. An sdist that excludes the package is a
+        # smaller failure to notice than one that ships too much.
+        for needed in ("/flow/__main__.py", "/pyproject.toml", "/LICENSE",
+                       "/README.md"):
+            with self.subTest(needed=needed):
+                self.assertTrue(self.carried(needed), f"{needed} was excluded")
+
+    def test_it_is_small_enough_that_nobody_has_to_think_about_it(self):
+        size = self.tarball.stat().st_size
+        self.assertLess(size, SDIST_MAX_BYTES, f"{size:,} B")
+
+
+class TestThePyprojectSaysSoOutLoud(unittest.TestCase):
+    """The same facts where a reviewer reads them, and in a form a diff shows.
+
+    The build test above is the one that cannot be fooled; this one is what fails in a
+    pull request when somebody deletes a line, without waiting to find out what
+    hatchling made of it.
+    """
+
+    def excluded(self) -> list[str]:
+        sdist = pyproject()["tool"]["hatch"]["build"]["targets"]["sdist"]
+        return sdist["exclude"]
+
+    def test_every_directory_the_item_named_is_excluded(self):
+        for path in (".bench/", ".claude/", "tests/", "LOOP_PLAN.md",
+                     "NEEDS_YOU.md", "docs/decisions.md", "docs/history/"):
+            with self.subTest(path=path):
+                self.assertIn(path, self.excluded())
+
+    def test_the_wheel_is_untouched_and_still_packages_the_module(self):
+        # Two targets, two questions. The wheel never carried any of this — it packages
+        # `flow` and nothing else — so a change here that quietly narrowed it would be
+        # fixing the wrong artifact.
+        wheel = pyproject()["tool"]["hatch"]["build"]["targets"]["wheel"]
+        self.assertEqual(wheel["packages"], ["flow"])
+
+
+class TestTheSuiteGatesEveryPush(unittest.TestCase):
+    """RELEASE-01: the release path claimed things nothing checked until a tag.
+
+    `release.yml` runs the suite, and it only runs on `v*` — so between tags there was
+    no gate at all, and the first thing to find a broken push was a release. This is the
+    gate that runs before anything is called a version.
+    """
+
+    CI = ROOT / ".github" / "workflows" / "ci.yml"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.yml = cls.CI.read_text(encoding="utf-8") if cls.CI.is_file() else ""
+
+    def test_there_is_one(self):
+        self.assertTrue(self.CI.is_file(), "no CI workflow")
+
+    def test_it_runs_on_a_pull_request_and_on_main(self):
+        self.assertIn("pull_request:", self.yml)
+        self.assertIn("push:", self.yml)
+        self.assertIn("main", self.yml)
+
+    def test_it_is_not_gated_on_a_tag(self):
+        # The defect, stated as a rule: a gate that waits for a tag is the release.
+        self.assertNotIn('tags:', self.yml)
+
+    def test_it_runs_on_the_three_platforms_the_suite_claims(self):
+        # Item 34's law — the platform decides what imports, `lite` decides what
+        # happens — is a claim about three operating systems, and it was only ever run
+        # on one of them.
+        for runner in ("windows-latest", "macos-latest", "ubuntu-latest"):
+            with self.subTest(runner=runner):
+                self.assertIn(runner, self.yml)
+
+    def test_the_install_is_locked(self):
+        # `uv sync --frozen` and not `uv sync`: a CI run that silently resolves a newer
+        # dependency is testing a tree nobody has.
+        self.assertIn("uv sync --frozen", self.yml)
+
+    def test_it_runs_the_suite_the_gate_is_named_for(self):
+        self.assertIn("unittest discover", self.yml)
+
+    def test_and_the_two_checks_that_catch_what_a_unit_test_cannot(self):
+        # `compileall` catches a syntax error in a module no test imports; `--help`
+        # catches an entry point that cannot boot at all.
+        self.assertIn("compileall", self.yml)
+        self.assertIn("--help", self.yml)
+
+    def test_the_release_workflow_is_still_a_deliberate_act(self):
+        # Adding a push gate must not turn tagging into something that happens by
+        # itself. Release stays tag-only.
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8")
+        self.assertIn('tags: ["v*"]', release)
+        self.assertNotIn("pull_request", release)

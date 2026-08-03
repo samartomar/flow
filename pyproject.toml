@@ -38,6 +38,30 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["flow"]
 
+# The sdist is what `uv tool install git+…/flow` builds, and it shipped everything in the
+# tree: **15,603,458 B and 384 files** measured on 2026-08-03, against 19 files and 536 KB
+# of `flow/`. Two directories were 93% of it, and the size was the smaller half of the
+# problem — `.bench/` is recorded speech, which is a recording of the person who recorded
+# it, and `.claude/` is a working directory nobody installing this has any business
+# receiving. The rest is this project talking to itself: a plan, a queue, a decision log
+# and its history are worth reading in the repo and are not part of an install.
+#
+# Excluded rather than whitelisted because hatchling's sdist default is "the tree", and an
+# include list would need editing every time the product grows a directory — the failure
+# would be a missing file at install time, which is quieter than a large download.
+# `tests/test_packaging.py` builds the real artifact and checks both halves: that none of
+# this is in it, and that `flow/` still is.
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".bench/",
+    ".claude/",
+    "tests/",
+    "LOOP_PLAN.md",
+    "NEEDS_YOU.md",
+    "docs/decisions.md",
+    "docs/history/",
+]
+
 [tool.uv]
 # Installed, and editable — so `uv run flow` works while an edit to flow/*.py still takes
 # effect on the next run with no reinstall. This was `package = false`, which meant the

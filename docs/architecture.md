@@ -1350,7 +1350,7 @@ what was true.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1219 tests, ~36 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1251 tests, ~36 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -1391,6 +1391,29 @@ synthetic Tk event cannot do. A harness that cannot reproduce the defect cannot 
 `paste()` returned True, so nothing else could either.
 
 ## Verification
+
+**Every pull request and every push to `main` runs the unit suite on Windows, macOS and
+Ubuntu** (`.github/workflows/ci.yml`, 2026-08-03): `uv sync --frozen` so a run cannot
+silently resolve a dependency nobody has, then the suite, then `compileall` — which
+catches a syntax error in a module no test imports, the failure a green suite is
+structurally unable to see — then `flow --help`, which catches an entry point that cannot
+boot at all. Three platforms because §11's law is a claim about three of them (the
+platform decides what imports, `lite` decides what happens) and it had only ever been run
+on one. `release.yml` is untouched and still fires only on a `v*` tag: before this, that
+tag-gated run was the *only* gate, so nothing was checked between releases and the first
+thing that could find a broken push was a release.
+
+**The sdist carries the product and not the workshop** (`pyproject.toml`, same day).
+`uv tool install git+…/flow` builds it, and it used to build everything in the tree:
+**15,603,458 B across 384 files**, of which `.bench/` was 82 files and 14.7 MB and
+`.claude/` was 185 files and 16.7 MB — the two of them 93% of the bytes against 19 files
+and 536 KB of `flow/`. Size was the smaller half of that: `.bench/` is recorded speech,
+which is a recording of the person who recorded it. Excluded now, with `tests/`,
+`LOOP_PLAN.md`, `NEEDS_YOU.md`, `docs/decisions.md` and `docs/history/` — this project
+talking to itself, worth reading in the repo and not part of an install. Measured after:
+**428,944 B across 72 files**, 2.7% of what shipped. `tests/test_packaging.py` builds the
+real artifact rather than reading the config, and asserts both halves — that none of it is
+in there, and that `flow/` still is, which is the half a whitelist gets wrong.
 
 Everything above was checked on 2026-07-31, Windows 11, CPU-only, int8. The rows marked **↻**
 were re-measured on 2026-08-01 — four when the indicator was added, and the Send rows when

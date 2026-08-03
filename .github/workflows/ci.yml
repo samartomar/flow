@@ -1,0 +1,63 @@
+# The gate that runs before anything is called a version.
+#
+# `release.yml` runs the suite too, but only on a `v*` tag — so between tags nothing was
+# checked, and the first thing that could find a broken push was a release. Release stays
+# tag-only and deliberate; this is the one that runs on the way in.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push to the same ref makes the first run's answer worthless before it lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    # Three platforms because the suite's own law is a claim about three of them — the
+    # platform decides what imports, `lite` decides what happens — and it had only ever
+    # been run on one. Flow is a Windows product; the other two legs are what keep the
+    # platform-honest imports honest.
+    name: suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing is a fact about that platform, and the other two answers are
+      # the ones that say whether it is specific to it.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # `flow.audio` imports sounddevice at module scope, and sounddevice is a ctypes
+      # wrapper: it ships PortAudio for Windows and macOS and finds it on the system
+      # everywhere else. Without this the Linux leg fails at import, before any test has
+      # an opinion about anything.
+      - name: PortAudio (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2
+
+      # `--frozen` and not a plain sync: a run that silently resolves a newer dependency
+      # is testing a tree nobody has, and reports green about it.
+      - run: uv sync --frozen
+
+      - name: unit suite
+        run: uv run python -m unittest discover -s tests
+
+      # Catches a syntax error in a module no test happens to import — the failure that
+      # a green suite is structurally unable to see.
+      - name: compile everything
+        run: uv run python -m compileall -q flow scripts
+
+      # And an entry point that cannot boot at all, which is the one thing every user
+      # does first and no unit test does.
+      - name: the entry point starts
+        run: uv run flow --help
