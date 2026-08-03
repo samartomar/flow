@@ -15,7 +15,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from collections import Counter  # noqa: E402
+
 from flow import SAMPLE_RATE  # noqa: E402
+from flow import edits  # noqa: E402
 from flow.audio import (  # noqa: E402
     BLOCK,
     FLOOR_MAX_DB,
@@ -789,3 +792,150 @@ class TestTheWorkspaceRecents(unittest.TestCase):
         self.assertEqual(path_key(r"D:\dev\X"), path_key("D:/DEV/x/"))
         self.assertIsNone(path_key(None))
         self.assertIsNone(path_key(""))
+
+
+def written(**fields) -> Profile:
+    """A profile loaded from a schema-1 file carrying exactly `fields`."""
+    path = Path(tempfile.mkdtemp()) / "profile.json"
+    path.write_text(json.dumps({"schema": 1, **fields}), encoding="utf-8")
+    return Profile(path)
+
+
+class TestAWrongTypeCostsItsFieldAndNothingElse(unittest.TestCase):
+    """PERSONAL-01: the schema number was checked and the fields were not.
+
+    `Profile.__init__`'s own docstring has promised since it was written that "a corrupt
+    file must degrade to defaults rather than to a stack trace", and `load()` honoured
+    exactly one half of that: valid JSON with the right `schema` was trusted field by
+    field. So a file that is *syntactically* perfect and semantically nonsense — the
+    shape a hand-edit or a half-written sync produces — took the app down at startup, or
+    worse, loaded and exploded later in arithmetic a long way from the cause.
+
+    Per-field and not per-file, which is the distinction that matters to somebody with a
+    calibration in there. One bad key must not cost a measured room.
+    """
+
+    def test_a_numeric_send_word_degrades_to_the_shipped_one(self):
+        # The audit's first reproduction: `AttributeError: 'int' object has no attribute
+        # 'strip'`, raised inside `load()` during `Profile()` — before the pill exists.
+        self.assertEqual(written(send_word=42).send_word, edits.SEND_WORD)
+
+    def test_a_scalar_workspaces_does_not_become_five_one_letter_entries(self):
+        # Reported as a TypeError and it is not one — it is worse. `[str(w) for w in
+        # "C:/one"]` iterates the *string*, so the recents menu filled with 'C', ':',
+        # '/', 'o', 'n' and nothing raised at all.
+        self.assertEqual(written(workspaces="C:/one").workspaces, [])
+
+    def test_a_scalar_dismissed_degrades_to_empty(self):
+        self.assertEqual(written(dismissed="a -> b").dismissed, set())
+
+    def test_a_string_calibration_value_never_reaches_arithmetic(self):
+        # The nastiest of the four, because it loads clean and detonates later: the gate
+        # subtracts a margin from `floor_db` on the first block of audio.
+        p = written(floor_db="-60", speech_db="-20", confidence="0.9")
+        self.assertIsNone(p.floor_db)
+        self.assertIsNone(p.speech_db)
+        self.assertIsNone(p.confidence)
+        self.assertFalse(p.calibrated)
+
+    def test_a_string_false_is_a_wrong_type_and_not_a_truthy(self):
+        # `bool("false")` is True, so writing the obvious thing in an editor turned the
+        # setting *on*. A wrong type takes the default; it does not get interpreted.
+        self.assertIs(written(auto_ask="false").auto_ask, True)
+        self.assertIs(written(auto_ask=False).auto_ask, False)
+        self.assertIs(written(auto_ask=0).auto_ask, True, "0 is not a boolean here")
+
+    def test_every_persisted_field_survives_every_wrong_shape(self):
+        """The table the item asked for: no shape of any field may raise.
+
+        Driven off `save()`'s own payload keys rather than a list written here, so a
+        field added later without a validator fails this immediately instead of being
+        discovered by whoever hand-edits their profile next.
+        """
+        reference = tmp_profile()
+        reference.save()
+        keys = set(json.loads(reference.path.read_text(encoding="utf-8"))) - {"schema"}
+        self.assertGreaterEqual(len(keys), 13, "the payload shrank; check this list")
+        shapes = [42, -1, 0, 3.5, "text", "", "  ", True, False, None,
+                  [], {}, ["a"], {"a": 1}, {"a": "b"}, [None], [[]], float("nan"),
+                  float("inf"), {"a": -1}, {"a": True}]
+        for key in sorted(keys):
+            for shape in shapes:
+                with self.subTest(field=key, shape=shape):
+                    p = written(**{key: shape})
+                    # Loaded, and every field is usable without a type check by callers.
+                    self.assertIsInstance(p.send_word, str)
+                    self.assertIsInstance(p.send_enter_word, str)
+                    self.assertIsInstance(p.auto_ask, bool)
+                    self.assertIsInstance(p.workspaces, list)
+                    self.assertIsInstance(p.dismissed, set)
+                    self.assertIsInstance(p.pairs, Counter)
+                    self.assertIsInstance(p.misroutes, Counter)
+                    for number in (p.floor_db, p.speech_db, p.confidence,
+                                   p.calibrated_at):
+                        self.assertTrue(number is None
+                                        or isinstance(number, (int, float)))
+                    for text in (p.voice, p.workspace, p.calibrated_device):
+                        self.assertTrue(text is None or isinstance(text, str))
+                    # And usable: the arithmetic and the string ops the app performs.
+                    if p.calibrated:
+                        self.assertIsInstance(p.floor_db - 10.0, float)
+                    p.send_word.strip()
+                    [w.strip() for w in p.workspaces]
+                    p.save()
+
+    def test_one_bad_field_does_not_cost_a_measured_room(self):
+        # The whole point of per-field. Somebody's calibration is the expensive thing in
+        # this file and the one they cannot re-create by typing.
+        p = written(floor_db=-61.5, speech_db=-24.0, confidence=0.88,
+                    send_word=42, workspaces="C:/one")
+        self.assertEqual(p.floor_db, -61.5)
+        self.assertEqual(p.speech_db, -24.0)
+        self.assertTrue(p.calibrated)
+        self.assertEqual(p.send_word, edits.SEND_WORD)
+        self.assertEqual(p.workspaces, [])
+
+    def test_a_non_finite_number_is_not_a_number(self):
+        # NaN and inf survive `json.loads` as floats and pass an `isinstance` check,
+        # then poison every comparison they touch — NaN is not even equal to itself.
+        self.assertIsNone(written(floor_db=float("nan")).floor_db)
+        self.assertIsNone(written(speech_db=float("inf")).speech_db)
+
+    def test_counters_reject_entries_that_are_not_word_and_count(self):
+        self.assertEqual(written(pairs=["a", "b"]).pairs, Counter())
+        self.assertEqual(written(pairs={"a -> b": "lots"}).pairs, Counter())
+        self.assertEqual(written(pairs={"a -> b": 2}).pairs, Counter({"a -> b": 2}))
+
+    def test_the_faults_are_named_rather_than_swallowed(self):
+        p = written(send_word=42, floor_db="-60", workspaces="C:/one")
+        self.assertEqual(sorted(p.faults), ["floor_db", "send_word", "workspaces"])
+        self.assertEqual(written(send_word="tango").faults, [])
+
+
+class TestAValidProfileIsUnmoved(unittest.TestCase):
+    """The guard must not rewrite a good file, which is how a validator earns its keep."""
+
+    def test_a_full_valid_profile_round_trips_byte_identical(self):
+        p = tmp_profile()
+        p.floor_db, p.speech_db, p.confidence = -61.5, -24.0, 0.88
+        p.calibrated_at, p.calibrated_device = 1_700_000_000.0, "USB Mic"
+        p.voice, p.auto_ask = "Microsoft Mark", False
+        p.send_word, p.send_enter_word = "tango", "enter tango"
+        p.workspace = "D:/dev/flow"
+        p.workspaces = ["D:/dev/flow", "D:/dev/other"]
+        p.pairs = Counter({"sameer -> Samir": 2})
+        p.misroutes = Counter({"delete tuesday": 1})
+        p.dismissed = {"a -> b", "c -> d"}
+        p.save()
+        first = p.path.read_text(encoding="utf-8")
+
+        again = Profile(p.path)
+        self.assertEqual(again.faults, [], "a valid profile reported a fault")
+        again.save()
+        self.assertEqual(p.path.read_text(encoding="utf-8"), first)
+
+    def test_an_integer_calibration_stays_an_integer(self):
+        # Coercing to float would be a silent rewrite of a file the user can read, and
+        # would break the byte-identical round trip above for anyone who hand-wrote one.
+        self.assertEqual(written(floor_db=-60).floor_db, -60)
+        self.assertIsInstance(written(floor_db=-60).floor_db, int)

@@ -27,6 +27,7 @@ module that could send anything anywhere.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from collections import Counter
@@ -34,6 +35,82 @@ from pathlib import Path
 from typing import Sequence
 
 from . import edits
+
+
+# -- per-field validation ---------------------------------------------------
+#
+# The schema number was checked and the fields were not, so a file that is
+# *syntactically* perfect and semantically nonsense — what a hand-edit or a half-written
+# sync produces — took the app down inside `Profile()`, before the pill existed. Worse in
+# the quiet cases: a string where a number belongs loads clean and detonates later, in
+# gate arithmetic a long way from the cause.
+#
+# Each of these answers "is this usable as the thing it claims to be", never "can I coerce
+# it into one". Coercion is how `"false"` became `True` and how `"C:/one"` became five
+# one-character workspaces — both silent, both worse than the crash they avoided.
+
+
+def _text(value, default=None):
+    """A non-blank string, or `default`."""
+    return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+def _number(value, default=None):
+    """A finite real number, or `default`.
+
+    Returned as stored rather than coerced to float, so a hand-written integer survives a
+    load/save round trip unchanged — a validator that quietly rewrites the file it is
+    protecting has not protected it.
+
+    `bool` is excluded deliberately: it is a subclass of `int` in Python, so `True` would
+    otherwise pass as the number 1 and calibrate a room to 1 dB. Non-finite is excluded
+    because NaN and inf survive `json.loads` as genuine floats and then poison every
+    comparison they reach — NaN is not equal to itself.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    return value if math.isfinite(value) else default
+
+
+def _flag(value, default: bool) -> bool:
+    """A real boolean, or `default`. A string is a wrong type, not a truthy."""
+    return value if isinstance(value, bool) else default
+
+
+def _text_list(value, cap: int) -> list[str]:
+    """Non-blank strings from a list, bounded. Anything else is an empty list.
+
+    The `isinstance` check is the whole fix for the workspaces case: iterating a *string*
+    yields its characters, so `"C:/one"` filled the recents menu with `C`, `:`, `/`, `o`,
+    `n` and raised nothing at all.
+    """
+    if not isinstance(value, list):
+        return []
+    return [t for t in (_text(v) for v in value) if t][:cap]
+
+
+def _text_set(value) -> set[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return set()
+    return {t for t in (_text(v) for v in value) if t}
+
+
+def _counter(value) -> Counter:
+    """`{phrase: positive count}`. Entries that are not that shape are dropped.
+
+    Per-entry rather than per-field: one unparseable row in a learned-words file should
+    not cost every other word the user has taught this profile.
+    """
+    if not isinstance(value, dict):
+        return Counter()
+    out: Counter[str] = Counter()
+    for key, count in value.items():
+        name = _text(key)
+        if name is None or isinstance(count, bool) or not isinstance(count, int):
+            continue
+        if count > 0:
+            out[name] = count
+    return out
 
 DEFAULT_PATH = Path.home() / ".flow" / "profile.json"
 
@@ -158,6 +235,10 @@ class Profile:
         #: answer "yes" and is otherwise the only one Flow forgets. Additive, and schema
         #: stays 1: an older profile loads with an empty set, exactly as `voice` does.
         self.dismissed: set[str] = set()
+        #: Field names that were present in the file and unusable, so a caller can say so
+        #: rather than leaving the user to notice their setting reverted. Empty on a first
+        #: run and on any valid file.
+        self.faults: list[str] = []
         self.load()
 
     # -- persistence -------------------------------------------------------
@@ -169,30 +250,44 @@ class Profile:
             return False
         if not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
             return False
-        self.floor_db = raw.get("floor_db")
-        self.speech_db = raw.get("speech_db")
-        self.confidence = raw.get("confidence")
-        self.calibrated_at = raw.get("calibrated_at")
-        self.calibrated_device = raw.get("calibrated_device")
+        # Per field, and per field is the whole design. A calibration is the expensive
+        # thing in here and the one nobody can re-create by typing, so a nonsense
+        # `send_word` must cost the send word and nothing else. `faults` names what
+        # degraded, because a setting that silently reverts is indistinguishable from one
+        # that never saved.
+        self.faults = []
+
+        def take(key, validate, default=None):
+            present = key in raw and raw[key] is not None
+            value = validate(raw.get(key), default)
+            if present and value != default:
+                return value
+            if present and value == default and raw[key] != default:
+                self.faults.append(key)
+            return value
+
+        self.floor_db = take("floor_db", _number)
+        self.speech_db = take("speech_db", _number)
+        self.confidence = take("confidence", _number)
+        self.calibrated_at = take("calibrated_at", _number)
+        self.calibrated_device = take("calibrated_device", _text)
         # `bool(None)` is False, so a key that was never written — or written as null by
         # an older Flow — would read as a deliberate "off". Absent means the default.
-        stored = raw.get("auto_ask")
-        self.auto_ask = True if stored is None else bool(stored)
-        self.voice = raw.get("voice")
-        # `or` rather than a presence check: absent, null and blank all mean "use the
-        # shipped word", because none of them is somebody choosing silence.
-        self.send_word = (raw.get("send_word") or "").strip() or edits.SEND_WORD
-        self.send_enter_word = (
-            (raw.get("send_enter_word") or "").strip() or edits.SEND_ENTER_WORD
-        )
-        self.workspace = raw.get("workspace") or None
+        self.auto_ask = take("auto_ask", _flag, True)
+        self.voice = take("voice", _text)
+        # Absent, null and blank all mean "use the shipped word", because none of them is
+        # somebody choosing silence. A *wrong type* is different and is reported.
+        self.send_word = take("send_word", _text, edits.SEND_WORD)
+        self.send_enter_word = take("send_enter_word", _text, edits.SEND_ENTER_WORD)
+        self.workspace = take("workspace", _text)
         # Bounded on load, not only on save: the cap is a menu-stall budget, and a
         # hand-grown file must not buy a longer menu than the flag can.
-        self.workspaces = [str(w) for w in (raw.get("workspaces") or [])
-                           if str(w).strip()][:MAX_WORKSPACES]
-        self.pairs = Counter(raw.get("pairs") or {})
-        self.misroutes = Counter(raw.get("misroutes") or {})
-        self.dismissed = {str(k) for k in (raw.get("dismissed") or [])}
+        self.workspaces = take(
+            "workspaces", lambda v, _d: _text_list(v, MAX_WORKSPACES), []
+        )
+        self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
+        self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
+        self.dismissed = take("dismissed", lambda v, _d: _text_set(v), set())
         return True
 
     def save(self) -> bool:
