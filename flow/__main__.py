@@ -20,6 +20,7 @@ and nothing else. All the behaviour lives in the modules.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from .asr import FINAL_MODEL, PARTIAL_MODEL
@@ -56,6 +57,21 @@ def say(msg: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # First, before anything resolves anything. Windows searches the current directory
+    # ahead of PATH for a bare executable name, and Flow is launched *inside* project
+    # directories by design — the workshop is the product — so a repository carrying
+    # `codex.EXE` or `pwsh.EXE` supplies them. One variable closes that search for
+    # `shutil.which` *and* for `CreateProcess`, which is what makes it worth a line here
+    # rather than a check at each of the four call sites: it is inherited, so the `node`
+    # that `codex` starts is covered too, and nothing in this process can reach a
+    # resolver before argparse has even been built.
+    #
+    # `setdefault` rather than assignment: an owner who set this deliberately — including
+    # to `0`, wanting the old order for a build script — has said something, and
+    # overriding it would be a second surprise rather than a fix. The belt under this is
+    # `refine.trusted`, which needs no environment at all.
+    os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
+
     ap = argparse.ArgumentParser(prog="flow", description=__doc__)
     ap.add_argument(
         "--partial-model", default=PARTIAL_MODEL,

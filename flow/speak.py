@@ -31,11 +31,17 @@ Entering converse mode is the opt-in; `Session.muted` is the runtime toggle.
 from __future__ import annotations
 
 import base64
+import os
 import shutil
 import subprocess
 import threading
 import time
 from typing import NamedTuple
+
+# The only thing this module borrows from the CLI adapter, and it is borrowed rather than
+# copied for the reason `resolve` gives: a second resolver is how the two halves of a
+# lookup come to disagree. Nothing in `refine` imports back, so this stays a leaf edge.
+from .refine import trusted
 
 #: Rate is -10..10, 0 being the engine default. Slightly quick: these are short answers
 #: to a developer who is waiting, not an audiobook.
@@ -138,11 +144,43 @@ HOSTS = ("pwsh", "powershell")
 _HOST: str | None = None
 
 
+def _stock_host() -> str:
+    """`HOSTS[-1]` by its fixed location rather than by name.
+
+    Windows PowerShell 5.1 is part of the OS and lives at exactly this path on every
+    install, which is what makes it the guaranteed fallback in the first place — so it can
+    be *addressed*, and a thing that is addressed cannot be substituted.
+
+    Not checked for existence deliberately. If it were somehow absent, `Popen` raises the
+    `OSError` `_ensure` already handles and speech is simply off; a name that falls back to
+    a search would instead start whatever answers to it. Failing closed is the point.
+    """
+    if os.name != "nt":
+        return HOSTS[-1]
+    return os.path.join(os.environ.get("SystemRoot") or "C:\\Windows",
+                        "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
 def host() -> str:
-    """The PowerShell that both speaks and enumerates."""
+    """The PowerShell that both speaks and enumerates, as a path rather than a word.
+
+    It used to store the *name* it had looked up, which meant the lookup that decided
+    PowerShell was available and the search that actually starts it were two different
+    searches under two different rule sets, run seconds apart — and until `main()` closes
+    it, both consult the current directory first. Keeping what `which` returned collapses
+    them into one answer, and `refine.trusted` is what makes that answer a safe one.
+
+    The fallback is `_stock_host()` and not `HOSTS[-1]`, which is a correction the probe
+    made rather than a preference: a planted workspace holds *both* names, so both lookups
+    are refused, and a bare name handed to `Popen` is resolved by `CreateProcess` — from
+    the current directory first. The one branch that existed to be safe was the only one
+    left reaching the planted file.
+    """
     global _HOST
     if _HOST is None:
-        _HOST = next((h for h in HOSTS if shutil.which(h)), HOSTS[-1])
+        _HOST = next(
+            (found for h in HOSTS if (found := trusted(shutil.which(h)))), _stock_host()
+        )
     return _HOST
 
 

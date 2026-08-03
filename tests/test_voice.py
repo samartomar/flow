@@ -85,23 +85,36 @@ class TestPick(unittest.TestCase):
 
 
 class TestHost(unittest.TestCase):
+    """*Which* host is chosen. That it arrives as a path is `test_speak.py`'s question.
+
+    These three asserted the bare name until 2026-08-03, when SPEECH-04 made `host()`
+    keep what the lookup returned. The preference order they pin has not moved at all —
+    only what a chosen host is spelled as, which is why the edit is to the expectation
+    and not to the case.
+    """
+
     def test_the_modern_shell_is_preferred(self):
         with mock.patch("flow.speak.shutil.which", side_effect=lambda n: f"/x/{n}"), \
              mock.patch("flow.speak._HOST", None):
-            self.assertEqual(host(), "pwsh")
+            self.assertEqual(host(), "/x/pwsh")
 
     def test_it_falls_back_to_the_one_every_windows_has(self):
         with mock.patch("flow.speak.shutil.which",
                         side_effect=lambda n: None if n == "pwsh" else "/x/powershell"), \
              mock.patch("flow.speak._HOST", None):
-            self.assertEqual(host(), "powershell")
+            self.assertEqual(host(), "/x/powershell")
 
     def test_with_neither_found_it_still_returns_something_runnable(self):
         # Guessing beats raising: `Speaker` already degrades to silent when the host
-        # will not start, and `which` failing is not proof the shell is absent.
+        # will not start, and `which` failing is not proof the shell is absent. What the
+        # guess *is* changed with SPEECH-04 — `HOSTS[-1]` was a name, and a name reaching
+        # `Popen` is resolved by a search that reads the current directory first, so the
+        # branch that existed to be safe was the last one that was not.
         with mock.patch("flow.speak.shutil.which", return_value=None), \
              mock.patch("flow.speak._HOST", None):
-            self.assertEqual(host(), HOSTS[-1])
+            found = host()
+        self.assertTrue(found.lower().endswith(f"{HOSTS[-1]}.exe"), found)
+        self.assertNotEqual(found, HOSTS[-1], "a bare name is what CreateProcess searches")
 
 
 class TestEnumeration(unittest.TestCase):

@@ -26,9 +26,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import flow.__main__ as main_mod  # noqa: E402
 from cli_env import no_off_path_installs  # noqa: E402
 from flow.refine import MAX_CHARS, Cli, _split_tail, refine  # noqa: E402
 from flow.session import Session  # noqa: E402
+
+#: The tree the planted-workspace probe imports Flow from. A subprocess started in a
+#: temporary directory has no idea where this checkout is, and inheriting the parent's
+#: `sys.path` would defeat the point of running it somewhere else.
+REPO = Path(__file__).resolve().parent.parent
 
 CLI = Cli("codex", ("codex", "exec"))
 
@@ -809,3 +815,161 @@ class TestStdinIsACapabilityAndNotAGuess(unittest.TestCase):
         self.assertEqual(started.call_args.args[0][-1], "a\nprompt")
         self.assertEqual(started.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertIsNone(proc.communicate.call_args.kwargs.get("input"))
+
+
+def in_planted_workspace(snippet: str, *, guarded: bool) -> str:
+    """Run `snippet` in a fresh directory holding empty `pwsh`/`codex`/`claude` `.EXE`s.
+
+    A subprocess because both halves of the question are process-wide: the directory
+    Windows searches before PATH, and the environment variable that decides whether it
+    searches it at all. **Nothing planted is ever executed** — `shutil.which` and
+    `CreateProcess` both answer on presence, so presence is the whole probe, and a probe
+    that ran what it planted would be the attack it is testing for.
+
+    `guarded=False` clears `NoDefaultCurrentDirectoryInExePath`, which is what an ordinary
+    launch looks like: the audit shell exported it as `1`, and neither the User nor the
+    Machine scope on this machine sets it, so an app started from Explorer or a fresh
+    console gets the vulnerable search order.
+
+    The filter is case-insensitive deliberately. Windows stores environment keys
+    upper-cased, so `dict(os.environ).pop("NoDefaultCurrentDirectoryInExePath")` removes
+    nothing at all — a probe written the obvious way reports a clean tree while sitting in
+    a planted directory, which is the one failure a security probe must not have.
+    """
+    workspace = tempfile.mkdtemp(prefix="planted-")
+    try:
+        for name in ("pwsh.EXE", "powershell.EXE", "codex.EXE", "claude.EXE"):
+            (Path(workspace) / name).write_bytes(b"")
+        env = {k: v for k, v in os.environ.items()
+               if guarded or k.lower() != "nodefaultcurrentdirectoryinexepath"}
+        head = "import sys; sys.path.insert(0, %r)\n" % str(REPO)
+        done = subprocess.run(
+            [sys.executable, "-c", head + snippet], cwd=workspace, env=env,
+            capture_output=True, text=True, timeout=120,
+        )
+        if done.returncode:
+            raise AssertionError("probe failed:\n" + done.stderr[-2000:])
+        return done.stdout.strip()
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+class TestTheProbeCanSeeAHijack(unittest.TestCase):
+    """Before trusting the probe, show that the door it checks is really open.
+
+    Every assertion in the class below has the form "the planted file was not chosen",
+    and that shape passes just as happily when the probe is broken as when the code is
+    right. So this class asserts the opposite: with the guard off, the plain library call
+    underneath every resolver in Flow *does* pick the workspace copy.
+    """
+
+    def test_which_prefers_the_workspace_when_the_variable_is_cleared(self):
+        out = in_planted_workspace(
+            "import shutil\n"
+            "print(shutil.which('pwsh'), shutil.which('codex'), shutil.which('claude'))",
+            guarded=False,
+        )
+        self.assertEqual(out, ".\\pwsh.EXE .\\codex.EXE .\\claude.EXE")
+
+    def test_and_does_not_when_it_is_set(self):
+        # The other row of the same table, and the correction item 46 made to CLI-01: the
+        # audit shell had this set, so the finding's evidence sentence described a
+        # configuration its own reproduction needed cleared. The defect is real; the shell
+        # it was measured in was not the vulnerable one.
+        out = in_planted_workspace("import shutil\nprint(shutil.which('pwsh'))",
+                                   guarded=True)
+        self.assertNotEqual(out, ".\\pwsh.EXE")
+
+
+class TestExecutablesComeFromTrustedDirectories(unittest.TestCase):
+    """CLI-01 / SPEECH-04: a repository-local `codex.EXE` must never be the one that runs.
+
+    Flow is *designed* to be launched inside a project directory — `--cwd` is the workshop
+    and the workshop is the product — so a current-directory-first search is not a corner
+    case here, it is the ordinary run. Cloning a repository would be enough.
+    """
+
+    def test_a_planted_agent_cli_is_never_resolved(self):
+        out = in_planted_workspace(
+            "from flow import refine\n"
+            "print(refine.resolve(refine.named('codex')))",
+            guarded=False,
+        )
+        self.assertNotIn(".\\codex", out)
+        self.assertNotIn("planted-", out)
+
+    # The speech host's half of this probe lives in `test_speak.py`, where it can assert
+    # the answer is absolute. Written here first, it passed against the broken tree: a
+    # bare `"pwsh"` contains no `.\` either, so "the planted file was not returned" was
+    # true of a value that had not resolved anything at all.
+
+    def test_a_relative_result_is_refused_even_with_the_variable_gone(self):
+        # The belt for the brace: `main()` sets the variable, and this is what answers if
+        # a caller resolves before `main()` runs, or if a future entry point never calls
+        # it. Nothing here depends on the process environment.
+        with mock.patch("shutil.which", resolves_to(".\\codex.EXE")), \
+                no_off_path_installs():
+            self.assertIsNone(refine_mod.resolve(refine_mod.named("codex")))
+
+    def test_a_result_inside_the_current_directory_is_refused(self):
+        planted = str(Path(os.getcwd()) / "codex.EXE")
+        with mock.patch("shutil.which", resolves_to(planted)), no_off_path_installs():
+            self.assertIsNone(refine_mod.resolve(refine_mod.named("codex")))
+
+    def test_an_ordinary_absolute_path_is_still_accepted(self):
+        # The refusal must not become "nothing resolves", which would take refine away
+        # from every machine rather than from the attacker.
+        found = str(Path(tempfile.gettempdir()) / "elsewhere" / "codex.EXE")
+        with mock.patch("shutil.which", resolves_to(found)), no_off_path_installs():
+            self.assertEqual(refine_mod.resolve(refine_mod.named("codex")), found)
+
+    def test_the_off_path_probe_still_answers_when_which_is_refused(self):
+        # A workspace copy shadowing a real install must leave the real one reachable
+        # rather than take the CLI away: the probe is a list of literal paths in the entry.
+        real = str(Path(tempfile.gettempdir()) / "Kiro-Cli" / "kiro-cli.exe")
+        with mock.patch("shutil.which", resolves_to(".\\kiro-cli.EXE")), \
+                mock.patch.object(refine_mod, "probed", return_value=real):
+            self.assertEqual(refine_mod.resolve(refine_mod.named("kiro-cli")), real)
+
+    def test_taskkill_is_the_one_in_system32(self):
+        # `_kill_tree` runs on the cancel path, which is exactly when the user is already
+        # unhappy, and a bare `taskkill` is the same door one process along.
+        proc = mock.Mock(pid=4321)
+        proc.poll.return_value = None
+        with mock.patch("os.name", "nt"), mock.patch("subprocess.run") as ran:
+            refine_mod._kill_tree(proc)
+        argv0 = ran.call_args.args[0][0]
+        self.assertTrue(os.path.isabs(argv0), argv0)
+        self.assertTrue(argv0.lower().endswith("system32\\taskkill.exe"), argv0)
+
+
+class TestMainClosesTheDoorForEveryChild(unittest.TestCase):
+    """One line at the top of `main()` hardens `shutil.which` *and* `CreateProcess`.
+
+    The refusals above only cover what Flow resolves itself. This covers every process any
+    of them starts — `codex` spawning `node`, PowerShell loading a module — because the
+    variable is inherited and Windows honours it in its own search.
+    """
+
+    def test_main_sets_the_guard_before_anything_resolves(self):
+        out = in_planted_workspace(
+            "import os\n"
+            "from flow.__main__ import main\n"
+            "try:\n"
+            "    main(['--not-a-flag'])\n"
+            "except SystemExit:\n"
+            "    pass\n"
+            "print(os.environ.get('NoDefaultCurrentDirectoryInExePath'))",
+            guarded=False,
+        )
+        self.assertEqual(out.splitlines()[-1], "1")
+
+    def test_an_owner_who_set_it_means_it(self):
+        # `setdefault`, not assignment: somebody who deliberately wants the old search
+        # order — a build script that relies on it, say — has said so, and overriding that
+        # would be a second surprise rather than a fix.
+        with mock.patch.dict(os.environ,
+                             {"NoDefaultCurrentDirectoryInExePath": "0"}, clear=False):
+            with self.assertRaises(SystemExit):
+                main_mod.main(["--not-a-flag"])
+            self.assertEqual(os.environ["NoDefaultCurrentDirectoryInExePath"], "0")

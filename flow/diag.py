@@ -238,13 +238,32 @@ def model_revision(name: str) -> str:
         return ""
 
 
+def _resolved_cli(name: str) -> str | None:
+    """Where `name` is, asked of the one resolver rather than of PATH a second time."""
+    from . import refine
+
+    cli = refine.named(name)
+    return refine.resolve(cli) if cli is not None else None
+
+
 def _cli_version(name: str) -> str:
-    """`<name> --version`, reduced to the version in it. "" if it will not say."""
+    """`<name> --version`, reduced to the version in it. "" if it will not say.
+
+    The absolute path, because this is the earliest thing in the app to start a foreign
+    process: `identity()` runs on a profiled startup thread, before a word has been
+    dictated, purely to label a measurement. A diagnostic nobody reads was the first
+    place a workspace `codex.EXE` could have been reached.
+    """
     import subprocess
 
+    exe = _resolved_cli(name)
+    if exe is None:
+        # Same answer as before for a CLI that is not here — what changed is that no
+        # process is started to find that out, so there is no search to be won.
+        return ""
     try:
         done = subprocess.run(
-            [name, "--version"], capture_output=True, text=True,
+            [exe, "--version"], capture_output=True, text=True,
             timeout=_VERSION_TIMEOUT_SEC, stdin=subprocess.DEVNULL,
             encoding="utf-8", errors="replace",
         )

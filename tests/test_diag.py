@@ -388,3 +388,51 @@ class TestWhatProducedAMeasurement(Temp):
         with mock.patch("flow.diag.identity", side_effect=OSError("no")):
             record_identity(Diag(self.path), models=())
         self.assertEqual(self.lines(), [])
+
+
+class TestVersionProbesRunAResolvedPath(unittest.TestCase):
+    """CLI-01, one process further out than anybody was looking.
+
+    `identity()` labels a measurement, so it is the least suspicious code in the repo —
+    and it starts `codex --version` and `claude --version` on a profiled startup thread,
+    which means a diagnostic nobody reads was the earliest thing in the app to hand a bare
+    name to `CreateProcess`. It runs before a single word has been dictated.
+    """
+
+    def test_the_probe_launches_an_absolute_path(self):
+        from flow import diag as diag_mod
+
+        with mock.patch.object(diag_mod, "_resolved_cli",
+                               return_value="C:\\tools\\codex.EXE"), \
+                mock.patch("subprocess.run") as ran:
+            ran.return_value = mock.Mock(stdout="codex 1.2.3", stderr="")
+            diag_mod._cli_version("codex")
+        argv = ran.call_args.args[0]
+        self.assertEqual(argv, ["C:\\tools\\codex.EXE", "--version"])
+
+    def test_an_unresolvable_cli_is_not_probed_at_all(self):
+        # Previously a bare name went to `Popen` and the OSError was swallowed into "".
+        # The answer is the same string; what changed is that no process is started, so
+        # there is no search for a workspace copy to win.
+        from flow import diag as diag_mod
+
+        with mock.patch.object(diag_mod, "_resolved_cli", return_value=None), \
+                mock.patch("subprocess.run") as ran:
+            self.assertEqual(diag_mod._cli_version("nosuchtool"), "")
+        ran.assert_not_called()
+
+    def test_it_asks_the_one_resolver_rather_than_its_own(self):
+        # The point of the shared `refine.resolve` is that a second resolver cannot appear
+        # without somebody noticing. This is the check that notices.
+        from flow import diag as diag_mod
+        from flow import refine as refine_mod
+
+        with mock.patch.object(refine_mod, "resolve",
+                               return_value="C:\\tools\\claude.EXE") as resolved:
+            self.assertEqual(diag_mod._resolved_cli("claude"), "C:\\tools\\claude.EXE")
+        self.assertEqual(resolved.call_args.args[0].name, "claude")
+
+    def test_a_name_no_entry_claims_resolves_to_nothing(self):
+        from flow import diag as diag_mod
+
+        self.assertIsNone(diag_mod._resolved_cli("definitely-not-a-cli"))

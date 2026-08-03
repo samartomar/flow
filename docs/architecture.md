@@ -1105,6 +1105,30 @@ policy here; it is enforced by absence.
     a rewrite with no reader. The kill is `taskkill /T`, because `codex` is a launcher
     and killing a launcher leaves the `node` doing the work — still holding the pipe it
     inherited, so the read would block on it anyway.
+13. **Every executable comes from a trusted directory, as an absolute path.** Windows
+    searches the current directory ahead of PATH for a bare name, and Flow is launched
+    *inside* project directories by design — `--cwd` is the workshop and the workshop is
+    the product — so this is the ordinary run rather than a corner of it. Cloning a
+    repository that carries `codex.EXE` or `pwsh.EXE` is the whole attack.
+
+    Two mechanisms, and the reason for both is that either alone leaves a door. `main()`
+    sets `NoDefaultCurrentDirectoryInExePath` before argparse is built: one line, and it
+    closes the search for `shutil.which` *and* for `CreateProcess`, which means it covers
+    the processes Flow's children start as well as Flow's own. `setdefault` and not
+    assignment — an owner who set it, including to `0`, has said something. Under it sits
+    `refine.trusted`, which needs no environment at all: a `which` result must be absolute
+    and must not live in the current directory, and a refused one falls through to the
+    entry's own `probed` list so a workspace copy shadowing a real install cannot take the
+    CLI away from the user.
+
+    The corollary is that a *name* is never carried to a launch. `speak.host()` keeps the
+    path the lookup returned rather than the word it looked up, `diag._cli_version` runs
+    what `refine.resolve` returned instead of a bare `codex`, and stock Windows tools are
+    addressed at `%SystemRoot%\System32` — `taskkill.exe` on the cancel path, and the
+    guaranteed `powershell.exe` when neither host resolves. That last one is where the
+    planted-workspace probe earned its keep: a workspace holds *both* host names, so both
+    lookups are refused and the fallback is the branch that runs, and while it was a bare
+    name the one branch that existed to be safe was the only unsafe one left.
 
 ### Gaps that are one fix away from being invariants
 
@@ -1130,7 +1154,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1050 tests, ~16 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1110 tests, ~26 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

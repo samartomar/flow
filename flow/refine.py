@@ -234,6 +234,31 @@ def probed(cli: Cli) -> str | None:
     return None
 
 
+def trusted(path: str | None) -> str | None:
+    """`path`, if it came from somewhere a program is allowed to come from. Else None.
+
+    Windows searches the current directory before PATH for a bare name, so a repository
+    holding `codex.EXE` supplies the codex — and Flow is launched *inside* project
+    directories by design, because `--cwd` is the workshop and the workshop is the
+    product. Cloning a repository is the whole attack.
+
+    `main()` sets `NoDefaultCurrentDirectoryInExePath`, which closes the search itself and
+    for every child process too. This is the belt under that brace: a caller resolving
+    before `main()` runs, an embedding that never calls it, or a PATH with `.` written
+    into it all reach here instead. Two rules, and neither needs the environment to have
+    been arranged — a result must be absolute, and its directory must not be the one Flow
+    happens to be sitting in.
+    """
+    if not path or not os.path.isabs(path):
+        return None
+    try:
+        if os.path.realpath(os.path.dirname(path)) == os.path.realpath(os.getcwd()):
+            return None
+    except OSError:
+        return None
+    return path
+
+
 def resolve(cli: Cli) -> str | None:
     """Where this CLI actually is, or None. The one answer detection and launch share.
 
@@ -241,8 +266,12 @@ def resolve(cli: Cli) -> str | None:
     while `CreateProcess` appends only `.exe`, which is how startup once named a CLI that
     every call then failed to start. One function now, so a second resolver cannot appear
     without somebody noticing it.
+
+    A refused `which` result falls through to the entry's own probe rather than ending the
+    search: a workspace copy shadowing a real install must not take the CLI away from the
+    user, and `probed` is a list of literal paths written in the entry itself.
     """
-    return shutil.which(cli.argv[0]) or probed(cli)
+    return trusted(shutil.which(cli.argv[0])) or probed(cli)
 
 
 def available() -> list[Cli]:
@@ -389,6 +418,16 @@ def _split_tail(text: str) -> tuple[str, str]:
 _POLL_SEC = 0.1
 
 
+def _system_tool(name: str) -> str:
+    """A stock Windows tool, addressed rather than looked up.
+
+    `%SystemRoot%` and not a hard-coded `C:\\Windows`: the variable is what Windows itself
+    uses, and a machine that installed to another drive is unusual rather than impossible.
+    The literal is only the floor under a stripped environment.
+    """
+    return os.path.join(os.environ.get("SystemRoot") or "C:\\Windows", "System32", name)
+
+
 def _kill_tree(proc: subprocess.Popen) -> None:
     """End the call and everything it started.
 
@@ -399,13 +438,18 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     thing it timed out on carried on. Windows has no process group to signal, so the
     tree walk is `taskkill /T`; it ships with the OS and costs no dependency (R16),
     and `send_check.py` already reaps its target window the same way.
+
+    By its fixed location rather than by name. This runs on the cancel path, which is when
+    the user is already unhappy, and a bare name here is the same current-directory door
+    `trusted()` closes one process along — with the difference that this one would be
+    handed the cwd the *call* was made in, which is the workshop by construction.
     """
     if proc.poll() is not None:
         return
     if os.name == "nt":
         try:
             subprocess.run(
-                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                [_system_tool("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True,
                 timeout=5.0,
             )
