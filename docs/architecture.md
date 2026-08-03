@@ -1523,8 +1523,13 @@ stops, then the full unit suite, then the PyInstaller build from `packaging/flow
 then `flow.exe --help` against the bundle it just made, then the zip is attached to the
 release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
 every commit passes, and a bundle that builds but cannot start does not reach a Releases
-page. Measured on the first build (2026-08-01): 323 MB unpacked, 125 MB zipped, models
-excluded — they download to the HF cache on first decode exactly as a dev install does.
+page. Re-measured on the **v0.2.0** asset, downloaded from
+`releases/latest/download/flow-windows-x64.zip` and unzipped (2026-08-03): **338,857,704 B
+unpacked across 1,196 files, 132,471,792 B zipped** — 323 MB and 126 MB, against the first
+build's 323 MB and 125 MB on 2026-08-01. Models excluded; they download to the HF cache on
+first decode exactly as a dev install does. Re-taken from the published asset rather than
+from a local build, because the first-build numbers stop being true the moment a second
+build exists, and the zip a stranger receives is the one the README's figures are about.
 
 **And the suite is machine-independent, which it was not until CI said so.** The first
 release run failed the gate with 14 tests that had never failed on the development
@@ -1548,7 +1553,7 @@ re-measured on 2026-08-01 — see the loading section — and now reads 38 → 1
 | Check | Command | Result |
 |---|---|---|
 | bench provenance | `uv run python scripts/command_bench.py`, twice | the `identity` block resolves here (faster-whisper 1.2.1, ctranslate2 4.8.1, date) and the non-identity content of two consecutive runs is **identical**, so item 14's byte-for-byte idiom survives the addition |
-| unit tests ↻ | `uv run python -m unittest discover -s tests` | **766 passed**, 13.5 s (2026-08-01; the row read 437 for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
+| unit tests ↻ | `uv run python -m unittest discover -s tests` | **1251 passed**, 36.4 s (2026-08-03, the v0.2.0 release gate; the row read 437, then 766, for long enough to be worth saying out loud — the count is re-read here whenever the suite is) |
 | command grammar ↻ | `uv run python scripts/command_bench.py` | unchanged by every 2026-08-01 grammar addition, which is the point of running it: recall 100% snapped on all six corruption classes, 5/20 adversarial misroutes, **0 misroutes on 580 real utterances**, and the threshold sweep identical row for row. Run again *before* admitting the `follow and` elision, as the admission gate rather than as a check afterwards — every figure identical, and so was the rest of the file bar its date |
 | end-to-end ↻ | `uv run python scripts/selfdrive.py` | **64/64 checks passed**, including a live `codex` converse round trip and a spoken reply |
 | **does Send arrive** ↻ | `uv run python scripts/send_check.py --live`, a real mouse click on the chip | **before: 6/12.** Extended styles `0x00080088` on both toplevels; an ordinary window *unchanged — nothing arrived*; a console with *nothing there to run*; and `paste()` reported success both times. **After: 18/18**, three consecutive runs. `0x08080088` on both, the marker text in the window, the command in the console, and it ran only once Enter was pressed by hand |
