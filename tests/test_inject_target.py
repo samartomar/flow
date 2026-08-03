@@ -899,3 +899,175 @@ class TestARefusedSendGivesTheTransactionUp(unittest.TestCase):
         _after, clip = self._refused_then_ordinary("one\ntwo")
         self.assertEqual(clip.text, "one\ntwo",
                          "an abandoned debt was restored over the refused payload")
+
+
+class TestWhatCannotComeBackIsNamed(unittest.TestCase):
+    """DESKTOP-03, bounded: the limitation was honest in a comment and nowhere else.
+
+    `set_clipboard_text` calls `EmptyClipboard()`, which destroys every format, and only
+    `CF_UNICODETEXT` is captured — so a clipboard holding a screenshot or a file
+    selection is erased by a Send and never restored. `inject.py` said so in a comment,
+    which is the one place the user is guaranteed never to look.
+
+    Preserving the formats is the fix this deliberately is not: enumerating and copying an
+    arbitrary OLE data object is a great deal of ctypes for a path ending with Flow owning
+    a copy of somebody's screenshot. Saying what is about to be lost, before losing it,
+    costs one enumeration that copies no data at all.
+    """
+
+    def test_an_image_is_named(self):
+        from flow.inject import CF_DIB, unrestorable
+
+        self.assertEqual(unrestorable([CF_DIB]), "an image")
+
+    def test_files_are_named(self):
+        from flow.inject import CF_HDROP, unrestorable
+
+        self.assertEqual(unrestorable([CF_HDROP]), "files")
+
+    def test_both_at_once_read_as_a_sentence(self):
+        from flow.inject import CF_BITMAP, CF_HDROP, unrestorable
+
+        self.assertEqual(unrestorable([CF_BITMAP, CF_HDROP]), "an image and files")
+
+    def test_an_ordinary_text_clipboard_says_nothing(self):
+        # Measured on this machine, and it is the reason the rule can be this narrow:
+        # a plain text clipboard reads CF_UNICODETEXT, CF_LOCALE, CF_TEXT, CF_OEMTEXT —
+        # every one of them synthesised by Windows from the single format Flow saves. Put
+        # the text back and they all come back with it, so there is nothing to warn about.
+        from flow.inject import CF_LOCALE, CF_OEMTEXT, CF_TEXT, CF_UNICODETEXT, unrestorable
+
+        self.assertEqual(
+            unrestorable([CF_UNICODETEXT, CF_LOCALE, CF_TEXT, CF_OEMTEXT]), ""
+        )
+
+    def test_rich_text_alongside_plain_text_says_nothing(self):
+        # A registered format — "HTML Format", "Rich Text Format" — travelling with
+        # CF_UNICODETEXT is the ordinary result of copying from a browser or a word
+        # processor, and the *content* does come back; only styling is lost. Warning here
+        # would fire on almost every paste, and a warning that fires constantly is one
+        # nobody reads by the time it matters.
+        from flow.inject import CF_UNICODETEXT, unrestorable
+
+        self.assertEqual(unrestorable([CF_UNICODETEXT, 49_384]), "")
+
+    def test_a_registered_format_with_no_text_at_all_is_a_total_loss(self):
+        # The other half of the same judgement: with no CF_UNICODETEXT there is nothing
+        # for the restore to put back, so whatever that format held is simply gone.
+        from flow.inject import unrestorable
+
+        self.assertEqual(unrestorable([49_384]), "its contents")
+
+    def test_an_empty_clipboard_says_nothing(self):
+        from flow.inject import unrestorable
+
+        self.assertEqual(unrestorable([]), "")
+
+
+class TestTheWarningComesBeforeTheDestruction(unittest.TestCase):
+    """Order is the whole feature. Said afterwards it is a report, not a warning."""
+
+    def _paste_over(self, formats):
+        take_warnings()
+        events: list[str] = []
+        with mock.patch("flow.inject.resolve", return_value=EDITOR), \
+                mock.patch("flow.inject.clipboard_formats", return_value=formats), \
+                mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+                mock.patch("flow.inject.set_clipboard_text",
+                           side_effect=lambda t: (events.append("write"), True)[1]), \
+                mock.patch("flow.inject._warn",
+                           side_effect=lambda line: events.append(f"warn:{line}")), \
+                mock.patch("flow.inject._send", side_effect=all_inserted):
+            from flow.inject import paste
+
+            ok = paste("deploy it", restore_clipboard=True)
+        take_warnings()
+        return ok, events
+
+    def test_the_image_warning_precedes_the_write(self):
+        from flow.inject import CF_DIB
+
+        ok, events = self._paste_over([CF_DIB])
+        self.assertTrue(ok, "the user asked to send; this warns, it does not refuse")
+        self.assertEqual(len(events), 2, events)
+        self.assertTrue(events[0].startswith("warn:"), events)
+        self.assertEqual(events[1], "write")
+
+    def test_the_warning_says_what_and_says_it_will_not_come_back(self):
+        from flow.inject import CF_HDROP
+
+        _ok, events = self._paste_over([CF_HDROP])
+        self.assertIn("files", events[0])
+        self.assertIn("not be restored", events[0])
+
+    def test_a_text_clipboard_produces_no_extra_line(self):
+        from flow.inject import CF_UNICODETEXT
+
+        _ok, events = self._paste_over([CF_UNICODETEXT])
+        self.assertEqual(events, ["write"])
+
+
+class TestTheClipboardSurvivesAFailedAllocation(unittest.TestCase):
+    """`EmptyClipboard()` ran first, so a failure after it erased what it had.
+
+    The audit's own sentence: "allocation/write failure after EmptyClipboard() can also
+    erase the original before paste begins". It is the narrowest possible window and it
+    costs nothing to close — the handle can be filled before the clipboard is opened at
+    all, and then the destructive step and the replacement are adjacent.
+    """
+
+    def _write_with(self, alloc=1234, lock=5678, setdata=1, opens=True):
+        calls: list[str] = []
+        user32 = mock.Mock()
+        kernel32 = mock.Mock()
+        user32.OpenClipboard.side_effect = lambda h: (calls.append("open"), opens)[1]
+        user32.EmptyClipboard.side_effect = lambda: calls.append("empty") or 1
+        user32.SetClipboardData.side_effect = lambda f, h: (calls.append("set"), setdata)[1]
+        user32.CloseClipboard.side_effect = lambda: calls.append("close") or 1
+        kernel32.GlobalAlloc.side_effect = lambda f, n: (calls.append("alloc"), alloc)[1]
+        kernel32.GlobalLock.side_effect = lambda h: (calls.append("lock"), lock)[1]
+        kernel32.GlobalUnlock.side_effect = lambda h: 1
+        kernel32.GlobalFree.side_effect = lambda h: calls.append("free") or 0
+        with mock.patch("flow.inject.user32", user32), \
+                mock.patch("flow.inject.kernel32", kernel32), \
+                mock.patch("flow.inject.ctypes.memmove"):
+            from flow.inject import set_clipboard_text
+
+            ok = set_clipboard_text("deploy it")
+        return ok, calls
+
+    def test_a_failed_allocation_never_empties_the_clipboard(self):
+        ok, calls = self._write_with(alloc=0)
+        self.assertFalse(ok)
+        self.assertNotIn("empty", calls, "the original was erased for a write that failed")
+
+    def test_a_failed_lock_never_empties_the_clipboard(self):
+        ok, calls = self._write_with(lock=0)
+        self.assertFalse(ok)
+        self.assertNotIn("empty", calls)
+        self.assertIn("free", calls, "the handle leaked for the life of the process")
+
+    def test_the_ordinary_write_still_empties_then_sets(self):
+        ok, calls = self._write_with()
+        self.assertTrue(ok)
+        self.assertEqual([c for c in calls if c in ("empty", "set", "close")],
+                         ["empty", "set", "close"])
+
+    def test_the_buffer_is_filled_before_the_clipboard_is_even_opened(self):
+        # The property that makes the window closed rather than merely narrow: by the
+        # time anything destructive can run, the replacement already exists.
+        _ok, calls = self._write_with()
+        self.assertLess(calls.index("alloc"), calls.index("open"))
+        self.assertLess(calls.index("lock"), calls.index("open"))
+
+    def test_a_clipboard_that_will_not_open_frees_the_handle(self):
+        ok, calls = self._write_with(opens=False)
+        self.assertFalse(ok)
+        self.assertIn("free", calls)
+        self.assertNotIn("empty", calls)
+
+    def test_a_refused_setclipboarddata_still_frees(self):
+        ok, calls = self._write_with(setdata=0)
+        self.assertFalse(ok)
+        self.assertIn("free", calls)
+        self.assertIn("close", calls, "the clipboard was left open for the process")

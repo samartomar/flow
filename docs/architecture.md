@@ -754,8 +754,37 @@ if `GetClipboardSequenceNumber` still reads what it read when Flow's own text la
 exists at all is that people are doing things. The unconditional write that used to
 follow was not a restore, it was Flow deleting what the user had just copied and putting
 back what they had copied before. A counter of `0` means the OS declined to answer and is
-not treated as evidence either way. **Known limit:** only text is captured, so a clipboard
-holding an image or a file list is emptied by the paste and never restored.
+not treated as evidence either way.
+
+**The limit is still text-only, and it is now said rather than commented.** Only
+`CF_UNICODETEXT` is captured, so a clipboard holding an image or a file selection is
+emptied by the paste and never comes back. That sentence lived in a source comment for
+the life of the file — the one place the user is guaranteed never to read it. `paste`
+enumerates the formats **before** it writes and names what is about to go: *"your
+clipboard held an image - it will not be restored after this paste"*. Presence only; no
+data is read, because saving an image means taking a copy and that ends with Flow owning
+somebody's screenshot for the life of the process. It warns rather than refuses — Send is
+what the user asked for, the clipboard is the collateral, and naming collateral is not the
+same as declining to act.
+
+Where the line falls is a judgement, so it is written down. An image and a file list are
+total losses and are named. A registered format travelling *with* `CF_UNICODETEXT` —
+"HTML Format", "Rich Text Format", what copying out of a browser produces — is not: the
+content returns and only the styling does not, and a line that fires on nearly every paste
+is one nobody is still reading when it matters. The same format with no text beside it is
+a total loss again, and says so. Measured on a real clipboard: a plain text copy
+enumerates `CF_UNICODETEXT, CF_LOCALE, CF_TEXT, CF_OEMTEXT` — all four synthesised from
+the one Flow saves — while a real bitmap enumerates `CF_BITMAP, CF_DIB, CF_DIBV5` and
+reads as no text at all.
+
+Full multi-format preservation stays out of scope, deliberately: enumerating and copying
+an arbitrary OLE data object is a great deal of ctypes for that same screenshot.
+
+**And the write no longer destroys before it can succeed.** `EmptyClipboard()` used to run
+first, so an allocation or lock failure after it left the user with nothing — their
+clipboard erased on behalf of a write that never happened. The buffer is allocated and
+filled before the clipboard is opened at all, so by the time anything destructive can run
+the replacement already exists, and the emptying and the setting are adjacent.
 
 **Borrowed once per burst, not once per send.** The counter guards Flow against the
 *user*; it cannot guard Flow against itself, and it is worth saying why, because it looks
@@ -1229,7 +1258,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1138 tests, ~29 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1154 tests, ~29 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

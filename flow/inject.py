@@ -39,6 +39,8 @@ user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
 user32.SetClipboardData.restype = wintypes.HANDLE
 user32.GetClipboardSequenceNumber.argtypes = []
 user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
+user32.EnumClipboardFormats.restype = wintypes.UINT
 
 kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
 kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
@@ -50,6 +52,22 @@ kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
 kernel32.GlobalFree.restype = wintypes.HGLOBAL
 
 CF_UNICODETEXT = 13
+#: The rest of the standard formats this module has an opinion about. `CF_TEXT`,
+#: `CF_OEMTEXT` and `CF_LOCALE` are *synthesised* by Windows from `CF_UNICODETEXT` — put
+#: the text back and they come back with it — which is what makes the one format Flow
+#: saves enough for an ordinary clipboard. Measured on this machine: a plain text
+#: clipboard enumerates exactly those four and nothing else.
+CF_TEXT = 1
+CF_BITMAP = 2
+CF_OEMTEXT = 7
+CF_DIB = 8
+CF_HDROP = 15
+CF_LOCALE = 16
+CF_DIBV5 = 17
+
+_IMAGE_FORMATS = frozenset({CF_BITMAP, CF_DIB, CF_DIBV5})
+_TEXT_FORMATS = frozenset({CF_TEXT, CF_OEMTEXT, CF_UNICODETEXT, CF_LOCALE})
+
 GMEM_MOVEABLE = 0x0002
 KEYEVENTF_KEYUP = 0x0002
 INPUT_KEYBOARD = 1
@@ -117,23 +135,82 @@ def get_clipboard_text() -> str | None:
         user32.CloseClipboard()
 
 
-def set_clipboard_text(text: str) -> bool:
+def clipboard_formats() -> list[int]:
+    """Which formats the clipboard holds. Presence only — no data is read or copied.
+
+    The distinction matters: knowing an image is there costs one enumeration, while
+    *saving* it means asking for the handle and taking a copy, which ends with Flow
+    owning somebody's screenshot for the life of the process.
+    """
     if not user32.OpenClipboard(None):
+        return []
+    try:
+        found: list[int] = []
+        fmt = 0
+        while True:
+            fmt = int(user32.EnumClipboardFormats(fmt))
+            if not fmt:
+                return found
+            found.append(fmt)
+    finally:
+        user32.CloseClipboard()
+
+
+def unrestorable(formats) -> str:
+    """What a text paste is about to destroy that putting the text back will not undo.
+
+    Empty when the loss is nothing worth a sentence, and the line between the two is a
+    judgement rather than a fact, so it is written down here.
+
+    An **image** and a **file selection** are total losses: nothing survives the
+    `EmptyClipboard()`, and there is no text underneath to come back. Those are named.
+
+    A registered format travelling *with* `CF_UNICODETEXT` — "HTML Format", "Rich Text
+    Format", which is the ordinary result of copying out of a browser or a word processor
+    — is not. The content returns; the styling does not. Warning there would fire on very
+    nearly every paste, and a line that appears every time is one nobody is still reading
+    by the time it matters. The same format with **no** text beside it is the total loss
+    again, and is named as one.
+    """
+    present = set(formats)
+    kinds = []
+    if present & _IMAGE_FORMATS:
+        kinds.append("an image")
+    if CF_HDROP in present:
+        kinds.append("files")
+    if not kinds and CF_UNICODETEXT not in present and present - _TEXT_FORMATS:
+        kinds.append("its contents")
+    return " and ".join(kinds)
+
+
+def set_clipboard_text(text: str) -> bool:
+    """Replace the clipboard with `text`. False if Windows would not let us.
+
+    The buffer is allocated and filled **before** the clipboard is opened, which is not
+    the obvious order and is the point. `EmptyClipboard()` used to run first, so an
+    allocation or lock failure after it left the user with nothing at all — their
+    clipboard destroyed on behalf of a write that never happened. Filling first means
+    that by the time anything destructive can run, the replacement already exists, and
+    the emptying and the setting are adjacent.
+    """
+    size = (len(text) + 1) * ctypes.sizeof(ctypes.c_wchar)
+    handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
+    if not handle:
+        return False
+    ptr = kernel32.GlobalLock(handle)
+    if not ptr:
+        kernel32.GlobalFree(handle)
+        return False
+    try:
+        ctypes.memmove(ptr, ctypes.create_unicode_buffer(text), size)
+    finally:
+        kernel32.GlobalUnlock(handle)
+
+    if not user32.OpenClipboard(None):
+        kernel32.GlobalFree(handle)
         return False
     try:
         user32.EmptyClipboard()
-        size = (len(text) + 1) * ctypes.sizeof(ctypes.c_wchar)
-        handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
-        if not handle:
-            return False
-        ptr = kernel32.GlobalLock(handle)
-        if not ptr:
-            kernel32.GlobalFree(handle)
-            return False
-        try:
-            ctypes.memmove(ptr, ctypes.create_unicode_buffer(text), size)
-        finally:
-            kernel32.GlobalUnlock(handle)
         # Ownership transfers to the clipboard only on success; on failure it is still
         # ours to free, or it leaks for the life of the process.
         if not user32.SetClipboardData(CF_UNICODETEXT, handle):
@@ -338,6 +415,17 @@ def paste(
     # of them, which is a great deal of ctypes for a path that ends with Flow owning a
     # copy of the user's screenshot.
     previous = _borrow(restore_clipboard)
+
+    # So the limit is said out loud instead. It lived in the comment above for the life
+    # of this file, which is the one place the user is guaranteed never to read it.
+    #
+    # Before the write and not after: said afterwards this is a report of something that
+    # already happened. It warns rather than refuses, because the user pressed Send and
+    # the draft is what they asked for — the clipboard is the collateral, and naming
+    # collateral is not the same as declining to act.
+    lost = unrestorable(clipboard_formats())
+    if lost:
+        _warn(f"your clipboard held {lost} - it will not be restored after this paste")
     if not set_clipboard_text(payload):
         _warn("not pasted: could not take the clipboard")
         # Nothing was written, so nothing is owed by *this* send — but an earlier send in
