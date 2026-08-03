@@ -20,11 +20,13 @@ and nothing else. All the behaviour lives in the modules.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 
 from .asr import FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
+from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, available, named, unverified, unverified_note
 from .session import AUTO_ASK_SEC, Session
@@ -54,6 +56,31 @@ def say(msg: str) -> None:
     invisible whenever the app was piped or redirected.
     """
     print(msg, flush=True)
+
+
+def _timeout_arg(text: str) -> float:
+    """`--cli-timeout`, refused at the flag when it is not a wait.
+
+    `type=float` accepted `nan` and `inf`, because both are perfectly good floats — and
+    downstream `max(nan, 60.0)` is `nan` while `nan <= 0` is False, so the deadline check
+    that ends every CLI call could never fire. A hung provider was then waited on
+    forever, microphone open, pill saying "thinking". `0` and negatives are the same hole
+    from the other side, where every call times out before it starts.
+
+    Refused here rather than clamped, because at a prompt these are typos and a silent
+    substitution would leave somebody wondering why their number did nothing.
+    `refine.sane_timeout` is the belt under it for callers who never came through here.
+    """
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of seconds")
+    if not math.isfinite(value) or not 0 < value <= MAX_TIMEOUT_SEC:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not a wait - give a number of seconds "
+            f"between 0 and {MAX_TIMEOUT_SEC:.0f}"
+        )
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
              f"({', '.join(c.name for c in CANDIDATES if c.verified)})",
     )
     ap.add_argument(
-        "--cli-timeout", type=float, default=REFINE_TIMEOUT_SEC, metavar="SEC",
+        "--cli-timeout", type=_timeout_arg, default=REFINE_TIMEOUT_SEC, metavar="SEC",
         help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f})",
     )
     ap.add_argument(

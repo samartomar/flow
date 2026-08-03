@@ -9,6 +9,7 @@ refined only at the end, and from outside that looks like the CLI ignoring most 
 was asked. The last class here is about that being said out loud.
 """
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -253,7 +254,11 @@ class TestTheFallbackIsReal(unittest.TestCase):
         """Patch _invoke to answer per CLI name, and record the order tried."""
         tried = []
 
-        def fake(cli, prompt, *, timeout, cwd=None, cancel=None):
+        def fake(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            # `cap` arrived with the operation deadline (item 56). These fakes return
+            # instantly, so no budget is consumed and the walk proceeds — which is the
+            # case that matters here: three of the four failures `_invoke_any` falls over
+            # on (failed to start, non-zero exit, empty output) are fast.
             tried.append(cli.name)
             return results[cli.name]
 
@@ -973,3 +978,187 @@ class TestMainClosesTheDoorForEveryChild(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 main_mod.main(["--not-a-flag"])
             self.assertEqual(os.environ["NoDefaultCurrentDirectoryInExePath"], "0")
+
+
+class TestATimeoutIsAFiniteNumberOfSeconds(unittest.TestCase):
+    """AGENT-05: `--cli-timeout nan` parses, and then the wait loop dissolves.
+
+    `float("nan")` is a perfectly good float, so argparse accepts it. Downstream,
+    `max(nan, 60.0)` is `nan` and `nan <= 0` is **False** — so the deadline check that
+    ends every CLI call can never fire and a hung provider is waited on forever, with the
+    microphone open and the pill saying "thinking". `inf` is the same defect spelled
+    legibly; `0` and negatives are the same hole from the other side, where every call
+    times out before it starts.
+
+    Refused at the flag with a sentence naming the range, and refused again inside
+    `refine` — argparse is not the only caller, and a library that trusts its callers to
+    have used its own CLI is not a library.
+    """
+
+    def test_the_validator_refuses_what_cannot_be_waited(self):
+        for bad in ("nan", "inf", "-inf", "0", "-5", "1e300", "later", ""):
+            with self.subTest(value=bad):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    main_mod._timeout_arg(bad)
+
+    def test_the_refusal_names_the_range(self):
+        with self.assertRaises(argparse.ArgumentTypeError) as caught:
+            main_mod._timeout_arg("nan")
+        self.assertIn(f"{refine_mod.MAX_TIMEOUT_SEC:.0f}", str(caught.exception))
+
+    def test_the_flag_is_actually_wired_to_it(self):
+        """A validator that is defined and not attached is worse than none.
+
+        Run as a subprocess, and that is the point rather than caution: this value
+        *parses* against the tree as it stands, so a check that called `main()` in
+        process would boot the whole app — pill, models, mainloop — and hang the suite.
+        It did, once, which is how this check came to look like this.
+        """
+        done = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, r'{REPO}');"
+             " from flow.__main__ import main; main(['--cli-timeout=nan'])"],
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(done.returncode, 2, done.stdout[-500:])
+        self.assertIn("cli-timeout", done.stderr)
+
+    def test_an_ordinary_wait_is_still_accepted(self):
+        # The guard must not become "no timeout may be set", which is the failure a range
+        # check invites. These reach argparse and fail later for want of a display.
+        for good in ("1", "20", "45.5", "600"):
+            with self.subTest(value=good):
+                self.assertEqual(main_mod._timeout_arg(good), float(good))
+
+    def test_the_library_refuses_it_too(self):
+        # `sane_timeout` is what the entry points call, because a caller that imported
+        # `refine` and passed its own number never went through argparse at all.
+        for bad in (float("nan"), float("inf"), float("-inf"), 0, -5, None, "20", True):
+            with self.subTest(value=bad):
+                self.assertEqual(refine_mod.sane_timeout(bad), refine_mod.TIMEOUT_SEC)
+
+    def test_a_sane_number_passes_through_unchanged(self):
+        self.assertEqual(refine_mod.sane_timeout(45.5), 45.5)
+        self.assertEqual(refine_mod.sane_timeout(1), 1)
+
+    def test_an_enormous_number_is_capped_rather_than_refused(self):
+        # A library call is not a typo at a prompt: the caller meant "a long time", and
+        # the honest answer is the longest this will actually wait.
+        self.assertEqual(refine_mod.sane_timeout(1e300), refine_mod.MAX_TIMEOUT_SEC)
+
+
+class TestAnOperationHasOneDeadline(unittest.TestCase):
+    """AGENT-09: sequential fallback granted every candidate its full budget.
+
+    Three unhealthy providers made one spoken question wait out three timeouts — and
+    worse than the naive sum, because each abandoned call also pays `_abandon`'s 5 s
+    reap. Measured against three hanging fakes at a 0.6 s budget: **16.8 s**.
+
+    The user set one number and can see it. A fallback chain that multiplies it is not a
+    fallback, it is a different feature with the same name.
+    """
+
+    def _waits_for(self, floors, budget=30.0):
+        """The `timeout` each attempt is actually given, with every CLI hanging."""
+        seen: list[float] = []
+        clock = [0.0]
+
+        def fake_invoke(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            # Mirrors `_invoke`'s own arithmetic, floor included — a fake that ignored
+            # `Cli.timeout_sec` would report the floor broken when it was the fake that
+            # did not have one.
+            given = timeout if cli.timeout_sec is None else max(timeout, cli.timeout_sec)
+            if cap is not None:
+                given = min(given, cap)
+            seen.append(given)
+            clock[0] += given  # the whole wait is spent, which is what hanging means
+            return None, f"{cli.name} timed out"
+
+        clis = [refine_mod.Cli(f"c{i}", (f"c{i}",), timeout_sec=f) for i, f in
+                enumerate(floors)]
+        with mock.patch.object(refine_mod, "available", return_value=clis), \
+                mock.patch.object(refine_mod, "_invoke", side_effect=fake_invoke), \
+                mock.patch.object(refine_mod.time, "monotonic",
+                                  side_effect=lambda: clock[0]):
+            refine_mod._invoke_any(None, "p", timeout=budget)
+        return seen
+
+    def test_the_total_wait_stays_inside_the_budget(self):
+        waits = self._waits_for([None, None, None], budget=30.0)
+        self.assertLessEqual(sum(waits), 30.0 + 0.01, waits)
+
+    def test_the_first_attempt_gets_the_whole_budget(self):
+        waits = self._waits_for([None, None, None], budget=30.0)
+        self.assertAlmostEqual(waits[0], 30.0, places=2)
+
+    def test_a_first_attempt_that_hangs_out_the_budget_leaves_no_fallback(self):
+        """And that is the deliberate answer, not a gap in it.
+
+        This class first asserted the opposite — that a fallback still happens — and the
+        arithmetic refused, correctly. Dividing the budget among candidates is the other
+        design, and it is worse: it silently shortens every individual call, so a slow but
+        *working* codex times out where it would have answered, turning a working setup
+        into a failing one to serve a hypothetical second provider.
+
+        The fallback is not lost by this. Three of the four failures `_invoke_any` falls
+        over on — failing to start, exiting non-zero, returning nothing — cost
+        milliseconds, and `TestTheFallbackIsReal` pins all of them. Only the fourth, a
+        genuine hang, spends the budget, and spending it is what the user asked for when
+        they set the number.
+        """
+        waits = self._waits_for([None, None, None], budget=30.0)
+        self.assertEqual(len(waits), 1)
+
+    def test_and_it_says_why_rather_than_going_quiet(self):
+        # "codex timed out" followed by nothing reads as a fallback nobody configured,
+        # which is the confusion the fallback was built to end.
+        clock = [0.0]
+
+        def fake_invoke(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            clock[0] += timeout if cap is None else min(timeout, cap)
+            return None, f"{cli.name} timed out"
+
+        clis = [refine_mod.Cli("codex", ("codex",)), refine_mod.Cli("claude", ("claude",))]
+        with mock.patch.object(refine_mod, "available", return_value=clis),                 mock.patch.object(refine_mod, "_invoke", side_effect=fake_invoke),                 mock.patch.object(refine_mod.time, "monotonic",
+                                  side_effect=lambda: clock[0]):
+            _out, reason, _who = refine_mod._invoke_any(None, "p", timeout=30.0)
+        self.assertIn("codex timed out", reason)
+        self.assertIn("no time left to try claude", reason)
+
+    def test_the_measured_floor_still_holds_for_the_cli_that_needs_it(self):
+        # kiro-cli was measured at 35.8 s and ships a 60 s floor (item 41). A user who
+        # lowered the global timeout must still not re-create that incident on the one
+        # CLI known to need the time — so the deadline is the larger of the two.
+        waits = self._waits_for([60.0, None], budget=20.0)
+        self.assertAlmostEqual(waits[0], 60.0, places=2)
+
+    def test_and_the_chain_still_cannot_exceed_that_deadline(self):
+        waits = self._waits_for([60.0, None, None], budget=20.0)
+        self.assertLessEqual(sum(waits), 60.0 + 0.01, waits)
+
+    def test_a_pinned_cli_is_not_second_guessed(self):
+        # `cli=` is a decision, not a preference. One attempt, its own full wait.
+        seen = []
+        with mock.patch.object(refine_mod, "_invoke",
+                               side_effect=lambda c, p, **kw: (seen.append(kw["timeout"]),
+                                                               ("out", ""))[1]):
+            out, _reason, who = refine_mod._invoke_any(
+                refine_mod.Cli("pinned", ("pinned",)), "p", timeout=30.0)
+        self.assertEqual(out, "out")
+        self.assertEqual(seen, [30.0])
+
+    def test_a_shortened_attempt_is_given_the_shorter_number(self):
+        # Item 41's rule: the failure names the wait, not the constant. A later attempt
+        # running on the remainder must be *told* the remainder, or its message would
+        # quote a wait nobody performed.
+        seen = []
+
+        def fake_invoke(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            seen.append(cap)
+            return None, "no"
+
+        clis = [refine_mod.Cli("a", ("a",)), refine_mod.Cli("b", ("b",))]
+        with mock.patch.object(refine_mod, "available", return_value=clis),                 mock.patch.object(refine_mod, "_invoke", side_effect=fake_invoke):
+            refine_mod._invoke_any(None, "p", timeout=30.0)
+        self.assertEqual(len(seen), 2)
+        self.assertLessEqual(seen[1], seen[0], "the second was handed a fresh budget")

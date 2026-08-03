@@ -14,6 +14,7 @@ no output parser is needed — merging them is what makes the output look pollut
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -25,6 +26,40 @@ from dataclasses import dataclass
 #: R11: never hand the CLI an unbounded draft. Past this, only the tail is sent.
 MAX_CHARS = 2000
 TIMEOUT_SEC = 20.0
+
+#: The widest a single CLI wait may be. Not a judgement about how long a model may
+#: think — it is the point past which "waiting" stops being a thing a user is doing and
+#: becomes a hang they will kill the app over. Ten minutes is far beyond any measured
+#: call (kiro-cli, the slowest verified entry, was 35.8 s) and still finite, which is the
+#: property that matters: every arithmetic below assumes the deadline can be reached.
+MAX_TIMEOUT_SEC = 600.0
+
+
+def sane_timeout(value) -> float:
+    """A wait that can actually expire, whatever the caller passed.
+
+    `float("nan")` is a perfectly good float, so it parsed at the flag and reached the
+    wait loop — where `max(nan, 60.0)` is `nan` and `nan <= 0` is **False**, so the
+    deadline check that ends every CLI call could never fire. A hung provider was then
+    waited on forever with the microphone open and the pill saying "thinking". `inf` is
+    the same defect spelled legibly; `0` and negatives are the same hole from the other
+    side, where every call times out before it starts.
+
+    Argparse refuses these at the flag (`__main__._timeout_arg`) with a sentence naming
+    the range. This is the same rule for callers who never went through argparse — a
+    library that trusts its callers to have used its own CLI is not a library — and it
+    *substitutes* rather than raises, because the caller here is `refine()` mid-session
+    and a bad number is not worth losing a draft over.
+
+    An enormous number is capped rather than refused, which is the one asymmetry: at a
+    prompt a huge value is a typo, but in a library call the caller meant "a long time",
+    and the honest answer is the longest this will actually wait.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return TIMEOUT_SEC
+    if not math.isfinite(value) or value <= 0:
+        return TIMEOUT_SEC
+    return min(float(value), MAX_TIMEOUT_SEC)
 
 _PROMPT = (
     "Revise the text below according to the instruction.\n"
@@ -333,14 +368,40 @@ def _invoke_any(
 
     An explicit `cli=` is a decision, not a preference, so it is never second-guessed.
     Cancellation stops the walk: quitting should not start a second process.
+
+    **One deadline for the whole operation, not one per candidate.** Every attempt used
+    to get the full budget, so three unhealthy providers made one spoken question wait
+    out three timeouts — and worse than the naive sum, because each abandoned call also
+    pays `_abandon`'s 5 s reap. Measured against three hanging fakes at a 0.6 s budget:
+    **16.8 s**. The user set one number and can see it; a chain that multiplies it is not
+    a fallback, it is a different feature wearing the same name.
+
+    The budget is `max(timeout, largest candidate floor)`, so `Cli.timeout_sec` stays
+    honest inside it: the one CLI measured needing 60 s still gets 60 s when it is first,
+    even if the global timeout was lowered. What it does not get is 60 s *after* two
+    other CLIs have already spent the budget — a floor is a floor under the wait, not a
+    promise that survives somebody else's failure.
     """
+    timeout = sane_timeout(timeout)
     if cli is not None:
         out, reason = _invoke(cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
         return out, reason, cli
 
+    candidates = available()
+    floors = [c.timeout_sec for c in candidates if c.timeout_sec]
+    deadline = time.monotonic() + max([timeout, *floors])
+
     reasons: list[str] = []
-    for candidate in available():
-        out, reason = _invoke(candidate, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+    for candidate in candidates:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            # Named rather than silently skipped: "codex timed out" followed by nothing
+            # reads as a fallback that was never configured, which is the confusion the
+            # fallback was built to end.
+            reasons.append(f"no time left to try {candidate.name}")
+            break
+        out, reason = _invoke(candidate, prompt, timeout=timeout, cwd=cwd,
+                              cancel=cancel, cap=left)
         if out is not None:
             return out, "", candidate
         reasons.append(reason)
@@ -478,6 +539,7 @@ def _invoke(
     timeout: float,
     cwd: str | None = None,
     cancel: threading.Event | None = None,
+    cap: float | None = None,
 ) -> tuple[str | None, str]:
     """Run one CLI call. Returns `(stdout, "")`, or `(None, reason)` on any failure.
 
@@ -541,7 +603,13 @@ def _invoke(
     except OSError as exc:
         return None, f"{cli.name} failed to start: {exc}"
 
-    wait = timeout if cli.timeout_sec is None else max(timeout, cli.timeout_sec)
+    wait = sane_timeout(timeout if cli.timeout_sec is None
+                        else max(timeout, cli.timeout_sec))
+    if cap is not None:
+        # What is left of the operation's budget (`_invoke_any`). The floor above is a
+        # floor under *this* call's wait; it is not a claim on time an earlier candidate
+        # has already spent.
+        wait = min(wait, cap)
     deadline = time.monotonic() + wait
     # `communicate` is what pipes, writes and closes stdin — and it may carry `input`
     # exactly once: a second call with it raises "Cannot send input after starting
