@@ -224,6 +224,29 @@ code that reads it sat behind the armed check. A question you have already asked
 depend on still listening — and disarming while waiting is the obvious thing to do, all
 the more so now that Flow goes deaf while it reads a reply aloud.
 
+**A transcript belongs to its own utterance, and carries the proof.** `_finalise` mints a
+frozen `Utterance` — a monotonic id, the audio, and the capture generation — and that
+record rides with the work through the decode queue and comes back attached to the text.
+Nothing looks anything up when a result lands.
+
+That is the whole of it, and the reason is that a lookup at delivery time reads a slot the
+*next* utterance may already have overwritten. `_last_audio` was one such slot shared by
+every utterance ever spoken: A submitted, B captured and finalised, A's text arrives, and
+the rescue record left behind was (A's words, **B's sound**). "Was a command" then asked
+the decoder to re-listen to a different sentence, with `command_bias` built from A's draft,
+and applied whatever came back. The audio is what makes it sharp — every other stale-result
+defect here ends in text the user can see is wrong, while this one ends in a *plausible*
+command derived from sound they are not thinking about. `_remember_append`, `_escalate` and
+`_give_back` all take the record now rather than reading the slot.
+
+`generation` is the other half, and it is what makes `pause()` a boundary rather than a
+stopped stream. Until 2026-08-03 a pause left `_utter` holding the half-said sentence, the
+gate open so the next arm resumed mid-utterance with no onset, and the 256-block mic queue
+undrained — and nothing consumed any of it in between, because the UI skips `tick()` while
+disarmed. All three now go at the pause. The fourth road cannot be closed there because it
+is not there yet: a decode already in flight belongs to the session the user stopped, so it
+is refused on arrival by generation and says so.
+
 `Session.events()` drains what happened. The UI never reads session internals; it reacts to
 the event stream.
 
@@ -1254,11 +1277,19 @@ paste was drained by nobody until the *next* Send, and shown against the wrong o
 `Pill._pump_warnings` now drains the queue every frame, so a late line lands while the
 card for its own Send is still on screen.
 
+**A third never got written down, which is the more useful thing to record.** The
+capture-association gap — a transcript paired with the wrong utterance's audio — was real
+from the first version of `_last_audio` and was found by an outside audit in 2026-08-02,
+not by this file. "As of 2026-08-01 there are none" was written in good faith and was
+wrong, because a gap nobody has noticed does not announce itself here. It is closed (§4),
+and the dated claim above stands as what it is: a statement about what was known, not about
+what was true.
+
 ## 11. Testing layers
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1154 tests, ~29 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1165 tests, ~30 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

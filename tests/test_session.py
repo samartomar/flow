@@ -207,8 +207,36 @@ class TestDecodeScheduling(unittest.TestCase):
         w.close()
         # Losing a final would lose the user's words, so these are a FIFO.
         self.assertEqual(len(results), 6)
-        self.assertEqual([t for _k, t, _s, _c in results],
+        self.assertEqual([t for _k, t, _s, _c, _u in results],
                          [f"final:{i}" for i in range(6)])
+
+    def test_a_final_submitted_without_a_record_carries_none(self):
+        # `selfdrive.py` and several probes submit bare audio at this seam deliberately,
+        # because it is the one `Session._finalise` itself uses. They have no identity to
+        # mint, and the result must route without one rather than refuse.
+        w = DecodeWorker(SlowTranscriber(delay=0.0))
+        w.submit_final(np.full(8, 1.0, dtype=np.float32))
+        deadline = time.perf_counter() + 5.0
+        out: list = []
+        while not out and time.perf_counter() < deadline:
+            out = w.results()
+        w.close()
+        self.assertIsNone(out[0][4])
+
+    def test_a_record_rides_with_its_own_final(self):
+        from flow.session import Utterance
+
+        w = DecodeWorker(SlowTranscriber(delay=0.02))
+        records = [Utterance(i, np.full(8, float(i), dtype=np.float32), 0)
+                   for i in range(3)]
+        for r in records:
+            w.submit_final(r.audio, r)
+        deadline = time.perf_counter() + 5.0
+        while w.busy and time.perf_counter() < deadline:
+            time.sleep(0.01)
+        out = w.results()
+        w.close()
+        self.assertEqual([u.id for _k, _t, _s, _c, u in out], [0, 1, 2])
 
     def test_a_transcriber_with_no_confidence_to_report_still_decodes(self):
         # `SlowTranscriber`, like every other fake here, predates `take_confidence`.
@@ -221,8 +249,131 @@ class TestDecodeScheduling(unittest.TestCase):
         while not out and time.perf_counter() < deadline:
             out = w.results()
         w.close()
-        self.assertEqual([(k, c) for k, _t, _s, c in out], [("final", None)])
+        self.assertEqual([(k, c) for k, _t, _s, c, _u in out], [("final", None)])
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestATranscriptBelongsToItsOwnUtterance(unittest.TestCase):
+    """CAP-01: `_last_audio` was one slot shared by every utterance ever spoken.
+
+    `_remember_append` reads whatever `_finalise` wrote last, not the audio of the
+    utterance whose text it is remembering. Those are the same thing exactly when
+    decoding is instant, and decoding is the slowest thing in this app.
+
+    So: A is submitted and its decode begins; B is spoken, captured and finalised, which
+    overwrites the slot; A's text arrives and is routed, and the rescue record it leaves
+    behind is (A's words, **B's sound**). "Was a command" then asks the decoder to
+    re-listen to a completely different sentence — with `command_bias` built from A's
+    draft — and whatever comes back is applied as if it were the rescue of A.
+
+    The audio is what makes this sharp rather than theoretical. Every other stale-result
+    defect in this codebase ends in text the user can see is wrong; this one ends in the
+    decoder confidently returning a *plausible* command derived from sound the user is
+    not thinking about.
+    """
+
+    def _interleaved(self):
+        """A submitted, B captured and finalised, then A's result delivered."""
+        session = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        a_audio = np.full(BLOCK, 0.11, dtype=np.float32)
+        b_audio = np.full(BLOCK, 0.22, dtype=np.float32)
+        session._utter = [a_audio]
+        session._finalise()
+        session._utter = [b_audio]
+        session._finalise()
+        return session, a_audio, b_audio
+
+    def test_the_rescue_record_holds_the_audio_that_was_decoded(self):
+        session, a_audio, b_audio = self._interleaved()
+        # A's text arrives now, after B has already replaced the slot.
+        session._route("underline the heading", record=session._sent[0])
+        _text, audio = session._last_append
+        self.assertIsNotNone(audio)
+        self.assertTrue(np.array_equal(audio, a_audio),
+                        "the rescue would re-decode a different utterance")
+        self.assertFalse(np.array_equal(audio, b_audio))
+
+    def test_the_later_utterance_keeps_its_own_audio_too(self):
+        session, a_audio, b_audio = self._interleaved()
+        session._route("and the second thing", record=session._sent[1])
+        _text, audio = session._last_append
+        self.assertTrue(np.array_equal(audio, b_audio))
+
+    def test_a_route_with_no_utterance_still_works(self):
+        # Replays, tests and the rescue path itself route text that never came from a
+        # decode. They must not be forced to invent an identity.
+        session = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        session._route("just some words")
+        self.assertEqual(session.draft.text, "just some words")
+
+    def test_the_identity_reaches_the_result_end_to_end(self):
+        # The seam that matters: what `_finalise` mints has to survive the worker and
+        # come back attached to the text, or `_route` has nothing to be right about.
+        session = run(["first thing", "second thing"], utterances=2)
+        self.addCleanup(session.close)
+        self.assertEqual(len(session._sent), 2)
+        self.assertNotEqual(session._sent[0].id, session._sent[1].id)
+
+
+class TestPauseIsAnUtteranceBoundary(unittest.TestCase):
+    """CAP-02 as the validation corrected it: `pause()` stops the mic and nothing else.
+
+    `audio.py:102-106` is `Mic.stop()` and touches no gate state at all — the finding's
+    original citation, and the reason it read as already-handled. What `pause()` actually
+    does is stop the stream, stop any reply, and set IDLE. `_utter` keeps whatever blocks
+    it held; `gate.reset()` is never called; the 256-block mic queue is never drained.
+    And `ui.py` skips `session.tick()` entirely while disarmed, so nothing consumes any
+    of it in between. Every piece survives to the next arm and lands in the next
+    transcript — audio from before a deliberate pause, in words spoken after it.
+    """
+
+    def _paused_mid_speech(self):
+        mic = FakeMic()
+        session = Session(asr=FakeTranscriber(["whatever"]), mic=mic)
+        before = np.full(BLOCK, 0.33, dtype=np.float32)
+        session._utter = [before, before]
+        session.gate.speaking = True
+        mic._blocks = [before, before, before]
+        return session, mic, before
+
+    def test_the_held_utterance_is_discarded(self):
+        session, _mic, _before = self._paused_mid_speech()
+        session.pause()
+        self.assertEqual(session._utter, [], "pre-pause speech survived into the next arm")
+
+    def test_the_gate_is_closed(self):
+        session, _mic, _before = self._paused_mid_speech()
+        session.pause()
+        self.assertFalse(session.gate.speaking,
+                         "the next arm resumes mid-utterance with no onset")
+
+    def test_the_microphone_queue_is_drained(self):
+        session, mic, _before = self._paused_mid_speech()
+        session.pause()
+        self.assertEqual(mic.drain(), [], "blocks captured before the pause were queued")
+
+    def test_a_result_from_before_the_pause_is_refused(self):
+        # The other end of the same boundary. A decode already in flight when the user
+        # paused belongs to the session they stopped, and delivering it into the next one
+        # is the same defect as the queued blocks, arriving by a slower road.
+        session = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        session._utter = [np.full(BLOCK, 0.44, dtype=np.float32)]
+        session._finalise()
+        stale = session._sent[0]
+        session.pause()
+        session._route("words from before the pause", record=stale)
+        self.assertEqual(session.draft.text, "",
+                         "an utterance from before the pause reached the new draft")
+
+    def test_a_result_from_after_the_pause_is_kept(self):
+        # The refusal must not become "nothing survives a pause", which would lose the
+        # ordinary case: pause, re-arm, speak.
+        session = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        session.pause()
+        session._utter = [np.full(BLOCK, 0.55, dtype=np.float32)]
+        session._finalise()
+        session._route("words from after", record=session._sent[-1])
+        self.assertEqual(session.draft.text, "words from after")

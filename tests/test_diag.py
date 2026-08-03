@@ -258,7 +258,9 @@ class TestHowWellItHeardReachesTheTrace(Temp):
         while not out and time.perf_counter() < deadline:
             out = w.results()
         w.close()
-        self.assertEqual([(k, c) for k, _t, _ms, c in out], [("final", -0.87)])
+        # The fifth field is the utterance record CAP-01 added; this submits bare audio,
+        # so it is None and the confidence question is unaffected.
+        self.assertEqual([(k, c) for k, _t, _ms, c, _u in out], [("final", -0.87)])
         self.assertEqual(asr.drained, 1)
 
     def test_a_confidence_that_is_not_a_number_is_refused_not_written(self):

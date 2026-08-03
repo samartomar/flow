@@ -173,6 +173,26 @@ class Activity(NamedTuple):
     waiting: bool
 
 
+@dataclass(frozen=True)
+class Utterance:
+    """One captured stretch of speech, and the identity its result carries back.
+
+    Frozen and passed by value because the defect it exists to close is a *mutable slot*:
+    `_last_audio` held whatever the most recent `_finalise` wrote, so a result arriving
+    after the next utterance had been captured was paired with that one's sound. Those
+    two are the same object exactly when decoding is instant, and decoding is the slowest
+    thing in this app.
+
+    `generation` is the capture epoch. A pause is a boundary — everything spoken before it
+    belongs to a session the user deliberately stopped — so a result minted under an older
+    generation is refused on arrival rather than folded into the new draft.
+    """
+
+    id: int
+    audio: np.ndarray
+    generation: int
+
+
 class DecodeWorker:
     """One thread. Partials are latest-wins; finals are never dropped.
 
@@ -185,11 +205,14 @@ class DecodeWorker:
         self._asr = asr
         self._cv = threading.Condition()
         self._partial: np.ndarray | None = None
-        self._finals: deque[np.ndarray] = deque()
-        #: (audio, hotwords) re-decodes of an utterance the router suspects was a
-        #: mis-heard command. Queued like finals, because losing one means paying the
+        #: (audio, utterance). The record rides with the work rather than being looked up
+        #: when the result lands, which is the whole of CAP-01: a lookup at delivery time
+        #: reads a slot that a later utterance may already have overwritten.
+        self._finals: deque[tuple[np.ndarray, Utterance | None]] = deque()
+        #: (audio, hotwords, utterance) re-decodes of an utterance the router suspects was
+        #: a mis-heard command. Queued like finals, because losing one means paying the
         #: CLI call this exists to avoid.
-        self._rescues: deque[tuple[np.ndarray, str]] = deque()
+        self._rescues: deque[tuple[np.ndarray, str, Utterance | None]] = deque()
         #: (kind, text, seconds). The duration rides along so a caller can record
         #: it without draining `timings`, which the soak test reads for its own
         #: latency check and would otherwise find empty.
@@ -217,16 +240,24 @@ class DecodeWorker:
             self._partial = audio  # replaces any pending partial
             self._cv.notify()
 
-    def submit_final(self, audio: np.ndarray) -> None:
+    def submit_final(self, audio: np.ndarray, utterance: "Utterance | None" = None) -> None:
+        """`utterance` is optional so the probes that submit bare audio still work.
+
+        `selfdrive.py` and several tests call this with audio alone — deliberately, since
+        it is the seam `Session._finalise` itself uses and that is what makes those checks
+        exercise the real decoder, router and apply. They have no identity to mint, and a
+        result carrying `None` simply routes without one, exactly as before.
+        """
         with self._cv:
-            self._finals.append(audio)
+            self._finals.append((audio, utterance))
             self._partial = None  # a final supersedes a pending partial of the same audio
             self._cv.notify()
 
-    def submit_rescue(self, audio: np.ndarray, hotwords: str) -> None:
+    def submit_rescue(self, audio: np.ndarray, hotwords: str,
+                      utterance: "Utterance | None" = None) -> None:
         """Re-decode this audio biased toward `hotwords`. Result kind: "rescue"."""
         with self._cv:
-            self._rescues.append((audio, hotwords))
+            self._rescues.append((audio, hotwords, utterance))
             self._cv.notify()
 
     def results(self) -> list[tuple[str, str, float, float | None]]:
@@ -267,10 +298,11 @@ class DecodeWorker:
                 if not self._alive:
                     return
                 hotwords = ""
+                utterance: Utterance | None = None
                 if self._finals:
-                    audio, kind = self._finals.popleft(), "final"
+                    (audio, utterance), kind = self._finals.popleft(), "final"
                 elif self._rescues:
-                    (audio, hotwords), kind = self._rescues.popleft(), "rescue"
+                    (audio, hotwords, utterance), kind = self._rescues.popleft(), "rescue"
                 else:
                     audio, kind = self._partial, "partial"
                     self._partial = None
@@ -296,7 +328,7 @@ class DecodeWorker:
             with self._cv:
                 self._busy = False
                 self.timings.append((kind, elapsed))
-                self._out.append((kind, text, elapsed, confidence))
+                self._out.append((kind, text, elapsed, confidence, utterance))
 
 
 @dataclass
@@ -396,6 +428,17 @@ class Session:
         #: suspected mis-heard command can be re-decoded without asking the user to
         #: say it again.
         self._last_audio: np.ndarray | None = None
+        #: Monotonic, so two utterances are never the same one however alike they sound.
+        self._utterance_id = 0
+        #: The capture epoch. `pause()` bumps it, and a result minted under an older one
+        #: is refused: everything spoken before a deliberate pause belongs to a session
+        #: the user stopped.
+        self._capture_generation = 0
+        #: A bounded tail of what has been submitted, for inspection only — the record
+        #: that decides anything rides with the work. Bounded because R8 says a long
+        #: session costs what a short one costs, and because a list of every utterance
+        #: with its audio is a recording of the room.
+        self._sent: deque[Utterance] = deque(maxlen=8)
         #: What the router was about to send to the CLI when it asked for a rescue.
         self._pending_rescue: str | None = None
         #: The last utterance that was appended as dictation, with its audio, so
@@ -563,6 +606,21 @@ class Session:
         """
         self.mic.stop()
         self._mic_started = False
+        # An atomic boundary, not just a stopped stream. Everything below survived a
+        # pause until 2026-08-03 and arrived in the *next* transcript: `_utter` kept the
+        # half-said sentence, the gate stayed open so the next arm resumed mid-utterance
+        # with no onset, and the 256-block mic queue still held whatever was captured
+        # before the stop. Nothing consumed any of it in between either — `ui.py` skips
+        # `tick()` entirely while disarmed — so all three reached the other side intact.
+        #
+        # The generation covers the fourth road: a decode already in flight when the user
+        # paused. That one cannot be discarded here because it is not here yet, so it is
+        # refused on arrival instead.
+        self._utter = []
+        self.gate.reset()
+        self.mic.drain()
+        self._decoded_sec = 0.0
+        self._capture_generation += 1
         # Disarming is one of the ways to say "enough" to a reply in progress. Since the
         # microphone is gated while Flow talks, an answer cannot be interrupted by
         # talking over it any more, so every deliberate stop has to actually stop it.
@@ -967,13 +1025,20 @@ class Session:
         if not self._utter:
             return
         audio = np.concatenate(self._utter)
+        self._utterance_id += 1
+        record = Utterance(self._utterance_id, audio, self._capture_generation)
+        # Kept only so the *bounded* tail is inspectable — the record that matters travels
+        # with the work. `_sent` exists for the tests and for a reader trying to follow an
+        # id through a log, and it is capped for R8: a long session must cost what a short
+        # one costs, and an unbounded list of every utterance ever spoken is a recording.
+        self._sent.append(record)
         self._last_audio = audio
-        self.worker.submit_final(audio)
+        self.worker.submit_final(audio, record)
         self._utter = []
         self._decoded_sec = 0.0
 
     def _pump_decodes(self) -> None:
-        for kind, text, elapsed, confidence in self.worker.results():
+        for kind, text, elapsed, confidence, utterance in self.worker.results():
             self.diag.write("decode", route=kind, ms=round(elapsed * 1000))
             if kind == "error":
                 self._emit("error", text)
@@ -985,7 +1050,7 @@ class Session:
             elif kind == "rescue":
                 self._finish_rescue(text)
             elif text:
-                self._route(text, confidence)
+                self._route(text, confidence, record=utterance)
             else:
                 # The utterance decoded to nothing — silence, noise, or a hallucination
                 # that clean.py rejected. Without this the state machine stays on
@@ -994,7 +1059,8 @@ class Session:
 
     # -- routing -----------------------------------------------------------
 
-    def _route(self, utterance: str, confidence: float | None = None) -> None:
+    def _route(self, utterance: str, confidence: float | None = None,
+               record: Utterance | None = None) -> None:
         """Decide what a completed utterance means, given whether a draft is held.
 
         `confidence` is recorded and nothing else. The router has always chosen between
@@ -1004,7 +1070,20 @@ class Session:
         for want of a real distribution to set it from; this is where that distribution
         comes from. Default None so the callers that are not a decode (a replay, a test,
         a rescue) do not have to invent a reading.
+
+        `record` is the utterance this text was decoded *from*, and it is what makes the
+        rescue path honest: `_remember_append` used to read `_last_audio`, a slot the next
+        utterance overwrites, so a slow decode left the rescue pointing at somebody else's
+        sound. Also None for the callers that are not a decode — a replay routes text that
+        never had audio, and inventing an identity for it would be worse than admitting
+        there is none.
         """
+        if record is not None and record.generation != self._capture_generation:
+            # Spoken before a pause the user chose. The draft on screen belongs to the
+            # session they started afterwards, and folding an older utterance into it is
+            # the same defect as the un-drained mic queue arriving by a slower road.
+            self._emit("note", "dropped what was said before the pause")
+            return
         # Consumed here, before any early return, and expired by age. The chip is
         # pressed *for the utterance the user is about to say*; leaving it set when
         # that utterance takes another path meant it silently applied to a later,
@@ -1056,20 +1135,20 @@ class Session:
             return
         if thread_plan.kind == "followup":
             trace("followup")
-            self._start_followup(thread_plan.payload)
+            self._start_followup(thread_plan.payload, record)
             return
 
         if not self.draft.text:
             trace("append")
             self.draft.append(utterance)
-            self._remember_append(utterance)
+            self._remember_append(utterance, record)
             self._after_draft_change()
             return
 
         if forced == "append":
             trace("append")
             self.draft.append(utterance)
-            self._remember_append(utterance)
+            self._remember_append(utterance, record)
             self._after_draft_change()
             return
 
@@ -1089,7 +1168,7 @@ class Session:
             return
         if p.kind == "append":
             self.draft.append(utterance)
-            self._remember_append(utterance)
+            self._remember_append(utterance, record)
         elif p.kind == "undo":
             # P8: an undo that lands straight on top of an append is the signature of
             # a command the router read as dictation. Recorded before the undo, since
@@ -1135,7 +1214,7 @@ class Session:
             self._emit("send", p.op)
             return
         else:
-            self._escalate(p)
+            self._escalate(p, record)
             return
 
         self._after_draft_change()
@@ -1294,26 +1373,32 @@ class Session:
         self._emit("draft", self.draft.text)
         return True
 
-    def _start_followup(self, rest: str) -> None:
+    def _start_followup(self, rest: str, record: Utterance | None = None) -> None:
         """P6: the next thing said continues the thread rather than starting over."""
         if not self.thread.last:
             # Nothing to follow, so this is just dictation with an odd opening.
             if rest:
                 self.draft.append(rest)
-                self._remember_append(rest)
+                self._remember_append(rest, record)
             self._emit("note", "nothing sent yet - treating that as dictation")
             self._after_draft_change()
             return
         self.following_up = True
         if rest:
             self.draft.append(rest)
-            self._remember_append(rest)
+            self._remember_append(rest, record)
         self._emit("note", f"following up on {len(self.thread)} sent")
         self._after_draft_change()
 
-    def _remember_append(self, utterance: str) -> None:
-        """Keep the last dictation, with its audio, for a post-hoc reinterpretation."""
-        self._last_append = (utterance, self._last_audio)
+    def _remember_append(self, utterance: str, record: Utterance | None = None) -> None:
+        """Keep the last dictation, with **its own** audio, for a reinterpretation.
+
+        The audio comes from the record this text was decoded from, not from
+        `_last_audio`. Those differ exactly when they matter: a decode slow enough for
+        the next utterance to have been captured meanwhile is the case rescue exists to
+        serve, and reading the slot paired the words with the wrong sound.
+        """
+        self._last_append = (utterance, record.audio if record is not None else None)
 
     @property
     def can_rescue(self) -> bool:
@@ -1361,18 +1446,25 @@ class Session:
             self.worker.submit_rescue(audio, command_bias(self.draft.text))
             return True
 
-        self._give_back(utterance, "could not re-read that as a command")
+        self._give_back(utterance, "could not re-read that as a command", audio)
         return False
 
-    def _give_back(self, utterance: str, note: str) -> None:
+    def _give_back(self, utterance: str, note: str,
+                   audio: np.ndarray | None = None) -> None:
         """Put a withdrawn utterance back. The user's words are never the price of a
-        failed guess."""
+        failed guess.
+
+        The audio goes back with them. Re-reading `_last_audio` here would hand the
+        restored utterance whatever was captured most recently, so a second "Was a
+        command" on the same words would re-decode a different sentence — the original
+        defect, reached through the recovery path for it.
+        """
         self.draft.append(utterance)
-        self._last_append = (utterance, self._last_audio)
+        self._last_append = (utterance, audio)
         self._emit("note", note)
         self._after_draft_change()
 
-    def _escalate(self, p) -> None:
+    def _escalate(self, p, record: Utterance | None = None) -> None:
         """A semantic plan. Try one cheap re-decode first, if it might be a mis-hearing.
 
         `escalated` means the shape was a correction but the target was nowhere in the
@@ -1380,18 +1472,22 @@ class Session:
         judgement. A second decode biased toward the trigger verbs and the draft's own
         words costs about a second; the CLI costs seven and will be asked to edit text
         that does not contain the word.
+
+        The re-decode is of `record`'s audio — the utterance this plan came from — for
+        the same reason `_remember_append` takes one. Asking the decoder to re-listen to
+        whatever was captured most recently is the version of this that sounds right and
+        re-reads a different sentence.
         """
         if p.op == "polish":
             # A named request for a specific transformation, not an instruction to be
             # interpreted — and never a mis-hearing to re-listen for.
             self._start_refine(p.payload, polish=True)
             return
-        if p.escalated and self._last_audio is not None and self._pending_rescue is None:
+        audio = record.audio if record is not None else self._last_audio
+        if p.escalated and audio is not None and self._pending_rescue is None:
             self._pending_rescue = p.payload
             self._emit("note", f"re-listening for {p.target!r}")
-            self.worker.submit_rescue(
-                self._last_audio, command_bias(self.draft.text)
-            )
+            self.worker.submit_rescue(audio, command_bias(self.draft.text), record)
             return
         self._start_refine(p.payload)
 
