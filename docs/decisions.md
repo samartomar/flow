@@ -6,6 +6,38 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-03 — The download must not trail the repo: v0.2.0 now, and links that cannot go stale
+
+The owner caught it in one sentence: anyone downloading the current release misses the
+updates. Measured: the only tag is **v0.1.0**, main is **53 commits past it**, and
+item 59's release workflow fires on tag push alone — deliberately, so nothing refreshes
+the zip by itself. The stale binary is not just short on features (trigger words, the
+workspace switcher, the long-draft fixes, the kiro-cli adapter all postdate it); it
+predates **round nine's security fixes**, so the download ships flaws the repo already
+fixed. Decided, three parts:
+
+1. **Cut v0.2.0 now.** Bump `pyproject.toml`, tag, and let release.yml do what item 59
+   built it to do: gate on the suite, build, smoke-run, publish. The auto-generated
+   notes are then replaced with a written summary of what changed since v0.1.0 — every
+   claim traceable to this file, `docs/architecture.md`, or a commit message, with a
+   plain line telling v0.1.0 holders to replace the binary and why.
+2. **README download links go through `releases/latest/download/flow-windows-x64.zip`.**
+   The asset name stays constant across versions precisely so this URL stays true
+   forever — a link written today serves whatever is newest, so no old clone or cached
+   page can hand someone a stale zip again. The measured size figures in the README are
+   re-taken from the v0.2.0 asset, since the first-build numbers stop being true the
+   moment a second build exists.
+3. **The standing cadence: a round that changes behavior owes a tag.** Not per commit —
+   per landed round (or accumulation of owner-visible change), the version bumps and
+   the tag ships. The release costs one command now; staleness costs a stranger a
+   binary with known, already-fixed defects. Reopen bar: if tagging ever stops being
+   one command — the workflow gains steps a human must babysit — the cadence gets
+   re-decided rather than silently skipped.
+
+*(Noted for a future round, not this release: nothing in the app tells a user which
+version they hold — a `--version` flag and a line in Help would let "am I current?" be
+answered without guesswork. Parked in NEEDS_YOU rather than smuggled into a release.)*
+
 ### 2026-08-02 — Five words from the owner: the round-seven residue decided
 
 1. **The selfdrive tripwire resolves as a fix, not a quarantine.** `capitalize
