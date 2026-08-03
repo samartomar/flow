@@ -499,6 +499,21 @@ class TestTheWordsAreThePersonsOwn(unittest.TestCase):
         self.assertEqual(sends(s), [""])
 
 
+def recording_send(into: list):
+    """A `SendInput` that records its burst *and answers like the real one*.
+
+    This was `lambda *a: keys.append(a)`, which returns None — fine while nobody read the
+    answer, and a refused paste from 2026-08-03, when `paste()` started requiring a
+    complete insertion. The same shape of unrealistic fake the audit found next door in
+    `test_inject_target.py`: a mock that records the call and invents the result.
+    """
+    def sender(*events):
+        into.append(events)
+        return len(events)
+
+    return sender
+
+
 class TestTheEnterGoesWithThePaste(unittest.TestCase):
     """Check 3: to the validated target, after the paste, and never on its own."""
 
@@ -516,7 +531,7 @@ class TestTheEnterGoesWithThePaste(unittest.TestCase):
                         mock.patch.object(inject, "get_clipboard_text",
                                           return_value=None), \
                         mock.patch.object(inject, "_send",
-                                          side_effect=lambda *a: keys.append(a)):
+                                          side_effect=recording_send(keys)):
                     self.assertTrue(inject.paste("deploy it\n", hwnd=0x22, submit=submit))
                 self.assertEqual(len(keys), 1 + expected)
 

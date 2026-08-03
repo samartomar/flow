@@ -1058,6 +1058,23 @@ policy here; it is enforced by absence.
    to dictate so the following Send is the ordinary explicit one. It deliberately does
    **not** settle the draft — a taken answer is not an utterance somebody finished, and
    settling it would arm the countdown against Flow's own answer.
+
+   **And the Enter is earned by a paste that actually landed.** `SendInput` reports how
+   many events it inserted; both call sites discarded that number, so a Ctrl-V that
+   inserted nothing — UIPI denial against an elevated window is the ordinary way to get a
+   zero — was followed by Enter regardless, into a shell, running whatever already sat on
+   the prompt. That is this invariant's own failure arriving one layer below where it
+   looks: P7 decides what is safe to *paste*, and this is the keystroke going in after the
+   payload did not. A short count on the four-event burst (`PASTE_KEYS`) is now a refusal
+   that names the count, sends no Enter, and **leaves the payload on the clipboard rather
+   than restoring** — the recovery `paste()` promises for UIPI is the user pressing Ctrl-V
+   themselves, and a restore would take away the thing they press it on. The two-event
+   Enter burst (`SUBMIT_KEYS`) is checked the same way and reports differently: the text is
+   in the window, so the Send worked and only the submit is missing.
+
+   The target is also re-resolved immediately before that burst. The refusals at the top of
+   `paste()` ran before a clipboard write and a `SendInput` round trip, and a window
+   arriving inside that gap would receive a bare Enter with nothing pasted under it.
 6. **Flow does not listen to itself, and does not claim to.** While a reply is playing the
    microphone is not evidence. There is no echo cancellation and there is not going to be
    one (R16), so converse mode is half-duplex and interrupting is an explicit action. A VAD
@@ -1154,7 +1171,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1110 tests, ~26 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1119 tests, ~27 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

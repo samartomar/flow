@@ -38,6 +38,28 @@ UNKNOWN = Target()
 FLOW = Target("TkTopLevel", "python.exe", is_flow=True)
 
 
+def all_inserted(*events):
+    """A `SendInput` that accepts everything, which is what the real one returns.
+
+    The audit named this module's mocks as a finding in their own right, and it was
+    right to: every one of them was `return_value=1`, so a four-event Ctrl-V burst
+    reported **one** event inserted and the tests called that a success. That is not a
+    lax fake, it is a fake of the failure — one of four is precisely the partial paste
+    DESKTOP-02 is about, and the suite was green on it for the life of the file.
+    """
+    return len(events)
+
+
+def none_inserted(*_events):
+    """A `SendInput` the OS refused outright. Zero is what UIPI denial looks like."""
+    return 0
+
+
+def only(n: int):
+    """A `SendInput` that accepts `n` of however many events it was given."""
+    return lambda *events: min(n, len(events))
+
+
 class TestClassification(unittest.TestCase):
     def test_terminals_are_recognised_by_class_or_process(self):
         for target in (WT, CMD, BASH):
@@ -184,7 +206,7 @@ class TestTheTargetIsRevalidatedAtPasteTime(unittest.TestCase):
                         side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
              mock.patch("flow.inject.get_clipboard_text", return_value=None), \
              mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
-             mock.patch("flow.inject._send", return_value=1) as sent:
+             mock.patch("flow.inject._send", side_effect=all_inserted) as sent:
             from flow.inject import paste
 
             ok = paste("deploy it\n", hwnd=0x22, restore_clipboard=False)
@@ -204,7 +226,7 @@ class TestTheTargetIsRevalidatedAtPasteTime(unittest.TestCase):
                         side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
              mock.patch("flow.inject.get_clipboard_text", return_value=None), \
              mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
-             mock.patch("flow.inject._send", return_value=1):
+             mock.patch("flow.inject._send", side_effect=all_inserted):
             from flow.inject import paste
 
             ok = paste("deploy it\n", hwnd=0x22, restore_clipboard=False)
@@ -219,7 +241,7 @@ class TestPasteUsesTheTarget(unittest.TestCase):
         with mock.patch("flow.inject.resolve", return_value=target), \
              mock.patch("flow.inject.get_clipboard_text", return_value=None), \
              mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
-             mock.patch("flow.inject._send", return_value=1):
+             mock.patch("flow.inject._send", side_effect=all_inserted):
             from flow.inject import paste
 
             ok = paste(text, restore_clipboard=False)
@@ -259,7 +281,7 @@ class TestPasteUsesTheTarget(unittest.TestCase):
                         side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
              mock.patch("flow.inject.get_clipboard_text", return_value=None), \
              mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
-             mock.patch("flow.inject._send", return_value=1):
+             mock.patch("flow.inject._send", side_effect=all_inserted):
             from flow.inject import paste
 
             ok = paste("deploy it\n", hwnd=0x22, restore_clipboard=False)
@@ -279,7 +301,7 @@ class TestFlowNeverPastesIntoItself(unittest.TestCase):
         with mock.patch("flow.inject.resolve", return_value=FLOW), \
              mock.patch("flow.inject.get_clipboard_text", return_value=None), \
              mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
-             mock.patch("flow.inject._send", return_value=1) as sent:
+             mock.patch("flow.inject._send", side_effect=all_inserted) as sent:
             from flow.inject import paste
 
             ok = paste("some words", restore_clipboard=False)
@@ -306,7 +328,7 @@ class TestFlowNeverPastesIntoItself(unittest.TestCase):
         with mock.patch("flow.inject.resolve", return_value=EDITOR), \
              mock.patch("flow.inject.get_clipboard_text", return_value=None), \
              mock.patch("flow.inject.set_clipboard_text", return_value=False), \
-             mock.patch("flow.inject._send", return_value=1):
+             mock.patch("flow.inject._send", side_effect=all_inserted):
             from flow.inject import paste
 
             ok = paste("some words", restore_clipboard=False)
@@ -337,7 +359,7 @@ class TestTheClipboardIsGivenBackOnlyIfNobodyElseTookIt(unittest.TestCase):
              mock.patch("flow.inject.get_clipboard_text", return_value=previous), \
              mock.patch("flow.inject.set_clipboard_text",
                         side_effect=lambda t: (writes.append(t), True)[1]), \
-             mock.patch("flow.inject._send", return_value=1):
+             mock.patch("flow.inject._send", side_effect=all_inserted):
             from flow.inject import paste
 
             paste("deploy it", restore_clipboard=True)
@@ -431,3 +453,136 @@ class TestLateWarningsReachTheBubble(unittest.TestCase):
         pill.bubble.note.reset_mock()
         pill._pump_warnings()
         pill.bubble.note.assert_not_called()
+
+
+class TestEnterIsEarnedByACompletePaste(unittest.TestCase):
+    """DESKTOP-02: the Ctrl-V result was computed, returned, and thrown away.
+
+    `_send` has always returned `SendInput`'s count and both call sites ignored it, so a
+    Ctrl-V that inserted nothing — UIPI denial against an elevated window is the ordinary
+    way — was followed by Enter anyway. Into a shell, that runs whatever was already
+    sitting on the prompt. It is the exact failure P7 exists to prevent, arriving one
+    layer below where P7 looks: P7 asks what the target is and strips the newline, and
+    this is the keystroke going in after the payload did not.
+
+    The recovery is the one `paste()` already promises in its docstring for the UIPI
+    case: the text stays on the clipboard, so Ctrl-V by hand works.
+    """
+
+    def _paste(self, sender, *, submit=True, hwnd=0x22, live=None):
+        take_warnings()
+        live = hwnd if live is None else live
+        with mock.patch("flow.inject.foreground_hwnd", return_value=live), \
+                mock.patch("flow.inject.classify",
+                           side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
+                mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+                mock.patch("flow.inject.set_clipboard_text", return_value=True) as put, \
+                mock.patch("flow.inject._send", side_effect=sender) as sent:
+            from flow.inject import paste
+
+            ok = paste("deploy it", hwnd=hwnd, submit=submit, restore_clipboard=False)
+        return ok, sent, put, take_warnings()
+
+    def test_a_refused_paste_sends_no_enter(self):
+        ok, sent, _put, warnings = self._paste(none_inserted)
+        self.assertFalse(ok)
+        self.assertEqual(sent.call_count, 1, "Enter followed a paste that did not land")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("0 of 4", warnings[0])
+
+    def test_every_partial_count_is_a_failed_paste(self):
+        for n in (1, 2, 3):
+            with self.subTest(inserted=n):
+                ok, sent, _put, warnings = self._paste(only(n))
+                self.assertFalse(ok)
+                self.assertEqual(sent.call_count, 1)
+                self.assertIn(f"{n} of 4", warnings[0])
+
+    def test_the_warning_says_the_text_is_still_recoverable(self):
+        # The payload is deliberately left on the clipboard rather than restored: the
+        # whole recovery for a refused keystroke is the user pressing Ctrl-V themselves,
+        # and a restore would take the thing they need to press it on.
+        _ok, _sent, put, warnings = self._paste(none_inserted)
+        self.assertEqual(put.call_args.args[0], "deploy it")
+        self.assertIn("Ctrl-V", warnings[0])
+
+    def test_a_complete_paste_still_submits(self):
+        ok, sent, _put, warnings = self._paste(all_inserted)
+        self.assertTrue(ok)
+        self.assertEqual(sent.call_count, 2, "the Enter burst never went")
+        self.assertEqual(warnings, [])
+
+    def test_a_complete_paste_without_submit_sends_one_burst(self):
+        ok, sent, _put, warnings = self._paste(all_inserted, submit=False)
+        self.assertTrue(ok)
+        self.assertEqual(sent.call_count, 1)
+        self.assertEqual(warnings, [])
+
+
+class TestTheTargetIsCheckedAgainBeforeEnter(unittest.TestCase):
+    """The paste's refusals ran a queue-latency ago, and Enter is the irreversible half.
+
+    `resolve()` is asked before the clipboard is touched, which is right — the answer
+    decides the payload. But between that check and the Enter burst sit a clipboard
+    write, a `SendInput`, and however long Windows took to deliver it. A window that
+    takes the foreground inside that gap receives a bare Enter, and the paste it would be
+    submitting is not there.
+    """
+
+    def _submit_with(self, live_at_paste, live_at_enter):
+        take_warnings()
+        answers = iter((live_at_paste, live_at_enter, live_at_enter))
+        with mock.patch("flow.inject.foreground_hwnd",
+                        side_effect=lambda: next(answers, live_at_enter)), \
+                mock.patch("flow.inject.classify",
+                           side_effect=lambda h: CMD if h == 0x22 else EDITOR), \
+                mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+                mock.patch("flow.inject.set_clipboard_text", return_value=True), \
+                mock.patch("flow.inject._send", side_effect=all_inserted) as sent:
+            from flow.inject import paste
+
+            ok = paste("deploy it", hwnd=0x22, submit=True, restore_clipboard=False)
+        return ok, sent, take_warnings()
+
+    def test_a_window_that_arrives_after_the_paste_gets_no_enter(self):
+        ok, sent, warnings = self._submit_with(0x22, 0x33)
+        self.assertTrue(ok, "the paste itself did land, and saying otherwise is a lie")
+        self.assertEqual(sent.call_count, 1, "a bare Enter went to the wrong window")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("not submitted", warnings[0])
+
+    def test_the_refusal_names_who_took_the_focus(self):
+        _ok, _sent, warnings = self._submit_with(0x22, 0x33)
+        self.assertIn("Code.exe", warnings[0])
+
+    def test_the_window_staying_put_submits(self):
+        ok, sent, warnings = self._submit_with(0x22, 0x22)
+        self.assertTrue(ok)
+        self.assertEqual(sent.call_count, 2)
+        self.assertEqual(warnings, [])
+
+
+class TestEnterHasItsOwnCount(unittest.TestCase):
+    """The second burst is checked like the first, and the failure is a different one.
+
+    A refused paste means nothing arrived. A refused *Enter* means the text is sitting in
+    the target unsubmitted, which is recoverable by pressing a key and is not a reason to
+    report the Send as failed — so this warns and still returns True.
+    """
+
+    def test_a_partial_enter_warns_without_calling_the_paste_a_failure(self):
+        take_warnings()
+        bursts = iter((4, 1))
+        with mock.patch("flow.inject.foreground_hwnd", return_value=0x22), \
+                mock.patch("flow.inject.classify", side_effect=lambda h: CMD), \
+                mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+                mock.patch("flow.inject.set_clipboard_text", return_value=True), \
+                mock.patch("flow.inject._send",
+                           side_effect=lambda *e: next(bursts, len(e))):
+            from flow.inject import paste
+
+            ok = paste("deploy it", hwnd=0x22, submit=True, restore_clipboard=False)
+        warnings = take_warnings()
+        self.assertTrue(ok, "the text is in the window; only the Enter is missing")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("1 of 2", warnings[0])

@@ -55,6 +55,15 @@ KEYEVENTF_KEYUP = 0x0002
 INPUT_KEYBOARD = 1
 VK_CONTROL, VK_V, VK_RETURN = 0x11, 0x56, 0x0D
 
+#: How many events each burst is, so `SendInput`'s return value can be read as an answer
+#: rather than discarded. It reports how many it *inserted*, and a short count is not a
+#: slow paste — it is a refused one. UIPI is the ordinary way to get a zero: a
+#: non-elevated process cannot synthesise input into an elevated window, and Windows says
+#: so only here. Both numbers are the length of their own literal argument list below;
+#: named because a check against a magic 4 is a check nobody can verify by reading it.
+PASTE_KEYS = 4
+SUBMIT_KEYS = 2
+
 
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [
@@ -238,7 +247,24 @@ def paste(
     # here on is somebody else.
     stamp = clipboard_sequence()
 
-    _send(_key(VK_CONTROL), _key(VK_V), _key(VK_V, up=True), _key(VK_CONTROL, up=True))
+    inserted = _send(
+        _key(VK_CONTROL), _key(VK_V), _key(VK_V, up=True), _key(VK_CONTROL, up=True)
+    )
+    if inserted != PASTE_KEYS:
+        # The count was always computed and always thrown away, which is how an Enter
+        # could follow a Ctrl-V that inserted nothing — into a shell, running whatever
+        # was already on the prompt. That is the failure P7 exists to prevent, arriving
+        # one layer below where P7 looks.
+        #
+        # Returning here also means the clipboard is *not* put back, and that is the
+        # point rather than an oversight: the recovery this function's docstring promises
+        # for the UIPI case is the user pressing Ctrl-V themselves, and a restore would
+        # take away the thing they need to press it on.
+        _warn(
+            f"not pasted: Windows took {inserted} of {PASTE_KEYS} keystrokes - the text "
+            f"is on the clipboard, so Ctrl-V puts it in"
+        )
+        return False
 
     if submit:
         # After the paste and never instead of it. Every refusal above has already run,
@@ -250,7 +276,30 @@ def paste(
         # still lost its trailing newline above, so there is exactly one submit and the
         # user is the one who called for it. Under bracketed paste the block stays inert
         # until this keystroke, which is deliberate execution done deliberately.
-        _send(_key(VK_RETURN), _key(VK_RETURN, up=True))
+        #
+        # Asked again, because those refusals ran before a clipboard write and a
+        # `SendInput` round trip. A window arriving inside that gap would receive a bare
+        # Enter with nothing pasted under it, which is the same defect the count above
+        # catches reached by a different road.
+        again = resolve(hwnd)
+        if again.is_flow:
+            _warn("pasted, but not submitted: Flow took the focus back")
+        elif again.stale:
+            _warn(
+                "pasted, but not submitted: the window changed after the paste"
+                + (f" - {again.process} has the focus now" if again.process else "")
+            )
+        else:
+            entered = _send(_key(VK_RETURN), _key(VK_RETURN, up=True))
+            if entered != SUBMIT_KEYS:
+                # A different failure from the one above and reported as one: the text is
+                # in the window, so the Send worked and only the submit is missing. Saying
+                # "not pasted" here would send the user looking for text that is already
+                # in front of them.
+                _warn(
+                    f"pasted, but Enter did not go in ({entered} of {SUBMIT_KEYS}) - "
+                    f"press it yourself"
+                )
 
     if previous is not None:
         def restore() -> None:
