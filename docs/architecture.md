@@ -187,7 +187,7 @@ is written down.
 | `hotkeys` | `Hotkeys.start()` | `RegisterHotKey` + `GetMessageW` message loop | `RegisterHotKey` requires the message loop to be on the registering thread. Presses go back through a `queue`, drained on the UI thread |
 | `refine` | per semantic rewrite | one `refine._invoke` | Result handed back under `_refine_lock`, tagged with its operation id and the draft revision it was computed from. Watches `Session._cancel` while it waits, so `close()` does not have to |
 | `ask` | per converse question | one `refine._invoke` | Result handed back under `_ask_lock`, tagged with its operation id. Same cancellation |
-| `clipboard-restore` | per paste | sleeps `RESTORE_DELAY_SEC`, puts the old clipboard back | Lets the target app read the clipboard first, then checks `GetClipboardSequenceNumber` against the reading taken when Flow's own text landed — a changed counter means the user copied something in that pause and the old text is not written back. The one thread that appends to `take_warnings()` from off the UI thread, which is why that queue is locked |
+| `clipboard-restore` | one, re-armed | sleeps until `_BORROWED.due`, puts the old clipboard back | Lets the target app read the clipboard first, then checks `GetClipboardSequenceNumber` against the reading taken when Flow's own text landed — a changed counter means the user copied something in that pause and the old text is not written back. **One worker, not one per paste**: a second send pushes the deadline out and this thread re-reads it on waking, where before every send parked its own sleeper (100 alive at once, measured). The one thread that appends to `take_warnings()` from off the UI thread, which is why that queue is locked |
 | `speech` watcher | each `Speaker.say()` | polls the host until it reports `Ready`, then clears `speaking` | Best-effort only. The ceiling that actually bounds `speaking` is enforced by the reader, so a wedged host cannot leave Flow deaf |
 | speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking, and the state protocol needs it responsive |
 
@@ -757,6 +757,35 @@ back what they had copied before. A counter of `0` means the OS declined to answ
 not treated as evidence either way. **Known limit:** only text is captured, so a clipboard
 holding an image or a file list is emptied by the paste and never restored.
 
+**Borrowed once per burst, not once per send.** The counter guards Flow against the
+*user*; it cannot guard Flow against itself, and it is worth saying why, because it looks
+like exactly the check for it. Two sends inside 0.6 s used to be two independent
+borrowings, and the second asked the clipboard what it owed back — at a moment when the
+clipboard held the first send's payload. So B faithfully restored Flow's own text and the
+user's real clipboard was gone permanently, with no warning, because from B's point of
+view nothing anomalous had happened. The stamp saw the counter move and was right: it had
+moved, because of Flow. A stamp answers *is this still mine*, never *was what I found also
+mine*.
+
+`_BORROWED` is the whole answer. `_borrow()` reads the clipboard only when nothing is
+already owed, so a send arriving mid-restore inherits the debt instead of inventing one;
+the last send to arrive pushes the deadline out; one worker wakes, re-reads that deadline
+under the lock, and commits when it has finally passed. There is no generation counter
+because the deadline *is* the generation — last writer wins, which is the same rule stated
+once instead of twice. Flow owes the user one clipboard, not one per send it made in
+between.
+
+That also retires the thread-per-send. Every paste used to park its own sleeping thread —
+the audit measured 300 for 300 rapid pastes, and the instrument here reproduces 100 for
+100 before the change, 1 after. The lock is re-entrant and held across the commit, so a
+restore and a paste cannot interleave inside one clipboard.
+
+A **refused** send releases the transaction rather than leaving it pending. Every refusal
+above keeps Flow's text on the clipboard deliberately, because the recovery on offer is a
+manual Ctrl-V; once that has been said, paying the old debt back would restore over the
+very text the user was told to paste, and a debt left outstanding would be paid by some
+unrelated send an hour later.
+
 The one guarantee: a draft ending in a newline never reaches a shell with that newline
 attached, because that does not paste, it *runs*. Interior newlines are explicitly not a
 guarantee and are reported rather than rewritten; silently reflowing someone's text to make
@@ -1200,7 +1229,7 @@ card for its own Send is still on screen.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1130 tests, ~26 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1138 tests, ~29 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

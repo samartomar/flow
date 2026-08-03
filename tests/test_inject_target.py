@@ -11,6 +11,7 @@ click that started the Send. The answer was Flow's own window, so P7 was decidin
 a Tk canvas and the guarantee above was never once exercised on the Send chip's path.
 """
 
+import contextlib
 import sys
 import threading
 import unittest
@@ -717,3 +718,184 @@ class TestWhatRunsOnArrivalIsAskedInOnePlace(unittest.TestCase):
         from flow.inject import runs_on_arrival
 
         self.assertFalse(runs_on_arrival("one\ntwo", UNKNOWN))
+
+
+class FakeClipboard:
+    """A clipboard with a sequence counter that moves when it is written.
+
+    The counter is the point. `clipboard_sequence` is Flow's only way to ask "does this
+    still hold what I put there", and the DESKTOP-04 defect is invisible to it: when send
+    B overwrites send A's payload the counter *does* move, but it moved because of Flow.
+    A fake that let the two be told apart would not be reproducing the bug.
+    """
+
+    def __init__(self, text="what the user had"):
+        self.text = text
+        self.seq = 1
+        self.writes: list[str] = []
+
+    def get(self):
+        return self.text
+
+    def put(self, text):
+        self.text = text
+        self.seq += 1
+        self.writes.append(text)
+        return True
+
+    def sequence(self):
+        return self.seq
+
+    def patches(self, delay=0.05):
+        return (
+            mock.patch("flow.inject.resolve", return_value=EDITOR),
+            mock.patch("flow.inject.RESTORE_DELAY_SEC", delay),
+            mock.patch("flow.inject.get_clipboard_text", side_effect=self.get),
+            mock.patch("flow.inject.set_clipboard_text", side_effect=self.put),
+            mock.patch("flow.inject.clipboard_sequence", side_effect=self.sequence),
+            mock.patch("flow.inject._send", side_effect=all_inserted),
+        )
+
+
+def restore_threads():
+    return [t for t in threading.enumerate() if t.name == "clipboard-restore"]
+
+
+def settle(timeout=5.0):
+    """Wait for every restore worker to finish. Not a sleep — they are joinable."""
+    for t in restore_threads():
+        t.join(timeout)
+
+
+class TestTwoSendsAreOneClipboardTransaction(unittest.TestCase):
+    """DESKTOP-04 as the validation corrected it: Flow racing itself, not a stale timer.
+
+    The sequence stamp already stops an old restore from landing on a newer one, and it
+    already keeps a copy the user made during the pause. What it cannot see is the other
+    send being Flow's. Send B read the clipboard to find out what it owed back, at a
+    moment when the clipboard held **send A's payload**, so B faithfully restored Flow's
+    own text and the user's real clipboard was gone for good — no warning, because from
+    B's point of view nothing anomalous had happened.
+
+    The fix is that there is one borrowing, not one per send: a send arriving while a
+    restore is pending inherits what is already owed instead of asking the clipboard.
+    """
+
+    def _send_twice(self, delay=0.2):
+        clip = FakeClipboard()
+        with contextlib.ExitStack() as stack:
+            for p in clip.patches(delay):
+                stack.enter_context(p)
+            from flow.inject import paste
+
+            paste("send A text", restore_clipboard=True)
+            paste("send B text", restore_clipboard=True)
+            settle()
+        return clip
+
+    def test_the_users_clipboard_comes_back_and_not_flows(self):
+        clip = self._send_twice()
+        self.assertEqual(clip.text, "what the user had")
+        self.assertNotIn("send A text", clip.writes[-1:])
+
+    def test_flows_own_payload_is_never_restored(self):
+        # The sharp assertion, and the one that fails loudest against the old code: the
+        # last thing written must not be something Flow put there itself.
+        clip = self._send_twice()
+        self.assertNotIn(clip.writes[-1], ("send A text", "send B text"))
+
+    def test_both_payloads_still_reached_the_clipboard_in_order(self):
+        # The fix must not become "the second send does not paste".
+        clip = self._send_twice()
+        self.assertEqual(clip.writes[:2], ["send A text", "send B text"])
+
+    def test_a_burst_of_five_restores_once(self):
+        clip = FakeClipboard()
+        with contextlib.ExitStack() as stack:
+            for p in clip.patches(0.2):
+                stack.enter_context(p)
+            from flow.inject import paste
+
+            for i in range(5):
+                paste(f"payload {i}", restore_clipboard=True)
+            settle()
+        self.assertEqual(clip.text, "what the user had")
+        self.assertEqual(clip.writes.count("what the user had"), 1,
+                         "the restore ran more than once")
+
+
+class TestOneRestoreWorkerWhateverTheSendRate(unittest.TestCase):
+    """DESKTOP-09: every send parked its own sleeping thread.
+
+    Measured by the audit at 300 threads for 300 rapid pastes, alive together until
+    their 600 ms delays expired. A generation the single worker re-reads when it wakes
+    does the same job — and it is the same mechanism as the class above rather than a
+    second one, which is why the two findings are one item.
+    """
+
+    def test_a_hundred_rapid_sends_keep_one_worker(self):
+        clip = FakeClipboard()
+        peak = 0
+        with contextlib.ExitStack() as stack:
+            for p in clip.patches(3.0):  # long enough that none can retire mid-burst
+                stack.enter_context(p)
+            from flow.inject import paste
+
+            for i in range(100):
+                paste(f"payload {i}", restore_clipboard=True)
+                peak = max(peak, len(restore_threads()))
+            with mock.patch("flow.inject.RESTORE_DELAY_SEC", 0.0):
+                paste("last", restore_clipboard=True)
+                settle()
+        self.assertLessEqual(peak, 1, f"{peak} restore threads were alive at once")
+
+    def test_and_the_one_worker_retires(self):
+        clip = FakeClipboard()
+        with contextlib.ExitStack() as stack:
+            for p in clip.patches(0.0):
+                stack.enter_context(p)
+            from flow.inject import paste
+
+            paste("deploy it", restore_clipboard=True)
+            settle()
+        self.assertEqual(restore_threads(), [])
+
+
+class TestARefusedSendGivesTheTransactionUp(unittest.TestCase):
+    """A refusal keeps the payload on the clipboard, so there is nothing owed back.
+
+    Items 48 and 49 both refuse *after* writing, deliberately: the recovery is the user
+    pressing Ctrl-V. Once that has been said, restoring would take away the thing they
+    were told to press it on — so the transaction is released rather than left pending,
+    or the next send an hour later would put back an hour-old clipboard.
+    """
+
+    def _refused_then_ordinary(self, refuse_with):
+        clip = FakeClipboard()
+        with contextlib.ExitStack() as stack:
+            for p in clip.patches(0.0):
+                stack.enter_context(p)
+            stack.enter_context(mock.patch("flow.inject.resolve",
+                                           side_effect=[CMD, EDITOR, EDITOR]))
+            from flow.inject import paste
+
+            take_warnings()
+            self.assertFalse(paste(refuse_with, restore_clipboard=True))
+            settle()
+            after_refusal = clip.text
+            paste("an ordinary send", restore_clipboard=True)
+            settle()
+            take_warnings()
+        return after_refusal, clip
+
+    def test_a_refused_payload_stays_and_nothing_is_restored_over_it(self):
+        after, _clip = self._refused_then_ordinary("one\ntwo")
+        self.assertEqual(after, "one\ntwo")
+
+    def test_the_next_send_borrows_fresh_rather_than_an_old_debt(self):
+        # The stale-debt case: if the refusal left the user's original owed, this send
+        # would restore a clipboard from before the refusal — over text the user was
+        # explicitly told to paste by hand.
+        _after, clip = self._refused_then_ordinary("one\ntwo")
+        self.assertEqual(clip.text, "one\ntwo",
+                         "an abandoned debt was restored over the refused payload")

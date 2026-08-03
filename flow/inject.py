@@ -163,6 +163,45 @@ def clipboard_sequence() -> int:
 #: text had been read.
 RESTORE_DELAY_SEC = 0.6
 
+class _Borrowed:
+    """The single clipboard transaction: what Flow owes back, and who gives it.
+
+    Two sends inside `RESTORE_DELAY_SEC` used to be two independent borrowings, and the
+    second one asked the *clipboard* what it owed — at a moment when the clipboard held
+    Flow's own payload from the first send. So B restored A's text and the user's real
+    clipboard was gone permanently, with nothing on screen about it, because from B's
+    point of view nothing anomalous had happened.
+
+    `clipboard_sequence` cannot catch this and it is worth saying why, since it looks
+    like exactly the guard for it: the counter *did* move between A's write and B's
+    read. It moved because of Flow. A stamp answers "is this still mine", not "was the
+    thing I found also mine".
+
+    So the borrowing happens once per burst. A send arriving while a restore is pending
+    inherits what is already owed rather than reading; the last send to arrive sets the
+    deadline; one worker wakes, re-reads that deadline, and commits when it has finally
+    passed. That also retires the thread-per-send — the audit measured 300 sleeping
+    threads for 300 rapid pastes, and this reproduces at 100 for 100.
+    """
+
+    def __init__(self) -> None:
+        # Re-entrant because the commit path holds it across `set_clipboard_text`, which
+        # keeps a restore and a `paste` from interleaving inside one clipboard.
+        self.lock = threading.RLock()
+        #: What the user had before Flow's *first* borrow of this burst, or None when
+        #: nothing is owed. Not a stack: Flow owes the user one clipboard, not one per
+        #: send it made in between.
+        self.owed: str | None = None
+        #: The counter reading from the most recent send, so a copy made during the
+        #: pause is still detected — that guard is unchanged and pre-dates this.
+        self.stamp = 0
+        self.due = 0.0
+        self.worker: threading.Thread | None = None
+
+
+_BORROWED = _Borrowed()
+
+
 #: Warnings raised by the last paste, drained by the UI. A module-level queue rather
 #: than a return value because `paste` already returns success, and a caller that
 #: ignores the warning must still see it — the whole point is that the user is told.
@@ -185,6 +224,67 @@ def take_warnings() -> list[str]:
         out = list(_WARNINGS)
         _WARNINGS.clear()
         return out
+
+
+def _borrow(restore: bool) -> str | None:
+    """Register one send against the transaction, and answer what it owes back."""
+    with _BORROWED.lock:
+        if restore and _BORROWED.owed is None:
+            # Only ever asked when nothing is pending. This single condition is the
+            # whole fix: while a restore is outstanding the clipboard holds Flow's text,
+            # so reading it here is what mistook send A's payload for the user's.
+            _BORROWED.owed = get_clipboard_text()
+        return _BORROWED.owed if restore else None
+
+
+def _release() -> None:
+    """Give the transaction up without restoring — the payload is staying, deliberately.
+
+    Every refusal below leaves Flow's text on the clipboard and says so, because the
+    recovery on offer is the user pressing Ctrl-V. Once that has been said, owing the old
+    clipboard back is a debt that must not be paid: the next send, possibly an hour
+    later, would restore over the very text they were told to paste by hand.
+    """
+    with _BORROWED.lock:
+        _BORROWED.owed = None
+
+
+def _schedule_restore(stamp: int) -> None:
+    """Arm — or re-arm — the one restore worker."""
+    with _BORROWED.lock:
+        _BORROWED.stamp = stamp
+        _BORROWED.due = time.monotonic() + RESTORE_DELAY_SEC
+        if _BORROWED.worker is not None and _BORROWED.worker.is_alive():
+            return  # it re-reads `due` when it wakes; a second thread would add nothing
+        _BORROWED.worker = threading.Thread(
+            target=_restore_worker, daemon=True, name="clipboard-restore"
+        )
+        _BORROWED.worker.start()
+
+
+def _restore_worker() -> None:
+    while True:
+        with _BORROWED.lock:
+            wait = _BORROWED.due - time.monotonic()
+            if wait <= 0:
+                previous, stamp = _BORROWED.owed, _BORROWED.stamp
+                _BORROWED.owed = None
+                _BORROWED.worker = None
+                if previous is None:
+                    return
+                now = clipboard_sequence()
+                if stamp and now and now != stamp:
+                    # Somebody copied something during that pause. Putting the old text
+                    # back now would not be a restore — it would be Flow deleting a thing
+                    # the user did *after* the paste, which is the one clipboard write
+                    # nobody could explain. A zero on either reading means the counter was
+                    # unavailable, not that nothing happened, so it is not taken as proof.
+                    _warn("kept what you copied since - the clipboard Flow borrowed was "
+                          "not put back")
+                    return
+                set_clipboard_text(previous)
+                return
+        time.sleep(wait)
 
 
 def paste(
@@ -237,9 +337,12 @@ def paste(
     # than restored. Capturing arbitrary formats means enumerating and copying every one
     # of them, which is a great deal of ctypes for a path that ends with Flow owning a
     # copy of the user's screenshot.
-    previous = get_clipboard_text() if restore_clipboard else None
+    previous = _borrow(restore_clipboard)
     if not set_clipboard_text(payload):
         _warn("not pasted: could not take the clipboard")
+        # Nothing was written, so nothing is owed by *this* send — but an earlier send in
+        # the same burst may still have a restore pending, and that one is still owed.
+        # Leaving the transaction alone is what keeps it.
         return False
     if runs_on_arrival(payload, target):
         # P7's second half, and it is a refusal rather than the warning it used to be.
@@ -254,6 +357,7 @@ def paste(
         # be the one to press the key. No restore, for the same reason it is skipped on a
         # refused insertion: it would take away the thing the hand needs.
         _warn(f"not pasted: {warning} - the text is on the clipboard, so Ctrl-V is yours")
+        _release()
         return False
 
     if warning:
@@ -280,6 +384,7 @@ def paste(
             f"not pasted: Windows took {inserted} of {PASTE_KEYS} keystrokes - the text "
             f"is on the clipboard, so Ctrl-V puts it in"
         )
+        _release()
         return False
 
     if submit:
@@ -318,21 +423,7 @@ def paste(
                 )
 
     if previous is not None:
-        def restore() -> None:
-            time.sleep(RESTORE_DELAY_SEC)
-            now = clipboard_sequence()
-            if stamp and now and now != stamp:
-                # Somebody copied something during that pause. Putting the old text
-                # back now would not be a restore — it would be Flow deleting a thing
-                # the user did *after* the paste, which is the one clipboard write
-                # nobody could explain. A zero on either reading means the counter was
-                # unavailable, not that nothing happened, so it is not taken as proof.
-                _warn("kept what you copied since - the clipboard Flow borrowed was "
-                      "not put back")
-                return
-            set_clipboard_text(previous)
-
-        threading.Thread(target=restore, daemon=True, name="clipboard-restore").start()
+        _schedule_restore(stamp)
     return True
 
 
