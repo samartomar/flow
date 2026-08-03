@@ -31,6 +31,19 @@ def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
     return proc
 
 
+def prompt_sent(popen, proc) -> str:
+    """What actually reached the CLI, whichever road it took.
+
+    These tests are about the *content* of the prompt, so they must not also be a claim
+    about its delivery. They read the last argv element until codex and claude were
+    measured on stdin (2026-08-03) and stopped putting it there — at which point the
+    assertion became "the framing is not in `-`", which is true of every prompt ever
+    written and proves nothing.
+    """
+    piped = proc.communicate.call_args.kwargs.get("input")
+    return piped if piped is not None else popen.call_args.args[0][-1]
+
+
 RAMBLE = (
     "so the login is broken when you use SSO, it throws a five hundred, "
     "um, this is on version 2.3.1, and I need you to find the root cause"
@@ -117,7 +130,7 @@ class TestPrompt(unittest.TestCase):
         fake = fake_popen("POLISHED", stderr="")
         with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run:
             out, note = refine(RAMBLE, "make it a proper prompt", polish=True)
-        sent = run.call_args.args[0][-1]
+        sent = prompt_sent(run, fake)
         self.assertEqual(out, "POLISHED")
         self.assertNotIn("make it a proper prompt", sent)
         self.assertIn(RAMBLE, sent)
@@ -126,7 +139,7 @@ class TestPrompt(unittest.TestCase):
         fake = fake_popen("REVISED", stderr="")
         with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run:
             refine(RAMBLE, "make it more formal")
-        self.assertIn("make it more formal", run.call_args.args[0][-1])
+        self.assertIn("make it more formal", prompt_sent(run, fake))
 
     def test_growth_is_allowed_where_a_revision_would_be_refused(self):
         # Structure costs words. Sized so the *multiplier* decides rather than the

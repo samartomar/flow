@@ -24,6 +24,16 @@ from flow.thread import CONTEXT_CHARS, MAX_CHARS, MAX_TURNS, Thread  # noqa: E40
 from cli_env import cli_on_path  # noqa: E402
 
 
+def prompt_sent(popen, proc) -> str:
+    """What actually reached the CLI, whichever road it took — see `test_polish.py`.
+
+    codex and claude take the prompt on stdin as of 2026-08-03, so reading the last
+    argv element would be asserting about `-`.
+    """
+    piped = proc.communicate.call_args.kwargs.get("input")
+    return piped if piped is not None else popen.call_args.args[0][-1]
+
+
 def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
     """A `Popen` with the surface `_invoke` uses: one `communicate` and an exit code."""
     proc = mock.Mock(returncode=returncode, pid=0)
@@ -287,7 +297,7 @@ class TestContextInThePrompt(unittest.TestCase):
         with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run_:
             refine("and a rollback", "make it formal",
                    context=["write the migration"])
-        sent = run_.call_args.args[0][-1]
+        sent = prompt_sent(run_, fake)
         self.assertIn("write the migration", sent)
         self.assertIn("background only", sent)
         self.assertIn("do not repeat or rewrite", sent)
@@ -296,7 +306,7 @@ class TestContextInThePrompt(unittest.TestCase):
         fake = fake_popen("REVISED", stderr="")
         with cli_on_path(), mock.patch("subprocess.Popen", return_value=fake) as run_:
             refine("and a rollback", "make it formal")
-        self.assertNotIn("EARLIER IN THIS THREAD", run_.call_args.args[0][-1])
+        self.assertNotIn("EARLIER IN THIS THREAD", prompt_sent(run_, fake))
 
 
 if __name__ == "__main__":
