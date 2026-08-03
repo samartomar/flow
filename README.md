@@ -12,9 +12,11 @@ uv tool install git+https://github.com/samartomar/flow
 flow
 ```
 
-No Python on the machine? Take `flow-windows-x64.zip` from
-[Releases](https://github.com/samartomar/flow/releases) instead — [Install](#install) has
-both, and the clone.
+No Python on the machine? Take
+[`flow-windows-x64.zip`](https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip)
+instead — that link always serves the newest release — or browse
+[Releases](https://github.com/samartomar/flow/releases). [Install](#install) has both, and
+the clone.
 
 Click the pill to arm it, speak, and the draft floats up above it. Talk to the draft to
 correct it, keep talking to add more, type into it when that is faster, then **Send**
@@ -75,9 +77,12 @@ the three dependencies itself, and `uv tool install` puts `flow` on your PATH (r
 
 ### Without Python at all — the binary
 
-Download `flow-windows-x64.zip` from
-[Releases](https://github.com/samartomar/flow/releases), unzip it anywhere, and run
-`flow.exe`. Nothing to install and no Python on the machine. **125 MB zipped, 323 MB
+Download
+[`flow-windows-x64.zip`](https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip),
+unzip it anywhere, and run `flow.exe`. That URL is version-free on purpose: the asset name
+never changes, so the link serves whatever release is newest and no cached page can hand
+you a stale zip. [Releases](https://github.com/samartomar/flow/releases) is there to browse
+the notes and older builds. Nothing to install and no Python on the machine. **125 MB zipped, 323 MB
 unpacked** (measured on the first build). The two speech models are *not* in the zip —
 they download to your Hugging Face cache on the first decode, exactly as they do for
 every other install, and the startup line names the path. Bundling them would have made
