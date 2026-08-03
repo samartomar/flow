@@ -87,6 +87,7 @@ class StubSession:
         return self.draft.clear()
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 @unittest.skipUnless(HAVE_TK, "no display available")
 class TestPumpNeverDies(unittest.TestCase):
     def _pill(self, session):

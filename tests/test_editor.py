@@ -253,6 +253,7 @@ class TestTheCountdownIsHeld(unittest.TestCase):
         s.close()
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 class TestFlowStillCannotPasteIntoItself(unittest.TestCase):
     """Invariant 10, asserted in the arrangement the editor creates.
 

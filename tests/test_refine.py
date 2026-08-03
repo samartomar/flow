@@ -589,6 +589,7 @@ class TestAnUnverifiedEntryIsInert(unittest.TestCase):
         self.assertEqual(names[:2], ["codex", "claude"])
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: cmd.exe %* truncation / taskkill in System32")
 class TestWhatWhichFindsIsWhatRuns(unittest.TestCase):
     """`shutil.which` and `CreateProcess` disagree about what a bare name means.
 
@@ -799,6 +800,7 @@ class TestStdinIsACapabilityAndNotAGuess(unittest.TestCase):
         self.assertEqual(out, "ok")
         started.assert_called_once()
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: cmd.exe %* truncation / taskkill in System32")
     def test_the_prompt_leaves_the_argv_when_it_travels_on_stdin(self):
         # Both halves matter. Sending it twice would hand a CLI the prompt as an argument
         # *and* on stdin, which is the truncation plus a duplicate.
@@ -875,6 +877,7 @@ class TestTheProbeCanSeeAHijack(unittest.TestCase):
     underneath every resolver in Flow *does* pick the workspace copy.
     """
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: kernel32 NeedCurrentDirectoryForExePath")
     def test_which_prefers_the_workspace_when_the_variable_is_cleared(self):
         out = in_planted_workspace(
             "import shutil\n"
@@ -943,6 +946,7 @@ class TestExecutablesComeFromTrustedDirectories(unittest.TestCase):
                 mock.patch.object(refine_mod, "probed", return_value=real):
             self.assertEqual(refine_mod.resolve(refine_mod.named("kiro-cli")), real)
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: cmd.exe %* truncation / taskkill in System32")
     def test_taskkill_is_the_one_in_system32(self):
         # `_kill_tree` runs on the cancel path, which is exactly when the user is already
         # unhappy, and a bare `taskkill` is the same door one process along.

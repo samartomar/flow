@@ -35,6 +35,7 @@ def fresh_host():
     return speak.host()
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: the PowerShell speech host")
 class TestTheHostIsAPathAndNotAWord(unittest.TestCase):
 
     def setUp(self) -> None:

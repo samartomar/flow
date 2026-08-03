@@ -378,6 +378,7 @@ class TestWhatProducedAMeasurement(Temp):
 
         self.assertEqual(model_revision("no-such-model-flow-test"), "")
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: the PowerShell speech host")
     def test_every_value_survives_the_redaction_guard(self):
         # Versions and hashes are tokens; a path or a banner line would not be, and
         # would land in the file as <refused> instead.

@@ -104,6 +104,7 @@ class TestHost(unittest.TestCase):
              mock.patch("flow.speak._HOST", None):
             self.assertEqual(host(), "/x/powershell")
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: the PowerShell speech host")
     def test_with_neither_found_it_still_returns_something_runnable(self):
         # Guessing beats raising: `Speaker` already degrades to silent when the host
         # will not start, and `which` failing is not proof the shell is absent. What the

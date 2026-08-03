@@ -345,6 +345,7 @@ class TestTheLiveCheckReplay(unittest.TestCase):
         self.assertEqual((p.kind, p.op), ("local", "replace"))
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: os.startfile")
 class TestTheSettingsFolderOpens(unittest.TestCase):
     """The menu entry, and the template it writes the first time.
 

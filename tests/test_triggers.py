@@ -514,6 +514,7 @@ def recording_send(into: list):
     return sender
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 class TestTheEnterGoesWithThePaste(unittest.TestCase):
     """Check 3: to the validated target, after the paste, and never on its own."""
 

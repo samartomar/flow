@@ -17,18 +17,28 @@ concurrency:
 
 jobs:
   suite:
-    # Three platforms because the suite's own law is a claim about three of them — the
-    # platform decides what imports, `lite` decides what happens — and it had only ever
-    # been run on one. Flow is a Windows product; the other two legs are what keep the
-    # platform-honest imports honest.
+    # Two platforms, and the second one is the whole point: the suite's law is that the
+    # platform decides what imports and `lite` decides what happens, which had never been
+    # run anywhere but Windows. macOS now says it holds — **1128 of 1168 tests pass**, and
+    # the 40 that do not are six named Win32 mechanisms, each carrying a `skipUnless` that
+    # says which.
+    #
+    # **Ubuntu was here and was dropped on evidence, 2026-08-03.** uv's managed CPython
+    # ships tkinter on macOS and not on Linux, and the suite reaches `flow.ui` in six
+    # modules — 139 errors that say nothing about Flow and everything about that build.
+    # macOS gives the same "not Windows" signal *with* the UI included, so the Linux leg
+    # was buying a second opinion at the cost of a permanently red badge, and a CI nobody
+    # believes is worse than no CI. Worth re-adding the day it can run the UI: the leg was
+    # `ubuntu-latest` plus `sudo apt-get install -y libportaudio2` before the sync, which
+    # did work — sounddevice bundles PortAudio for Windows and macOS only.
     name: suite (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
-      # One platform failing is a fact about that platform, and the other two answers are
-      # the ones that say whether it is specific to it.
+      # One platform failing is a fact about that platform; the other answer is what says
+      # whether it is specific to it.
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -44,14 +54,6 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.12"
-
-      # `flow.audio` imports sounddevice at module scope, and sounddevice is a ctypes
-      # wrapper: it ships PortAudio for Windows and macOS and finds it on the system
-      # everywhere else. Without this the Linux leg fails at import, before any test has
-      # an opinion about anything.
-      - name: PortAudio (Linux only)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libportaudio2
 
       # `--frozen` and not a plain sync: a run that silently resolves a newer dependency
       # is testing a tree nobody has, and reports green about it.

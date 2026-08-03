@@ -1392,16 +1392,30 @@ synthetic Tk event cannot do. A harness that cannot reproduce the defect cannot 
 
 ## Verification
 
-**Every pull request and every push to `main` runs the unit suite on Windows, macOS and
-Ubuntu** (`.github/workflows/ci.yml`, 2026-08-03): `uv sync --frozen` so a run cannot
-silently resolve a dependency nobody has, then the suite, then `compileall` — which
-catches a syntax error in a module no test imports, the failure a green suite is
-structurally unable to see — then `flow --help`, which catches an entry point that cannot
-boot at all. Three platforms because §11's law is a claim about three of them (the
-platform decides what imports, `lite` decides what happens) and it had only ever been run
-on one. **The interpreter is pinned** — the first run let each runner choose, and got
-3.12.3 from `/usr/bin/python3` on Ubuntu against 3.14.6 from Homebrew on macOS, which is
-three unrelated experiments rather than one matrix. `release.yml` is untouched and still fires only on a `v*` tag: before this, that
+**Every pull request and every push to `main` runs the unit suite on Windows and macOS**
+(`.github/workflows/ci.yml`, 2026-08-03): `uv sync --frozen` so a run cannot silently
+resolve a dependency nobody has, then the suite, then `compileall` — which catches a
+syntax error in a module no test imports, the failure a green suite is structurally unable
+to see — then `flow --help`, which catches an entry point that cannot boot at all. The
+interpreter is pinned to uv's own 3.12 on both legs.
+
+**§11's law is now measured rather than asserted.** "The platform decides what imports,
+`lite` decides what happens" had only ever been run on Windows. It holds: **1128 of 1168
+tests pass on macOS**, and the 40 that do not are six Win32 mechanisms and nothing else —
+`ctypes.WinDLL`, `os.startfile`, kernel32's `NeedCurrentDirectoryForExePath`, the
+PowerShell speech host, Windows path case-folding, and `taskkill`/`.cmd`. Each carries a
+`skipUnless` naming which, because a test that mocks `ctypes.WinDLL` is a test *about*
+`ctypes.WinDLL`, and a skip with a reason is a fact about the platform while a skip
+without one is a test nobody has to think about again.
+
+Getting there cost two runs and three separate causes, one of which was ours: `cli_env`
+handed out a fake CLI at `C:\fake\codex.exe`, which nothing minded until `trusted()`
+gained an `os.path.isabs` gate — `ntpath.isabs` accepts that string and `posixpath.isabs`
+does not, so 25 tests that carefully declared a CLI got none. **Ubuntu was a third leg and
+was dropped on evidence**: uv's managed CPython ships tkinter on macOS and not on Linux,
+and the suite reaches `flow.ui` in six modules, so that leg could only ever report 139
+errors about a Python build. macOS gives the same "not Windows" signal with the UI
+included. `release.yml` is untouched and still fires only on a `v*` tag: before this, that
 tag-gated run was the *only* gate, so nothing was checked between releases and the first
 thing that could find a broken push was a release.
 

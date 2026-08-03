@@ -470,6 +470,7 @@ class FakeMenu:
     def grab_release(self) -> None: ...
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: os.startfile")
 class TestTheMenuReachesIt(unittest.TestCase):
     """The two entries, and the inversion.
 

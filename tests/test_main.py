@@ -141,6 +141,7 @@ class TestNonWindowsRunsLite(unittest.TestCase):
         self.assertIn("unrecognized arguments", err.getvalue())
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 class TestWindowsStillGetsHands(unittest.TestCase):
     """The full body is the default here, and `--lite` is the way to ask for the other."""
 
@@ -181,6 +182,7 @@ class TestWindowsStillGetsHands(unittest.TestCase):
         self.assertNotIn("Windows-only", out.getvalue())
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: kernel32 NeedCurrentDirectoryForExePath")
 class TestThePinKnowsWhyItRefused(unittest.TestCase):
     """Three ways `--cli` can fail, and they are three different sentences.
 
@@ -274,6 +276,7 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         self.assertIn("refine CLI: NONE", out.getvalue())
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only: Windows path case-folding")
 class TestACwdLaunchFeedsTheRecents(unittest.TestCase):
     """Item 36, asserted at the wiring: main() records a resolved --cwd.
 

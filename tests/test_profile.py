@@ -734,6 +734,7 @@ class TestTheWorkspaceRecents(unittest.TestCase):
         p.note_workspace(r"D:\dev\acme")
         self.assertEqual(p.workspaces, [r"D:\dev\acme"])
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: Windows path case-folding")
     def test_a_respelt_path_is_the_same_workspace(self):
         # Separators, case and a trailing slash are spelling, not identity, on this
         # OS — and the stored form is the canonical spelling of the latest arrival.
@@ -788,6 +789,7 @@ class TestTheWorkspaceRecents(unittest.TestCase):
         p.note_workspace("   ")
         self.assertEqual(p.workspaces, [])
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: Windows path case-folding")
     def test_path_key_is_the_os_identity_and_none_stays_none(self):
         self.assertEqual(path_key(r"D:\dev\X"), path_key("D:/DEV/x/"))
         self.assertIsNone(path_key(None))

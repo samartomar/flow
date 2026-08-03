@@ -371,6 +371,7 @@ class TestTheWorkspaceIsARecentsList(Menu):
         self.assertEqual(self.pill._workspace_var.get(), "(not set)")
         self.assertIn(("(not set)", "(not set)"), sub.radios)
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: Windows path case-folding")
     def test_a_current_workspace_off_the_list_is_shown_rather_than_dropped(self):
         # The hand-set trigger word's rule, same reason: the menu must never open
         # with nothing ticked, and `--cwd` wins over the profile without joining it.
@@ -392,6 +393,7 @@ class TestTheWorkspaceIsARecentsList(Menu):
         self.assertIn("missing", label)
         self.assertEqual(value, str(gone))
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: Windows path case-folding")
     def test_a_tap_hands_the_path_to_the_session(self):
         p = self.profile()
         a = self.folder / "acme"
