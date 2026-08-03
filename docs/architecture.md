@@ -1350,7 +1350,7 @@ what was true.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1251 tests, ~36 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1251 tests, ~36 s; 1168 of them run off Windows, see Verification) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -1400,22 +1400,33 @@ to see — then `flow --help`, which catches an entry point that cannot boot at 
 interpreter is pinned to uv's own 3.12 on both legs.
 
 **§11's law is now measured rather than asserted.** "The platform decides what imports,
-`lite` decides what happens" had only ever been run on Windows. It holds: **1128 of 1168
-tests pass on macOS**, and the 40 that do not are six Win32 mechanisms and nothing else —
-`ctypes.WinDLL`, `os.startfile`, kernel32's `NeedCurrentDirectoryForExePath`, the
-PowerShell speech host, Windows path case-folding, and `taskkill`/`.cmd`. Each carries a
-`skipUnless` naming which, because a test that mocks `ctypes.WinDLL` is a test *about*
-`ctypes.WinDLL`, and a skip with a reason is a fact about the platform while a skip
-without one is a test nobody has to think about again.
+`lite` decides what happens" had only ever been run on Windows. Green on both legs since
+2026-08-03: **Windows 1251 OK (1 skipped), macOS 1168 OK (65 skipped)**. Of those 65, 40
+are the six Win32 mechanisms that cannot exist off Windows — `ctypes.WinDLL`,
+`os.startfile`, kernel32's `NeedCurrentDirectoryForExePath`, the PowerShell speech host,
+Windows path case-folding, and `taskkill`/`.cmd`. **Each skip names its mechanism**,
+because a test that mocks `ctypes.WinDLL` is a test *about* `ctypes.WinDLL`: a skip with a
+reason is a fact about the platform, and a skip without one is a test nobody has to think
+about again. `test_inject_target` is the one guarded above its imports rather than on a
+class, because `inject.py` binds `user32` at module scope and the failure is the `from`
+line itself.
 
-Getting there cost two runs and three separate causes, one of which was ours: `cli_env`
-handed out a fake CLI at `C:\fake\codex.exe`, which nothing minded until `trusted()`
-gained an `os.path.isabs` gate — `ntpath.isabs` accepts that string and `posixpath.isabs`
-does not, so 25 tests that carefully declared a CLI got none. **Ubuntu was a third leg and
-was dropped on evidence**: uv's managed CPython ships tkinter on macOS and not on Linux,
-and the suite reaches `flow.ui` in six modules, so that leg could only ever report 139
-errors about a Python build. macOS gives the same "not Windows" signal with the UI
-included. `release.yml` is untouched and still fires only on a `v*` tag: before this, that
+**Four runs, one variable each, and the first three were red.** That is what the gate is
+for and it is worth writing down rather than smoothing over. Run 1 found three causes at
+once. Run 2 isolated them: the interpreter was whatever each runner had — 3.12.3 from
+`/usr/bin/python3` on Ubuntu against **3.14.6** from Homebrew on macOS, three unrelated
+experiments rather than one matrix — and `cli_env` handed out a fake CLI at
+`C:\fake\codex.exe`, which nothing minded until `trusted()` gained an `os.path.isabs`
+gate. `ntpath.isabs` accepts that string and `posixpath.isabs` does not, so 25 tests that
+carefully declared a CLI silently got none: **a regression introduced by the same round
+that added the gate, found by CI before anyone hit it.** Run 3 left one module. Run 4 was
+green.
+
+**Ubuntu was a third leg and was dropped on evidence, not preference.** uv's managed
+CPython ships tkinter on macOS and not on Linux, and the suite reaches `flow.ui` in six
+modules, so that leg could only ever report 139 errors about a Python build. macOS gives
+the same "not Windows" signal with the UI included. `ci.yml` records what the leg was and
+what would let it return, because dropping a platform quietly is how it never comes back. `release.yml` is untouched and still fires only on a `v*` tag: before this, that
 tag-gated run was the *only* gate, so nothing was checked between releases and the first
 thing that could find a broken push was a release.
 
