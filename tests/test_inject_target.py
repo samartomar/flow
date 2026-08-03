@@ -20,6 +20,16 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Windows-only: ctypes.WinDLL, bound at import.
+#
+# The guard has to be here rather than on the classes below, because `flow.inject` calls
+# `ctypes.WinDLL("user32", use_last_error=True)` at module scope — so the failure is the
+# `from` on the next line, before any test exists to decorate. Deliberate over there: the
+# whole module is Win32, and a lazily-bound user32 would only move the same import error
+# to the first paste.
+if sys.platform != "win32":  # pragma: no cover - the CI legs that are not Windows
+    raise unittest.SkipTest("Windows-only: flow.inject binds user32 at import")
+
 from flow.inject import (  # noqa: E402
     BRACKETED_PASTE,
     TERMINAL_CLASSES,
