@@ -193,6 +193,43 @@ class Utterance:
     generation: int
 
 
+@dataclass(frozen=True)
+class Append:
+    """The last dictation, plus enough identity to know it is still the last one.
+
+    `revision` is the draft's revision immediately *after* this append landed, and it is
+    the whole of DRAFT-02: "Was a command" used to ask only whether an append was
+    remembered and whether the draft was non-empty, neither of which is *is this still
+    the draft that append went into*. The chip stayed offered across further dictation,
+    edits and sends, and pressing it withdrew an utterance from a draft it had never been
+    part of.
+
+    Nearly free, because every mutation of `Draft` already bumps the revision — a CLI
+    rewrite takes ~7 s and something had to be able to tell whether the text it was
+    computed from still existed.
+    """
+
+    text: str
+    record: "Utterance | None"
+    revision: int
+
+
+@dataclass(frozen=True)
+class Rescue:
+    """A re-decode in flight, and what it was a re-decode *of*.
+
+    Both rescue paths are ~1 s of decoding during which the draft can move — the user
+    keeps talking, edits, or the auto-ask countdown fires — and both used to apply their
+    result against whatever `self.draft.text` held at delivery. `payload` is what to fall
+    back to: the withdrawn utterance for the user-pressed path, the instruction for the
+    escalated one.
+    """
+
+    payload: str
+    record: "Utterance | None"
+    revision: int
+
+
 class DecodeWorker:
     """One thread. Partials are latest-wins; finals are never dropped.
 
@@ -1048,7 +1085,7 @@ class Session:
                 if text:
                     self._emit("partial", text)
             elif kind == "rescue":
-                self._finish_rescue(text)
+                self._finish_rescue(text, utterance)
             elif text:
                 self._route(text, confidence, record=utterance)
             else:
@@ -1398,12 +1435,22 @@ class Session:
         the next utterance to have been captured meanwhile is the case rescue exists to
         serve, and reading the slot paired the words with the wrong sound.
         """
-        self._last_append = (utterance, record.audio if record is not None else None)
+        self._last_append = Append(utterance, record, self.draft.revision)
 
     @property
     def can_rescue(self) -> bool:
-        """True when there is a just-appended utterance to reinterpret."""
-        return self._last_append is not None and bool(self.draft.text)
+        """True when there is a *just*-appended utterance to reinterpret.
+
+        "Just" is the word that was missing. The draft must still be the one the append
+        landed in, or the chip is offering to take back an utterance from text that has
+        moved on — and every capture, edit, undo, send and clear moves the revision, so
+        one comparison covers all of them.
+        """
+        return (
+            self._last_append is not None
+            and self._last_append.revision == self.draft.revision
+            and bool(self.draft.text)
+        )
 
     def rescue_last_append(self) -> bool:
         """"That was a command." Take back the last dictation and re-read it.
@@ -1417,10 +1464,17 @@ class Session:
         text with the correction appended to it. Nothing is lost if the re-read fails:
         the words go back exactly where they were.
         """
-        if self._last_append is None:
+        if not self.can_rescue or self._last_append is None:
+            # `can_rescue` and not just "is there one": the chip is drawn from that
+            # property, and a spoken "was a command" reaches here without passing it.
+            # Two answers to one question is how the button and the grammar come to
+            # disagree about what is possible.
             self._emit("note", "nothing to re-read")
             return False
-        utterance, audio = self._last_append
+        appended = self._last_append
+        utterance, audio = appended.text, (
+            appended.record.audio if appended.record is not None else None
+        )
         self._last_append = None
 
         restored = self.draft.undo()
@@ -1441,9 +1495,14 @@ class Session:
         if audio is not None and self._post_hoc is None:
             # The words as transcribed are not a command either, so ask the decoder
             # again with the command vocabulary in hand.
-            self._post_hoc = utterance
+            #
+            # The revision is taken *after* the undo, because that is the draft this
+            # rescue is being computed against — the target of a correction is in the
+            # text as it was when the command was spoken.
+            self._post_hoc = Rescue(utterance, appended.record, self.draft.revision)
             self._emit("note", "re-listening to that as a command")
-            self.worker.submit_rescue(audio, command_bias(self.draft.text))
+            self.worker.submit_rescue(audio, command_bias(self.draft.text),
+                                      appended.record)
             return True
 
         self._give_back(utterance, "could not re-read that as a command", audio)
@@ -1460,7 +1519,11 @@ class Session:
         defect, reached through the recovery path for it.
         """
         self.draft.append(utterance)
-        self._last_append = (utterance, audio)
+        self._last_append = Append(
+            utterance,
+            Utterance(-1, audio, self._capture_generation) if audio is not None else None,
+            self.draft.revision,
+        )
         self._emit("note", note)
         self._after_draft_change()
 
@@ -1485,16 +1548,40 @@ class Session:
             return
         audio = record.audio if record is not None else self._last_audio
         if p.escalated and audio is not None and self._pending_rescue is None:
-            self._pending_rescue = p.payload
+            self._pending_rescue = Rescue(p.payload, record, self.draft.revision)
             self._emit("note", f"re-listening for {p.target!r}")
             self.worker.submit_rescue(audio, command_bias(self.draft.text), record)
             return
         self._start_refine(p.payload)
 
-    def _finish_rescue(self, text: str) -> None:
+    def _answers(self, pending: Rescue, record: Utterance | None) -> bool:
+        """Is this result the one `pending` is waiting for, against the draft it saw?
+
+        Two questions, and they fail differently. A **different utterance** means the
+        result is somebody else's answer — item 52's ids, spent here. A **moved draft**
+        means it is the right answer to a question about text that no longer exists: the
+        target of a correction is in the draft the command was spoken against, and
+        applying it to whatever is there now is how a stale rescue rewrites text it never
+        saw.
+        """
+        if pending.record is not None and (record is None
+                                           or record.id != pending.record.id):
+            return False
+        return pending.revision == self.draft.revision
+
+    def _finish_rescue(self, text: str, record: Utterance | None = None) -> None:
         """The biased re-decode came back. Accept it only if it beats the first read."""
         if self._post_hoc is not None:
-            original, self._post_hoc = self._post_hoc, None
+            pending, self._post_hoc = self._post_hoc, None
+            if not self._answers(pending, record):
+                # The words are still withdrawn — `rescue_last_append` ran `undo` before
+                # submitting — so they go back. `_give_back`'s bargain is that the user's
+                # words are never the price of a failed guess, and a guard is a kind of
+                # failed guess: it is Flow declining to act, not the user changing
+                # their mind.
+                self._give_back(pending.payload, "the draft moved - put that back",
+                                pending.record.audio if pending.record else None)
+                return
             p = plan(text, self.draft.text) if text else None
             if p is not None and p.kind == "local":
                 before = self.draft.text
@@ -1505,12 +1592,20 @@ class Session:
                                f"re-read as {describe_change(p, before, new)}")
                     self._after_draft_change()
                     return
-            self._give_back(original, "could not re-read that as a command")
+            self._give_back(pending.payload, "could not re-read that as a command",
+                            pending.record.audio if pending.record else None)
             return
 
-        instruction, self._pending_rescue = self._pending_rescue, None
-        if instruction is None:
+        pending, self._pending_rescue = self._pending_rescue, None
+        if pending is None:
             return  # a rescue nobody is waiting for; ignore rather than act on it
+        if not self._answers(pending, record):
+            # Nothing was withdrawn on this path, so dropping it costs the user nothing
+            # and the draft is already what they want. Starting the CLI fallback instead
+            # would send an instruction computed against text that has since changed —
+            # a ~7 s call whose answer is wrong before it is asked.
+            self._emit("note", "the draft moved - dropped that re-read")
+            return
         p = plan(text, self.draft.text) if text else None
         if p is not None and p.kind == "local":
             before = self.draft.text
@@ -1522,7 +1617,7 @@ class Session:
                 return
         # The second read did not find a command either. The CLI was always the
         # fallback; it just costs a second more than it used to.
-        self._start_refine(instruction)
+        self._start_refine(pending.payload)
 
     @property
     def force_next(self) -> str | None:
@@ -1827,6 +1922,10 @@ class Session:
         have to say it again — the words are the same words either way.
         """
         self.mode = CONVERSE if self.mode == DICTATE else DICTATE
+        # The one clearing the revision cannot do, because this deliberately does
+        # not touch the draft. Asking about words is a different intent from having
+        # mis-dictated them, and the chip should not survive the change of mind.
+        self._last_append = None
         self._emit("mode", self.mode)
         # Named after the button that is actually on screen. This used to say "Send asks
         # the CLI" while the chip renamed itself to "Ask", so the app announced one verb

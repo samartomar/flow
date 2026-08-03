@@ -452,6 +452,33 @@ never demote dictation into an edit.
 Local operations: `replace`, `replace_all`, `delete`, `delete_last`, `delete_range`,
 `insert_before`, `insert_after`, `capitalize`, `upper`, `lower`, `break`.
 
+**A rescue is bound to the draft it diagnosed, at both ends.** `_last_append` carries the
+utterance record (§4) and the draft revision the append landed at, and `can_rescue` demands
+that revision still be current. That one comparison covers every way the draft can move —
+capture, edit, undo, send, clear — because each of them bumps it already. `toggle_mode` is
+the exception and is cleared by name: it deliberately does not touch the draft, since
+someone who dictated three sentences and then decides to *ask* about them should not have to
+say it again, so the revision cannot see it. Before this, the chip stayed offered across all
+of it, and pressing it withdrew an utterance from a draft it had never been part of.
+
+The commit path re-checks, because a rescue is a ~1 s decode and the draft can move during
+it. `_answers()` asks two questions with different failures. A **different utterance** means
+the result is somebody else's answer — item 52's ids, spent here. A **moved draft** means it
+is the right answer to a question about text that no longer exists: the target of a
+correction lives in the draft the command was spoken against.
+
+On a mismatch the two rescue paths part company, and the asymmetry is the point. The
+escalated one withdrew nothing, so it is dropped with a note; starting the CLI fallback
+would send an instruction computed against text that has since changed — a ~7 s call whose
+answer is wrong before it is asked. The user-pressed one already ran `undo`, so its words
+are in the air and they go back, per `_give_back`'s bargain. A guard is a kind of failed
+guess: it is Flow declining to act, not the user changing their mind, and the words were
+never the price of either.
+
+The UI needed no change for any of this, which is the useful part: `Bubble` already gated
+the chip on `can_rescue`. It was asking the right question of a property that gave the wrong
+answer.
+
 Three mechanisms make the grammar survive an accent:
 
 **Lead-in absorption.** Every pattern takes a repeatable prefix of hesitation *and*
@@ -1289,7 +1316,7 @@ what was true.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1165 tests, ~30 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1176 tests, ~30 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

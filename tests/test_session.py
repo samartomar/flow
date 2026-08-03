@@ -290,7 +290,7 @@ class TestATranscriptBelongsToItsOwnUtterance(unittest.TestCase):
         session, a_audio, b_audio = self._interleaved()
         # A's text arrives now, after B has already replaced the slot.
         session._route("underline the heading", record=session._sent[0])
-        _text, audio = session._last_append
+        audio = session._last_append.record.audio
         self.assertIsNotNone(audio)
         self.assertTrue(np.array_equal(audio, a_audio),
                         "the rescue would re-decode a different utterance")
@@ -299,7 +299,7 @@ class TestATranscriptBelongsToItsOwnUtterance(unittest.TestCase):
     def test_the_later_utterance_keeps_its_own_audio_too(self):
         session, a_audio, b_audio = self._interleaved()
         session._route("and the second thing", record=session._sent[1])
-        _text, audio = session._last_append
+        audio = session._last_append.record.audio
         self.assertTrue(np.array_equal(audio, b_audio))
 
     def test_a_route_with_no_utterance_still_works(self):
