@@ -338,7 +338,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             ok = calibrate_run(session.mic, profile, asr=session.asr, log=say)
         finally:
-            session.mic.stop()
+            # `close()`, not `mic.stop()`. This branch builds a whole Session and then
+            # returns down a path that never reaches `__exit__`, so it used to leave the
+            # decode thread and — since `speaker.available` starts the host during
+            # launch — a live PowerShell behind it.
+            session.close()
         return 0 if ok else 1
 
     # A stored calibration replaces the shipped constants, which were tuned on one

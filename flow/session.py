@@ -93,6 +93,13 @@ IDLE_UNLOAD_SEC = 300.0
 #: How often to check that the input device is still alive.
 MIC_CHECK_SEC = 5.0
 
+#: How long `close()` waits for a thread it owns before abandoning it. Every wait on the
+#: quit path is bounded, because the two threads being waited on are the ones with no
+#: ceiling of their own: a decode is however long the audio is, and a first-run preload
+#: is a 141 MB download. Both are daemons, so abandoning one costs nothing at the door;
+#: blocking the quit behind either costs the user a window that will not go away.
+JOIN_SEC = 2.0
+
 #: How long a Refine/Continue chip stays armed. The chip means "the next thing I say",
 #: and after this long the next thing someone says is a different thought.
 FORCE_NEXT_TTL_SEC = 30.0
@@ -317,10 +324,20 @@ class DecodeWorker:
             self.timings.clear()
             return out
 
-    def close(self) -> None:
+    def close(self, timeout: float = JOIN_SEC) -> None:
+        """Signal, then wait a bounded moment for the thread to actually leave.
+
+        Signalling alone is a statement of intent: the thread may be inside a decode,
+        which holds a model and a tier lock, and it went on running after `close()`
+        returned. Joining makes "closed" mean the thread is gone — and the bound makes
+        it safe to say so on the quit path, where a decode in flight can be seconds.
+        Past the bound it is abandoned deliberately, which a daemon thread survives.
+        """
         with self._cv:
             self._alive = False
             self._cv.notify()
+        if self._thread is not threading.current_thread():
+            self._thread.join(timeout)
 
     def _run(self) -> None:
         while True:
@@ -581,6 +598,14 @@ class Session:
         #: When the CLI call in flight began. One of each kind runs at a time, so one
         #: slot is enough; it is only ever read by the trace.
         self._cli_started = 0.0
+        #: Guards the three facts `start()` and `close()` disagree about — whether this
+        #: session is still open, and which preload it owns. Held only around those
+        #: decisions, never across a join, so closing cannot deadlock against an arm.
+        self._lifecycle = threading.Lock()
+        self._closed = False
+        #: The one preload this session owns, or None before the first arm. Single, not
+        #: one per arm: see `_warm`.
+        self._preload_thread: threading.Thread | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -591,13 +616,45 @@ class Session:
         download, and doing that inline froze the whole UI on the first click with no
         indication of why. The decode worker loads lazily on its own thread anyway, so
         this only pre-warms; `mic.start()` is what actually has to succeed.
+
+        Runs on every arm, not once per session — which is why the warm-up is
+        single-flight and why arming a closed session is refused rather than half done.
+        `Pill._toggle` already renders a refusal to start capture and stays disarmed, so
+        the raise reaches the user as a sentence instead of a green pill over a session
+        whose worker is gone.
         """
+        with self._lifecycle:
+            if self._closed:
+                raise RuntimeError("this session is closed")
         self.mic.start()
         self._mic_started = True
         self._last_activity = time.perf_counter()
         self._check_calibrated_device()
-        threading.Thread(target=self._preload, daemon=True, name="preload").start()
+        self._warm()
         self._set_state(State.IDLE)
+
+    def _warm(self) -> None:
+        """One preload at a time, however often this session is armed.
+
+        Invisible while the model is already loaded — the thread finds it warm and
+        exits. On the run where it matters it is not: during a first-run download every
+        arm used to park another thread on the tier lock, and 100 arm/pause cycles
+        against a blocked load left **100 live threads**, each holding this session and
+        each waking when the load finally landed.
+
+        The gate is "is one running", not "has one ever run", so a load that failed —
+        no disk, no network on a first launch — is tried again the next time the user
+        arms. That is the door a "warmed once" flag would close.
+        """
+        with self._lifecycle:
+            if self._closed:
+                return
+            running = self._preload_thread
+            if running is not None and running.is_alive():
+                return
+            self._preload_thread = threading.Thread(
+                target=self._preload, daemon=True, name="preload")
+            self._preload_thread.start()
 
     def _check_calibrated_device(self) -> None:
         """Say when this is not the microphone the profile was measured through.
@@ -673,14 +730,50 @@ class Session:
         return True
 
     def close(self) -> None:
+        """Give back everything `start()` and the constructor took, in that order.
+
+        Idempotent because the quit paths overlap: `__exit__` on the way out of `main()`
+        and the pill's own teardown both reach here, and a second round of teardown
+        against a torn-down session is how a quit turns into a traceback. Nothing after
+        the flag runs twice.
+
+        The order is the argument:
+
+        1. **Admission first.** Everything below is a statement about the past unless
+           nothing new can start behind it — an arm one scheduling slot later used to
+           re-open the microphone and warm a model for a session with no worker left.
+        2. **The microphone**, so the room stops being recorded before anything that
+           might take a moment.
+        3. **Cancel, then the worker** — cancel first because it is the one that reaches
+           outside the process. A refine thread used to run its `subprocess.run` to
+           completion after the app was gone, and killing the CLI Flow launched still
+           left the `node` it launched behind it: a model call billing tokens for an
+           answer with no reader.
+        4. **The speaker**, which is a PowerShell subprocess and outlives this one if
+           nobody closes it. `speak.close()` existed from the beginning and nothing in
+           the app called it.
+        5. **The preload last**, because it is the longest wait and the least urgent —
+           by the time it is joined the mic is shut and the worker is gone.
+
+        Steps 3 and 5 are bounded joins (`JOIN_SEC`); past the bound the thread is
+        abandoned deliberately. Both are daemons.
+        """
+        with self._lifecycle:
+            if self._closed:
+                return
+            self._closed = True
+            preload = self._preload_thread
         self.mic.stop()
         self._mic_started = False
-        # Before the worker, because this is the one that reaches outside the process.
-        # A refine thread used to run its `subprocess.run` to completion after the app
-        # was gone, and killing the CLI Flow launched still left the `node` it launched
-        # behind it — a model call billing tokens for an answer with no reader.
         self._cancel.set()
         self.worker.close()
+        # `getattr` because the speaker is injected and half the harnesses pass a
+        # stand-in — the same reason `profile` is read that way.
+        shut = getattr(self.speaker, "close", None)
+        if callable(shut):
+            shut()
+        if preload is not None:
+            preload.join(JOIN_SEC)
 
     def __enter__(self) -> "Session":
         self.start()

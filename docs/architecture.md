@@ -182,14 +182,14 @@ is written down.
 |---|---|---|---|
 | main / UI | `Pill.mainloop()` | `Pill._tick()` every 30 ms → poll the foreground → `Session.tick()` → repaint | **The only thread that may touch Tk.** `_tick` re-schedules itself in a `finally`, so an exception cannot break the chain and leave a dead pill on screen. The foreground poll is two user-mode calls and is where `paste_target` comes from — asking at paste time asks after the click. The one thing that stops this thread is the right-click menu, which is a native `TrackPopupMenu` running its own modal loop |
 | PortAudio callback | `Mic.start()` | copies each block into the queue, updates the level | No allocation-heavy or blocking work. Never touches the session — which is exactly why `Mic.level_db` is not what the meter draws: it reports the room whether or not anything is reading the blocks. `Session.level_db` is the honest one |
-| `decode` | `DecodeWorker.__init__` | runs the model | Owns the only model calls. Catches every exception and turns it into an `error` result |
-| `preload` | `Session.start()` | warms both tiers | Not awaited — a first run includes a model download, and doing it inline froze the UI on the first click |
+| `decode` | `DecodeWorker.__init__` | runs the model | Owns the only model calls. Catches every exception and turns it into an `error` result. `close()` signals **and joins**, bounded by `JOIN_SEC` — signalling alone let it run on past the quit, holding a model and a tier lock |
+| `preload` | `Session.start()` | warms both tiers | Not awaited — a first run includes a model download, and doing it inline froze the UI on the first click. **One at a time**: `start()` runs on every arm, and a thread per arm meant 100 arm/pause cycles during a blocked load left 100 live threads (measured). The gate is "is one running", so a load that failed is retried on the next arm |
 | `hotkeys` | `Hotkeys.start()` | `RegisterHotKey` + `GetMessageW` message loop | `RegisterHotKey` requires the message loop to be on the registering thread. Presses go back through a `queue`, drained on the UI thread |
 | `refine` | per semantic rewrite | one `refine._invoke` | Result handed back under `_refine_lock`, tagged with its operation id and the draft revision it was computed from. Watches `Session._cancel` while it waits, so `close()` does not have to |
 | `ask` | per converse question | one `refine._invoke` | Result handed back under `_ask_lock`, tagged with its operation id. Same cancellation |
 | `clipboard-restore` | one, re-armed | sleeps until `_BORROWED.due`, puts the old clipboard back | Lets the target app read the clipboard first, then checks `GetClipboardSequenceNumber` against the reading taken when Flow's own text landed — a changed counter means the user copied something in that pause and the old text is not written back. **One worker, not one per paste**: a second send pushes the deadline out and this thread re-reads it on waking, where before every send parked its own sleeper (100 alive at once, measured). The one thread that appends to `take_warnings()` from off the UI thread, which is why that queue is locked |
 | `speech` watcher | each `Speaker.say()` | polls the host until it reports `Ready`, then clears `speaking` | Best-effort only. The ceiling that actually bounds `speaking` is enforced by the reader, so a wedged host cannot leave Flow deaf |
-| speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking, and the state protocol needs it responsive |
+| speech host | first spoken reply | a long-lived PowerShell `System.Speech` process | Not a thread but a subprocess, and deliberately long-lived: a subprocess already launched cannot be told to stop talking, and the state protocol needs it responsive. Long-lived until the quit — `Session.close()` calls `speak.close()`, which existed from the beginning with nothing in the app calling it |
 
 Locks: `WhisperTranscriber._lock` (model dict + drop log + confidence), one
 `WhisperTranscriber._locks[tier]` per tier held across a model build, `DecodeWorker._cv`,
@@ -198,6 +198,19 @@ Locks: `WhisperTranscriber._lock` (model dict + drop log + confidence), one
 The per-tier lock is not decoration: without it the preload thread and the decode worker
 each build a model and one is thrown away. Held *per tier* so preloading `small.en` cannot
 block a partial that only needs `base.en`.
+
+**`Session.close()` gives back everything `start()` and the constructor took, in that
+order**, and is idempotent because the quit paths overlap — `__exit__` on the way out of
+`main()` and the pill's own teardown both reach it. The order is the argument: admission
+first (nothing new may start behind the teardown, or every step below it is only a
+statement about the past), then the microphone, then `_cancel` and the decode worker
+(cancel before the worker, because it is the one that reaches outside the process), then
+the speech host, then the preload — the longest wait and the least urgent. The two joins
+are bounded by `JOIN_SEC`; past it the thread is abandoned deliberately, which a daemon
+survives, because a quit that blocks behind a first-run download is a worse failure than
+a thread that outlives the window by a second. `--calibrate` is the one path that builds
+a Session and returns without `__exit__`, so it calls `close()` in its `finally` rather
+than just stopping the mic.
 
 ## 4. The pump
 

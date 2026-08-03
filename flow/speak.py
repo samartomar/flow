@@ -462,7 +462,13 @@ class Speaker:
         return self._write(_STOP)
 
     def close(self) -> None:
+        # `_speaking` is cleared here and not left to the watcher, because `speaking`
+        # reads a dead host through `self._proc` and there is no `self._proc` any more.
+        # Without this a close mid-reply reports "still speaking" until the ceiling —
+        # and the microphone is gated on that, so the last thing a closing session
+        # would do is go deaf for the length of a long answer.
         with self._lock:
+            self._speaking = False
             proc, self._proc = self._proc, None
         if proc is None:
             return

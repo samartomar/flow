@@ -25,7 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.refine import Cli, _invoke  # noqa: E402
-from flow.session import Session  # noqa: E402
+from flow.session import JOIN_SEC, Session  # noqa: E402
 
 #: Sleeps, then reports that it got to the end. Stands in for a CLI call in flight.
 _SLEEPER = (
@@ -340,6 +340,169 @@ class TestThePromptCanTravelOnStdin(Temp):
         self.assertEqual(reason, "", "a stdin CLI must not be refused for being a .cmd")
         self.assertIn("marmalade-42", out)
 
+
+class CountingMic(FakeMic):
+    """Records what was asked of it, so "once" can be told from "every time"."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.starts = 0
+        self.stops = 0
+
+    def start(self) -> None:
+        self.starts += 1
+
+    def stop(self) -> None:
+        self.stops += 1
+
+
+class BlockedLoader:
+    """A model load that never returns — a first run held still mid-download.
+
+    The state the defect needs: `start()` warms the model on a thread, and on a first
+    run that thread is inside a ~141 MB download for minutes. Counting entries into
+    `load()` rather than live threads because the suite runs every module in one
+    process, and another test's session warming its own fake would otherwise be
+    indistinguishable from this one's.
+    """
+
+    def __init__(self) -> None:
+        self.loads = 0
+        self._lock = threading.Lock()
+        self.release = threading.Event()
+
+    def load(self) -> None:
+        with self._lock:
+            self.loads += 1
+        self.release.wait(30.0)
+
+    def text(self, audio, *, final=False, hotwords="") -> str:
+        return ""
+
+
+class TestOnePreloadHoweverOftenItIsArmed(unittest.TestCase):
+    """CLI-05: `start()` runs on every arm and used to spawn a thread every time.
+
+    Harmless while the model is already warm — the thread finds it loaded and exits.
+    Not harmless on the run that matters: during a first-run download every arm parks
+    another thread on the tier lock, and the audit measured **100 arm/pause cycles →
+    100 threads**, each holding a reference to the session and waking when the load
+    finally lands.
+    """
+
+    def test_a_hundred_arms_during_one_load_warm_the_model_once(self):
+        asr = BlockedLoader()
+        s = Session(asr=asr, mic=FakeMic())
+        self.addCleanup(s.close)
+        self.addCleanup(asr.release.set)  # LIFO: released before close waits on it
+        for _ in range(100):
+            s.start()
+            s.pause()
+        # A short settle rather than an immediate read: a thread that has been started
+        # has not necessarily reached `load()` yet, so "one" has to be given the chance
+        # to become two before it is believed.
+        self.assertFalse(wait_for(lambda: asr.loads > 1, timeout=0.5),
+                         f"{asr.loads} preloads for one model load")
+        self.assertEqual(asr.loads, 1)
+
+    def test_a_load_that_finished_may_be_tried_again(self):
+        # The single-flight must not become "warmed once, never again". A load that
+        # failed — no disk, no network on a first run — is worth retrying when the user
+        # arms again, and that is the same door.
+        asr = BlockedLoader()
+        asr.release.set()
+        s = Session(asr=asr, mic=FakeMic())
+        self.addCleanup(s.close)
+        s.start()
+        self.assertTrue(wait_for(lambda: asr.loads == 1))
+        s.pause()
+        s.start()
+        self.assertTrue(wait_for(lambda: asr.loads == 2),
+                        "a finished preload was never tried again")
+
+
+class TestCloseOwnsEverythingStartOpened(unittest.TestCase):
+    """CLI-02 + SPEECH-03: `close()` gave back less than `start()` took.
+
+    It stopped the mic and signalled the worker, and then returned — while the decode
+    thread was still running, the speaker's PowerShell host was still alive with its
+    pipes open, and the preload was unowned. `speak.close()` existed and nothing in the
+    app called it.
+
+    Every wait here is bounded on purpose. A decode in flight can be seconds and a
+    first-run load can be minutes; a quit that blocks behind either is a worse bug than
+    the one being fixed, so close waits a moment and then abandons deliberately.
+    """
+
+    def session(self, **kw) -> Session:
+        s = Session(asr=FakeAsr(), mic=kw.pop("mic", None) or FakeMic(), **kw)
+        self.addCleanup(s.close)
+        return s
+
+    def test_the_decode_thread_is_gone_when_close_returns(self):
+        s = self.session()
+        worker = s.worker._thread
+        self.assertTrue(worker.is_alive())
+        s.close()
+        self.assertFalse(worker.is_alive(),
+                         "the decoder outlived the session that started it")
+
+    def test_the_speech_host_is_asked_to_die(self):
+        speaker = mock.Mock()
+        speaker.speaking = False
+        s = self.session(speaker=speaker)
+        s.close()
+        speaker.close.assert_called_once()
+
+    def test_closing_twice_stops_the_microphone_once(self):
+        # Idempotence with something to see. The quit paths overlap — `__exit__` on the
+        # way out of `main()`, and the pill's own teardown — so the second close has to
+        # be a no-op rather than a second round of teardown against a torn-down session.
+        mic = CountingMic()
+        s = self.session(mic=mic)
+        s.start()
+        s.close()
+        s.close()
+        s.close()
+        self.assertEqual(mic.stops, 1)
+
+    def test_a_preload_that_never_returns_does_not_hold_the_quit(self):
+        asr = BlockedLoader()
+        s = Session(asr=asr, mic=FakeMic())
+        self.addCleanup(asr.release.set)
+        s.start()
+        self.assertTrue(wait_for(lambda: asr.loads == 1), "the preload never started")
+        began = time.perf_counter()
+        s.close()
+        elapsed = time.perf_counter() - began
+        # Against the join bound, not against `PATIENCE_SEC` — they happen to be the
+        # same number, and the first draft of this asserted `< PATIENCE_SEC` and failed
+        # by 9 ms, having proved nothing either way. The load here is 30 s: anything in
+        # the neighbourhood of the bound is the bound doing its job.
+        self.assertLess(elapsed, JOIN_SEC + 1.0,
+                        "quitting waited out a model download")
+        self.assertGreater(asr.loads, 0)
+
+    def test_arming_a_closed_session_is_refused_rather_than_half_done(self):
+        # The admission half of "total". Without it `close()` is only a statement about
+        # the past: a `start()` one scheduling slot later re-opens the microphone and
+        # warms a model for a session whose worker is already gone, and the pill turns
+        # green over it.
+        mic = CountingMic()
+        s = self.session(mic=mic)
+        s.close()
+        with self.assertRaises(RuntimeError):
+            s.start()
+        self.assertEqual(mic.starts, 0, "a closed session re-opened the microphone")
+
+    def test_a_close_with_no_start_is_still_a_close(self):
+        # `--calibrate` builds a Session and never arms it, and the CLI probes build
+        # them by the hundred. None of those took the mic, and all of them took a
+        # decode thread in the constructor.
+        s = Session(asr=FakeAsr(), mic=FakeMic())
+        worker = s.worker._thread
+        s.close()
+        self.assertFalse(worker.is_alive())
 
 if __name__ == "__main__":
     unittest.main()
