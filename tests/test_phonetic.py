@@ -160,3 +160,129 @@ class TestPhoneticEditsEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestExactMeansTheWordNotTheLetters(unittest.TestCase):
+    """DRAFT-01: the *confident* path was the destructive one.
+
+    `find_span` and `find_spans` tried an unrestricted substring scan first, so "art"
+    matched inside "cart" and the planner — which asks `in_draft` the same way — read that
+    as a literal correction it could apply for free. The fuzzy fallback underneath has
+    always thought in whitespace-delimited word windows and was never the problem.
+
+    That inversion is what makes this the sharpest finding in the audit. Every other
+    matching defect ends in an escalation to the CLI, which costs seven seconds and no
+    text. This one ends in a silent, confident, destructive edit: `delete art` turning
+    "the cart is red" into "the c is red" while the router records a clean `local` route.
+
+    Three reproductions, all from the validation, all as negative tests here.
+    """
+
+    def test_delete_does_not_carve_a_word_open(self):
+        # Not `assertIsNone`, which is what this asserted first and was the wrong
+        # question. The exact path does refuse — but "art" and "cart" score 0.857 against
+        # a 0.82 threshold, so the *fuzzy* fallback then matches "cart" as a whole word,
+        # which is that path doing its documented job (the two genuinely sound alike, and
+        # a mis-dictation between them is exactly what it exists for).
+        #
+        # The invariant worth pinning is therefore the one that holds of both paths: a
+        # span is a whole word, never letters carved out of one. Before, this returned
+        # (5, 8) — "art" cut out of the middle of "cart", leaving "c".
+        span = find_span("the cart is red", "art")
+        self.assertEqual(span, (4, 8))
+        self.assertEqual("the cart is red"[span[0]:span[1]], "cart")
+
+    def test_replace_all_leaves_unrelated_words_whole(self):
+        self.assertEqual(find_spans("cart art cart", "art"), [(5, 8)])
+
+    def test_capitalize_does_not_reach_inside_a_longer_word(self):
+        self.assertIsNone(find_span("please concatenate the list", "cat"))
+
+    def test_the_word_itself_still_matches(self):
+        # The guard must not become "exact matching never fires", which is the failure
+        # mode a boundary rule invites and the reason every negative has a positive here.
+        self.assertEqual(find_span("the art is red", "art"), (4, 7))
+
+    def test_the_last_occurrence_is_still_preferred(self):
+        # Documented behaviour, unchanged: a spoken correction refers to what was just
+        # said. The boundary walk searches backwards for exactly this reason.
+        self.assertEqual(find_span("art and more art", "art"), (13, 16))
+
+    def test_it_skips_a_mid_word_hit_to_reach_a_real_one(self):
+        # The case that decides whether the rule was implemented as a filter or as a
+        # veto: the *last* substring hit is inside "cart", and there is a genuine word
+        # earlier. A veto returns None and escalates; a filter finds the real one.
+        self.assertEqual(find_span("the art is in the cart", "art"), (4, 7))
+
+    def test_punctuation_around_the_word_is_still_a_boundary(self):
+        self.assertEqual(find_span("Meeting on Tuesday.", "Tuesday"), (11, 18))
+        self.assertEqual(find_span('he said "art" loudly', "art"), (9, 12))
+
+    def test_a_target_carrying_its_own_full_stop_still_matches(self):
+        self.assertEqual(find_span("Meeting on Tuesday.", "Tuesday."), (11, 19))
+
+    def test_a_possessive_is_not_carved_open(self):
+        # An apostrophe is word-internal in English, so "art" must not match inside
+        # "art's" and leave the user with "'s". Refused here, and the fuzzy fallback is
+        # what recovers the genuinely-quoted case one line below.
+        self.assertIsNone(find_span("the art's colour", "art"))
+
+    def test_a_multi_word_target_needs_boundaries_at_both_ends(self):
+        self.assertIsNone(find_span("the shortcart artichoke", "cart artichoke"[:12]))
+        self.assertEqual(find_span("send the art file", "the art"), (5, 12))
+
+    def test_replace_all_still_finds_every_real_occurrence(self):
+        self.assertEqual(find_spans("art and art again", "art"), [(0, 3), (8, 11)])
+
+
+class TestTheBoundaryRuleReachesThePlanner(unittest.TestCase):
+    """`in_draft` asks `find_span`, so the routing gate moves with it.
+
+    This is the half that matters to the user. With no span, "delete art" is no longer a
+    confident local edit against a word that is not there — it becomes dictation, which
+    is recoverable with one undo. The audit's phrase for the old behaviour was
+    "destructive silent text corruption", and the word doing the work is *silent*.
+    """
+
+    def test_delete_art_no_longer_leaves_a_severed_word(self):
+        # "the c is red" was the audit's headline reproduction, and the damage in it is
+        # the orphan "c" — a fragment no undo history explains and no reader can parse.
+        # The fuzzy path now takes "cart" whole instead, which is a deletion the user can
+        # see and undo in one word. Whether it should match at all is a threshold
+        # question and is in NEEDS_YOU; it is not this item's, which is the substring
+        # scan.
+        text = "the cart is red"
+        p = plan("delete art", text)
+        new, applied = apply_local(text, p)
+        self.assertTrue(applied)
+        self.assertNotEqual(new, "the c is red")
+        self.assertNotIn(" c ", new, "a word was severed rather than removed")
+        self.assertEqual(new, "the is red")
+
+    def test_replace_all_art_no_longer_corrupts_cart(self):
+        text = "cart art cart"
+        p = plan("replace all art with x", text)
+        new, _applied = apply_local(text, p)
+        self.assertNotEqual(new, "cx x cx")
+        self.assertIn("cart", new)
+
+    def test_capitalize_cat_no_longer_reaches_concatenate(self):
+        text = "please concatenate the list"
+        p = plan("capitalize cat", text)
+        new, _applied = apply_local(text, p)
+        self.assertNotIn("conCatenate", new)
+
+    def test_a_real_correction_still_applies_for_free(self):
+        text = "the art is red"
+        p = plan("delete art", text)
+        self.assertEqual(p.kind, "local", "a genuine correction escalated to the CLI")
+        new, applied = apply_local(text, p)
+        self.assertTrue(applied)
+        self.assertEqual(new, "the is red")
+
+    def test_a_real_replace_all_still_applies(self):
+        text = "art and art again"
+        p = plan("replace all art with sketch", text)
+        new, applied = apply_local(text, p)
+        self.assertTrue(applied)
+        self.assertEqual(new, "sketch and sketch again")

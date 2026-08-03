@@ -594,6 +594,26 @@ target's own word count ±1, because a mis-transcription moves word boundaries a
 letters. Both the router's `in_draft()` and every span operation in `apply_local()` go
 through it.
 
+**A span is a whole word or phrase, never letters carved out of one.** The exact pass tried
+an unrestricted substring scan first, and it was the *confident* path that lacked the rule
+the fuzzy one always had — window search has thought in whitespace-delimited words since it
+was written. So "art" matched inside "cart", `in_draft()` answered "the word is right
+there", and `delete art` turned "the cart is red" into **"the c is red"** while the router
+recorded a clean `local` route. That asymmetry is what made it the sharpest defect in the
+file: every other matching mistake here costs seven seconds and no text, and this one cost
+text, silently, leaving an orphan letter no undo history explains.
+
+`_at_word_boundary` checks the characters either side of a candidate — alphanumerics *and
+the apostrophe*, so "art" cannot be cut out of "art's" and leave the user `'s`. Whisper
+emits possessives constantly and quoted single words almost never, so that trades a rare
+refusal for a common corruption; the refused quote is not even lost, since the exact pass
+failing falls through to the sound-scored windows, which take `'art'` whole.
+
+It filters rather than vetoes. The backwards walk in `find_span` keeps looking past a
+mid-word hit instead of giving up on one, so "the art is in the cart" still finds the real
+word — refusing there would escalate a correction the user can see is possible. Last
+occurrence and tie-to-later are unchanged; the fuzzy fallback is untouched.
+
 `plan()` also marks `escalated=True` when the shape was a correction but the target was
 nowhere in the draft. That is likelier a mis-hearing than a request for judgement, so it
 earns one biased re-decode (`edits.command_bias()`: every trigger verb plus the draft's own
@@ -1316,7 +1336,7 @@ what was true.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1176 tests, ~30 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1192 tests, ~32 s) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |

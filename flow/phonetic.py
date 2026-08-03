@@ -266,6 +266,39 @@ def _word_spans(text: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
 
 
+def _is_word_char(ch: str) -> bool:
+    """Would `ch` continue a word?
+
+    Alphanumerics, and the apostrophe — which is word-internal in English and is the
+    difference between refusing "art" inside "art's" and handing the user `'s`. Whisper
+    emits possessives and contractions constantly and quoted single words almost never,
+    so this trades a rare refusal for a common corruption. The refused quote is not even
+    lost: the exact path failing falls through to the sound-scored word windows, which
+    take `'art'` whole and match it.
+    """
+    return bool(ch) and (ch.isalnum() or ch == "'")
+
+
+def _at_word_boundary(text: str, begin: int, end: int) -> bool:
+    """True when `[begin, end)` is a whole word or phrase rather than part of one.
+
+    The rule the *exact* path was missing, and it was the confident path that lacked it —
+    which is what made DRAFT-01 the sharpest defect in this file. A substring scan let
+    "art" match inside "cart", and because `edits.in_draft` asks this same question to
+    decide between a free local edit and a CLI call, the answer came back "the word is
+    right there" and `delete art` turned "the cart is red" into "the c is red". Every
+    other matching mistake here costs seven seconds and no text; this one cost text,
+    silently, and recorded a clean `local` route while doing it.
+
+    Only the edges are checked. Whatever punctuation sits inside a multi-word target is
+    the target's own business, and a target carrying its own full stop still matches the
+    word it names.
+    """
+    before = text[begin - 1] if begin > 0 else ""
+    after = text[end] if end < len(text) else ""
+    return not _is_word_char(before) and not _is_word_char(after)
+
+
 def _tighten(text: str, begin: int, end: int) -> tuple[int, int]:
     """Trim punctuation off a matched window.
 
@@ -285,9 +318,16 @@ def find_span(
 ) -> tuple[int, int] | None:
     """Where in `text` the user's spoken `target` actually is, or None.
 
-    Exact substring first, because when the transcription is right this must behave
+    Exact matching first, because when the transcription is right this must behave
     exactly as it always did — and it must find the **last** occurrence, since a
     spoken correction refers to what was just said rather than to the first mention.
+    "Exact" means the whole word or phrase (`_at_word_boundary`), never letters carved
+    out of the middle of a longer one.
+
+    A **filter and not a veto**: the walk keeps searching backwards past a mid-word hit
+    rather than giving up on one. "the art is in the cart" has its last substring hit
+    inside "cart" and a real word earlier, and refusing there would escalate a correction
+    the user can see is possible.
 
     Failing that, word windows are scored by sound. The window is sized around the
     target's own word count and allowed to vary by one, because a mis-transcription
@@ -298,8 +338,12 @@ def find_span(
         return None
     low_text, low_target = text.lower(), target.lower()
     idx = low_text.rfind(low_target)
-    if idx >= 0:
-        return idx, idx + len(target)
+    while idx >= 0:
+        if _at_word_boundary(text, idx, idx + len(target)):
+            return idx, idx + len(target)
+        # Strictly earlier than this hit, and `- 1` rather than `- len` so overlapping
+        # occurrences of a repeated target are not skipped over.
+        idx = low_text.rfind(low_target, 0, idx + len(low_target) - 1)
 
     words = _word_spans(text)
     if not words:
@@ -325,6 +369,10 @@ def find_spans(
     For "replace all X with Y", where X may have been transcribed differently in
     different places — which is precisely what happens to a name the model is unsure
     about.
+
+    Whole words only, like `find_span` and for the same reason — more urgently here, in
+    fact: `replace all art with x` on "cart art cart" rewrote *every* occurrence, so one
+    utterance corrupted three words instead of one.
     """
     if not target.strip() or not text.strip():
         return []
@@ -332,8 +380,13 @@ def find_spans(
     out: list[tuple[int, int]] = []
     start = 0
     while (idx := low_text.find(low_target, start)) >= 0:
-        out.append((idx, idx + len(target)))
-        start = idx + len(target)
+        if _at_word_boundary(text, idx, idx + len(target)):
+            out.append((idx, idx + len(target)))
+            start = idx + len(target)
+        else:
+            # Past this hit only, not past the whole match: "aa" inside "aaa" has a
+            # second occurrence one character along.
+            start = idx + 1
     if out:
         return out
 
