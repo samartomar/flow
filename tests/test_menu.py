@@ -553,3 +553,70 @@ class TestTheVoiceMenuCanTickEngineDefault(Menu):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestANewDraftFromTheClipboard(Menu):
+    """The way in, opposite Copy draft — the path three users looked for.
+
+    Every route into a draft was speech, which is exactly wrong for the first thing
+    somebody does with a dictation tool they have just installed: they have a paragraph
+    in front of them and want to work on it, not compose one.
+    """
+
+    def test_it_sits_beside_its_opposite(self):
+        order = self.build(self.profile()).order
+        self.assertEqual(order[order.index("Copy draft") + 1],
+                         "New draft from clipboard")
+
+    def test_clipboard_text_becomes_the_draft(self):
+        import flow.ui as ui
+
+        top = self.build(self.profile())
+        self.pill.session.paste_draft.return_value = ""
+        with mock.patch.object(ui.Pill, "clipboard_get",
+                               lambda _s: "a paragraph from somewhere else"):
+            top.commands["New draft from clipboard"]()
+        self.pill.session.paste_draft.assert_called_once_with(
+            "a paragraph from somewhere else")
+        self.assertEqual(self.notes, [], "a success does not need a note of its own")
+
+    def test_an_empty_clipboard_draws_a_note(self):
+        import flow.ui as ui
+
+        top = self.build(self.profile())
+        self.pill.session.paste_draft.return_value = "nothing on the clipboard"
+        with mock.patch.object(ui.Pill, "clipboard_get", lambda _s: ""):
+            top.commands["New draft from clipboard"]()
+        self.assertIn("nothing on the clipboard", " ".join(self.notes))
+
+    def test_a_clipboard_holding_something_that_is_not_text_says_the_same_thing(self):
+        # Tk raises `TclError` for an empty clipboard *and* for one holding an image or
+        # a file list. Neither is a fault worth a stack trace, and from where the user
+        # stands they are the same fact: there is nothing here to start from.
+        import tkinter as tk
+
+        import flow.ui as ui
+
+        top = self.build(self.profile())
+        self.pill.session.paste_draft.return_value = "nothing on the clipboard"
+
+        def boom(_self):
+            raise tk.TclError("CLIPBOARD selection doesn't exist")
+
+        with mock.patch.object(ui.Pill, "clipboard_get", boom):
+            top.commands["New draft from clipboard"]()
+        self.pill.session.paste_draft.assert_called_once_with("")
+        self.assertIn("nothing on the clipboard", " ".join(self.notes))
+
+    def test_the_refusal_is_surfaced_rather_than_noted(self):
+        # It runs with an empty draft and a hidden bubble, which is the state it exists
+        # for — and `note()` only paints on a window that is already showing.
+        import flow.ui as ui
+
+        top = self.build(self.profile())
+        self.pill.session.paste_draft.return_value = "no"
+        surfaced: list[str] = []
+        self.pill.bubble.surface = surfaced.append
+        with mock.patch.object(ui.Pill, "clipboard_get", lambda _s: ""):
+            top.commands["New draft from clipboard"]()
+        self.assertEqual(surfaced, ["no"])

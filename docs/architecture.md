@@ -933,6 +933,25 @@ for `ui.SENT_LINGER_SEC` under a `sent` label with a **Put it back** chip, which
 `Session.recall()` — the same path the spoken *"bring back my last prompt"* takes. Dictate
 mode only: in converse mode the bubble is already staying up for the answer.
 
+### New draft from clipboard
+
+The way in, sitting beside `Copy draft`, which was the only way out that needed nothing.
+Three outside users went looking for it and did not find it: every route into a draft was
+speech, which is exactly wrong for the first thing somebody does with a dictation tool
+they have just installed — they have a paragraph in front of them and want to work on it,
+not compose one.
+
+`Session.paste_draft` goes through `Draft.set`, and that is the whole implementation: the
+undo snapshot, the revision bump and invariant 11's discard of any rewrite in flight all
+come with it, so "one undo back" is true rather than promised. Refused while the editor is
+open, for the same reason a spoken result is held back there. It **returns** its refusal
+rather than emitting a note, because the caller is the only thing that knows whether there
+is a window on screen to put one on — and this runs with an empty draft and a hidden
+bubble, which is the state it exists for. Tk's clipboard rather than `inject`'s, matching
+`Pill._copy`: a body with no hands is precisely a body that starts from a paste. An empty
+clipboard and one holding an image both raise `TclError` and both get the same sentence,
+because from where the user is standing they are the same fact.
+
 ### Copy draft
 
 Lite's `Pill._copy` — Tk's own clipboard, three declared dependencies on every OS — is a

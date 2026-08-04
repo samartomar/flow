@@ -668,6 +668,9 @@ class Pill(tk.Tk):
         # Above Clear draft, because one of them saves the words and the other destroys
         # them, and this menu is where the long-draft incident would have ended.
         m.add_command(label="Copy draft", command=self._copy_draft)
+        # Beside its opposite, because they are one pair: the words out, and the words
+        # in. Three outside users looked for the second and found only the first.
+        m.add_command(label="New draft from clipboard", command=self._paste_draft)
         self._recent_menu(m)
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
@@ -1001,6 +1004,31 @@ class Pill(tk.Tk):
             return
         problem = self._copy(text)
         self.bubble.note(problem or "draft copied — paste it where you need it")
+
+    def _paste_draft(self) -> None:
+        """The way in, opposite `Copy draft`, which is the only way out that needs nothing.
+
+        Tk's own clipboard rather than `inject`'s Win32 one, matching `_copy`: it is the
+        same three declared dependencies on every OS, and Lite has to be able to do this
+        too — a body with no hands is precisely a body that starts from a paste.
+
+        `TclError` is the ordinary case rather than an error case. Tk raises it for an
+        *empty* clipboard and for one holding something that is not text — an image, a
+        file list — and neither of those is a fault worth a stack trace. Both get the
+        same sentence, because from where the user is standing they are the same fact:
+        there is nothing here to start from.
+        """
+        try:
+            text = self.clipboard_get()
+        except tk.TclError:
+            text = ""
+        refused = self.session.paste_draft(text)
+        if refused:
+            # Surfaced rather than noted: this runs with an empty draft and a hidden
+            # bubble, which is the state it exists for, and `note()` only paints on a
+            # window that is already showing. A success needs nothing here — the draft
+            # event opens the window on its own.
+            self.front.surface(refused)
 
     def _send(self, submit: bool = False) -> None:
         """R5: hand the draft over, and leave it recoverable either way.
@@ -1811,6 +1839,15 @@ class ConversationCard(tk.Toplevel):
     def note(self, msg: str) -> None:
         self._note = msg
         self._show()
+
+    def surface(self, msg: str) -> None:
+        """`note`, under the name the bubble gives it. Both surfaces answer to both.
+
+        On this window they are genuinely the same act — a note brings the card up —
+        while on the bubble `note` paints only what is already showing. The protocol
+        `Pill.front` hands work to has to be complete, or every caller grows a branch.
+        """
+        self.note(msg)
 
     def clear(self) -> None:
         """Everything gone — history, question, answer, note. Item 64's one act."""

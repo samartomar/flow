@@ -705,3 +705,58 @@ class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
         full._render()
         part._render()
         self.assertEqual(full._h, part._h)
+
+
+class TestStartingFromTheClipboard(unittest.TestCase):
+    """`Session.paste_draft`: the undo snapshot is the whole reason it goes through
+    `Draft.set` rather than assigning `text`."""
+
+    def test_it_becomes_the_draft(self):
+        s = session()
+        self.assertEqual(s.paste_draft("  a paragraph from somewhere else  "), "")
+        self.assertEqual(s.draft.text, "a paragraph from somewhere else")
+
+    def test_the_previous_draft_is_one_undo_back(self):
+        # The history exists; this is the one path that would have been tempted to skip
+        # it, because "there was nothing there anyway" is true right up until it is not.
+        s = session()
+        s.draft.set("what was already there")
+        s.paste_draft("something pasted over it")
+        self.assertTrue(s.draft.undo())
+        self.assertEqual(s.draft.text, "what was already there")
+
+    def test_it_works_on_an_empty_draft(self):
+        # The state it exists for: nothing said yet, no bubble on screen.
+        s = session()
+        self.assertEqual(s.draft.text, "")
+        self.assertEqual(s.paste_draft("a paragraph"), "")
+        self.assertEqual(s.draft.text, "a paragraph")
+
+    def test_an_empty_clipboard_is_refused_with_a_reason_rather_than_a_note(self):
+        # Returned, not emitted: the caller is the only thing that knows whether there
+        # is a window on screen to put a note on.
+        s = session()
+        self.assertIn("clipboard", s.paste_draft("   "))
+        self.assertEqual([e for e in s.events() if e.kind == "note"], [])
+
+    def test_it_is_refused_while_the_editor_is_open(self):
+        # The draft is two things at once until the box closes — the same reason a
+        # spoken result is held back there.
+        s = session()
+        s.draft.set("being edited")
+        s.begin_edit()
+        self.assertIn("edit", s.paste_draft("something else").lower())
+        self.assertEqual(s.draft.text, "being edited")
+
+    def test_the_revision_moves_so_a_rewrite_in_flight_is_discarded(self):
+        # Invariant 11 comes free with `Draft.set`, which is why this does not assign.
+        s = session()
+        s.draft.set("widen the column")
+        was = s.draft.revision
+        s.paste_draft("something entirely different")
+        self.assertGreater(s.draft.revision, was)
+
+    def test_it_joins_recent(self):
+        s = session()
+        s.paste_draft("a paragraph from somewhere else")
+        self.assertEqual(s.recent[0], ("said", "a paragraph from somewhere else"))

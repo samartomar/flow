@@ -1909,6 +1909,37 @@ class Session:
             self._emit("note", "listening again - nothing was changed")
         self.diag.write("edit", ok=True, chars=len(text), route="commit")
 
+    def paste_draft(self, text: str) -> str:
+        """Start from something already written: the clipboard becomes the draft.
+
+        Three outside users went looking for this and did not find it (decisions.md
+        2026-08-03). Every way into a draft was speech, which is exactly wrong for the
+        first thing somebody does with a dictation tool they have just installed — they
+        have a paragraph in front of them and want to work on it, not compose one.
+
+        `Draft.set` is the whole implementation and that is the point: the undo snapshot,
+        the revision bump and the invariant-11 discard of any rewrite in flight all come
+        with it. Refused while the editor is open, for the same reason a spoken result is
+        held back there: the draft is two things at once until the box closes.
+
+        Returns "" on success, or the reason it refused. A **returned** reason rather
+        than an emitted note, because the caller is the only thing that knows whether
+        there is a window on screen to put a note on — and this runs with an empty draft
+        and a hidden bubble, which is the state it exists for.
+        """
+        text = (text or "").strip()
+        if not text:
+            return "nothing on the clipboard to start from"
+        if self.editing:
+            return "finish or cancel the edit first"
+        self.draft.set(text)
+        self._remember_recent(RECENT_SAID, text)
+        self._emit("note", f"started from the clipboard - {len(text)} characters, "
+                           "one undo back")
+        self._after_draft_change()
+        self.diag.write("edit", ok=True, chars=len(text), route="paste")
+        return ""
+
     def cancel_edit(self) -> None:
         """Close the editor and keep the draft exactly as it was."""
         if not self.editing:
