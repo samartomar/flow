@@ -415,6 +415,21 @@ CARD_GAP = 8
 DOT_SEC = 0.4
 
 
+#: The widest label a chip's key can ever take, when that key carries a countdown.
+#:
+#: A chip's width follows its label, so `Ask` → `Ask 4s` → `Ask` moved the hit region
+#: under the hand every second the countdown ran. Reserving the widest form makes the
+#: region stable for the whole life of the chip, at the cost of a few pixels of air on
+#: the chip that is not counting — which nobody has ever complained about, and a hit
+#: region that moves is what three users did complain about.
+COUNTDOWN_WIDEST = {"Ask": "Ask 00s", "Put it back": "Put it back 00s"}
+
+
+def chip_w(key: str, label: str) -> int:
+    """How wide this chip is drawn. Stable across a countdown, by construction."""
+    return 20 + 7 * max(len(label), len(COUNTDOWN_WIDEST.get(key, "")))
+
+
 def chip_tag(key: str) -> str:
     """The canvas tag for a chip, from its key.
 
@@ -1706,6 +1721,17 @@ class ConversationCard(tk.Toplevel):
     is where item 37's 476.7 ms came from.
     """
 
+
+    #: Declared on the class as well as assigned in `__init__`, for the reason `lite` is:
+    #: `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on an
+    #: instance built with `__new__` — which is how every UI fixture in this suite builds
+    #: one — a missing name recurses until the stack ends instead of defaulting. Item 32
+    #: found that as a `RecursionError`; item 66 found it again the moment `_render`
+    #: started reading two new fields.
+    _visible = False
+    _pointer_in = False
+    _chips_drawn: tuple | None = None
+
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
         self.pill = pill
@@ -1737,9 +1763,15 @@ class ConversationCard(tk.Toplevel):
         #: Last auto-ask second painted, so the countdown repaints once a second rather
         #: than on every frame. Same discipline as `Bubble.tick_countdown`.
         self._countdown: int | None = None
+        #: The chip row last drawn, and whether the hand is over this window. Both are
+        #: item 66's — see `Bubble._lay_out` and `_frozen`.
+        self._chips_drawn: tuple | None = None
+        self._pointer_in = False
         self.canvas.bind("<MouseWheel>", self._wheel)
         self.canvas.bind("<ButtonPress-1>", self._grab)
         self.canvas.bind("<B1-Motion>", self._drag)
+        self.canvas.bind("<Enter>", self._enter, add="+")
+        self.canvas.bind("<Leave>", self._leave, add="+")
         self.withdraw()
 
     # -- content -----------------------------------------------------------
@@ -1862,13 +1894,44 @@ class ConversationCard(tk.Toplevel):
         y = max(top + EDGE_AIR, min(y, bottom - self._h - EDGE_AIR))
         self.geometry(f"{CARD_W}x{self._h}+{x}+{y}")
 
+
+    # -- holding still under the hand --------------------------------------
+
+    def _enter(self, _e=None) -> None:
+        self._pointer_in = True
+
+    def _leave(self, _e=None) -> None:
+        self._pointer_in = False
+        # Catch up on everything held back while the hand was here. Without this the
+        # window keeps whatever size and chip row it had when the pointer arrived until
+        # the next event happens to arrive, which on a settled draft is never.
+        if self._visible:
+            self._render()
+
+    def _frozen(self) -> bool:
+        """True while the pointer is over this window, so it must not move or resize.
+
+        The other half of the lost-click defect, and the half a persistent chip row
+        cannot fix on its own: the row can survive the redraw and still end up somewhere
+        else on the screen, because `_render` re-measures the window and `reposition`
+        re-places it on every partial, every countdown second and every activity frame.
+        A note arriving is 30 px of height, which is more than a chip is tall.
+
+        So the rule is the one every menu and tooltip already obeys: **nothing moves
+        under the hand.** While the pointer is inside, the geometry is whatever it was
+        when the pointer arrived; the body still redraws inside it, and the window
+        catches up the moment the hand leaves. The window is bounded and its content is
+        capped, so the worst a freeze costs is a line of body clipped for as long as
+        somebody is hovering.
+        """
+        return self._pointer_in and self._visible
+
     # -- painting ----------------------------------------------------------
 
     def _probe_h(self, text: str, font) -> int:
         probe = self.canvas.create_text(
             PAD, PAD, anchor="nw", text=text or " ", fill=TEXT,
-            font=font, width=CARD_W - 2 * PAD,
-        )
+            font=font, width=CARD_W - 2 * PAD, tags="body")
         _x1, y1, _x2, y2 = self.canvas.bbox(probe)
         return y2 - y1
 
@@ -1918,7 +1981,10 @@ class ConversationCard(tk.Toplevel):
     def _render(self) -> None:
         c = self.canvas
         accent = self.accent
-        c.delete("all")
+        # `body`, not `all`: the chip row is drawn under its own tag and survives this,
+        # because a chip torn down under a hand reaching for it is a lost click
+        # (item 66). The measuring probes below carry the tag too, so they still go.
+        c.delete("body")
 
         question = self._partial or self._question
         q_h = self._probe_h(question, ("Segoe UI", 9)) if question else 0
@@ -1941,15 +2007,18 @@ class ConversationCard(tk.Toplevel):
             + (note_h + 4 if self._note else 0)
         )
         history_h = sum(h + CARD_GAP for h in self._heights)
-        self._h = min(
-            max(CARD_MIN_H, PAD + history_h + self._pinned_h + HELP_FOOT_BAND),
-            self.work_h(),
-        )
-        c.configure(width=CARD_W, height=self._h)
-        self.reposition()
+        # Nothing moves or resizes under the hand — see `_frozen`.
+        if not self._frozen():
+            self._h = min(
+                max(CARD_MIN_H, PAD + history_h + self._pinned_h + HELP_FOOT_BAND),
+                self.work_h(),
+            )
+            c.configure(width=CARD_W, height=self._h)
+            self.reposition()
 
-        c.delete("all")
-        _round_rect(c, 1, 1, CARD_W - 1, self._h - 1, 14, fill=SHELL, outline=accent)
+        c.delete("body")
+        _round_rect(c, 1, 1, CARD_W - 1, self._h - 1, 14, fill=SHELL, outline=accent,
+                    tags="body")
 
         # -- the history, in what is left above the pinned block
         y, floor = PAD, PAD + self._view_h()
@@ -1963,8 +2032,7 @@ class ConversationCard(tk.Toplevel):
             c.create_text(
                 PAD, y, anchor="nw", text=self._row_text(self._history[i]),
                 fill=MUTED if kind == "q" else REPLY,
-                font=("Segoe UI", 9), width=CARD_W - 2 * PAD,
-            )
+                font=("Segoe UI", 9), width=CARD_W - 2 * PAD, tags="body")
             y += h + CARD_GAP
             drawn += 1
         self._scrollbar(drawn)
@@ -1973,32 +2041,33 @@ class ConversationCard(tk.Toplevel):
         y = self._h - HELP_FOOT_BAND - self._pinned_h
         if self._history:
             c.create_line(PAD, y - CARD_GAP // 2, CARD_W - PAD, y - CARD_GAP // 2,
-                          fill=CHIP)
+                          fill=CHIP, tags="body")
         if question:
             c.create_text(
                 PAD, y, anchor="nw", text=question, fill=MUTED,
-                font=("Segoe UI", 9), width=CARD_W - 2 * PAD,
-            )
+                font=("Segoe UI", 9), width=CARD_W - 2 * PAD, tags="body")
             y += q_h + (CARD_GAP if a_h else 0)
         if self._answer:
             c.create_text(
                 PAD, y, anchor="nw", text=shown, fill=REPLY,
-                font=("Segoe UI", 10), width=CARD_W - 2 * PAD,
-            )
+                font=("Segoe UI", 10), width=CARD_W - 2 * PAD, tags="body")
             y += a_h
             if more:
                 c.create_text(
                     PAD, y - 4, anchor="nw", text=f"… {more} more lines", fill=MUTED,
-                    font=("Segoe UI", 8, "italic"),
-                )
+                    font=("Segoe UI", 8, "italic"), tags="body")
                 y += BODY_ELIDED_H
         if self._note:
             c.create_text(
                 PAD, y, anchor="nw", text=self._note, fill=MUTED,
-                font=("Segoe UI", 8), width=CARD_W - 2 * PAD,
-            )
+                font=("Segoe UI", 8), width=CARD_W - 2 * PAD, tags="body")
 
         self._chips()
+        # The row was created before this render's body, and a canvas draws in creation
+        # order — so without this the fresh body sits on top of the chips and takes
+        # their clicks. Found by the click storm reading 0/60 after the persistence
+        # change that was supposed to fix it.
+        c.tag_raise("chips")
 
     def _scrollbar(self, drawn: int) -> None:
         if self._top == 0 and drawn >= len(self._history):
@@ -2006,13 +2075,13 @@ class ConversationCard(tk.Toplevel):
         c = self.canvas
         x = CARD_W - 9
         y1, y2 = PAD, PAD + self._view_h()
-        c.create_rectangle(x, y1, x + 3, y2, fill=CHIP, outline="")
+        c.create_rectangle(x, y1, x + 3, y2, fill=CHIP, outline="", tags="body")
         span = max(1, len(self._history))
         shown = max(1, drawn - self._top)
         height = max(24, int((y2 - y1) * shown / span))
         offset = int((y2 - y1 - height) * self._top / max(1, span - shown))
         c.create_rectangle(x, y1 + offset, x + 3, y1 + offset + height,
-                           fill=MUTED, outline="")
+                           fill=MUTED, outline="", tags="body")
 
     def _chips(self) -> None:
         session = self.pill.session
@@ -2025,19 +2094,26 @@ class ConversationCard(tk.Toplevel):
             specs.append(("Copy", "Copy", self._copy_answer))
         specs.append(("New conversation", "New conversation", self._new_conversation))
         c = self.canvas
+        # Rebuilt only when the row has changed — see `Bubble._lay_out`. This card
+        # renders on every partial too, so it inherits the same defect and the same fix.
+        key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent)
+        if key_now == self._chips_drawn or (self._frozen() and self._chips_drawn):
+            return
+        self._chips_drawn = key_now
+        c.delete("chips")
         x = PAD
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
         for key, label, cmd in specs:
-            w = 20 + 7 * len(label)
+            w = chip_w(key, label)
             primary = key == "Ask"
             tag = chip_tag(key)
             _round_rect(c, x, y1, x + w, y2, 13,
                         fill=self.accent if primary else CHIP,
-                        outline="", tags=tag)
+                        outline="", tags=(tag, "chips"))
             c.create_text(x + w / 2, (y1 + y2) / 2, text=label,
                           fill=SHELL if primary else TEXT,
-                          font=("Segoe UI", 9, "bold"), tags=tag)
+                          font=("Segoe UI", 9, "bold"), tags=(tag, "chips"))
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
             x += w + 8
 
@@ -2082,6 +2158,16 @@ class Bubble(tk.Toplevel):
     #: attribute default as `Pill.lite`, and for the same `__getattr__` reason.
     lite = False
 
+    #: Declared on the class as well as assigned in `__init__`, for the reason `lite` is:
+    #: `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on an
+    #: instance built with `__new__` — which is how every UI fixture in this suite builds
+    #: one — a missing name recurses until the stack ends instead of defaulting. Item 32
+    #: found that as a `RecursionError`; item 66 found it again the moment `_render`
+    #: started reading two new fields.
+    _visible = False
+    _pointer_in = False
+    _chips_drawn: tuple | None = None
+
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
         self.pill = pill
@@ -2120,6 +2206,13 @@ class Bubble(tk.Toplevel):
         self._editor: tk.Text | None = None
         self._previous_focus = 0
         self._h = 120
+        #: The chip row last drawn, as `(keys+labels, height, accent)`. Compared before
+        #: anything is torn down, so the row survives a body redraw — see `_lay_out`.
+        self._chips_drawn: tuple | None = None
+        #: True while the pointer is over this window. Nothing moves under the hand.
+        self._pointer_in = False
+        self.canvas.bind("<Enter>", self._enter, add="+")
+        self.canvas.bind("<Leave>", self._leave, add="+")
         self.withdraw()
 
     # -- content -----------------------------------------------------------
@@ -2291,6 +2384,38 @@ class Bubble(tk.Toplevel):
 
         step(0)
 
+
+    # -- holding still under the hand --------------------------------------
+
+    def _enter(self, _e=None) -> None:
+        self._pointer_in = True
+
+    def _leave(self, _e=None) -> None:
+        self._pointer_in = False
+        # Catch up on everything held back while the hand was here. Without this the
+        # window keeps whatever size and chip row it had when the pointer arrived until
+        # the next event happens to arrive, which on a settled draft is never.
+        if self._visible:
+            self._render()
+
+    def _frozen(self) -> bool:
+        """True while the pointer is over this window, so it must not move or resize.
+
+        The other half of the lost-click defect, and the half a persistent chip row
+        cannot fix on its own: the row can survive the redraw and still end up somewhere
+        else on the screen, because `_render` re-measures the window and `reposition`
+        re-places it on every partial, every countdown second and every activity frame.
+        A note arriving is 30 px of height, which is more than a chip is tall.
+
+        So the rule is the one every menu and tooltip already obeys: **nothing moves
+        under the hand.** While the pointer is inside, the geometry is whatever it was
+        when the pointer arrived; the body still redraws inside it, and the window
+        catches up the moment the hand leaves. The window is bounded and its content is
+        capped, so the worst a freeze costs is a line of body clipped for as long as
+        somebody is hovering.
+        """
+        return self._pointer_in and self._visible
+
     # -- painting ----------------------------------------------------------
 
     def _body_slot(self, body: str) -> tuple[str, int, int]:
@@ -2317,8 +2442,7 @@ class Bubble(tk.Toplevel):
         for _ in range(BODY_PROBES):
             probe = c.create_text(
                 PAD, PAD, anchor="nw", text=shown or " ", fill=TEXT,
-                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
-            )
+                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD, tags="body")
             _x1, y1, _x2, y2 = c.bbox(probe)
             text_h = y2 - y1
             if text_h <= BODY_MAX_H:
@@ -2332,8 +2456,7 @@ class Bubble(tk.Toplevel):
         """How tall `text` wraps to in the body column, measured rather than estimated."""
         probe = self.canvas.create_text(
             PAD, PAD, anchor="nw", text=text or " ", fill=TEXT,
-            font=font, width=BUBBLE_W - 2 * PAD,
-        )
+            font=font, width=BUBBLE_W - 2 * PAD, tags="body")
         _x1, y1, _x2, y2 = self.canvas.bbox(probe)
         return y2 - y1
 
@@ -2354,7 +2477,8 @@ class Bubble(tk.Toplevel):
         # The sent card takes the body slot: it is the same words in the same place,
         # which is what makes "that went to the wrong window" readable at a glance.
         body = self._sent or self._text
-        c.delete("all")
+        # `body`, not `all` — see `_lay_out`. The chip row outlives a redraw now.
+        c.delete("body")
 
         # Measure first: the window has to be sized to the wrapped text. Only the tail of
         # it, though, and that is the whole of the long-draft fix — see `_body_slot`.
@@ -2373,8 +2497,7 @@ class Bubble(tk.Toplevel):
         if self._note:
             nprobe = c.create_text(
                 PAD, PAD, anchor="nw", text=self._note, fill=MUTED,
-                font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD,
-            )
+                font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD, tags="body")
             nx1, ny1, nx2, ny2 = c.bbox(nprobe)
             note_h = ny2 - ny1
         # The box gets a floor of its own: a one-line draft measures ~18 px, and a
@@ -2415,12 +2538,15 @@ class Bubble(tk.Toplevel):
         # *draft* asks for; this bounds what the window may be whatever asked — which is
         # the reply path, whose full-text probe is unchanged and is what sizes a 12 000-
         # character artifact to 4 179 px on a 672 px desktop.
-        self._h = min(max(96, text_h + extra + 74), self.work_h())
-        c.configure(width=BUBBLE_W, height=self._h)
-        self.reposition()
+        # Nothing moves or resizes under the hand — see `_frozen`.
+        if not self._frozen():
+            self._h = min(max(96, text_h + extra + 74), self.work_h())
+            c.configure(width=BUBBLE_W, height=self._h)
+            self.reposition()
 
-        c.delete("all")
-        _round_rect(c, 1, 1, BUBBLE_W - 1, self._h - 1, 14, fill=SHELL, outline=accent)
+        c.delete("body")
+        _round_rect(c, 1, 1, BUBBLE_W - 1, self._h - 1, 14, fill=SHELL, outline=accent,
+                    tags="body")
         y = PAD
         if self._sent:
             c.create_text(
@@ -2433,8 +2559,7 @@ class Bubble(tk.Toplevel):
             # do not move under the cursor at the moment somebody reaches for them.
             c.create_window(
                 PAD, y, anchor="nw", window=self._editor,
-                width=BUBBLE_W - 2 * PAD, height=edit_h,
-            )
+                width=BUBBLE_W - 2 * PAD, height=edit_h, tags="body")
             y += edit_h + 6
         elif body:
             if earlier:
@@ -2442,20 +2567,17 @@ class Bubble(tk.Toplevel):
                 # whole draft, and somebody would go looking for words that are there.
                 c.create_text(
                     PAD, y, anchor="nw", text=f"… {earlier} earlier lines", fill=MUTED,
-                    font=("Segoe UI", 8, "italic"),
-                )
+                    font=("Segoe UI", 8, "italic"), tags="body")
                 y += BODY_ELIDED_H
             # Muted once it has gone: these are no longer the words being worked on.
             c.create_text(
                 PAD, y, anchor="nw", text=shown, fill=MUTED if self._sent else TEXT,
-                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
-            )
+                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD, tags="body")
             y += text_h + 6
         if self._partial:
             c.create_text(
                 PAD, y, anchor="nw", text=self._partial, fill=MUTED,
-                font=("Segoe UI", 9, "italic"), width=BUBBLE_W - 2 * PAD,
-            )
+                font=("Segoe UI", 9, "italic"), width=BUBBLE_W - 2 * PAD, tags="body")
             y += 28
         if self._act is not None:
             # In the flow of the text rather than pinned to the foot: it belongs to what
@@ -2470,10 +2592,12 @@ class Bubble(tk.Toplevel):
             # measurement above just reserved, instead of down onto the chips.
             c.create_text(
                 PAD, self._h - PAD - CHIP_H - 4, anchor="sw", text=self._note,
-                fill=MUTED, font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD,
-            )
+                fill=MUTED, font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD, tags="body")
 
         self._chips()
+        # Above the body this render just drew — see the card's `_render` for the
+        # measurement that found it.
+        c.tag_raise("chips")
 
     def _chips(self) -> None:
         # (key, label, command). The key becomes the canvas tag and the label is what is
@@ -2525,23 +2649,37 @@ class Bubble(tk.Toplevel):
         self._lay_out(specs)
 
     def _lay_out(self, specs) -> None:
-        """Draw a row of chips left to right, tagged by key rather than by label."""
+        """Draw a row of chips left to right, tagged by key rather than by label.
+
+        **Only when the row has actually changed.** The body is deleted and redrawn on
+        every partial, every countdown second and every activity frame; the chips are
+        not, because a chip that is destroyed and rebuilt under a hand reaching for it
+        is the click three users reported losing. `_render` deletes the `body` tag now,
+        so this row survives a redraw and is torn down only when its keys, its labels or
+        the height it hangs off have moved.
+        """
         c = self.canvas
+        key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent)
+        if key_now == self._chips_drawn or (self._frozen() and self._chips_drawn):
+            return
+        self._chips_drawn = key_now
+        c.delete("chips")
         x = PAD
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
         for key, label, cmd in specs:
-            w = 20 + 7 * len(label)
+            w = chip_w(key, label)
             primary = key in ("Send", "Ask", "Put it back")
             tag = chip_tag(key)
             _round_rect(
                 c, x, y1, x + w, y2, 13,
-                fill=self.accent if primary else CHIP, outline="", tags=tag,
+                fill=self.accent if primary else CHIP, outline="",
+                tags=(tag, "chips"),
             )
             c.create_text(
                 x + w / 2, (y1 + y2) / 2, text=label,
                 fill=SHELL if primary else TEXT,
-                font=("Segoe UI", 9, "bold"), tags=tag,
+                font=("Segoe UI", 9, "bold"), tags=(tag, "chips"),
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
             x += w + 8

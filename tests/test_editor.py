@@ -417,6 +417,13 @@ if __name__ == "__main__":
 WORK = (0, 0, 1280, 672)
 
 
+def _tags(value) -> tuple:
+    """Tk accepts a tag as a string or a tuple; this fake has to take both."""
+    if value is None:
+        return ()
+    return (value,) if isinstance(value, str) else tuple(value)
+
+
 class MeasuringCanvas:
     """A canvas that answers `bbox`, which is what a layout test needs.
 
@@ -434,8 +441,18 @@ class MeasuringCanvas:
     def __init__(self) -> None:
         self.items: list[dict] = []
 
-    def delete(self, *a, **kw) -> None:
-        self.items.clear()
+    def delete(self, *specs, **kw) -> None:
+        """Tag-aware, since item 66 made the tag the whole point.
+
+        `_render` deletes the `body` tag and leaves the chip row standing, so a fake
+        that cleared everything on any `delete` would report a card with no body on it
+        and, worse, would make the persistence being tested invisible.
+        """
+        if not specs or "all" in specs:
+            self.items.clear()
+            return
+        wanted = set(specs)
+        self.items[:] = [i for i in self.items if not wanted & set(i["tags"])]
 
     def configure(self, **kw) -> None: ...
 
@@ -467,6 +484,7 @@ class MeasuringCanvas:
             # whose words they are — the answer in REPLY, the question in MUTED — and a
             # fake that dropped the colour could not see them swap.
             "fill": kw.get("fill"),
+            "tags": _tags(kw.get("tags")),
         }
         self.items.append(item)
         return len(self.items) - 1

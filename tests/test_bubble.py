@@ -487,3 +487,112 @@ class TestTheBubbleOpensBelowWhenAboveHasNoRoom(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheChipsSurviveARedraw(unittest.TestCase):
+    """Item 66: a chip being aimed at must still be there when the click lands.
+
+    `_render` used to delete the whole canvas — every chip and its binding — and
+    reposition the window, on every partial decode, every countdown second and every
+    activity frame. Three outside users reported chips that "genuinely failed clicks",
+    and the click storm on real Tk put a number on it: **10 of 60** landed in a live
+    session, where a partial, a note and the rescue chip all move without the user doing
+    anything. 60 of 60 after.
+
+    What is asserted here is the mechanism the storm measured, so the storm does not
+    have to be run to notice a regression: the row is not rebuilt by a body redraw, the
+    geometry does not change under the pointer, and a countdown does not resize its own
+    chip.
+    """
+
+    def chips(self, b) -> list[int]:
+        """The identity of every chip item on the canvas. Identity, because the question
+        is whether they were *rebuilt* rather than whether they look the same."""
+        return [id(i) for i in b.canvas.items if "chips" in i["tags"]]
+
+    def test_a_body_redraw_leaves_the_row_standing(self):
+        b = bubble(draft(400))
+        b._render()
+        was = self.chips(b)
+        self.assertTrue(was, "no chips were drawn at all")
+        for i in range(5):
+            b._partial = draft(200 + i * 37)
+            b._render()
+        self.assertEqual(self.chips(b), was, "the chip row was rebuilt by a partial")
+
+    def test_but_a_changed_row_is_rebuilt(self):
+        # The other direction, so persistence cannot pass this by being a freeze: a chip
+        # that should appear has to appear.
+        b = bubble(draft(400))
+        b._render()
+        was = self.chips(b)
+        b.pill.session.can_rescue = True
+        b._render()
+        self.assertNotEqual(self.chips(b), was)
+        self.assertIn("Was a command", [i["text"] for i in b.canvas.items])
+
+    def test_nothing_moves_or_resizes_under_the_pointer(self):
+        # `_visible`, because a window nobody can see is a window nobody is pointing at
+        # — the freeze is about a hand that has arrived, not about a hidden card.
+        b = bubble(draft(400), _visible=True)
+        b._render()
+        h, placed_at = b._h, []
+        b.reposition = lambda *a, **kw: placed_at.append(1)
+        b._enter()
+        for n in (4_000, 50_000):
+            b._text = draft(n)
+            b._note = "microphone overflowed - some audio was dropped"
+            b._render()
+            self.assertEqual(b._h, h, "the window resized under the hand")
+        self.assertEqual(placed_at, [], "the window moved under the hand")
+
+    def test_and_the_row_is_not_rebuilt_under_it_either(self):
+        # A persistent row that still moves 118 px when `Was a command` appears is the
+        # same lost click with a different cause — the storm read 30/60 with only the
+        # geometry frozen.
+        b = bubble(draft(400), _visible=True)
+        b._render()
+        was = self.chips(b)
+        b._enter()
+        b.pill.session.can_rescue = True
+        b._render()
+        self.assertEqual(self.chips(b), was)
+
+    def test_leaving_catches_everything_up(self):
+        # Otherwise the window keeps whatever it had when the pointer arrived until the
+        # next event, which on a settled draft is never.
+        b = bubble(draft(400), _visible=True)
+        b._render()
+        b._enter()
+        # A note rather than a longer draft: the body is capped at `BODY_MAX_H`, so a
+        # 400-character draft and a 50 000-character one measure the same window and a
+        # check built on that would pass while proving nothing.
+        b._note = "microphone overflowed - some audio was dropped, twice over now"
+        b._render()
+        frozen = b._h
+        b._leave()
+        self.assertNotEqual(b._h, frozen, "the window never caught up")
+
+    def test_a_countdown_does_not_resize_its_own_chip(self):
+        # Chip width followed the label, so `Ask` -> `Ask 4s` -> `Ask` moved the hit
+        # region every second the countdown ran.
+        widths = {ui.chip_w("Ask", label) for label in ("Ask", "Ask 1s", "Ask 10s")}
+        self.assertEqual(len(widths), 1)
+        self.assertEqual(ui.chip_w("Put it back", "Put it back"),
+                         ui.chip_w("Put it back", "Put it back 4s"))
+
+    def test_an_ordinary_chip_is_still_sized_by_its_label(self):
+        # The reserve is per key, not a flat minimum: a row of chips all as wide as the
+        # widest countdown would be a row nobody can tell apart.
+        self.assertLess(ui.chip_w("Edit", "Edit"), ui.chip_w("Was a command",
+                                                             "Was a command"))
+
+    def test_the_row_is_drawn_above_the_body_it_outlived(self):
+        # A canvas draws in creation order, so a row created before this render's body
+        # sits underneath it and the body takes its clicks. The click storm read 0/60
+        # with the persistence in and this line out.
+        import inspect
+
+        self.assertIn('tag_raise("chips")', inspect.getsource(ui.Bubble._render))
+        self.assertIn('tag_raise("chips")',
+                      inspect.getsource(ui.ConversationCard._render))

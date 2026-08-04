@@ -1016,10 +1016,44 @@ which is every ordinary placement; below is used only when above does not fit **
 does. Measured at three x positions along the top edge, `GetWindowRect`: a 414 px draft
 bubble moves from `(…,8)` to `(…,50)`, clear of a pill occupying y 0–40, and every other
 placement in the harness is byte-identical to what it produced before. When **neither** side
-fits — a window as tall as the desktop, which is what a full reply is — the arithmetic is the
-old one and the bubble clamps to the top over the pill. That is not an oversight and there is
-a check saying so: no anchor can place a window taller than the space on either side of it,
-and a third rule for that case would be pretending otherwise.
+fits — a window as tall as the desktop — the arithmetic is the old one and the bubble clamps
+to the top over the pill. That is not an oversight and there is a check saying so: no anchor
+can place a window taller than the space on either side of it, and a third rule for that case
+would be pretending otherwise.
+
+### Nothing moves under the hand
+
+Root 3 of the first-contact verdict: chips "genuinely failed clicks". `_render` deleted the
+whole canvas — every chip and its click binding — and repositioned the window, on every
+partial decode, every countdown second and every activity frame; and chip width followed the
+label, so `Ask` → `Ask 4s` → `Ask` moved the hit region once a second.
+
+**The instrument models a hand, not a loop.** A person sees a chip somewhere on the *screen*
+and clicks there a moment later, so the click storm records the chip's screen rect, moves the
+pointer to it, renders twice more at the decode cadence, and then clicks that point. In a
+live session — a partial, a note arriving and leaving, and `can_rescue` flipping, none of
+which the user does — **10 of 60 landed. 60 of 60 after.**
+
+Two of the three configurations read 100% *before* the fix and are worth recording as such:
+partials alone drift the Send chip 7 px against a 26 px chip, and a countdown moves Ask's
+centre 11 px while its left edge stays put. A harness that only floods partials would have
+been green over the defect. What reproduces it is the chip *set* changing — `Was a command`
+is 118 px, and every chip to its right moves by that when it appears.
+
+Three rules, and the storm found each one:
+
+- **Body items carry a `body` tag and only those are deleted.** The chip row outlives a
+  redraw and is rebuilt only when its keys, labels or height move. On its own this read
+  **0/60**: a canvas draws in creation order, so a row created before this render's body
+  sits underneath it and the body takes the clicks. `tag_raise("chips")` is the other half.
+- **The window does not move or resize while the pointer is inside it**, and neither is the
+  chip row rebuilt. Geometry alone read **30/60** — the row was still being rebuilt 118 px
+  along. `<Leave>` re-renders, so everything held back catches up the moment the hand goes.
+- **A countdown reserves its widest label** (`chip_w`), so its own chip cannot change size
+  under the pointer. Per key rather than a flat minimum: a row of chips all as wide as the
+  widest countdown is a row nobody can tell apart.
+
+Both surfaces, because the conversation card renders on every partial too.
 
 ### Converse
 
