@@ -45,7 +45,7 @@ from .edits import (
 #: a different word; lower-casing marks it as ordinary prose, which is the one thing not
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
-from .help import exits_note
+from .help import auto_ask_notice, exits_note
 from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
@@ -178,6 +178,7 @@ CONVERSE = "converse"
 
 class Event(NamedTuple):
     kind: str  # partial | draft | state | note | error | reply | mode | drop
+    #:                | conversation - the thread and the reply were cleared (item 64)
     text: str
 
 
@@ -2025,6 +2026,51 @@ class Session:
         self._emit("note", "replies muted" if self.muted else "replies spoken aloud")
         return not self.muted
 
+    def _first_converse_notice(self) -> None:
+        """Say once, on screen, that a pause sends the question.
+
+        Auto-ask stays ON (decisions.md 2026-08-03, part 4) because the card now pins
+        the question, so a premature send costs nothing. The bargain that makes that
+        defensible is that the first entry says so — and the reopen bar is one stranger
+        reporting a surprise send, which is a report only somebody who was never told
+        can make.
+
+        With `--no-profile` there is nothing to remember it in, so it is shown on every
+        entry rather than never. A session with no profile is a session that has also
+        forgotten the calibration and the trigger word; being told twice about auto-ask
+        is the cheapest of those costs, and the alternative is a warning that a
+        `--no-profile` user never receives.
+        """
+        if self.profile is not None and self.profile.converse_seen:
+            return
+        self._emit("note", auto_ask_notice(AUTO_ASK_SEC))
+        if self.profile is not None:
+            self.profile.converse_seen = True
+            self.profile.save()
+
+    def new_conversation(self) -> None:
+        """Start again: the thread, the reply and the card, in one act.
+
+        Root 4's other half. `Clear draft` cleared the draft and left the thread, the
+        reply and the mode alive, so "clear prompt did not start fresh" was exactly
+        right — a new conversation was three separate actions and one of them did not
+        exist anywhere. The UI clears its own card off the back of this call.
+
+        **The draft is deliberately untouched**, which is `toggle_mode`'s argument
+        reused: words already spoken belong to the speaker whatever surface they were
+        heading for, and somebody who says "new conversation" mid-sentence has not asked
+        to lose the sentence. `Clear draft` is still the thing that clears a draft.
+
+        An answer still in flight is cancelled at the operation id rather than waited
+        for: it belongs to a conversation that no longer exists, and `_pump_ask` drops a
+        result whose op has moved.
+        """
+        self.thread.clear()
+        self.reply = ""
+        self._ask_op = None
+        self._emit("conversation", "")
+        self._emit("note", "new conversation")
+
     def toggle_mode(self) -> str:
         """P9: one action switches dictate <-> converse. Returns the new mode.
 
@@ -2061,6 +2107,7 @@ class Session:
                        f"leaves this machine{where}"
                        if who else
                        "converse mode - no agent CLI on PATH, so Ask has nothing to send")
+            self._first_converse_notice()
         else:
             self._emit("note", "dictate mode - Send copies the draft, and you paste it"
                        if self.lite

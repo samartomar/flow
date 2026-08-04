@@ -6,6 +6,7 @@ answer costs the user nothing, and that the second question inherits the first.
 """
 
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -16,6 +17,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
+from flow.help import AUTO_ASK_OFF_LABEL  # noqa: E402
+from flow.profile import Profile  # noqa: E402
 from flow.session import AUTO_ASK_SEC, CONVERSE, DICTATE, Session, State  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
@@ -95,9 +98,12 @@ class TestModeSwitch(unittest.TestCase):
     def test_the_switch_is_announced(self):
         s = session()
         s.toggle_mode()
-        kinds = {e.kind: e.text for e in s.events()}
-        self.assertEqual(kinds.get("mode"), CONVERSE)
-        self.assertIn("converse", kinds.get("note", ""))
+        events = s.events()
+        self.assertEqual(next(e.text for e in events if e.kind == "mode"), CONVERSE)
+        # Every note, not the last one: the first entry carries a second line now
+        # (item 64), and a check reading `{kind: text}` would silently follow it.
+        notes = [e.text for e in events if e.kind == "note"]
+        self.assertTrue(any("converse" in n for n in notes), notes)
 
 
 class TestSendRouting(unittest.TestCase):
@@ -171,6 +177,143 @@ class TestAnswers(unittest.TestCase):
         s.toggle_mode()
         self._ask(s, "how do I widen a column", (None, "no agent CLI found on PATH"))
         self.assertIn("how do I widen a column", s.thread.turns)
+
+
+class TestNewConversationIsOneAct(unittest.TestCase):
+    """Root 4's other half: "clear prompt did not start fresh".
+
+    `Clear draft` cleared the draft and left the thread, the reply and the mode alive,
+    so starting again was three separate actions and one of them did not exist anywhere.
+    """
+
+    def asked(self):
+        s = session()
+        s.toggle_mode()
+        s.draft.set("how do I widen a column")
+        with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
+            s.send()
+            s.wait_idle(timeout=5.0)
+        return s
+
+    def test_the_thread_and_the_reply_go_together(self):
+        s = self.asked()
+        self.assertTrue(s.thread.turns)
+        self.assertEqual(s.reply, "Use ALTER TABLE.")
+        s.new_conversation()
+        self.assertEqual(s.thread.turns, [])
+        self.assertEqual(s.reply, "")
+
+    def test_the_card_is_told(self):
+        # The surface half. An event rather than the chip reaching into the window, so a
+        # conversation cleared any other way still clears what is on screen.
+        s = self.asked()
+        s.events()
+        s.new_conversation()
+        kinds = [e.kind for e in s.events()]
+        self.assertIn("conversation", kinds)
+
+    def test_and_it_says_so(self):
+        s = self.asked()
+        s.events()
+        s.new_conversation()
+        said = " | ".join(e.text for e in s.events() if e.kind == "note")
+        self.assertIn("new conversation", said)
+
+    def test_the_draft_survives(self):
+        # `toggle_mode`'s argument reused: words already spoken belong to the speaker,
+        # and somebody saying "new conversation" mid-sentence has not asked to lose the
+        # sentence. Clear draft is still the thing that clears a draft.
+        s = self.asked()
+        s.draft.set("half of the next question")
+        s.new_conversation()
+        self.assertEqual(s.draft.text, "half of the next question")
+
+    def test_an_answer_in_flight_lands_nowhere(self):
+        # It belongs to a conversation that no longer exists. `_pump_ask` drops a result
+        # whose op has moved, and clearing the op is what moves it.
+        s = session()
+        s.toggle_mode()
+        s.draft.set("a question")
+        with mock.patch("flow.session.ask", return_value=("late answer", "codex")):
+            s.send()
+            s.new_conversation()
+            s.wait_idle(timeout=5.0)
+        self.assertEqual(s.reply, "")
+        self.assertEqual(s.thread.turns, [])
+
+    def test_the_mode_is_not_changed_by_it(self):
+        # It is a new conversation, not a way out of converse mode.
+        s = self.asked()
+        s.new_conversation()
+        self.assertEqual(s.mode, CONVERSE)
+
+
+class TestTheFirstConverseEntrySaysAPauseSends(unittest.TestCase):
+    """Decision part 4. Auto-ask stays ON, and the price is that it is said out loud.
+
+    The reopen bar on that default is one stranger reporting a surprise send — a report
+    only somebody who was never told can make. It printed to a console before this,
+    which is a surface no GUI user has open.
+    """
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name)
+
+    def profile(self):
+        return Profile(self.dir / "profile.json")
+
+    def entered(self, profile=None):
+        s = session(profile=profile)
+        s.toggle_mode()
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def test_the_first_entry_names_the_pause_and_the_setting(self):
+        said = self.entered(self.profile())
+        self.assertIn(f"{AUTO_ASK_SEC:.0f}s", said)
+        self.assertIn(AUTO_ASK_OFF_LABEL, said)
+        self.assertIn("Settings", said)
+
+    def test_and_the_second_entry_does_not(self):
+        p = self.profile()
+        self.entered(p)
+        self.assertNotIn(AUTO_ASK_OFF_LABEL, self.entered(p))
+
+    def test_it_survives_a_reload_so_a_new_launch_is_still_quiet(self):
+        p = self.profile()
+        self.entered(p)
+        self.assertNotIn(AUTO_ASK_OFF_LABEL, self.entered(Profile(p.path)))
+
+    def test_an_older_profile_is_told_once(self):
+        # Absent means "has not been told", the opposite way round from `auto_ask`: an
+        # upgrade is the first time this warning has existed at all.
+        p = self.profile()
+        p.path.write_text('{"schema": 1}', encoding="utf-8")
+        self.assertTrue(Profile(p.path).converse_seen is False)
+        self.assertIn(AUTO_ASK_OFF_LABEL, self.entered(Profile(p.path)))
+
+    def test_no_profile_is_told_every_time_rather_than_never(self):
+        # `--no-profile` has nothing to remember it in, and a warning a user never
+        # receives is worse than one they receive twice.
+        self.assertIn(AUTO_ASK_OFF_LABEL, self.entered(None))
+        self.assertIn(AUTO_ASK_OFF_LABEL, self.entered(None))
+
+    def test_the_label_is_the_menu_s_own_and_not_a_restatement(self):
+        # A notice naming a control that has since been reworded points at nothing, and
+        # costs the reader a hunt through a menu for a line that is not there.
+        import flow.ui as ui
+
+        self.assertIs(ui.AUTO_ASK_OFF_LABEL, AUTO_ASK_OFF_LABEL)
+
+    def test_going_back_to_dictate_says_nothing_about_it(self):
+        p = self.profile()
+        s = session(profile=p)
+        s.toggle_mode()
+        s.events()
+        s.toggle_mode()
+        said = " | ".join(e.text for e in s.events() if e.kind == "note")
+        self.assertNotIn(AUTO_ASK_OFF_LABEL, said)
 
 
 class TestTheThreadStoresTheCleanedAnswer(unittest.TestCase):

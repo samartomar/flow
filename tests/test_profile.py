@@ -535,6 +535,25 @@ class TestTheAutoAskChoiceIsRemembered(unittest.TestCase):
         p.path.write_text(json.dumps(raw), encoding="utf-8")
         self.assertTrue(Profile(p.path).auto_ask)
 
+    def test_converse_seen_defaults_the_other_way_round_and_says_why(self):
+        # The mirror of the two above, and deliberately the opposite default. Absent
+        # `auto_ask` means on, because nobody expressed a preference; absent
+        # `converse_seen` means **not seen**, because an upgrade is the first time the
+        # first-entry notice has existed at all — so an existing profile is told once
+        # rather than never.
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        del raw["converse_seen"]
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertFalse(Profile(p.path).converse_seen)
+
+    def test_and_it_survives_a_round_trip_once_it_is_set(self):
+        p = tmp_profile()
+        p.converse_seen = True
+        self.assertTrue(p.save())
+        self.assertTrue(Profile(p.path).converse_seen)
+
     def test_the_schema_did_not_move(self):
         # Every read has a fallback, so an older Flow ignores a key it does not know and
         # a newer Flow reads an older file. A bump would throw both of those away, and

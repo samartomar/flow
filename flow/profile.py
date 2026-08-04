@@ -235,6 +235,17 @@ class Profile:
         #: answer "yes" and is otherwise the only one Flow forgets. Additive, and schema
         #: stays 1: an older profile loads with an empty set, exactly as `voice` does.
         self.dismissed: set[str] = set()
+        #: Whether converse mode has been entered before. One line is shown on the
+        #: conversation card the first time it is, saying that a pause sends the question
+        #: and naming the setting that stops it (decisions.md 2026-08-03, part 4).
+        #:
+        #: A field rather than a session flag, because the thing being remembered is that
+        #: *this person* has been told — and the reopen bar on auto-ask's default is one
+        #: stranger reporting a surprise send, which is a report that can only come from
+        #: somebody who was never warned. Absent reads as **not seen**, so an existing
+        #: profile gets the notice once rather than never: an upgrade is the first time
+        #: this warning has existed at all. Additive, schema stays 1.
+        self.converse_seen: bool = False
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -274,6 +285,9 @@ class Profile:
         # `bool(None)` is False, so a key that was never written — or written as null by
         # an older Flow — would read as a deliberate "off". Absent means the default.
         self.auto_ask = take("auto_ask", _flag, True)
+        # Absent means False here, the opposite way round from `auto_ask` — the default
+        # is "has not been told", so an upgrade shows the notice once.
+        self.converse_seen = take("converse_seen", _flag, False)
         self.voice = take("voice", _text)
         # Absent, null and blank all mean "use the shipped word", because none of them is
         # somebody choosing silence. A *wrong type* is different and is reported.
@@ -300,6 +314,7 @@ class Profile:
             "calibrated_device": self.calibrated_device,
             "voice": self.voice,
             "auto_ask": self.auto_ask,
+            "converse_seen": self.converse_seen,
             "send_word": self.send_word,
             "send_enter_word": self.send_enter_word,
             "workspace": self.workspace,

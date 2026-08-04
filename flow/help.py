@@ -39,6 +39,30 @@ GUIDE_URL = "https://github.com/samartomar/flow#readme"
 
 TITLE = "Commands & shortcuts"
 
+#: The Settings entry that turns auto-ask off, worded exactly as the menu words it.
+#:
+#: One constant because three places need to agree: the menu that draws it, the
+#: first-entry notice that tells somebody where to find it, and the Help sheet. A notice
+#: naming a control that has since been reworded points at nothing, and is worse than no
+#: notice at all — it costs the reader a hunt through a menu for a line that is not
+#: there. Lives here rather than in `ui.py` because `session.py` needs it and must not
+#: import the surface.
+AUTO_ASK_OFF_LABEL = "Ask only when I press it"
+AUTO_ASK_ON_LABEL = "Ask after a pause"
+
+
+def auto_ask_notice(seconds: float) -> str:
+    """The one line converse mode owes a first-time user (decisions.md 2026-08-03).
+
+    Auto-ask stays ON — with the question pinned on the card, a premature send no longer
+    loses anything — and the reopen bar on that default is *one stranger reporting a
+    surprise send*. A report like that can only come from somebody who was never told,
+    so being told has to happen somewhere they will see it. It printed to a console
+    before this, which is a surface no GUI user has open.
+    """
+    return (f"a pause of {seconds:.0f}s sends the question on its own — "
+            f"right-click ▸ Settings ▸ “{AUTO_ASK_OFF_LABEL}” turns that off")
+
 #: What each hotkey does, in the words of the thing it does. An action with no entry
 #: renders as its own name rather than being dropped: a combo somebody can press and
 #: cannot find here is worse than one described badly.

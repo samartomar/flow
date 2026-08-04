@@ -256,6 +256,15 @@ class TestTheChips(unittest.TestCase):
 
 
 class TestNewConversationEmptiesTheCard(unittest.TestCase):
+    def test_the_chip_asks_the_session_rather_than_clearing_the_window(self):
+        # Item 64. Clearing the card alone is the half-clear root 4 is about: the thread
+        # and the reply would survive, so the next question would inherit a conversation
+        # that is no longer on screen. The card is cleared by the event coming back.
+        c = card()
+        c.ask("first")
+        c._new_conversation()
+        c.pill.session.new_conversation.assert_called_once()
+
     def test_everything_goes_in_one_act(self):
         c = card()
         c.ask("first")

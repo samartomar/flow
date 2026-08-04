@@ -22,7 +22,14 @@ from collections import deque
 from pathlib import Path
 
 from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
-from .help import TITLE as HELP_TITLE, open_guide, open_path, rows as help_rows
+from .help import (
+    AUTO_ASK_OFF_LABEL,
+    AUTO_ASK_ON_LABEL,
+    TITLE as HELP_TITLE,
+    open_guide,
+    open_path,
+    rows as help_rows,
+)
 from .lexicon import (
     DEFAULT_PATH as LEXICON_PATH,
     append_pair,
@@ -711,8 +718,8 @@ class Pill(tk.Tk):
             self._voice_menu(sub)
         if self.session.mode != DICTATE:
             sub.add_command(
-                label="Ask only when I press it" if self.session.auto_ask
-                else "Ask after a pause",
+                label=AUTO_ASK_OFF_LABEL if self.session.auto_ask
+                else AUTO_ASK_ON_LABEL,
                 command=self.session.toggle_auto_ask,
             )
         if offered:
@@ -1270,6 +1277,13 @@ class Pill(tk.Tk):
                     self.card.answer(ev.text)
             elif ev.kind == "mode":
                 self._swap_surfaces()
+            elif ev.kind == "conversation":
+                # Item 64's one act, reaching the surface half of it. The note that
+                # follows lands on the cleared card, which is why this is an event
+                # rather than something the chip does to the card directly: a
+                # conversation cleared by a hotkey or by a spoken command later would
+                # otherwise clear the session and leave the window showing the old one.
+                self.card.clear()
             elif ev.kind == "send":
                 # A spoken trigger. Handled here rather than in the session because the
                 # paste belongs to this thread and to `paste_target` — the same button
@@ -2007,7 +2021,14 @@ class ConversationCard(tk.Toplevel):
         self.note(problem or "answer copied")
 
     def _new_conversation(self) -> None:
-        self.clear()
+        """The session's act, not this window's — item 64.
+
+        It used to clear the card alone, which is the half-clear root 4 is about: the
+        thread and the reply would have survived, so the next question would have
+        inherited a conversation that was no longer on screen. The card is cleared by
+        the `conversation` event coming back the other way.
+        """
+        self.pill.session.new_conversation()
 
 
 class Bubble(tk.Toplevel):
