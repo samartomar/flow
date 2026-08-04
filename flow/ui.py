@@ -24,9 +24,11 @@ from pathlib import Path
 from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
 from .help import (
     AUTO_ASK_OFF_LABEL,
+    WELCOME_TITLE,
+    welcome_rows,
     fit,
     AUTO_ASK_ON_LABEL,
-    TITLE as HELP_TITLE,
+    TITLE as TITLE_DEFAULT,
     open_guide,
     open_path,
     rows as help_rows,
@@ -382,10 +384,14 @@ HELP_FOOT_BAND = PAD + CHIP_H + PAD
 #: desktop rather than by this number. Scrolling exists for that case; on a display with
 #: room, the whole sheet is simply on screen and neither the thumb nor the drag hint
 #: appears.
-#: Set just above what the whole sheet measures today (1025 px), so a display with the
-#: room shows all of it and anything added past that scrolls rather than growing the
-#: window off the bottom of the screen.
-HELP_MAX_H = 1040
+#: Set just above what the whole sheet measures, so a display with the room shows all of
+#: it and anything added past that scrolls rather than growing the window off the bottom
+#: of the screen. Re-measured whenever the sheet grows, which is the maintenance this
+#: number exists to need: 1025 px when the window was built, and **1174 px** since item
+#: 71 added the colour legend permanently — measured with all five hotkeys registered,
+#: which is the tallest the sheet gets, because a machine where every combo was taken
+#: renders fewer rows rather than more.
+HELP_MAX_H = 1190
 #: Air left around the window inside the work area, so it reads as floating rather than
 #: as a panel wedged against the edges.
 HELP_MARGIN = 48
@@ -605,6 +611,7 @@ class Pill(tk.Tk):
         # visible to report itself.
         if self._arm_on_start:
             self.after(120, self._toggle)
+        self.after(160, self._welcome)
         self.after(30, self._tick)
 
     # -- interaction -------------------------------------------------------
@@ -1206,6 +1213,33 @@ class Pill(tk.Tk):
             lite=self.lite,
         ))
 
+    def _welcome(self) -> None:
+        """The first minute, once (item 71).
+
+        Every line on it was a `print()` before this: Flow says the combos it registered,
+        the trigger word and that a pause sends a question — into a console a GUI user
+        does not have open. Three outside users met the app without any of it
+        (decisions.md 2026-08-03).
+
+        Shown after the first frame rather than during construction, so the pill is on
+        screen behind it and the card reads as belonging to something rather than as the
+        whole application. `profile.welcomed` is written immediately, before anybody has
+        read a word: a card shown twice is worse than one shown once, and a crash between
+        showing and saving would do exactly that.
+        """
+        profile = getattr(self.session, "profile", None)
+        if profile is None or getattr(profile, "welcomed", True):
+            return
+        profile.welcomed = True
+        profile.save()
+        if self._help is None:
+            self._help = HelpWindow(self)
+        self._help.show(
+            welcome_rows(hotkeys=self.hotkeys, send_words=self.session.send_words,
+                         lite=self.lite),
+            title=WELCOME_TITLE, chip="Dismiss",
+        )
+
     def _open_guide(self) -> None:
         try:
             open_guide()
@@ -1515,7 +1549,7 @@ class Pill(tk.Tk):
 
 
 class HelpWindow(tk.Toplevel):
-    """Commands & shortcuts, drawn by Flow instead of handed to Notepad.
+    """Commands & shortcuts — and, once, the welcome card.
 
     This used to write `~/.flow/commands.txt` and shell out to it. The owner's verdict
     was three words — "which is not help" — and the three reasons behind it are all
@@ -1544,6 +1578,13 @@ class HelpWindow(tk.Toplevel):
     or over the chip, and no overpainting is needed to hide it.
     """
 
+    #: Declared on the class as well as in `__init__`, for the reason `Pill.lite` is:
+    #: `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on an
+    #: instance built with `__new__` — which is how the fixtures build one — a missing
+    #: name recurses until the stack ends instead of defaulting.
+    _title = TITLE_DEFAULT
+    _chip = "Close"
+
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
         self.pill = pill
@@ -1556,6 +1597,7 @@ class HelpWindow(tk.Toplevel):
         #: and take it from whatever the user was typing in.
         self.no_activate = _no_activate(self)
         self._rows: list[tuple[str, str, str]] = []
+        self._title, self._chip = TITLE_DEFAULT, "Close"
         self._top = 0  # index of the first row drawn
         self._drag_y: int | None = None
         self._drag_px = 0
@@ -1567,14 +1609,20 @@ class HelpWindow(tk.Toplevel):
 
     # -- content -----------------------------------------------------------
 
-    def show(self, rows) -> None:
+    def show(self, rows, title: str = TITLE_DEFAULT, chip: str = "Close") -> None:
         """Replace what is shown and bring the window up, back at the top.
 
         Replaced on every open rather than kept: the combos, the trigger words and the
         workshop are read at the moment the menu is tapped, and a window that reused the
         last render would be the stale help file this replaced, one surface along.
+
+        `title` and `chip` because the welcome card is this window with different rows in
+        it (item 71). A second `Toplevel` would be a second set of the things this one
+        has already been made to get right — `WS_EX_NOACTIVATE`, a viewport with two ways
+        to scroll, a row layout that cannot clip — and the welcome card needs every one.
         """
         self._rows = list(rows)
+        self._title, self._chip = title, chip
         self._top = 0
         self._render()
         self.deiconify()
@@ -1649,7 +1697,7 @@ class HelpWindow(tk.Toplevel):
 
         c.delete("all")
         _round_rect(c, 1, 1, HELP_W - 1, self._h - 1, 14, fill=SHELL, outline=accent)
-        c.create_text(PAD, PAD + 2, anchor="nw", text=HELP_TITLE, fill=TEXT,
+        c.create_text(PAD, PAD + 2, anchor="nw", text=self._title, fill=TEXT,
                       font=("Segoe UI", 11, "bold"))
 
         y, floor = HELP_HEAD_BAND, self._h - HELP_FOOT_BAND
@@ -1713,8 +1761,8 @@ class HelpWindow(tk.Toplevel):
         nothing below the fold is noise, and it is the second thing somebody reads.
         """
         c = self.canvas
-        label = "Close"
-        w = 20 + 7 * len(label)
+        label = self._chip
+        w = chip_w(label, label)
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
         tag = chip_tag(label)

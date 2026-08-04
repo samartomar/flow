@@ -39,6 +39,72 @@ GUIDE_URL = "https://github.com/samartomar/flow#readme"
 
 TITLE = "Commands & shortcuts"
 
+WELCOME_TITLE = "Flow — the first minute"
+
+#: What the colours mean, in the words the windows use for themselves.
+#:
+#: A legend rather than a tutorial, and it is short because there is little left to say:
+#: item 63 took the pill from five colours to three by giving the two it lost to the
+#: windows that were already saying the same thing. Somebody who has read this knows
+#: everything the app encodes in colour.
+#:
+#: In the sheet **permanently** as well as on the welcome card, because a legend is
+#: exactly the thing somebody wants a second time — and the welcome card is shown once,
+#: by design, to a person who has not yet seen any of these states happen.
+def legend_rows() -> list[tuple[str, str, str]]:
+    return [
+        ("head", "What the colours mean", ""),
+        ("pair", "grey pill", "resting - armed or not, nothing being said"),
+        ("pair", "green pill", "it can hear you"),
+        ("pair", "blue pill", "waiting on the agent CLI"),
+        ("pair", "red pill", "something went wrong; the note says what"),
+        ("pair", "amber window", "your draft - the words you are working on"),
+        ("pair", "violet window", "a conversation - your question and its answer"),
+        ("pair", "pale blue text", "the model's words, never yours"),
+    ]
+
+
+def welcome_rows(hotkeys=None, send_words: tuple[str, str] | None = None,
+                 lite: bool = False) -> list[tuple[str, str, str]]:
+    """The first minute, shown once (item 71).
+
+    Every line here was a `print()` before this. Flow says all of it at startup — the
+    combos it registered, the trigger word, that a pause sends a question — into a
+    console a GUI user does not have open, and three outside users met the app without
+    any of it (decisions.md 2026-08-03). A first launch is the one moment somebody is
+    willing to read six lines, and it is the only moment none of this is obvious yet.
+
+    Generated like the sheet and for the same reason: `ctrl+alt+space` is the first
+    alternative in `DEFAULT_BINDINGS` and was already taken on the machine this was
+    built on, so a welcome that named it would greet somebody with a key that does
+    nothing.
+    """
+    word, _enter = send_words or (SEND_WORD, SEND_ENTER_WORD)
+    chosen = (getattr(hotkeys, "chosen", {}) or {}) if hotkeys is not None else {}
+    arm = chosen.get("toggle")
+    return _fitted([
+        ("note", "Shown once. Everything here is also under right-click > Help.", ""),
+        ("gap", "", ""),
+        ("head", "Try it now", ""),
+        ("pair", arm or "click the pill",
+         "arms the microphone" if arm else "arms the microphone (no combo this launch)"),
+        ("note", "Then just talk. Stop, and what you said is held in a card - nothing "
+         "is sent anywhere until you say so.", ""),
+        ("pair", "the Send chip", "hands the draft to whatever window you were in"),
+        ("gap", "", ""),
+        ("head", "Two things worth knowing", ""),
+        ("pair", f"say “{word}”", "sends it without touching the mouse - on "
+                                             "its own, not inside a sentence"),
+        ("pair", "right-click the pill", "every setting, and the full command list"),
+        ("gap", "", ""),
+        *legend_rows(),
+        ("gap", "", ""),
+        ("head", "Converse mode", "right-click > Converse mode"),
+        ("note", "It asks an agent CLI instead of pasting, and there a pause sends the "
+         "question on its own.", ""),
+        ("note", f"Settings > “{AUTO_ASK_OFF_LABEL}” stops that.", ""),
+    ])
+
 #: The Settings entry that turns auto-ask off, worded exactly as the menu words it.
 #:
 #: One constant because three places need to agree: the menu that draws it, the
@@ -262,9 +328,24 @@ def rows(hotkeys=None, send_words: tuple[str, str] | None = None,
         ("head", "Where converse-mode questions are asked from", ""),
         ("note", workspace_note or "workshop: not set - Ask runs without a project", ""),
         ("gap", "", ""),
+        # Permanently, not only on the welcome card (item 71). A legend is exactly the
+        # thing somebody wants a *second* time, and the welcome card is shown once by
+        # design — to a person who has not yet seen any of these states happen.
+        *legend_rows(),
+        ("gap", "", ""),
         ("head", "The guide", "right-click > Help > Open the guide"),
         ("note", GUIDE_URL, ""),
     ]
+    return _fitted(out)
+
+
+def _fitted(out: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """Every row cut to the column budget the window draws in.
+
+    The window does not wrap — a row is one line, so its height is fixed and the scroll
+    offset can be computed from it — which makes the budget the suite's business rather
+    than something discovered on screen.
+    """
     limits = {"pair": (MAX_LEFT, MAX_RIGHT), "note": (MAX_NOTE, 0),
               "head": (MAX_NOTE, MAX_RIGHT), "gap": (0, 0)}
     return [(kind, fit(left, limits[kind][0]), fit(right, limits[kind][1]))

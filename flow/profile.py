@@ -235,6 +235,13 @@ class Profile:
         #: answer "yes" and is otherwise the only one Flow forgets. Additive, and schema
         #: stays 1: an older profile loads with an empty set, exactly as `voice` does.
         self.dismissed: set[str] = set()
+        #: Whether the welcome card has been shown. First launch only (item 71): the
+        #: arm gesture, one line to try, the trigger word by name, and the colour
+        #: legend. Absent reads as **not welcomed**, like `converse_seen` and for the
+        #: same reason — an upgrade is the first time the card has existed at all, and a
+        #: person who has been using Flow for a week still has not been told what the
+        #: colours mean. Additive, schema stays 1.
+        self.welcomed: bool = False
         #: Whether converse mode has been entered before. One line is shown on the
         #: conversation card the first time it is, saying that a pause sends the question
         #: and naming the setting that stops it (decisions.md 2026-08-03, part 4).
@@ -288,6 +295,7 @@ class Profile:
         # Absent means False here, the opposite way round from `auto_ask` — the default
         # is "has not been told", so an upgrade shows the notice once.
         self.converse_seen = take("converse_seen", _flag, False)
+        self.welcomed = take("welcomed", _flag, False)
         self.voice = take("voice", _text)
         # Absent, null and blank all mean "use the shipped word", because none of them is
         # somebody choosing silence. A *wrong type* is different and is reported.
@@ -315,6 +323,7 @@ class Profile:
             "voice": self.voice,
             "auto_ask": self.auto_ask,
             "converse_seen": self.converse_seen,
+            "welcomed": self.welcomed,
             "send_word": self.send_word,
             "send_enter_word": self.send_enter_word,
             "workspace": self.workspace,
