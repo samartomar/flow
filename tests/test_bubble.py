@@ -52,7 +52,7 @@ def bubble(text: str = "", **kw):
         auto_ask_in=None,
     )
     b.canvas = MeasuringCanvas()
-    b._text, b._sent, b._reply, b._partial, b._note = text, "", "", "", ""
+    b._text, b._sent, b._partial, b._note = text, "", "", ""
     b._editor = None
     b._act = None
     b._h = 120
@@ -193,203 +193,47 @@ class TestTheSentCardIsTheSameSlot(unittest.TestCase):
         self.assertLessEqual(b._h, WORK[3] - WORK[1] - 16)
 
 
-def drawn_reply(b) -> str:
-    """What actually reached the canvas as the answer, ignoring probes and furniture."""
-    hits = [i["text"] for i in b.canvas.items if i["text"] and i["text"] in b._reply]
-    return hits[-1] if hits else ""
+#: `drawn_reply`, `more_line`, and the three classes that used them — the head window, the
+#: head/tail asymmetry's reply half, and the exits carrying the whole answer — moved to
+#: `tests/test_card.py` on 2026-08-03 with the code they were about. P10 is not weakened
+#: by that: it is asserted on the window that now draws an answer. What stays here is the
+#: draft half of the asymmetry, because a draft still windows its tail and that is the
+#: statement the two functions exist to keep apart.
 
 
-def more_line(b) -> str:
-    return next((i["text"] for i in b.canvas.items
-                 if i["text"].startswith("…") and "more lines" in i["text"]), "")
+class TestTheDraftStillWindowsItsTail(unittest.TestCase):
+    """The half of the asymmetry this window still owns.
 
-
-class TestTheAnswerShowsItsHead(unittest.TestCase):
-    """P10, shape (b). An artifact is read from the top, so the window holds the top.
-
-    Item 42 fitted the window to the desktop, which made the chips reachable and left a
-    12 000-character answer clipped by the window edge with **no sign anything was missing**
-    — the same silence the draft had before item 37 gave it `… N earlier lines`. The reply
-    gets the same treatment pointing the other way.
+    `body_window` and `head_window` are separate functions rather than one function with
+    a direction flag, because a flag is a thing somebody flips — and the two now live on
+    two different windows, which is the strongest version of that argument yet.
     """
 
-    def test_a_long_reply_shows_its_first_lines(self):
-        reply = draft(12_000)
-        b = bubble(_reply=reply)
-        b._render()
-        shown = drawn_reply(b)
-        self.assertTrue(reply.startswith(shown), "the reply was windowed from the wrong end")
-        self.assertLess(len(shown), len(reply))
-
-    def test_it_is_not_the_tail(self):
-        # Both directions, so a window cannot pass this by being a window: the last words
-        # of a 12k answer must *not* be what is drawn.
-        reply = draft(12_000)[:-20] + "the very last words"
-        b = bubble(_reply=reply)
-        b._render()
-        self.assertNotIn("the very last words", drawn_reply(b))
-
-    def test_no_word_is_cut_in_half(self):
-        b = bubble(_reply=draft(12_000))
-        b._render()
-        shown = drawn_reply(b)
-        self.assertTrue(b._reply[len(shown)].isspace(),
-                        "the window closed mid-word")
-
-    def test_a_reply_that_fits_is_drawn_whole_and_says_nothing(self):
-        # Item 37's guard, kept: nothing changes for the answers people actually get.
-        reply = draft(200)
-        b = bubble(_reply=reply)
-        b._render()
-        self.assertEqual(drawn_reply(b), reply)
-        self.assertEqual(more_line(b), "")
-
-    def test_the_count_is_measured_and_exact(self):
-        # The draft's `… N earlier lines` is an *estimate* from a characters-per-line
-        # average, because laying the head out to count it exactly is the cost item 37
-        # exists to avoid — on every partial. A reply is laid out once, and it already
-        # carries a full-text probe, so here N can be the truth and is: total lines minus
-        # shown lines, both off the canvas.
-        b = bubble(_reply=draft(12_000))
-        b._render()
-        line = more_line(b)
-        self.assertRegex(line, r"^… \d+ more lines$")
-        # Read what was drawn *before* adding probes of our own: the probes are
-        # `create_text` calls too, and one carrying the whole reply would be picked up as
-        # the drawn body by anything looking for the last match.
-        shown_text = drawn_reply(b)
-        full = b.canvas.create_text(
-            ui.PAD, ui.PAD, anchor="nw", text=b._reply, font=("Segoe UI", 10),
-            width=ui.BUBBLE_W - 2 * ui.PAD,
-        )
-        one = b.canvas.create_text(
-            ui.PAD, ui.PAD, anchor="nw", text="M", font=("Segoe UI", 10),
-            width=ui.BUBBLE_W - 2 * ui.PAD,
-        )
-        shown = b.canvas.create_text(
-            ui.PAD, ui.PAD, anchor="nw", text=shown_text, font=("Segoe UI", 10),
-            width=ui.BUBBLE_W - 2 * ui.PAD,
-        )
-        h = lambda i: b.canvas.bbox(i)[3] - b.canvas.bbox(i)[1]  # noqa: E731
-        expected = round(h(full) / h(one)) - round(h(shown) / h(one))
-        self.assertEqual(int(line.split()[1]), expected)
-
-    def test_the_count_grows_with_the_answer(self):
-        counts = []
-        for n in (6_000, 12_000):
-            b = bubble(_reply=draft(n))
-            b._render()
-            counts.append(int(more_line(b).split()[1]))
-        self.assertLess(counts[0], counts[1])
-
-    def test_the_reply_still_sizes_the_bubble(self):
-        short = bubble(_reply=draft(200))
-        short._render()
-        long_ = bubble(_reply=draft(4_000))
-        long_._render()
-        self.assertGreater(long_._h, short._h)
-
-    def test_the_window_is_inside_the_work_area_at_every_corner(self):
-        # Item 42's guarantee, re-asserted: a second windowing rule is a second way to get
-        # the height wrong.
-        left, top, right, bottom = WORK
-        for corner, (px, py) in corners().items():
-            with self.subTest(corner=corner):
-                x1, y1, x2, y2 = placed(bubble(_reply=draft(12_000)), px, py)
-                self.assertGreaterEqual(y1, top)
-                self.assertLessEqual(y2, bottom)
-                self.assertGreaterEqual(x1, left)
-                self.assertLessEqual(x2, right)
-
-
-class TestHeadForRepliesAndTailForDrafts(unittest.TestCase):
-    """The asymmetry is deliberate, and it is stated here so nobody unifies it later.
-
-    They point opposite ways for different reasons. A draft grows at the end and the newest
-    words are the ones being worked on, so its window follows the **tail**. An artifact is
-    read from its first line and that is where triage happens, so its window holds the
-    **head**. `body_window` and `head_window` are separate functions rather than one
-    function with a direction flag, because a flag is a thing somebody flips.
-    """
-
-    def test_the_draft_still_windows_its_tail(self):
+    def test_the_draft_windows_its_tail(self):
         b = bubble(draft(50_000))
         b._text = b._text[:-20] + "the last words here"
         b._render()
         self.assertTrue(drawn_body(b).endswith("the last words here"))
 
-    def test_the_reply_windows_its_head(self):
-        reply = "the first words here" + draft(12_000)[20:]
-        b = bubble(_reply=reply)
+    def test_what_is_above_it_is_said(self):
+        b = bubble(draft(50_000))
         b._render()
-        self.assertTrue(drawn_reply(b).startswith("the first words here"))
-
-    def test_the_two_lines_say_opposite_things(self):
-        # `… N earlier lines` above a draft, `… N more lines` below an answer. The wording
-        # is the only thing telling a reader which way the window points.
-        d = bubble(draft(50_000))
-        d._render()
-        r = bubble(_reply=draft(12_000))
-        r._render()
-        earlier = next((i["text"] for i in d.canvas.items
+        earlier = next((i["text"] for i in b.canvas.items
                         if i["text"].startswith("…")), "")
         self.assertIn("earlier lines", earlier)
-        self.assertIn("more lines", more_line(r))
 
     def test_the_functions_are_separate(self):
-        # Not a style point: one function with a direction argument is one call site away
-        # from a draft that windows its head, which is the defect item 37 fixed.
         self.assertNotEqual(ui.head_window(draft(500), 100),
                             ui.body_window(draft(500), 100)[0])
         self.assertTrue(draft(500).startswith(ui.head_window(draft(500), 100)))
         self.assertTrue(draft(500).endswith(ui.body_window(draft(500), 100)[0]))
 
-
-class TestTheExitsCarryTheWholeAnswer(unittest.TestCase):
-    """A head window that also truncated Copy would be this item causing the loss it signals.
-
-    `Use this` goes through `session.take_reply()`, which reads `session.reply`. Neither it
-    nor the clipboard path has ever read the bubble's rendered string, and neither may start.
-    """
-
-    def test_take_reply_reads_the_session_not_the_drawn_window(self):
-        from flow.session import Session
-
-        class FakeAsr:
-            def load(self, final=None) -> None: ...
-
-            def text(self, a, *, final=False, hotwords="") -> str:
-                return ""
-
-        class FakeMic:
-            level_db = -60.0
-
-            def start(self) -> None: ...
-
-            def stop(self) -> None: ...
-
-            @property
-            def active(self) -> bool:
-                return True
-
-            def restart(self) -> None: ...
-
-            def drain(self) -> list:
-                return []
-
-        whole = draft(12_000)
-        s = Session(asr=FakeAsr(), mic=FakeMic())
-        s.reply = whole
-        self.assertTrue(s.take_reply())
-        self.assertEqual(s.draft.text, whole, "the exit carried a window, not the answer")
-
-    def test_the_bubble_draws_less_than_the_session_holds(self):
-        # The two halves of the same sentence, side by side: the card shows a window and
-        # the answer behind it is whole.
-        b = bubble(_reply=draft(12_000))
-        b._render()
-        self.assertLess(len(drawn_reply(b)), len(b._reply))
-        self.assertEqual(len(b._reply), 12_000)
+    def test_this_window_has_no_way_to_show_an_answer_at_all(self):
+        # The deletion, asserted. A `show_reply` that came back would be the two surfaces
+        # becoming one again, and it would come back looking like a convenience.
+        self.assertFalse(hasattr(ui.Bubble, "show_reply"))
+        self.assertFalse(hasattr(ui.Bubble, "_reply_slot"))
+        self.assertFalse(hasattr(ui.Bubble, "_take_reply"))
 
 
 #: The four corners of the work area a pill can be dragged to. The bubble anchors above and
@@ -446,12 +290,15 @@ class TestTheWindowIsInsideTheWorkAreaWhereverThePillIs(unittest.TestCase):
     leaves by is the bottom.
     """
 
+    #: The reply states left this table on 2026-08-03 with `show_reply`. They were the
+    #: only ones that ever sized this window past the desktop -- a draft is capped at
+    #: `BODY_MAX_H` -- so what is left is the two item 37 already bounded. The tall-window
+    #: guarantees they were pinning are asserted on `ConversationCard` now, which is the
+    #: window that can be that tall.
     def states(self):
         return [
             ("1k draft", {"_text": draft(1_000)}),
             ("50k draft", {"_text": draft(50_000)}),
-            ("4k reply", {"_reply": draft(4_000)}),
-            ("12k artifact reply", {"_reply": draft(12_000)}),
         ]
 
     def test_every_edge_is_inside_the_work_area_at_every_corner(self):
@@ -480,15 +327,14 @@ class TestTheWindowIsInsideTheWorkAreaWhereverThePillIs(unittest.TestCase):
                     self.assertGreaterEqual(chip_top, top)
                     self.assertLessEqual(chip_bottom, bottom, "the chips are off screen")
 
-    def test_a_reply_taller_than_the_desktop_no_longer_sizes_the_window_past_it(self):
-        b = bubble(_reply=draft(12_000))
+    def test_the_longest_draft_still_does_not_size_the_window_past_the_desktop(self):
+        b = bubble(draft(50_000))
         b._render()
         self.assertLessEqual(b._h, WORK[3] - WORK[1] - 2 * ui.EDGE_AIR)
 
-    def test_a_reply_that_fits_is_untouched(self):
-        # The other direction, so the bound cannot pass this by firing for everything: a
-        # short answer still sizes the window to itself, nowhere near the desktop.
-        b = bubble(_reply=draft(200))
+    def test_and_a_short_one_still_sizes_the_window_to_itself(self):
+        # The other direction, so the bound cannot pass this by firing for everything.
+        b = bubble(draft(200))
         b._render()
         self.assertLess(b._h, WORK[3] - WORK[1] - 2 * ui.EDGE_AIR)
 
@@ -536,12 +382,11 @@ def along_the_top() -> dict[str, tuple[int, int]]:
 #: byte, including the reply-sized windows at the top, which are taller than either side of
 #: the pill and so keep today's clamp.
 #:
-#: **The reply rows were re-captured for item 45 and the change is a height, not a
-#: placement.** The head window sizes a long answer to 643 px where the full-text probe
-#: sized it to 656, so every `380x656…` here became `380x643…` with the offsets untouched.
-#: Recorded rather than silently re-baselined: a regression table that is quietly rewritten
-#: whenever it fails is a table that pins nothing. The draft rows — which are what item 44's
-#: fallback is actually about — are byte-identical to the day they were captured.
+#: **The reply rows are gone, and that is the second time they moved rather than the first
+#: time they were rewritten.** Item 45 re-captured them at 643 px where the full-text probe
+#: had sized them 656; item 63 removed the path, because this window no longer draws an
+#: answer. The draft rows below are byte-identical to the day they were captured, which is
+#: the whole point of a table: one that gets quietly re-baselined pins nothing.
 GEOMETRY_BEFORE = {
     ("1k draft", "bottom-left"): "380x414+8+208",
     ("1k draft", "bottom-right"): "380x414+892+208",
@@ -549,18 +394,6 @@ GEOMETRY_BEFORE = {
     ("50k draft", "bottom-left"): "380x414+8+208",
     ("50k draft", "bottom-right"): "380x414+892+208",
     ("50k draft", "mid-left"): "380x414+8+8",
-    ("4k reply", "top-left"): "380x643+8+8",
-    ("4k reply", "top-middle"): "380x643+336+8",
-    ("4k reply", "top-right"): "380x643+892+8",
-    ("4k reply", "bottom-left"): "380x643+8+8",
-    ("4k reply", "bottom-right"): "380x643+892+8",
-    ("4k reply", "mid-left"): "380x643+8+8",
-    ("12k artifact reply", "top-left"): "380x643+8+8",
-    ("12k artifact reply", "top-middle"): "380x643+336+8",
-    ("12k artifact reply", "top-right"): "380x643+892+8",
-    ("12k artifact reply", "bottom-left"): "380x643+8+8",
-    ("12k artifact reply", "bottom-right"): "380x643+892+8",
-    ("12k artifact reply", "mid-left"): "380x643+8+8",
 }
 
 
@@ -579,12 +412,15 @@ class TestTheBubbleOpensBelowWhenAboveHasNoRoom(unittest.TestCase):
     taller than the space either side of it, and pretending otherwise would be a third rule.
     """
 
+    #: The reply states left this table on 2026-08-03 with `show_reply`. They were the
+    #: only ones that ever sized this window past the desktop -- a draft is capped at
+    #: `BODY_MAX_H` -- so what is left is the two item 37 already bounded. The tall-window
+    #: guarantees they were pinning are asserted on `ConversationCard` now, which is the
+    #: window that can be that tall.
     def states(self):
         return [
             ("1k draft", {"_text": draft(1_000)}),
             ("50k draft", {"_text": draft(50_000)}),
-            ("4k reply", {"_reply": draft(4_000)}),
-            ("12k artifact reply", {"_reply": draft(12_000)}),
         ]
 
     def test_a_pill_along_the_top_opens_the_bubble_below_it(self):
@@ -592,7 +428,7 @@ class TestTheBubbleOpensBelowWhenAboveHasNoRoom(unittest.TestCase):
         # bottom. Red at all three positions before this item, where it sat at y=8 with the
         # pill occupying y=0..40.
         _left, top, _right, _bottom = WORK
-        for label, state in self.states()[:2]:  # the draft sizes; a reply cannot fit below
+        for label, state in self.states():
             for name, (px, py) in along_the_top().items():
                 with self.subTest(state=label, at=name):
                     _x1, y1, _x2, _y2 = placed(bubble(**state), px, py)
@@ -619,14 +455,21 @@ class TestTheBubbleOpensBelowWhenAboveHasNoRoom(unittest.TestCase):
                              "the bubble should sit above the pill, not below it")
 
     def test_when_neither_side_fits_the_clamp_is_todays(self):
-        # A full reply is as tall as the desktop, so there is no room on either side. This
-        # is the case the fallback deliberately does not fix, and it is pinned so nobody
-        # reads its absence as an oversight.
-        _left, top, _right, _bottom = WORK
+        # A window as tall as the desktop has no room on either side of a pill. This is
+        # the case the fallback deliberately does not fix, and it is pinned so nobody
+        # reads its absence as an oversight. Driven against `reposition` directly now:
+        # the state that used to produce a desktop-tall bubble was a full reply, and this
+        # window has not drawn one since item 63. The card is where that height lives.
+        _left, top, _right, bottom = WORK
         for name, (px, py) in along_the_top().items():
             with self.subTest(at=name):
-                _x1, y1, _x2, _y2 = placed(bubble(_reply=draft(12_000)), px, py)
-                self.assertEqual(y1, top + ui.EDGE_AIR)
+                b = bubble(draft(1_000))
+                b._h = bottom - top - 2 * ui.EDGE_AIR
+                b.pill.x, b.pill.y = px, py
+                box: list[str] = []
+                b.geometry = box.append
+                ui.Bubble.reposition(b)
+                self.assertEqual(int(box[-1].rpartition("+")[2]), top + ui.EDGE_AIR)
 
     def test_the_work_area_guarantee_survives_the_second_anchor(self):
         # Item 42's property, re-asserted against the new placements: a second way to

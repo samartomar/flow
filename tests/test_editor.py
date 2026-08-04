@@ -315,7 +315,7 @@ class TestTheBubbleCarriesIt(unittest.TestCase):
         )
         b.pill.accent = "#000000"
         b.canvas = mock.Mock()
-        b._text, b._sent, b._reply, b._partial, b._note = text, "", "", "", ""
+        b._text, b._sent, b._partial, b._note = text, "", "", ""
         b._editor = None
         b._sent_at = time.perf_counter()
         b._h = 120
@@ -349,68 +349,10 @@ class TestTheBubbleCarriesIt(unittest.TestCase):
         self.assertNotIn("Refine", keys)
 
 
-class TestTheUseThisChip(unittest.TestCase):
-    """The floor for item 21, whatever the spoken form does: a chip cannot be misheard.
-
-    Gated the way "Was a command" is — only while there is something to act on. A chip
-    that is always present but usually does nothing teaches people to ignore it.
-    """
-
-    def _bubble(self, reply="an answer", can_take=True):
-        import flow.ui as ui
-
-        b = ui.Bubble.__new__(ui.Bubble)
-        b.pill = mock.Mock()
-        b.pill.session = mock.Mock(
-            mode="dictate", can_rescue=False, editing=False, auto_ask_in=None,
-            can_take_reply=can_take,
-        )
-        b.pill.accent = "#000000"
-        b.canvas = mock.Mock()
-        b._text, b._sent, b._partial, b._note = "a draft", "", "", ""
-        b._reply = reply
-        b._editor, b._sent_at, b._h = None, time.perf_counter(), 120
-        return b
-
-    def _keys(self, bubble) -> list[str]:
-        import flow.ui as ui
-
-        laid: list[str] = []
-        with mock.patch.object(ui.Bubble, "_lay_out",
-                               lambda _self, specs: laid.extend(k for k, _l, _c in specs)):
-            bubble._chips()
-        return laid
-
-    def test_a_reply_on_screen_offers_it(self):
-        self.assertIn("Use this", self._keys(self._bubble()))
-
-    def test_no_reply_no_chip(self):
-        self.assertNotIn("Use this", self._keys(self._bubble(reply="")))
-
-    def test_and_not_when_the_session_has_nothing_to_give(self):
-        # Both halves are asked: the card can still be showing an answer the session has
-        # already handed over, and offering to take it twice is offering nothing.
-        self.assertNotIn("Use this", self._keys(self._bubble(can_take=False)))
-
-    def test_the_sent_card_offers_only_put_it_back(self):
-        b = self._bubble()
-        b._sent, b._text = "already gone", ""
-        self.assertEqual(self._keys(b), ["Put it back"])
-
-    def test_tapping_it_takes_the_reply_and_clears_the_card(self):
-        b = self._bubble()
-        b.pill.session.take_reply.return_value = True
-        with mock.patch.object(type(b), "_render"):
-            b._take_reply()
-        b.pill.session.take_reply.assert_called_once()
-        self.assertEqual(b._reply, "", "the answer is on screen twice now")
-
-    def test_a_refused_take_leaves_the_answer_where_it_is(self):
-        b = self._bubble()
-        b.pill.session.take_reply.return_value = False
-        with mock.patch.object(type(b), "_render"):
-            b._take_reply()
-        self.assertEqual(b._reply, "an answer")
+# `TestTheUseThisChip` was here. The chip moved to `ConversationCard` with the answer it
+# acts on (item 63), and so did its tests — `tests/test_card.py`. Item 21's floor is
+# unchanged: a chip cannot be misheard, and it is still gated on both halves, the answer
+# being on screen and the session still having one to give.
 
 
 class TestAnEditorThatCannotHearIsClosed(unittest.TestCase):
@@ -431,7 +373,7 @@ class TestAnEditorThatCannotHearIsClosed(unittest.TestCase):
         b = ui.Bubble.__new__(ui.Bubble)
         b.pill = mock.Mock(session=session, accent="#000000")
         b.canvas = mock.Mock()
-        b._text, b._sent, b._reply, b._partial, b._note = session.draft.text, "", "", "", ""
+        b._text, b._sent, b._partial, b._note = session.draft.text, "", "", ""
         b._editor, b._previous_focus, b._h, b._visible = None, 0, 120, True
         b._sent_at = time.perf_counter()
         return session, b
@@ -577,7 +519,7 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         #: than a fixture silently laying out against a screen of no particular size.
         b.pill.work = WORK
         b.canvas = MeasuringCanvas()
-        b._text, b._sent, b._reply, b._partial, b._note = text, "", "", "", note
+        b._text, b._sent, b._partial, b._note = text, "", "", note
         b._editor = None
         b._act = None
         b._h = 120

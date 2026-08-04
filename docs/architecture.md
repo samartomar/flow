@@ -276,14 +276,24 @@ after Flow is closed. See [§9](#9-what-is-written-to-disk) and `flow/diag.py`.
 |---|---|---|---|---|
 | `IDLE` | slate | — | live | not capturing, or nothing held |
 | `LISTENING` | green | — | live | speech in progress |
-| `DRAFT` | amber | — (`Ask 4s` on the button) | live | text held, awaiting refine / continue / send |
+| `DRAFT` | slate | — (`Ask 4s` on the button) | live | text held, awaiting refine / continue / send |
 | `REFINING` | blue | ⋯ `refining` | live | a CLI rewrite is in flight, ~6 s |
-| `ASKING` | violet | ⋯ `asking` | live | a converse-mode question is with the CLI, ~8–10 s |
+| `ASKING` | blue | ⋯ `asking` | live | a converse-mode question is with the CLI, ~8–10 s |
 
 The last two are held for the whole call. Routing keeps running while a CLI call is out —
 the microphone never closed — and it used to end every utterance by setting `DRAFT`, which
 took the pill off `REFINING` while the rewrite was still in flight. `ASKING` outranks
 `REFINING` when both are out, matching the order `activity` reads them in.
+
+**The pill went from five colours to three on 2026-08-03, and the two it lost became
+windows.** Amber meant "a draft is held" and violet meant "a question is out" — and in
+both cases a whole card was already on screen saying so, which is the colour doing a
+second window's job. `DRAFT_ACCENT` (amber) is the draft bubble's outline for as long as
+it is up, `CARD_ACCENT` (violet) is the conversation card's, and neither changes with the
+session state. `REFINING` and `ASKING` share blue because from the user's side they are
+the same wait — something is out and the answer is not here yet — and the surface that is
+showing already names which. The error flash still reaches both windows, because the note
+it belongs to is drawn on one of them.
 
 ### What Flow is doing, and whether it can hear
 
@@ -1054,6 +1064,17 @@ renders on every partial, and a per-render walk of twenty wrapped turns is item 
 
 `Pill.front` is what keeps the two apart: notes, errors and partials are the three things
 both surfaces carry, so they go through one name rather than a branch at each call site.
+A mode switch is a surface switch — `Pill._swap_surfaces` opens the window that owns the
+new mode and closes the other, so exactly one is up afterwards. The winner is *opened*
+rather than left to the next event, because the note that follows the mode event is the
+one naming the workspace, and `note()` only paints on a window that is already showing:
+that line has been load-bearing since item 36 and invisible whenever there was no draft
+on screen, which is most of the times somebody switches mode.
+
+The bubble has no way to draw an answer at all any more — `show_reply`, `_reply_slot`,
+the reply rendering and the `Use this` chip were removed rather than left unused, and a
+test asserts their absence, because a `show_reply` that came back would be the two
+surfaces becoming one again and it would come back looking like a convenience.
 
 ## 8. Constants, and what is behind them
 

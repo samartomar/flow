@@ -221,19 +221,36 @@ TEXT = "#e6e9ef"
 MUTED = "#8b93a5"
 CHIP = "#1f2632"
 
-#: R13: colour encodes state, so the pill reads at a glance without being looked at.
+#: R13: colour encodes state, so the pill reads at a glance without being looked at —
+#: narrowed on 2026-08-03 to what a 40 px capsule can honestly claim on its own.
+#:
+#: It used to carry five colours, two of which were really about a *window*: amber meant
+#: a draft was held and violet meant a question was out, and in both cases a whole card
+#: was already on screen saying so. Those two are window identities now (`DRAFT_ACCENT`,
+#: `CARD_ACCENT`) and the pill keeps three values plus the error flash: resting,
+#: capturing, and waiting on a CLI. `REFINING` and `ASKING` share one because they are
+#: the same wait from the user's side — something is out and the answer is not here yet
+#: — and the surface that is showing already names which.
 ACCENT = {
-    State.IDLE: "#64748b",  # slate  - resting
-    State.LISTENING: "#22c55e",  # green  - capturing speech
-    State.DRAFT: "#f59e0b",  # amber  - text held, awaiting a decision
-    State.REFINING: "#3b82f6",  # blue   - CLI rewrite in flight
-    State.ASKING: "#a855f7",  # violet - P9, a question is with the CLI
+    State.IDLE: "#64748b",  # slate - resting, armed or not
+    State.LISTENING: "#22c55e",  # green - capturing speech
+    State.DRAFT: "#64748b",  # slate - the amber window is the signal, not the pill
+    State.REFINING: "#3b82f6",  # blue  - waiting on a CLI
+    State.ASKING: "#3b82f6",  # blue  - the same wait
 }
 ERROR = "#ef4444"
 
-#: P9. The answer, distinct from the user's own words in the same bubble. Nothing else
-#: in the UI is this colour, because mistaking the model's words for your own is the
-#: one confusion converse mode can create that dictate mode cannot.
+#: The two windows' identities, and the reason they are constants rather than moods.
+#: One card used to be both, so "amber" meant *this bubble is holding a draft* and
+#: "violet" meant *this same bubble is now a conversation* — which is the colour doing
+#: the work a second window should have been doing. Each window is one colour now, for
+#: as long as it is on screen (decisions.md 2026-08-03, "two surfaces, two jobs").
+DRAFT_ACCENT = "#f59e0b"  # amber  - the draft bubble
+CARD_ACCENT = "#a855f7"  # violet - the conversation card
+
+#: P9. The answer, distinct from the user's own words. Nothing else in the UI is this
+#: colour, because mistaking the model's words for your own is the one confusion
+#: converse mode can create that dictate mode cannot.
 REPLY = "#7dd3fc"
 
 PILL_W, PILL_H = 152, 40
@@ -434,7 +451,7 @@ def head_window(text: str, budget: int) -> str:
     happens, so its window holds the head.
 
     No line count comes back from here, unlike `body_window`. The reply's is *measured* off
-    the canvas rather than estimated — see `Bubble._reply_slot` for why it can be.
+    the canvas rather than estimated — see `ConversationCard._answer_slot` for why.
     """
     if len(text) <= budget:
         return text
@@ -1169,6 +1186,22 @@ class Pill(tk.Tk):
         """
         return self.card if self.converse else self.bubble
 
+    def _swap_surfaces(self) -> None:
+        """A mode switch is a surface switch: one window opens, the other closes.
+
+        Exactly one is up afterwards, and the winner is opened rather than left to the
+        next event — because the note that follows the mode event is the one that names
+        the workshop, and `note()` only paints on a window that is already showing. That
+        line has been load-bearing since item 36 and invisible whenever there was no
+        draft on screen, which is most of the times somebody switches mode.
+        """
+        if self.converse:
+            self.bubble.hide()
+            self.card.show()
+        else:
+            self.card.close()
+            self.bubble.surface("")
+
     def _frame(self) -> None:
         self._track_target()
 
@@ -1210,21 +1243,18 @@ class Pill(tk.Tk):
                     # two surfaces, two jobs. When the draft empties into an ask, the
                     # words that were on screen are the words that went, so they pin.
                     if ev.text:
-                        self.card.partial(ev.text)
+                        self.card.show_partial(ev.text)
                     elif self.session.state is State.ASKING:
                         self.card.ask(self._last_draft)
                 elif ev.text:
                     self.bubble.show(ev.text)
-                elif self.session.state is State.ASKING:
-                    # Asking clears the draft, and hiding here left the user staring
-                    # at nothing for the ten seconds the CLI takes. Keep the bubble up
-                    # so "asking..." is somewhere to be seen.
-                    self.bubble.show_reply("")
                 elif not self.bubble.showing_sent:
                     self.bubble.hide()
                 # The other way the draft empties is Send, which puts the words on the
                 # sent card in the same breath. Hiding on that event is what used to
-                # take them straight back off the screen.
+                # take them straight back off the screen. The third way is an ask, and
+                # that cannot reach here: `send()` only asks in converse mode, which is
+                # the branch above.
             elif ev.kind == "partial":
                 self.front.show_partial(ev.text)
             elif ev.kind == "error":
@@ -1233,13 +1263,13 @@ class Pill(tk.Tk):
             elif ev.kind == "note":
                 self.front.note(ev.text)
             elif ev.kind == "reply":
-                if self.converse:
-                    if ev.text:
-                        self.card.answer(ev.text)
-                else:
-                    self.bubble.show_reply(ev.text)
+                # Converse only, by construction: `Session.send()` returns "" in dictate
+                # mode and never asks, so there is no answer to draw on the bubble — and
+                # since 2026-08-03 no method on it that could.
+                if ev.text:
+                    self.card.answer(ev.text)
             elif ev.kind == "mode":
-                pass  # the accompanying note is what the user reads
+                self._swap_surfaces()
             elif ev.kind == "send":
                 # A spoken trigger. Handled here rather than in the session because the
                 # paste belongs to this thread and to `paste_target` — the same button
@@ -1821,9 +1851,18 @@ class ConversationCard(tk.Toplevel):
         line_h = max(1, self._probe_h("M", font))
         return shown, round(full_h / line_h) - round(shown_h / line_h), shown_h
 
+    @property
+    def accent(self) -> str:
+        """Violet, always — this window's identity rather than a mood (item 63).
+
+        The error flash still reaches it, because the message the flash belongs to is
+        drawn on this card and a red pill beside a violet card would be two answers.
+        """
+        return ERROR if self.pill.accent == ERROR else CARD_ACCENT
+
     def _render(self) -> None:
         c = self.canvas
-        accent = self.pill.accent
+        accent = self.accent
         c.delete("all")
 
         question = self._partial or self._question
@@ -1939,7 +1978,7 @@ class ConversationCard(tk.Toplevel):
             primary = key == "Ask"
             tag = chip_tag(key)
             _round_rect(c, x, y1, x + w, y2, 13,
-                        fill=self.pill.accent if primary else CHIP,
+                        fill=self.accent if primary else CHIP,
                         outline="", tags=tag)
             c.create_text(x + w / 2, (y1 + y2) / 2, text=label,
                           fill=SHELL if primary else TEXT,
@@ -1993,7 +2032,6 @@ class Bubble(tk.Toplevel):
         self._text = ""
         self._note = ""
         self._partial = ""
-        self._reply = ""
         #: What Send just handed over, and when. Held for `SENT_LINGER_SEC` so the words
         #: are still on screen — and still recoverable — when a Send goes wrong.
         self._sent = ""
@@ -2029,21 +2067,13 @@ class Bubble(tk.Toplevel):
         """True while the bubble is holding the words Send just handed over."""
         return bool(self._sent)
 
-    def show_reply(self, text: str) -> None:
-        """P9: the CLI's answer. Clears the draft area — the question was sent.
-
-        An empty `text` means "the question has gone, the answer is still coming":
-        keep the bubble up and leave whatever is there, so the wait is visible.
-        """
-        self._text, self._partial, self._sent = "", "", ""
-        if text:
-            self._reply = text
-        self._for_activity = False
-        if not self._visible:
-            self._visible = True
-            self.deiconify()
-            self._float_up()
-        self._render()
+    # `show_reply` was here, and with it `_reply`, `_reply_slot`, the reply rendering
+    # and the `Use this` chip. They are gone rather than deprecated: this window is about
+    # the words being worked on, and an answer is words that have already gone
+    # (decisions.md 2026-08-03, "two surfaces, two jobs"). Every guarantee they carried —
+    # the head window, the exact `… N more lines`, Copy and `Use this` reading the
+    # session rather than the drawn string — is `ConversationCard`'s now, and asserted
+    # there. P10 is not weakened by this; it moved.
 
     def show_sent(self, text: str, problem: str = "") -> None:
         """R5/P6: what just left, and a way to get it back.
@@ -2121,7 +2151,7 @@ class Bubble(tk.Toplevel):
         if self._editor is not None:
             self._cancel_edit()
         self._visible = False
-        self._text = self._partial = self._note = self._reply = self._sent = ""
+        self._text = self._partial = self._note = self._sent = ""
         self._for_activity = False
         self.withdraw()
 
@@ -2245,41 +2275,20 @@ class Bubble(tk.Toplevel):
         _x1, y1, _x2, y2 = self.canvas.bbox(probe)
         return y2 - y1
 
-    def _reply_slot(self, reply: str, cap: int) -> tuple[str, int, int]:
-        """What of the answer is drawn, how many lines are below it, and how tall it is.
+    @property
+    def accent(self) -> str:
+        """Amber, always — this window's identity rather than a mood (item 63).
 
-        The head, not the tail — see `head_window`. Item 42 fitted the window to the desktop,
-        which made the chips reachable and left a 12 000-character artifact clipped by the
-        window edge with no sign that anything was missing: the same silence the draft had
-        before item 37 gave it `… N earlier lines`.
-
-        **N is the truth here, and it is worth saying why it can be.** The draft's count is
-        wraps-plus-breaks from a measured characters-per-line average, because laying the
-        head out to count it exactly is the cost item 37 exists to avoid — *on every
-        partial*, thirty times a second. An answer is laid out once, when it arrives, and it
-        already carries the full-text probe item 37 deliberately kept. So the count comes off
-        that probe: total height over a measured line height, minus the lines shown. Two
-        measurements on the real canvas, no average anywhere.
-
-        Shrunk in proportion and measured again, like `_body_slot` and for the same reason:
-        the loop has to end in a fixed number of probes rather than in a number that depends
-        on the answer.
+        It used to be `pill.accent`, so the outline changed colour under the same words
+        as the session moved through its states: amber holding a draft, blue mid-rewrite.
+        That was the colour doing a second window's job. The error flash still comes
+        through, because the note it belongs to is drawn here.
         """
-        full_h = self._probe_h(reply)
-        if full_h <= cap:
-            return reply, 0, full_h
-        shown, shown_h = reply, full_h
-        for _ in range(BODY_PROBES):
-            shown = head_window(reply, max(1, int(len(shown) * cap * 0.95 / shown_h)))
-            shown_h = self._probe_h(shown)
-            if shown_h <= cap:
-                break
-        line_h = max(1, self._probe_h("M"))
-        return shown, round(full_h / line_h) - round(shown_h / line_h), shown_h
+        return ERROR if self.pill.accent == ERROR else DRAFT_ACCENT
 
     def _render(self) -> None:
         c = self.canvas
-        accent = self.pill.accent
+        accent = self.accent
         # The sent card takes the body slot: it is the same words in the same place,
         # which is what makes "that went to the wrong window" readable at a glance.
         body = self._sent or self._text
@@ -2325,12 +2334,7 @@ class Bubble(tk.Toplevel):
             others += 20
         if self._note:
             others += note_h + 4
-        reply_h, more = 0, 0
-        if self._reply:
-            cap = self.work_h() - 74 - text_h - others - BODY_ELIDED_H
-            reply_shown, more, rh = self._reply_slot(self._reply, max(BODY_ELIDED_H, cap))
-            reply_h = rh + 8
-        extra = reply_h + (BODY_ELIDED_H if more else 0)
+        extra = 0
         if edit_h:
             extra += edit_h - text_h + 8
         elif earlier:
@@ -2356,22 +2360,6 @@ class Bubble(tk.Toplevel):
         c.delete("all")
         _round_rect(c, 1, 1, BUBBLE_W - 1, self._h - 1, 14, fill=SHELL, outline=accent)
         y = PAD
-        if self._reply:
-            c.create_text(
-                PAD, y, anchor="nw", text=reply_shown, fill=REPLY,
-                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
-            )
-            y += reply_h
-            if more:
-                # Below the answer rather than above it, which is the window's direction
-                # said out loud: a reader who has reached the bottom of what is drawn is
-                # exactly the reader who needs to know there is more. Copy and Use this
-                # carry the whole thing — they read the session, never this string.
-                c.create_text(
-                    PAD, y - 4, anchor="nw", text=f"… {more} more lines", fill=MUTED,
-                    font=("Segoe UI", 8, "italic"),
-                )
-                y += BODY_ELIDED_H
         if self._sent:
             c.create_text(
                 PAD, y, anchor="nw", text="sent", fill=MUTED,
@@ -2461,9 +2449,6 @@ class Bubble(tk.Toplevel):
         # present but usually does nothing teaches people to ignore it.
         if getattr(self.pill.session, "can_rescue", False):
             specs.append(("Was a command", "Was a command", self._was_a_command))
-        # Same gating, same reason: only while an answer is on screen to take.
-        if self._reply and getattr(self.pill.session, "can_take_reply", False):
-            specs.append(("Use this", "Use this", self._take_reply))
         if getattr(self.pill.session, "mode", DICTATE) != DICTATE:
             # The countdown lives on the button it is going to press. Anywhere else it
             # is just a timer running somewhere on screen; here it says which action is
@@ -2489,7 +2474,7 @@ class Bubble(tk.Toplevel):
             tag = chip_tag(key)
             _round_rect(
                 c, x, y1, x + w, y2, 13,
-                fill=self.pill.accent if primary else CHIP, outline="", tags=tag,
+                fill=self.accent if primary else CHIP, outline="", tags=tag,
             )
             c.create_text(
                 x + w / 2, (y1 + y2) / 2, text=label,
@@ -2561,7 +2546,7 @@ class Bubble(tk.Toplevel):
             self._visible = True
             self.deiconify()
         elif act is None and self._for_activity and not (
-            self._text or self._partial or self._reply or self._note
+            self._text or self._partial or self._note
         ):
             self.hide()
             return
@@ -2591,7 +2576,7 @@ class Bubble(tk.Toplevel):
                 cx, cy = x + 4 + i * 10, y + 8
                 c.create_oval(
                     cx - r, cy - r, cx + r, cy + r,
-                    fill=self.pill.accent if lit else CHIP, outline="", tags="waiting",
+                    fill=self.accent if lit else CHIP, outline="", tags="waiting",
                 )
         else:
             c.create_line(x, y + 8, x + 24, y + 8, fill=MUTED, width=2, tags="waiting")
@@ -2612,19 +2597,6 @@ class Bubble(tk.Toplevel):
         # Reaching for any chip means the user is still working on this draft.
         self.pill.session.hold_auto_ask()
         self.pill.session.rescue_last_append()
-
-    def _take_reply(self) -> None:
-        """P9's verb, on the card the answer is drawn on.
-
-        The chip is the floor for this feature whatever the spoken form does: it cannot
-        be mis-decoded, and the workshop loop is unusable without *some* way across.
-        """
-        if self.pill.session.take_reply():
-            # The answer has been moved, so the card stops showing it as an answer —
-            # otherwise the same text sits on screen twice, once as a reply and once as
-            # the draft, and only one of them is what Send will hand over.
-            self._reply = ""
-            self._render()
 
     # -- repairing the text by hand ----------------------------------------
 
@@ -2651,8 +2623,8 @@ class Bubble(tk.Toplevel):
         self._previous_focus = 0 if lite else foreground_hwnd()
         box = self._editor = tk.Text(
             self, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
-            highlightthickness=1, highlightbackground=self.pill.accent,
-            highlightcolor=self.pill.accent, wrap="word",
+            highlightthickness=1, highlightbackground=self.accent,
+            highlightcolor=self.accent, wrap="word",
             font=("Segoe UI", 10), undo=True, padx=6, pady=4,
         )
         box.insert("1.0", text)

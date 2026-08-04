@@ -313,6 +313,196 @@ class TestScrolling(unittest.TestCase):
         self.assertEqual(c._top, c._max_top())
 
 
+def drawn_answer(c) -> str:
+    """What reached the canvas as the answer, ignoring probes and furniture."""
+    hits = [i["text"] for i in c.canvas.items if i["text"] and i["text"] in c._answer]
+    return hits[-1] if hits else ""
+
+
+def more_line(c) -> str:
+    return next((i["text"] for i in c.canvas.items
+                 if i["text"].startswith("…") and "more lines" in i["text"]), "")
+
+
+class TestTheAnswerShowsItsHead(unittest.TestCase):
+    """P10, shape (b) — moved here from the bubble with the code it is about (item 63).
+
+    An artifact is read from the top, so the window holds the top. The class is
+    otherwise item 45's, restated on this window's width: the guarantees did not change,
+    the surface did.
+    """
+
+    def answered(self, text):
+        c = card()
+        c.ask("write me a complete prompt")
+        c.answer(text)
+        return c
+
+    def test_a_long_answer_shows_its_first_lines(self):
+        c = self.answered(prose(12_000))
+        shown = drawn_answer(c)
+        self.assertTrue(c._answer.startswith(shown), "windowed from the wrong end")
+        self.assertLess(len(shown), len(c._answer))
+
+    def test_it_is_not_the_tail(self):
+        # Both directions, so a window cannot pass this by being a window.
+        c = self.answered(prose(12_000)[:-20] + "the very last words")
+        self.assertNotIn("the very last words", drawn_answer(c))
+
+    def test_no_word_is_cut_in_half(self):
+        c = self.answered(prose(12_000))
+        self.assertTrue(c._answer[len(drawn_answer(c))].isspace(),
+                        "the window closed mid-word")
+
+    def test_an_answer_that_fits_is_drawn_whole_and_says_nothing(self):
+        c = self.answered(prose(200))
+        self.assertEqual(drawn_answer(c), prose(200))
+        self.assertEqual(more_line(c), "")
+
+    def test_the_count_is_measured_and_exact(self):
+        # The draft's `… N earlier lines` is an estimate from a characters-per-line
+        # average, because laying the head out to count it exactly is the cost item 37
+        # exists to avoid — on every partial. An answer is laid out once and already
+        # carries a full-text probe, so here N is the truth: total lines minus shown
+        # lines, both off the canvas.
+        c = self.answered(prose(12_000))
+        line = more_line(c)
+        self.assertRegex(line, r"^… \d+ more lines$")
+        shown_text = drawn_answer(c)
+        probe = lambda t: c.canvas.create_text(  # noqa: E731
+            ui.PAD, ui.PAD, anchor="nw", text=t, font=("Segoe UI", 10),
+            width=ui.CARD_W - 2 * ui.PAD)
+        h = lambda i: c.canvas.bbox(i)[3] - c.canvas.bbox(i)[1]  # noqa: E731
+        full, one, shown = probe(c._answer), probe("M"), probe(shown_text)
+        self.assertEqual(int(line.split()[1]),
+                         round(h(full) / h(one)) - round(h(shown) / h(one)))
+
+    def test_the_count_grows_with_the_answer(self):
+        counts = [int(more_line(self.answered(prose(n))).split()[1])
+                  for n in (6_000, 12_000)]
+        self.assertLess(counts[0], counts[1])
+
+    def test_the_answer_still_sizes_the_card(self):
+        self.assertGreater(self.answered(prose(4_000))._h,
+                           self.answered(prose(200))._h)
+
+
+class TestTheExitsCarryTheWholeAnswer(unittest.TestCase):
+    """A head window that also truncated the exits would cause the loss it signals.
+
+    `Use this` goes through `session.take_reply()`, which reads `session.reply`; `Copy`
+    goes through `pill._copy(self._answer)`. Neither has ever read the drawn string and
+    neither may start.
+    """
+
+    def test_take_reply_reads_the_session_not_the_drawn_window(self):
+        from flow.session import Session
+
+        class FakeAsr:
+            def load(self, final=None) -> None: ...
+
+            def text(self, a, *, final=False, hotwords="") -> str:
+                return ""
+
+        class FakeMic:
+            level_db = -60.0
+
+            def start(self) -> None: ...
+
+            def stop(self) -> None: ...
+
+            @property
+            def active(self) -> bool:
+                return True
+
+            def restart(self) -> None: ...
+
+            def drain(self) -> list:
+                return []
+
+        whole = prose(12_000)
+        s = Session(asr=FakeAsr(), mic=FakeMic())
+        s.reply = whole
+        self.assertTrue(s.take_reply())
+        self.assertEqual(s.draft.text, whole, "the exit carried a window, not the answer")
+
+    def test_the_card_draws_less_than_it_holds(self):
+        c = card()
+        c.ask("q")
+        c.answer(prose(12_000))
+        self.assertLess(len(drawn_answer(c)), len(c._answer))
+        self.assertEqual(len(c._answer), 12_000)
+
+
+class TestEachWindowHasOneColour(unittest.TestCase):
+    """Item 63: amber and violet stop being one card's moods.
+
+    They used to be `pill.accent`, so the outline changed under the same words as the
+    session moved through its states — the colour doing a second window's job.
+    """
+
+    def test_the_card_is_violet_and_the_bubble_is_amber(self):
+        c = card()
+        c.pill.accent = ui.ACCENT[ui.State.LISTENING]
+        self.assertEqual(c.accent, ui.CARD_ACCENT)
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock(accent=ui.ACCENT[ui.State.LISTENING])
+        self.assertEqual(b.accent, ui.DRAFT_ACCENT)
+
+    def test_neither_changes_with_the_session_state(self):
+        c = card()
+        for state in ui.State:
+            c.pill.accent = ui.ACCENT[state]
+            self.assertEqual(c.accent, ui.CARD_ACCENT, state)
+
+    def test_but_the_error_flash_still_reaches_both(self):
+        # The note the flash belongs to is drawn on one of these windows, so a red pill
+        # beside a violet card would be two answers to one question.
+        c = card()
+        c.pill.accent = ui.ERROR
+        self.assertEqual(c.accent, ui.ERROR)
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock(accent=ui.ERROR)
+        self.assertEqual(b.accent, ui.ERROR)
+
+    def test_the_pill_keeps_three_colours_and_neither_of_theirs(self):
+        values = set(ui.ACCENT.values())
+        self.assertEqual(len(values), 3)
+        self.assertNotIn(ui.DRAFT_ACCENT, values)
+        self.assertNotIn(ui.CARD_ACCENT, values)
+
+    def test_a_held_draft_and_a_question_out_are_no_longer_pill_moods(self):
+        self.assertEqual(ui.ACCENT[ui.State.DRAFT], ui.ACCENT[ui.State.IDLE])
+        self.assertEqual(ui.ACCENT[ui.State.ASKING], ui.ACCENT[ui.State.REFINING])
+
+
+class TestTogglingSwapsSurfaces(unittest.TestCase):
+    """One window opens, the other closes, and exactly one is up afterwards."""
+
+    def pill(self, mode):
+        p = ui.Pill.__new__(ui.Pill)
+        p.session = mock.Mock(mode=mode)
+        p.bubble = mock.Mock()
+        p.card = mock.Mock()
+        return p
+
+    def test_switching_into_converse_opens_the_card_and_shuts_the_bubble(self):
+        p = self.pill(ui.CONVERSE)
+        p._swap_surfaces()
+        p.card.show.assert_called_once()
+        p.bubble.hide.assert_called_once()
+
+    def test_switching_out_closes_the_card_and_brings_the_bubble_up(self):
+        # The bubble is *opened* rather than left to the next event, because the note
+        # that follows the mode event names the workshop and `note()` only paints on a
+        # window that is already showing. That line has been invisible whenever there
+        # was no draft on screen, which is most of the times somebody switches mode.
+        p = self.pill(ui.DICTATE)
+        p._swap_surfaces()
+        p.card.close.assert_called_once()
+        p.bubble.surface.assert_called_once_with("")
+
+
 class TestTheBubbleStaysShutInConverse(unittest.TestCase):
     """`Pill.front`, which is what keeps two surfaces from being one again."""
 
@@ -332,6 +522,22 @@ class TestTheBubbleStaysShutInConverse(unittest.TestCase):
         p = self.pill(ui.DICTATE)
         self.assertFalse(p.converse)
         self.assertIs(p.front, p.bubble)
+
+    def test_both_surfaces_answer_to_the_same_names(self):
+        # The protocol `Pill.front` hands work to. A rename on one side is invisible to
+        # every unit test here, because none of them drives a real frame — which is
+        # exactly how a card with `partial()` came to sit under a `_frame` calling
+        # `show_partial`, caught by the real-Tk probe and not by any of these.
+        for name in ("show_partial", "note"):
+            with self.subTest(name=name):
+                self.assertTrue(callable(getattr(ui.ConversationCard, name, None)))
+                self.assertTrue(callable(getattr(ui.Bubble, name, None)))
+
+    def test_the_names_frame_calls_on_the_card_all_exist(self):
+        for name in ("show_partial", "note", "ask", "answer", "show", "close",
+                     "tick_countdown"):
+            with self.subTest(name=name):
+                self.assertTrue(callable(getattr(ui.ConversationCard, name, None)))
 
     def test_a_session_with_no_mode_at_all_is_dictate(self):
         # `--no-profile`, a fixture, an embedding. The bubble is the safe default: it is
