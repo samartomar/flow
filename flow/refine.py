@@ -712,6 +712,45 @@ def _clean_kiro(out: str) -> str:
 #: Per CLI, keyed by name, and empty for everything that writes its answer alone. A tidy
 #: that ran for every entry would be a parser applied to output that does not need one —
 #: and would damage codex, whose answers legitimately contain `>` and the word Credits.
+#:
+#: **codex has no entry because it was measured not to need one, and the measurement is
+#: dated** — the claim it replaces was not, which is what put this back on the queue when
+#: three users reported CLI chrome rendering in the bubble (decisions.md 2026-08-03, root
+#: 2). Re-taken 2026-08-04 against **codex-cli 0.145.0** and **claude 2.1.218**, through
+#: the exact `Popen` shape `_invoke` uses — multi-line prompt on stdin, streams apart —
+#: over every prompt shape this module sends (`_ASK_PROMPT`, `_ASK_ARTIFACT_PROMPT`,
+#: `_PROMPT`, and a bare one-liner), in `D:\flow` and in a scratch git repo where codex
+#: ran tools and produced diffs. **stdout was the final assistant message and nothing
+#: else, every time.** All of the chrome is on stderr, which `_invoke` discards:
+#:
+#:     OpenAI Codex v0.145.0
+#:     --------
+#:     workdir: D:\dev\flow
+#:     model: gpt-5.6-sol
+#:     provider: openai
+#:     approval: never
+#:     sandbox: read-only
+#:     ...
+#:     session id: 019fcaa2-7aca-77f3-92e4-57104ae5d483
+#:     --------
+#:     user
+#:     <the whole prompt, echoed>
+#:     codex
+#:     <the answer, again>
+#:     tokens used
+#:     5,955
+#:
+#: So there is nothing on stdout to strip, and a codex entry written anyway would be the
+#: speculative parsing this repo refuses — the more so because the one shape it would
+#: reach for, `> `, is what a codex answer uses to quote a shell line.
+#:
+#: **What the users actually saw is not chrome**, and that is the finding: an artifact
+#: ask in a repo comes back as an answer *containing* ```diff fences, `--- a/app.py`,
+#: `@@` hunks and a ```powershell block, measured verbatim on 2026-08-04. A bubble with
+#: no syntax highlighting renders that as furniture, but it is the answer somebody asked
+#: for, and `Use this` and `Copy` promise it whole (item 45). Stripping it would be a
+#: rendering decision taken in the wrong module. Raised in NEEDS_YOU rather than fixed
+#: here, with the versions the three users ran as the one thing this machine cannot see.
 _FURNITURE = {"kiro-cli": _clean_kiro}
 
 

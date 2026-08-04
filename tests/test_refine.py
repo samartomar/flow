@@ -504,6 +504,73 @@ class TestTheFurnitureIsStrippedForOneCliAndNoOther(unittest.TestCase):
         # front of that rather than instead of it.
         self.assertEqual(self.clean("\x1b[m> \x1b[0m```\nShip it.\n```"), "Ship it.")
 
+    def test_codex_has_no_entry_and_the_reason_is_a_measurement(self):
+        # The claim that put this back on the queue was undated. It is dated now, and
+        # this is the assertion that a later "codex needs a cleaner too" has to argue
+        # with: re-measure, or leave it alone.
+        self.assertNotIn("codex", refine_mod._FURNITURE)
+        self.assertNotIn("claude", refine_mod._FURNITURE)
+        self.assertEqual(set(refine_mod._FURNITURE), {"kiro-cli"})
+
+
+class TestWhatCodexActuallyPutsOnStdout(unittest.TestCase):
+    """Item 61's measurement, pinned as fixtures so the claim cannot go stale silently.
+
+    Taken 2026-08-04 against codex-cli 0.145.0 and claude 2.1.218 through `_invoke`'s own
+    `Popen` shape — multi-line prompt on stdin, streams apart — over every prompt shape
+    this module sends. stdout was the final assistant message and nothing else, every
+    time; the banner, the echoed prompt, the `codex` marker and `tokens used` were all on
+    stderr, which `_invoke` discards.
+    """
+
+    #: stdout, verbatim, for four prompt shapes. The trailing newline is codex's.
+    MEASURED = (
+        "PONG\n",
+        "Two plus two is four.\n",
+        "- [ ] Verify the changes meet the requirements and review the code for "
+        "correctness, security, and maintainability.\n- [ ] Confirm tests cover the "
+        "changes and that all automated checks pass.\n- [ ] Check documentation, "
+        "compatibility, and unintended side effects before approving.\n",
+        "Does the deploy run on Friday?\n",
+    )
+
+    #: stderr, verbatim, from the one-line call. Every shape of furniture is in here and
+    #: none of it is on stdout — which is the whole finding.
+    STDERR = (
+        "OpenAI Codex v0.145.0\n--------\nworkdir: D:\\dev\\flow\nmodel: gpt-5.6-sol\n"
+        "provider: openai\napproval: never\nsandbox: read-only\nreasoning effort: high\n"
+        "reasoning summaries: none\nsession id: 019fcaa2-7aca-77f3-92e4-57104ae5d483\n"
+        "--------\nuser\nReply with exactly: PONG\ncodex\nPONG\ntokens used\n5,955\n"
+    )
+
+    def test_every_measured_shape_survives_cleaning_intact(self):
+        codex = refine_mod.named("codex")
+        for out in self.MEASURED:
+            with self.subTest(out=out[:40]):
+                self.assertEqual(refine_mod._clean(out, codex), out.strip())
+
+    def test_an_answer_carrying_the_furniture_words_is_still_the_answer(self):
+        # The shapes a speculative codex cleaner would reach for, inside answers a user
+        # could genuinely receive. Each of these is content, and each would be eaten.
+        for out in (
+            "> git push --force-with-lease\n> git status",
+            "tokens used\n5,955 of them, which is why the call was slow.",
+            "workdir: is the field you want in the config file.",
+            "--------\nUse a rule that long only in a terminal.",
+        ):
+            with self.subTest(out=out[:30]):
+                self.assertEqual(refine_mod._clean(out, refine_mod.named("codex")), out)
+
+    def test_the_furniture_is_on_the_stream_invoke_throws_away(self):
+        # `_invoke` returns stdout alone. Pinned as a property of the *measurement*: if a
+        # later codex moves any of this to stdout, the fixture above is what has to
+        # change, and changing it is a re-measurement rather than a guess.
+        for shape in ("OpenAI Codex v", "workdir:", "session id:", "tokens used"):
+            with self.subTest(shape=shape):
+                self.assertIn(shape, self.STDERR)
+                for out in self.MEASURED:
+                    self.assertNotIn(shape, out)
+
 
 class TestAnUnverifiedEntryIsInert(unittest.TestCase):
     """Detection ships everywhere; invocation shapes are run or they do not exist.

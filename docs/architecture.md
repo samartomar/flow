@@ -1470,6 +1470,35 @@ process for a CLI most machines do not have on every launch. Half the numbers in
 this document are latencies and error rates, and every one of them belongs to a build:
 without this, a result six months old can only be compared to a fresh one by hoping.
 
+### What comes off stdout, and what is stripped from it
+
+`refine._clean` runs a per-CLI pass keyed by name (`_FURNITURE`) and then a defensive
+tidy. Only **kiro-cli** has an entry, and the absence of a codex one is a measurement
+rather than an omission — which is why it is dated. Re-taken 2026-08-04 against
+**codex-cli 0.145.0** and **claude 2.1.218**, through `_invoke`'s own `Popen` shape
+(multi-line prompt on stdin, streams apart), over every prompt shape this module sends
+and in a scratch git repo where codex ran tools and produced diffs: **stdout was the
+final assistant message and nothing else, every time.** The banner, the `workdir:` /
+`model:` / `sandbox:` lines, the session id, the echoed prompt, the `codex` marker and
+`tokens used` are all on stderr, which `_invoke` discards. `tests/test_refine.py` pins
+the four measured stdout strings and the stderr they were taken beside, so a later codex
+that moves any of it has to be re-measured rather than guessed at.
+
+The claim this replaces was true and undated, and it went back on the queue because three
+outside users reported CLI chrome rendering in the bubble (decisions.md 2026-08-03, root
+2). **What they saw is the answer, not the chrome**, and that is the finding: an artifact
+ask inside a repo comes back containing ```diff fences, `--- a/app.py`, `@@` hunks and a
+```powershell block — measured verbatim. A bubble with no syntax highlighting renders
+that as furniture, but it is the work somebody asked for and `Use this` / `Copy` promise
+it whole. Stripping it would be a rendering decision taken in the wrong module, so it is
+in NEEDS_YOU with the reproduction, along with the one thing this machine cannot see:
+which codex the three of them were running.
+
+The cleaned text is what reaches the bubble **and** what `_pump_ask` stores into the
+thread, which is the half the decision names — chrome in the thread is chrome in every
+later prompt. `tests/test_converse.py` asserts it end to end through the real `ask` and
+the real `_clean`, with only the subprocess faked.
+
 ### Verifying a candidate
 
 A `CANDIDATES` entry is `verified=True` only after somebody has run it: one prompt in,

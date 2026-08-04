@@ -173,6 +173,64 @@ class TestAnswers(unittest.TestCase):
         self.assertIn("how do I widen a column", s.thread.turns)
 
 
+class TestTheThreadStoresTheCleanedAnswer(unittest.TestCase):
+    """Item 61's uncovered half: what the *next* question inherits.
+
+    Everything above mocks `flow.session.ask`, so the cleaning never runs — and the
+    decision's root 2 is specifically that CLI chrome was "stored into the thread as
+    context for the next answer". This one goes through the real `ask` and the real
+    `_clean`, with only the subprocess faked, so a cleaner that stopped being applied on
+    the way to the thread would fail here and nowhere else.
+
+    kiro-cli because it is the one entry with measured furniture (codex's stdout carries
+    none — see `_FURNITURE`). `cli=` is explicit so `_invoke_any` goes straight to the
+    faked `_invoke` and no PATH lookup is involved.
+    """
+
+    FURNITURE = "\x1b[m> \x1b[0mUse ALTER TABLE.\x1b[0m\x1b[0m\nThen reindex."
+    ANSWER = "Use ALTER TABLE.\nThen reindex."
+
+    def asked(self):
+        from flow import refine
+
+        s = session(cli=refine.named("kiro-cli"))
+        s.toggle_mode()
+        s.draft.set("how do I widen a column")
+        with mock.patch("flow.refine._invoke", return_value=(self.FURNITURE, "")):
+            s.send()
+            s.wait_idle(timeout=5.0)
+        self.addCleanup(s.close)
+        return s
+
+    def test_the_bubble_gets_the_answer_alone(self):
+        s = self.asked()
+        self.assertEqual(s.reply, self.ANSWER)
+        self.assertIn(self.ANSWER, [e.text for e in s.events() if e.kind == "reply"])
+
+    def test_and_so_does_the_thread(self):
+        s = self.asked()
+        self.assertEqual(s.thread.turns[-1], f"(reply) {self.ANSWER}")
+        self.assertNotIn("\x1b", s.thread.turns[-1])
+
+    def test_which_is_what_the_next_question_carries(self):
+        # The end of the chain, and the one the decision names: chrome in the thread is
+        # chrome in the next prompt, forever.
+        s = self.asked()
+        seen: list[str] = []
+
+        def spy(cli, prompt, **kw):
+            seen.append(prompt)
+            return "fine", ""
+
+        s.draft.set("and to rename it")
+        with mock.patch("flow.refine._invoke", spy):
+            s.send()
+            s.wait_idle(timeout=5.0)
+        self.assertTrue(seen)
+        self.assertIn(f"(reply) {self.ANSWER}", seen[0])
+        self.assertNotIn("\x1b", seen[0])
+
+
 class TestSpokenReplies(unittest.TestCase):
     def test_the_answer_is_spoken_when_a_speaker_is_attached(self):
         sp = FakeSpeaker()
