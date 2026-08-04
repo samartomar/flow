@@ -376,6 +376,11 @@ class TestAnEditorThatCannotHearIsClosed(unittest.TestCase):
         b._text, b._sent, b._partial, b._note = session.draft.text, "", "", ""
         b._editor, b._previous_focus, b._h, b._visible = None, 0, 120, True
         b._sent_at = time.perf_counter()
+        #: `after` needs an interpreter and a `__new__`-built window has none. Stubbed
+        #: rather than guarded in the code: `_edit` schedules one repaint a frame later
+        #: because a `tk.Text` cannot report its own layout until Tk has run, and that
+        #: is a real requirement of the real widget rather than something to soften.
+        b.after = lambda *a, **kw: None
         return session, b
 
     def _open(self, took_focus: bool):
@@ -464,13 +469,25 @@ class MeasuringCanvas:
 
     def create_line(self, *a, **kw) -> None: ...
 
-    def create_rectangle(self, *a, **kw) -> None: ...
+    def create_rectangle(self, x1, y1, x2, y2, **kw):
+        """Recorded, unlike the other shapes: the editor's scroll bar is rectangles, and
+        whether it is drawn at all is the assertion."""
+        self.items.append({
+            "x": x1, "y": y1, "text": "", "anchor": "nw", "h": y2 - y1, "lines": 0,
+            "fill": kw.get("fill"), "tags": _tags(kw.get("tags")),
+        })
+        return len(self.items) - 1
 
     def tag_bind(self, *a, **kw) -> None: ...
 
     def tag_raise(self, *a, **kw) -> None: ...
 
     def itemconfigure(self, *a, **kw) -> None: ...
+
+    def create_window(self, *a, **kw) -> None:
+        """The embedded editor's slot. Recorded as nothing: this fake measures text, and
+        a `tk.Text` measures itself — see `FakeBox`."""
+        ...
 
     def create_text(self, x, y, text="", **kw):
         size = (kw.get("font") or ("", 10))[1]
@@ -571,3 +588,120 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         b._render()
         _top, bottom = b.canvas.band("saved")
         self.assertLessEqual(bottom, b._h - 14 - 26)
+
+
+class FakeBox:
+    """A `tk.Text` that answers the two questions the viewport asks it, and no others."""
+
+    def __init__(self, first=0.0, last=1.0, lines=60) -> None:
+        self._view = (first, last)
+        self._lines = lines
+        self.scrolled: list = []
+        self.moved: list = []
+
+    def yview(self):
+        return self._view
+
+    def yview_scroll(self, n, what):
+        self.scrolled.append((n, what))
+
+    def yview_moveto(self, fraction):
+        self.moved.append(fraction)
+
+    def count(self, *a):
+        return (self._lines,)
+
+    def update_idletasks(self):
+        ...
+
+
+class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
+    """Item 67. Twenty visible lines of a draft that may be ten times that, silently.
+
+    The hint used to be suppressed while editing, on the reasoning that "the box holds
+    the whole draft and scrolls itself, so a line about what is above the fold would be
+    about nothing". That was right about the words and wrong about the person: nothing
+    on screen said there was more, and there was no bar to see it in.
+
+    The numbers come off the widget rather than from an estimate, which is the one place
+    this differs from the draft's `… N earlier lines` — a `tk.Text` has already laid the
+    text out, so asking it costs one call and the answer is exact.
+    """
+
+    def bubble(self, first=0.0, last=0.3, lines=60):
+        import flow.ui as ui
+
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock()
+        b.pill.accent = "#000000"
+        b.pill.work = WORK
+        b.pill.session = mock.Mock(mode="dictate", editing=True, can_rescue=False,
+                                   can_take_reply=False, auto_ask_in=None)
+        b.canvas = MeasuringCanvas()
+        b._text, b._sent, b._partial, b._note = "a draft", "", "", ""
+        b._act, b._h, b._bar_y = None, 200, 0
+        b._editor = FakeBox(first, last, lines)
+        b.reposition = lambda *a, **kw: None
+        b.after = lambda *a, **kw: None
+        return b
+
+    def test_it_counts_what_is_outside_the_box(self):
+        # 30% of 60 display lines on screen, so 42 are not.
+        self.assertEqual(self.bubble(0.0, 0.3, 60)._hidden_lines(), 42)
+
+    def test_a_draft_that_fits_has_nothing_outside_it(self):
+        self.assertEqual(self.bubble(0.0, 1.0, 3)._hidden_lines(), 0)
+
+    def test_a_widget_that_cannot_answer_yet_says_nothing_rather_than_guessing(self):
+        b = self.bubble()
+        b._editor = object()
+        self.assertEqual(b._hidden_lines(), 0)
+
+    def test_the_hint_is_drawn_while_editing(self):
+        b = self.bubble(0.0, 0.3, 60)
+        b._render()
+        said = [i["text"] for i in b.canvas.items if "more lines in here" in i["text"]]
+        self.assertEqual(len(said), 1, [i["text"] for i in b.canvas.items])
+        self.assertIn("42", said[0])
+        self.assertIn("drag the bar", said[0])
+
+    def test_and_not_when_the_whole_draft_is_visible(self):
+        b = self.bubble(0.0, 1.0, 3)
+        b._render()
+        self.assertEqual([i for i in b.canvas.items
+                          if "more lines in here" in i["text"]], [])
+
+    def test_the_bar_is_drawn_only_when_there_is_something_to_reach(self):
+        # Same rule as the help sheet's thumb and the draft's elision line: furniture on
+        # a window with nothing off screen is the second thing somebody reads.
+        full = self.bubble(0.0, 1.0, 3)
+        full._render()
+        self.assertEqual([i for i in full.canvas.items if "editbar" in i["tags"]], [])
+        part = self.bubble(0.0, 0.3, 60)
+        part._render()
+        self.assertTrue([i for i in part.canvas.items if "editbar" in i["tags"]])
+
+    def test_the_wheel_scrolls_the_box(self):
+        # Bound explicitly rather than left to Tk's class binding, which needs the focus.
+        b = self.bubble()
+        b._wheel_edit(mock.Mock(delta=-120))
+        self.assertEqual(b._editor.scrolled, [(3, "units")])
+
+    def test_the_drag_scrolls_it_too_and_leaves_selection_alone(self):
+        # The bar is on the canvas, not inside the box: a drag inside a text box
+        # *selects*, and trading an editing gesture for a reading one is not an upgrade.
+        b = self.bubble(0.2, 0.5, 60)
+        b._bar_grab(mock.Mock(y=10))
+        b._bar_drag(mock.Mock(y=40), top=0, height=300)
+        self.assertEqual(len(b._editor.moved), 1)
+        self.assertGreater(b._editor.moved[0], 0.2)
+
+    def test_the_hint_keeps_its_row_whether_or_not_it_says_anything(self):
+        # It sits *above* the box and can only be measured once the box is laid out, so
+        # a layout that depended on the measurement would be deciding the box's position
+        # from the box's position. Measured first, it read `… 2484 more lines` for a
+        # 60-line draft and drew a bar on a draft that fitted.
+        full, part = self.bubble(0.0, 1.0, 3), self.bubble(0.0, 0.3, 60)
+        full._render()
+        part._render()
+        self.assertEqual(full._h, part._h)

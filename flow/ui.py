@@ -348,6 +348,14 @@ BODY_ELIDED_H = 17
 #: the display exactly as they had off the draft.
 EDGE_AIR = 8
 
+#: The gutter the editor's scroll bar lives in, taken off the box's width.
+#:
+#: The bar is on the canvas rather than inside the `tk.Text` for one reason: dragging
+#: inside a text box *selects*, and taking that away to add a scroll gesture would be
+#: removing an editing action to add a reading one. So the wheel goes on the box, where
+#: it costs nothing, and the drag goes on a gutter beside it.
+EDIT_GUTTER = 12
+
 #: How many times the window may be measured and shrunk before it is drawn. Each probe is
 #: over at most `BODY_TAIL_CHARS`, so the ceiling on one render is a small multiple of a
 #: fixed cost rather than anything to do with the draft. Two is what it takes in practice;
@@ -2205,6 +2213,8 @@ class Bubble(tk.Toplevel):
         #: back to when it closes — which is never Flow's own, by `_track_target`.
         self._editor: tk.Text | None = None
         self._previous_focus = 0
+        #: Where a drag on the editor's scroll bar was last seen.
+        self._bar_y = 0
         self._h = 120
         #: The chip row last drawn, as `(keys+labels, height, accent)`. Compared before
         #: anything is torn down, so the row survives a body redraw — see `_lay_out`.
@@ -2452,6 +2462,114 @@ class Bubble(tk.Toplevel):
             )
         return shown, earlier, text_h
 
+    # -- the editor's viewport ---------------------------------------------
+
+    def _view(self) -> tuple[float, float]:
+        """Where the editor is scrolled to, as `(first, last)` fractions."""
+        try:
+            first, last = self._editor.yview()
+            return float(first), float(last)
+        except (AttributeError, TypeError, ValueError, tk.TclError):
+            return 0.0, 1.0
+
+    def _hidden_lines(self) -> int:
+        """How many display lines of the draft are outside the box right now.
+
+        Measured off the widget — it is the thing that laid the text out, and asking it
+        costs one call. The `… N earlier lines` above a bubble is an estimate because
+        counting exactly means laying the text out on every partial; there is no such
+        bargain here, because the box has already done the layout.
+        """
+        first, last = self._view()
+        shown = max(0.0, min(1.0, last - first))
+        if shown >= 1.0:
+            return 0
+        try:
+            total = int(self._editor.count("1.0", "end-1c", "displaylines")[0])
+        except (AttributeError, TypeError, IndexError, tk.TclError):
+            return 0
+        return max(0, round(total * (1.0 - shown)))
+
+    def _edit_hint(self, hint_y: int, box_y: int, height: int) -> None:
+        """Say how much of the draft is outside the box, and draw the bar beside it.
+
+        Drawn *after* the box, and that is the whole reason this is a method rather than
+        four lines in `_render`: the numbers come off a widget that has to have been laid
+        out to have them. `update_idletasks` is what performs that layout — idle tasks
+        rather than a full `update`, for the reason `Pill._copy` gives: a full update
+        services pending `after` callbacks and would re-enter the frame pump.
+
+        The hint the editor used to suppress. Its old reasoning — "the box holds the
+        whole draft and scrolls itself, so a line about what is above the fold would be
+        about nothing" — was right about the words and wrong about the person: what is
+        on screen is ~20 lines of a draft that may be ten times that, with nothing saying
+        so and no bar to see it in.
+        """
+        # Deliberately no `update_idletasks()` here. It would run inside `_render`, and
+        # idle time is where the follow-up render is queued — so the render would
+        # re-enter itself, delete the body it is halfway through drawing, and finish
+        # into a canvas another pass had already filled. The layout is waited for by the
+        # timer `_edit` schedules instead, which is one place rather than every render.
+        hidden = self._hidden_lines()
+        if hidden:
+            self.canvas.create_text(
+                PAD, hint_y, anchor="nw",
+                text=f"… {hidden} more lines in here — scroll, or drag the bar",
+                fill=MUTED, font=("Segoe UI", 8, "italic"), tags="body")
+        self._edit_bar(box_y, height)
+
+    def _edit_bar(self, top: int, height: int) -> None:
+        """The bar beside the box: where you are, how much there is, and a way to move.
+
+        The Help sheet's `_scrollbar` idiom, in the gutter `EDIT_GUTTER` reserves — on
+        the canvas rather than inside the `tk.Text`, because a drag inside a text box
+        selects, and trading an editing gesture for a reading one is not an upgrade.
+
+        Drawn only when there is something off screen to point at, like the Help sheet's
+        thumb and the draft's elision line. A bar on a box that fits is furniture.
+        """
+        first, last = self._view()
+        if last - first >= 1.0:
+            return
+        c = self.canvas
+        x = BUBBLE_W - PAD - EDIT_GUTTER + 4
+        c.create_rectangle(x, top, x + 3, top + height, fill=CHIP, outline="",
+                           tags=("body", "editbar"))
+        thumb = max(24, int(height * (last - first)))
+        offset = int((height - thumb) * first / max(1e-6, 1.0 - (last - first)))
+        c.create_rectangle(x, top + offset, x + 3, top + offset + thumb,
+                           fill=MUTED, outline="", tags=("body", "editbar"))
+        # A wide invisible strip, because a 3 px target is a target nobody hits.
+        c.create_rectangle(x - 5, top, x + 8, top + height, fill="", outline="",
+                           tags=("body", "editbar"))
+        c.tag_bind("editbar", "<ButtonPress-1>", self._bar_grab)
+        c.tag_bind("editbar", "<B1-Motion>", lambda e: self._bar_drag(e, top, height))
+
+    def _bar_grab(self, e) -> None:
+        self._bar_y = e.y
+
+    def _bar_drag(self, e, top: int, height: int) -> None:
+        if self._editor is None or height <= 0:
+            return
+        moved = (e.y - getattr(self, "_bar_y", e.y)) / height
+        self._bar_y = e.y
+        first, _last = self._view()
+        self._editor.yview_moveto(max(0.0, min(1.0, first + moved)))
+        self._render()
+
+    def _wheel_edit(self, e) -> None:
+        """Three lines a notch, the Windows default.
+
+        Bound explicitly rather than left to Tk's class binding: the class binding needs
+        the widget to have the focus, and while `_edit` does take it, the wheel over an
+        unfocused Flow window is exactly the case the Help sheet's docstring is about.
+        """
+        if self._editor is None:
+            return
+        self._editor.yview_scroll(-3 * (e.delta // 120 or (1 if e.delta > 0 else -1)),
+                                  "units")
+        self._render()
+
     def _probe_h(self, text: str, font=("Segoe UI", 10)) -> int:
         """How tall `text` wraps to in the body column, measured rather than estimated."""
         probe = self.canvas.create_text(
@@ -2508,7 +2626,13 @@ class Bubble(tk.Toplevel):
         # minus the chrome, minus whatever else is being drawn.
         others = 0
         if edit_h:
-            others += edit_h - text_h + 8
+            # The hint's slot is reserved whether or not there is anything to say in it.
+            # It has to be: the hint sits *above* the box and can only be measured once
+            # the box has been laid out, so a layout that depended on the measurement
+            # would be deciding the box's position from the box's position. Measured
+            # first, it read `… 2484 more lines` for a 60-line draft and drew a bar on a
+            # draft that fitted — both on the render before the widget existed.
+            others += edit_h - text_h + 8 + BODY_ELIDED_H
         elif earlier:
             others += BODY_ELIDED_H
         if self._sent:
@@ -2521,10 +2645,10 @@ class Bubble(tk.Toplevel):
             others += note_h + 4
         extra = 0
         if edit_h:
-            extra += edit_h - text_h + 8
+            extra += edit_h - text_h + 8 + BODY_ELIDED_H
         elif earlier:
-            # Only outside the editor: the box holds the whole draft and scrolls itself,
-            # so a line saying part of it is above the fold would be about nothing.
+            # Outside the editor this counts what the *window* left out; inside it, the
+            # line above the box counts what the *box* left out, and both are drawn.
             extra += BODY_ELIDED_H
         if self._sent:
             extra += 16  # the "sent" label above the words
@@ -2554,12 +2678,16 @@ class Bubble(tk.Toplevel):
                 font=("Segoe UI", 8, "bold"), tags="sent",
             )
             y += 16
+        hint_y = box_y = 0
         if self._editor is not None:
+            hint_y = y
+            y += BODY_ELIDED_H
             # The box takes the body's slot rather than opening below it, so the words
             # do not move under the cursor at the moment somebody reaches for them.
+            box_y = y
             c.create_window(
                 PAD, y, anchor="nw", window=self._editor,
-                width=BUBBLE_W - 2 * PAD, height=edit_h, tags="body")
+                width=BUBBLE_W - 2 * PAD - EDIT_GUTTER, height=edit_h, tags="body")
             y += edit_h + 6
         elif body:
             if earlier:
@@ -2593,6 +2721,9 @@ class Bubble(tk.Toplevel):
             c.create_text(
                 PAD, self._h - PAD - CHIP_H - 4, anchor="sw", text=self._note,
                 fill=MUTED, font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD, tags="body")
+
+        if self._editor is not None:
+            self._edit_hint(hint_y, box_y, edit_h)
 
         self._chips()
         # Above the body this render just drew — see the card's `_render` for the
@@ -2832,6 +2963,10 @@ class Bubble(tk.Toplevel):
         # prompt is not a single line and the chips are the discoverable way out anyway.
         box.bind("<Escape>", lambda _e: (self._cancel_edit(), "break")[1])
         box.bind("<Control-Return>", lambda _e: (self._commit_edit(), "break")[1])
+        # The wheel over the box, and a repaint after every key, so the bar and the
+        # count beside it follow the cursor instead of describing where it used to be.
+        box.bind("<MouseWheel>", self._wheel_edit)
+        box.bind("<KeyRelease>", lambda _e: self._render(), add="+")
         self._render()
         if not lite:
             _user32.SetForegroundWindow(toplevel_hwnd(self))
@@ -2848,6 +2983,17 @@ class Bubble(tk.Toplevel):
             self._close_editor()
             self.pill.session.cancel_edit()
             self.note("could not open the editor - Windows kept the focus where it was")
+            return
+        # A second render on a timer, because the first render is what *created* the
+        # box: a widget Tk has not laid out yet cannot say how many of its lines are off
+        # screen. Measured, and each cheaper answer was tried and failed — rendered once,
+        # the hint read `… 2484 more lines` for a 60-line draft, which is a character
+        # count wearing a line count's label; called directly a second time it drew
+        # nothing; `after_idle` drew nothing, because the geometry manager had still not
+        # run. One frame is the first moment the box knows its own size, and it is
+        # imperceptible. Scheduled after the verification, so nothing sits between
+        # `focus_force` and the check that reads what the focus did.
+        self.after(20, self._render)
 
     def _close_editor(self) -> str:
         """Tear the box down and hand the foreground back. Returns what was in it."""

@@ -962,8 +962,29 @@ ever grows at the end.
 
 **No scrollback, deliberately.** Scrolling back would have to lay out what it scrolls to,
 which re-grows the cost the cap exists to bound. The whole draft stays reachable by two
-routes that cost nothing: **Edit** opens all of it in a `tk.Text` that scrolls itself, and
-**Copy draft** puts every character on the clipboard.
+routes that cost nothing: **Edit** opens all of it in a `tk.Text`, and **Copy draft** puts
+every character on the clipboard.
+
+**And Edit says what it is holding** (item 67). It shows about twenty lines of a draft that
+may be ten times that, and it used to say nothing about the rest: the elision line was
+suppressed while editing, on the reasoning that the box holds the whole draft and scrolls
+itself. That was right about the words and wrong about the person. There is now a line
+above the box counting the display lines outside it, a bar in an `EDIT_GUTTER`-wide gutter
+beside it showing where you are and how much there is, a `<MouseWheel>` binding on the box,
+and a press-and-drag on the bar. The count is **measured** off the widget rather than
+estimated — a `tk.Text` has already laid the text out, so there is none of the bargain the
+draft's `… N earlier lines` makes on every partial.
+
+Two things about it are load-bearing and were each found by measurement. The bar is on the
+**canvas** rather than inside the box, because a drag inside a text box selects, and trading
+an editing gesture for a reading one is not an upgrade. And the hint's row is reserved
+whether or not there is anything to put in it: it sits *above* the box and can only be
+measured once the box has been laid out, so a layout that depended on the measurement would
+be deciding the box's position from the box's position — measured first, it read
+`… 2484 more lines` for a 60-line draft, which is a character count wearing a line count's
+label. `_edit` schedules one repaint a frame later for the same reason: rendered once the
+numbers are wrong, called directly a second time nothing is drawn, and `after_idle` is still
+too early because the geometry manager has not run.
 
 **The answer gets a window too, and it points the other way.** The reply path was left out
 of the long-draft fix on the grounds that an answer is read rather than dictated into, which
