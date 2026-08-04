@@ -6,6 +6,85 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-03 — First contact: three users, one verdict, five roots, and a surface split
+
+Flow met its first three outside users on v0.2.0 and all three reached the same
+verdict: garbage. The verdict is earned, and it is not twelve bugs — every complaint
+traced to five roots, each with a named mechanism:
+
+1. **Ask answered nothing.** `session.WORKSHOP` told the CLI that every converse
+   utterance was "a prompt they will hand to an agentic coding CLI… do not carry out
+   the task it describes", from the most recency-weighted position in the prompt — so
+   "how are you" came back as a bug-report lecture. Codex obeyed the instruction
+   perfectly, which is the proof the instruction was wrong: the users were asking to
+   *learn about the project*, and nobody was workshopping a prompt.
+2. **CLI furniture read as UI.** Output stripping exists only for kiro-cli; codex's
+   diff stats and "Create PR" hints rendered verbatim in the bubble — users quoted
+   them back as buttons that would not click — and were stored into the thread as
+   context for the next answer.
+3. **Chips genuinely failed clicks.** `_render` deletes the whole canvas — every chip
+   and its click binding — and repositions the window on every partial decode, every
+   countdown second, every activity frame. A chip being aimed at is destroyed
+   mid-aim, and the codebase already records one drawn-but-dead chip as precedent.
+4. **The prompt vanished, uncommanded.** Auto-ask is ON by default: a 4 s pause sent
+   the words, the send cleared the draft, converse mode has no sent card and no Put
+   it back, and Clear draft left the thread, the reply and the mode alive — "clear
+   prompt did not start fresh", mechanism by mechanism.
+5. **The trigger word fails every voice but the owner's, silently.** The decoder is
+   never told the word exists (the hotwords parameter is wired and nothing ever puts
+   the send word in it), the match is exact whole-utterance equality, and a miss
+   lands in the draft as text with no note. Recognition was measured at exactly one
+   mic; the 2026-07 accent audit predicted exactly this failure.
+
+A 1251-test suite sat green through all five because it measures mechanisms, and
+nothing measured a stranger's first five minutes. First contact is now an instrument:
+the reopen bar on everything below is what the next stranger reports.
+
+**The reference was studied before deciding.** Wispr Flow — the app the users
+compared against — was examined live on this machine plus its docs. What it teaches:
+surfaces are separated by job (dictation streams into the focused app; drafting is a
+separate, opt-in scratchpad); recovery is a history, not a rescue chip; idle presence
+is a neutral, near-invisible dash; states are taught once in a hold-speak-release
+tutorial rather than by legend; and its one flaw shared with Flow is that an
+unrecognized spoken command types itself as text, silently — the near-miss note below
+makes Flow better than the reference at precisely that point.
+
+Decided, six parts:
+
+1. **Ask answers.** WORKSHOP comes out of the ask path. The CLI is told to answer,
+   grounded in the workspace ("consult it if the question concerns it"); the
+   improve-this-prompt instruction survives only in Refine, where a prompt exists.
+2. **Two surfaces, two jobs.** Converse gets its own conversation card — the question
+   pinned above the answer it produced, older turns in a scrolling viewport (the Help
+   sheet already built the machinery), chips Ask / Use this / Copy / New conversation.
+   The draft bubble becomes dictation-only and never shows a reply again. Amber and
+   violet stop being one card's moods and become window identities; the pill
+   simplifies toward mic states. New conversation clears thread, card and reply in
+   one act — no more half-clear.
+3. **Recent, in memory only.** The last ~20 utterances, questions and answers behind
+   the right-click menu, with Copy. Gone on quit, nothing on disk — the
+   words-never-stored stance holds by construction. Reopen: if quit-loss actually
+   bites someone, the next shape is an opt-in on-disk history, never a default one.
+4. **Auto-ask stays ON in converse, with a first-entry notice.** With the question
+   pinned, a premature send no longer loses anything. The first converse entry states
+   on-screen that a pause sends, and names the setting that turns it off. Reopen bar:
+   one stranger reporting a surprise send flips the default to OFF.
+5. **The trigger word is taught, not assumed.** The configured send words join the
+   final decode's hotword bias; a near-miss — phonetically close, not equal — draws a
+   note naming the word. Notify, never execute: the standing refusal to let edit
+   distance fire a send stands. The recording kit gains the trigger words, so
+   recognition across accents becomes measurable instead of assumed.
+6. **A welcome card, shaped like a tutorial.** First launch only: the arm gesture,
+   right-click for the menu, the trigger word by name, and what the colors mean — the
+   load-bearing lines that today print to a console no GUI user reads. The Help sheet
+   gains the legend permanently.
+
+Also in the round: codex furniture measured and stripped (and never stored into the
+thread), the chip teardown replaced with a persistent row proven by a synthetic
+click-storm instrument, Edit gaining a scrollbar and its earlier-lines hint while
+editing, a new-draft-from-clipboard menu entry, and the draft body opening Edit on
+click — the promise `help.exits_note` already makes. Spec'd as round ten, items 60–72.
+
 ### 2026-08-03 — The download must not trail the repo: v0.2.0 now, and links that cannot go stale
 
 The owner caught it in one sentence: anyone downloading the current release misses the
