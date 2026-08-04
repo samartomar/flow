@@ -15,7 +15,7 @@ from typing import NamedTuple, Protocol
 import numpy as np
 
 from .clean import invented_reason, normalise
-from .lexicon import Lexicon
+from .lexicon import MAX_TERMS, Lexicon, as_hotwords
 
 #: How many recent drops to keep. Bounded because R8 says a long session must cost what
 #: a short one costs; 100 is enough for the UI to explain what just vanished.
@@ -130,6 +130,12 @@ class Drop(NamedTuple):
 
 
 class Transcriber(Protocol):
+    #: The configured send words, set by the session before every final decode so a
+    #: trigger renamed through the menu reaches the very next utterance. A class
+    #: attribute as well, because a `Transcriber` built by an embedding or a fixture
+    #: that never sets it must still decode.
+    trigger_words: tuple[str, ...] = ()
+
     def text(
         self, audio: np.ndarray, *, final: bool = False, hotwords: str = ""
     ) -> str:
@@ -279,6 +285,40 @@ class WhisperTranscriber:
         """(partial, final) model names, for startup diagnostics."""
         return self._names[False], self._names[True]
 
+    def _standing_bias(self, final: bool) -> str | None:
+        """The lexicon, with the send words in front of it on a final decode.
+
+        Root 5 of the first-contact verdict: **the decoder was never told the trigger
+        word exists.** `hotwords` has been wired since the lexicon shipped, and nothing
+        ever put the send word in it — so the one word whose recognition decides whether
+        a spoken command works at all was the only word Flow never biased toward.
+        Recognition had been measured at exactly one microphone, the owner's, and the
+        2026-07 accent audit predicted this failure by name.
+
+        Merged rather than either/or, which is the difference from the rescue path above:
+        a rescue is aimed at one utterance and may replace everything, while the trigger
+        is standing and has to ride along with whatever the user has taught. **In front**
+        of the lexicon because the list is capped (`MAX_TERMS`, from a measured 223-token
+        truncation in the library) and a trigger that fell off the end of a full lexicon
+        would be the same silent failure one layer down.
+
+        Final only. A partial is never routed and never matched against a trigger, so
+        biasing one costs prompt tokens for a decision nobody makes.
+        """
+        terms = self.lexicon.terms()
+        if final and self.trigger_words:
+            lower = {t.lower() for t in terms}
+            terms = [w for w in self.trigger_words
+                     if w and w.lower() not in lower] + terms
+            terms = terms[:MAX_TERMS]
+        return as_hotwords(terms)
+
+    #: The configured send words, set by the session before every final decode so a
+    #: trigger renamed through the menu reaches the very next utterance. A class
+    #: attribute as well, because a `Transcriber` built by an embedding or a fixture
+    #: that never sets it must still decode.
+    trigger_words: tuple[str, ...] = ()
+
     def text(
         self, audio: np.ndarray, *, final: bool = False, hotwords: str = ""
     ) -> str:
@@ -291,7 +331,7 @@ class WhisperTranscriber:
         # A caller-supplied bias wins over the standing lexicon rather than joining
         # it: a rescue decode is aimed at one utterance, and the lexicon measurement
         # says a longer prompt full of terms that are not being said costs accuracy.
-        bias = hotwords or self.lexicon.hotwords()
+        bias = hotwords or self._standing_bias(final)
         segments, _ = model.transcribe(audio, **decode_options(final, bias))
         kept = []
         worst: float | None = None

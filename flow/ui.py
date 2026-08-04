@@ -2944,13 +2944,20 @@ class Bubble(tk.Toplevel):
                 cx, cy = x + 4 + i * 10, y + 8
                 c.create_oval(
                     cx - r, cy - r, cx + r, cy + r,
-                    fill=self.accent if lit else CHIP, outline="", tags="waiting",
+                    fill=self.accent if lit else CHIP, outline="",
+                    tags=("body", "waiting"),
                 )
         else:
-            c.create_line(x, y + 8, x + 24, y + 8, fill=MUTED, width=2, tags="waiting")
+            c.create_line(x, y + 8, x + 24, y + 8, fill=MUTED, width=2,
+                          tags=("body", "waiting"))
         c.create_text(
             x + 34, y, anchor="nw", text=self._act.label, fill=MUTED,
-            font=("Segoe UI", 9), tags="indicator",
+            # `body` as well as `indicator`, because `_render` deletes by the first and
+            # everything looks for it by the second. Without it the dots and the label
+            # outlived every redraw and stacked up — found by the selfdrive harness,
+            # which reads the *oldest* matching item and so quietly reported a state
+            # that had been gone for seconds.
+            font=("Segoe UI", 9), tags=("body", "indicator"),
         )
 
     def _put_back(self) -> None:

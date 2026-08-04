@@ -257,11 +257,24 @@ def scenario_corrections(report) -> None:
 
 
 def scenario_undo(report) -> None:
-    """Undo takes back the last change rather than the whole draft."""
+    """Undo takes back the last change rather than the whole draft.
+
+    **"delete the last two words" rather than "the last sentence", and that is a
+    measurement rather than a preference** (2026-08-04). The opening decodes as one
+    sentence or two depending on whether the decoder is given *any* hotword bias at all:
+    with an empty prompt it produces "Tuesday afternoon. Samir …", and with one word in
+    the prompt — a lexicon term, a trigger word, it makes no difference which — it
+    produces "Tuesday afternoon Samir …", deterministically, 3/3 each way. So a
+    sentence-level delete emptied the whole draft the moment item 69 put the send words
+    in the bias, and undo then had nothing to restore. The bias is not the defect: any
+    user who has ever taught Flow a word was already in that configuration, and this
+    harness was the only place still running without one. A word-level delete is stable
+    under both.
+    """
     d = Driver()
     d.speak(OPENING, "opening")
     original = d.session.draft.text
-    d.speak("delete the last sentence", "cmd_del_last")
+    d.speak("delete the last two words", "cmd_del_last_two")
     shortened = d.session.draft.text
     d.speak("undo that", "cmd_undo")
     report("undo restores the previous draft",
@@ -273,8 +286,10 @@ def scenario_rescue(report) -> None:
     """The button's own phrase, spoken, re-reads the last dictation as a command."""
     d = Driver()
     d.speak(OPENING, "opening")
-    # Something that will be heard as dictation, then reclassified.
-    d.speak("delete the last sentence", "cmd_del_last")
+    # Something that will be heard as dictation, then reclassified. A word-level delete
+    # for the reason `scenario_undo` records: a sentence-level one empties the draft
+    # under any hotword bias, and a rescue on an empty draft is an append.
+    d.speak("delete the last two words", "cmd_del_last_two")
     d.speak("was a command", "cmd_rescue")
     report("'was a command' is not appended as text",
            "was a command" not in d.session.draft.text.lower(),
@@ -354,10 +369,13 @@ def scenario_followup(report) -> None:
 
 
 def scenario_asking_ui(report) -> None:
-    """The bubble stays up while the CLI is answering.
+    """The conversation card holds the question while the CLI is answering.
 
     Asking clears the draft, and the draft-empty event used to hide the bubble — so the
-    ten seconds the CLI takes were spent looking at nothing at all.
+    ten seconds the CLI takes were spent looking at nothing at all. Since round ten this
+    is the *card's* job: converse has its own surface, the question is pinned rather than
+    merely surviving, and the draft bubble stays shut throughout (decisions.md
+    2026-08-03, "two surfaces, two jobs").
     """
     from flow.ui import Pill
 
@@ -390,22 +408,25 @@ def scenario_asking_ui(report) -> None:
         session.draft.set("what does WER stand for")
         session._emit("draft", session.draft.text)  # set() alone emits nothing
         pill._frame()
-        report("the bubble shows the question", pill.bubble._visible, "visible")
+        report("the card shows the forming question", pill.card._visible, "visible")
+        report("and the draft bubble stays shut", not pill.bubble._visible, "withdrawn")
         # Send without letting the ask thread finish, so the wait is what is observed.
         session._set_state(State.ASKING)
         session._emit("draft", "")
         session._emit("note", "asking...")
         pill._frame()
-        report("the bubble survives the draft clearing", pill.bubble._visible,
-               f"note={pill.bubble._note!r}")
+        report("the question is pinned once it has gone",
+               pill.card._question == "what does WER stand for", pill.card._question)
         session._emit("reply", "Word Error Rate.")
         pill._frame()
-        report("the answer replaces it", pill.bubble._reply == "Word Error Rate.",
-               pill.bubble._reply)
+        report("the answer lands under it", pill.card._answer == "Word Error Rate.",
+               pill.card._answer)
+        report("with the question still on screen",
+               pill.card._question == "what does WER stand for", pill.card._question)
         session._emit("draft", "and a typical value")
         pill._frame()
         report("the answer stays while the next question is dictated",
-               pill.bubble._reply == "Word Error Rate.", pill.bubble._reply)
+               pill.card._answer == "Word Error Rate.", pill.card._answer)
     finally:
         pill.destroy()
 
@@ -561,7 +582,7 @@ def scenario_chips(report) -> None:
     from unittest import mock
 
     from flow.inject import owned_by_flow
-    from flow.ui import Pill, chip_tag, toplevel_hwnd
+    from flow.ui import CARD_W, Pill, chip_tag, toplevel_hwnd
 
     class Dead:
         #: Loud, and it stays loud. That is not a convenience: a real microphone keeps
@@ -636,9 +657,13 @@ def scenario_chips(report) -> None:
             time.sleep(0.01)
         return False
 
-    def click(pill, label) -> bool:
-        """Press the chip where it is actually drawn. False if there is no such chip."""
-        canvas = pill.bubble.canvas
+    def click(pill, label, win=None) -> bool:
+        """Press the chip where it is actually drawn. False if there is no such chip.
+
+        `win` because there are two surfaces now: converse chips are on the conversation
+        card and dictation chips are on the draft bubble (decisions.md 2026-08-03).
+        """
+        canvas = (win or pill.bubble).canvas
         if not canvas.find_withtag(chip_tag(label)):
             return False
         x1, y1, x2, y2 = canvas.bbox(chip_tag(label))
@@ -664,26 +689,26 @@ def scenario_chips(report) -> None:
     try:
         session.toggle_mode()
         session.draft.set("can you hear me")
-        pill.bubble.show(session.draft.text)
+        pill.card.show_partial(session.draft.text)
         pill.update()
 
-        report("converse mode offers Ask, not Send",
-               bool(pill.bubble.canvas.find_withtag("chip-Ask"))
+        report("converse mode offers Ask on the card, not Send on the bubble",
+               bool(pill.card.canvas.find_withtag("chip-Ask"))
                and not pill.bubble.canvas.find_withtag("chip-Send"),
                f"mode={session.mode}")
 
-        # The bubble is 380 px wide and the chips are laid out left to right; a chip
+        # The card is `CARD_W` wide and the chips are laid out left to right; a chip
         # that runs off the end is drawn but unreachable.
         edges = []
-        for label in ("Refine", "Continue", "Ask"):
-            if pill.bubble.canvas.find_withtag(f"chip-{label}"):
-                edges.append(pill.bubble.canvas.bbox(f"chip-{label}")[2])
-        report("every chip is inside the bubble", edges and max(edges) <= 380,
-               f"rightmost edge {max(edges) if edges else '?'} of 380")
+        for label in ("Ask", "New conversation"):
+            if pill.card.canvas.find_withtag(f"chip-{label}"):
+                edges.append(pill.card.canvas.bbox(f"chip-{label}")[2])
+        report("every chip is inside the card", edges and max(edges) <= CARD_W,
+               f"rightmost edge {max(edges) if edges else '?'} of {CARD_W}")
 
         with mock.patch("flow.session.ask",
                         return_value=("Yes, I can hear you.", "codex")):
-            report("the Ask chip was clickable", click(pill, "Ask"))
+            report("the Ask chip was clickable", click(pill, "Ask", pill.card))
             # Either state proves the question went: `ask` is mocked here, so the answer
             # can be collected by the very pump `click` runs on its way out. Asserting
             # ASKING alone was a race, and it lost about one run in three.
@@ -765,17 +790,17 @@ def scenario_chips(report) -> None:
                not pill.bubble._sent and pill.bubble._visible, pill.bubble._text)
         session.draft.clear()
 
-        # P9 auto-ask: the countdown has to be on the button, and it has to fire.
+        # P9 auto-ask: the countdown has to be on the button, and it has to fire. On
+        # the card now, which is the surface converse mode owns.
         session.toggle_mode()
         session.draft.set("what is the time")
         session._after_draft_change()
         pill._frame()
-        label = pill.bubble.canvas.itemcget(
-            pill.bubble.canvas.find_withtag("chip-Ask")[1], "text"
-        )
+        found = pill.card.canvas.find_withtag("chip-Ask")
+        label = pill.card.canvas.itemcget(found[1], "text") if found else ""
         report("the Ask button shows the countdown", label.startswith("Ask ")
                and label.endswith("s"), label)
-        click(pill, "Refine")
+        session.hold_auto_ask()
         report("a chip press buys the time back",
                session.auto_ask_in > AUTO_ASK_SEC - 1.0,
                f"{session.auto_ask_in:.1f}s left of {AUTO_ASK_SEC:.0f}")
@@ -786,11 +811,14 @@ def scenario_chips(report) -> None:
                    session.state is State.ASKING, session.state.value)
             report("nothing was pasted by the pause", pasted() == ["some words"],
                    str(pasted()))
-            # Painted without pumping: `_frame` would collect the answer on its way
-            # past and the state under test would be gone before it was read.
-            pill.bubble.tick_activity()
-            report("the wait for an answer says so", indicator(pill) == "asking",
-                   indicator(pill))
+            # Read off the card rather than the bubble, and as a note rather than as
+            # the marching-dots indicator: converse owns its own surface now, and the
+            # egress note is the signal there — it names the provider and the workspace,
+            # which is strictly more than three dots said. Painted without pumping,
+            # because `_frame` would collect the answer on its way past and the state
+            # under test would be gone before it was read.
+            said = " | ".join(e.text for e in session.events() if e.kind == "note")
+            report("the wait for an answer says so", "asking" in said, said)
             settle(pill, lambda: session.state is not State.ASKING)
 
         # -- what Flow is doing, in each state it can be waiting in ------------

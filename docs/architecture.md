@@ -758,6 +758,53 @@ the platform convention rather than a translation of the user's text — but fee
 that is *already* CRLF yields `\r\r\n`, which is worth knowing before anything else in
 this app starts copying arbitrary strings.
 
+### The trigger word reaches the decoder, and a near miss says so
+
+Root 5 of the first-contact verdict, and the widest of the five: **the trigger word fails
+every voice but the owner's, silently.** Three mechanisms stacked. The `hotwords`
+parameter has been wired since the lexicon shipped and nothing ever put the send word in
+it, so the one word whose recognition decides whether a spoken command works at all was
+the only word Flow never biased toward. The match is exact whole-utterance equality. And
+a miss lands in the draft as text with no note, so the user's evidence that the feature
+exists is that nothing happened. Recognition had been measured at exactly one
+microphone; the 2026-07 accent audit predicted this by name.
+
+`Transcriber._standing_bias` merges the configured send words into the **final** decode's
+bias — merged rather than either/or, which is the difference from the rescue path, where
+a caller-supplied bias replaces everything because a rescue is aimed at one utterance.
+The triggers go in **front** of the lexicon, because the list is capped and a trigger
+that fell off the end of a full lexicon would be the same silent failure one layer down.
+Final only: a partial is never routed and never matched against a trigger. The session
+republishes them before every final decode, from the live profile, so a word renamed
+through the menu biases the very next utterance rather than the next launch.
+
+**`hotwords` is not free, and this is where that was measured** (2026-08-04). The
+selfdrive opening decodes as two sentences with an empty prompt and as one with *any*
+word in it — a lexicon term or a trigger word, it makes no difference which — 3/3
+deterministic each way. Two sentence-final periods are the price of biasing at all. That
+cost is not this feature's: any user who has ever taught Flow a word was already paying
+it, and the harness was the only place still running without one. What it did do is make
+two selfdrive scenarios fragile, because a sentence-level delete emptied the whole draft;
+both use a word-level delete now, and the reason is written where they are.
+
+`Session._note_near_miss` is the other half, and the point where Flow is better than its
+reference — Wispr Flow types an unrecognised spoken command as text, quietly, exactly as
+Flow did. An utterance of at most two words whose `phonetic.similarity` to a configured
+trigger clears `NEAR_MISS_SIMILARITY` draws a note naming the word. **Notify, never
+execute**: letting edit distance fire a send is a standing refusal, because a send is
+irreversible in dictate mode and the whole grammar rests on a wrong edit costing one undo
+while a wrong send costs a paragraph in a stranger's terminal. Routing is untouched and
+the exact-match rule stands.
+
+The threshold is swept, not chosen. Over every distinct one- and two-word sequence in the
+580 real EdAcc utterances — 4 866 of them — against all six shipped presets and their
+enter-variants: 0.70 fires 13 times, 0.75 fires 7 (`ZOOM`/boom, `MAN`/mango, `BOOK`/boom,
+`DOING`/tango, `POEM`/boom, `TONIC`/tango), and **0.78 and above fires zero**. Against 25
+plausible decoder misses written down before the sweep, 0.78 catches 22, 0.82 catches 21,
+0.90 catches 15. Deliberately not `phonetic.MATCH_THRESHOLD` (0.82): that one fires an
+edit and this one only speaks, so a notify rule can afford to be more sensitive than an
+editing one.
+
 ### Send, spoken
 
 Two words press it. `boom` pastes; `enter boom` pastes and then submits with Enter, and

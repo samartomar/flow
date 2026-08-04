@@ -570,3 +570,223 @@ class TestTheEnterGoesWithThePaste(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheDecoderIsToldTheWordExists(unittest.TestCase):
+    """Root 5's first half. The `hotwords` parameter has been wired since the lexicon
+    shipped, and nothing ever put the send word in it — so the one word whose
+    recognition decides whether a spoken command works at all was the only word Flow
+    never biased toward. Recognition had been measured at exactly one microphone.
+    """
+
+    def transcriber(self, terms=(), triggers=()):
+        from flow.asr import WhisperTranscriber
+
+        t = WhisperTranscriber.__new__(WhisperTranscriber)
+        t.lexicon = mock.Mock()
+        t.lexicon.terms.return_value = list(terms)
+        t.trigger_words = tuple(triggers)
+        return t
+
+    def test_the_send_words_join_the_final_bias(self):
+        bias = self.transcriber(terms=["Sameer"], triggers=("tango", "enter tango"))
+        self.assertIn("tango", bias._standing_bias(final=True))
+        self.assertIn("Sameer", bias._standing_bias(final=True))
+
+    def test_they_join_it_rather_than_replacing_it(self):
+        # The difference from the rescue path, which *does* replace: a rescue is aimed
+        # at one utterance and the trigger is standing, so it has to ride along with
+        # whatever the user has taught.
+        bias = self.transcriber(terms=["Sameer", "Priya"], triggers=("boom",))
+        for word in ("Sameer", "Priya", "boom"):
+            self.assertIn(word, bias._standing_bias(final=True))
+
+    def test_a_partial_is_not_biased_toward_them(self):
+        # A partial is never routed and never matched against a trigger, so biasing one
+        # costs prompt tokens for a decision nobody makes.
+        bias = self.transcriber(terms=["Sameer"], triggers=("boom",))
+        self.assertNotIn("boom", bias._standing_bias(final=False) or "")
+
+    def test_the_trigger_goes_in_front_of_a_full_lexicon(self):
+        # The list is capped from a measured 223-token truncation in the library, and a
+        # trigger that fell off the end of a full lexicon would be the same silent
+        # failure one layer down.
+        from flow.lexicon import MAX_TERMS
+
+        bias = self.transcriber(terms=[f"term{i}" for i in range(MAX_TERMS)],
+                                triggers=("boom",))
+        joined = bias._standing_bias(final=True)
+        self.assertTrue(joined.startswith("boom"), joined[:40])
+
+    def test_a_word_already_in_the_lexicon_is_not_repeated(self):
+        bias = self.transcriber(terms=["boom", "Sameer"], triggers=("boom",))
+        self.assertEqual(bias._standing_bias(final=True).split().count("boom"), 1)
+
+    def test_no_triggers_at_all_is_the_lexicon_unchanged(self):
+        bias = self.transcriber(terms=["Sameer"], triggers=())
+        self.assertEqual(bias._standing_bias(final=True), "Sameer")
+
+    def test_the_session_publishes_them_on_every_final_decode(self):
+        # From the live profile rather than at construction, so a trigger renamed
+        # through the menu biases the very next utterance rather than the next launch.
+        import numpy as np
+
+        from flow.audio import BLOCK
+        from flow.session import Session
+
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Profile(Path(tmp) / "profile.json")
+            p.send_word, p.send_enter_word = "tango", "enter tango"
+            s = Session(asr=_FakeAsr(), mic=_FakeMic(), profile=p)
+            s._utter = [np.full(BLOCK, 0.2, dtype=np.float32)]
+            s._finalise()
+            self.assertEqual(s.asr.trigger_words, ("tango", "enter tango"))
+            p.send_word, p.send_enter_word = "mango", "enter mango"
+            s._utter = [np.full(BLOCK, 0.2, dtype=np.float32)]
+            s._finalise()
+            self.assertEqual(s.asr.trigger_words, ("mango", "enter mango"))
+            s.close()
+
+
+class _FakeAsr:
+    loading = False
+    trigger_words = ()
+
+    def load(self, final=None) -> None: ...
+
+    def text(self, a, *, final=False, hotwords="") -> str:
+        return ""
+
+
+class _FakeMic:
+    level_db = -60.0
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    @property
+    def active(self) -> bool:
+        return True
+
+    def restart(self) -> None: ...
+
+    def drain(self) -> list:
+        return []
+
+
+class TestANearMissSpeaksUp(unittest.TestCase):
+    """Root 5's second half, and the point where Flow is better than its reference.
+
+    The trigger fails silently: the match is exact whole-utterance equality, so a miss
+    lands in the draft as text and the user's only evidence that the feature exists is
+    that nothing happened. Wispr Flow shares this flaw — an unrecognised spoken command
+    types itself, quietly.
+
+    **Notify, never execute.** Letting edit distance fire a send is a standing refusal:
+    a send is irreversible in dictate mode, and the whole grammar rests on a wrong edit
+    costing one undo while a wrong send costs a paragraph in a stranger's terminal.
+    """
+
+    def session(self, word="tango"):
+        from flow.session import Session
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p = Profile(Path(tmp.name) / "profile.json")
+        p.send_word, p.send_enter_word = word, enter_word(word)
+        s = Session(asr=_FakeAsr(), mic=_FakeMic(), profile=p)
+        self.addCleanup(s.close)
+        return s
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def test_a_near_miss_is_named(self):
+        s = self.session("tango")
+        s._route("tan go")
+        said = self.notes(s)
+        self.assertIn("tango", said)
+        self.assertIn("sends the draft", said)
+
+    def test_and_the_words_still_land_in_the_draft(self):
+        # Notify only. Routing is untouched, which is what makes this safe to be
+        # sensitive about.
+        s = self.session("tango")
+        s._route("tan go")
+        self.assertEqual(s.draft.text, "tan go")
+
+    def test_an_exact_match_still_sends(self):
+        s = self.session("tango")
+        s._route("tango")
+        self.assertEqual(s.draft.text, "")
+        self.assertIn("send", [e.kind for e in s.events()])
+
+    def test_ordinary_speech_says_nothing(self):
+        s = self.session("tango")
+        for utterance in ("the deploy failed", "yes", "okay then", "hello"):
+            with self.subTest(utterance=utterance):
+                s.draft.set("")
+                s.events()
+                s._route(utterance)
+                self.assertNotIn("sends the draft", self.notes(s))
+
+    def test_a_long_utterance_that_happens_to_score_is_a_sentence(self):
+        # Two words at most, because that is the shape a trigger has.
+        s = self.session("tango")
+        s.events()
+        s._route("tan go and do the thing")
+        self.assertNotIn("sends the draft", self.notes(s))
+
+    def test_it_follows_the_configured_word(self):
+        s = self.session("banana")
+        s._route("bananas")
+        self.assertIn("banana", self.notes(s))
+        other = self.session("falcon")
+        other._route("bananas")
+        self.assertNotIn("sends the draft", self.notes(other))
+
+    def test_the_threshold_is_the_swept_one_and_not_the_editing_one(self):
+        # 0.78 is the lowest bar with zero false fires over 4 866 real one- and two-word
+        # sequences; `MATCH_THRESHOLD` is 0.82 and fires an *edit*. A notify rule can
+        # afford to be more sensitive than an editing one.
+        from flow.phonetic import MATCH_THRESHOLD
+        from flow.session import NEAR_MISS_SIMILARITY
+
+        self.assertEqual(NEAR_MISS_SIMILARITY, 0.78)
+        self.assertNotEqual(NEAR_MISS_SIMILARITY, MATCH_THRESHOLD)
+
+    def test_no_word_in_the_corpus_scores_high_enough(self):
+        # The sweep, kept: every distinct one- and two-word sequence in the 580 real
+        # EdAcc utterances, against all six presets and their enter-variants. Zero fires
+        # at the shipped threshold, which is the whole reason it is the shipped one.
+        from flow.edits import SEND_WORD_PRESETS
+        from flow.phonetic import similarity
+        from flow.session import NEAR_MISS_SIMILARITY
+
+        bench = Path(__file__).resolve().parent.parent / ".bench" / "accent"
+        manifests = sorted(bench.glob("manifest-edacc*.jsonl"))
+        if not manifests:
+            self.skipTest("no EdAcc manifest - run scripts/fetch_accent_data.py")
+        grams = set()
+        for mf in manifests:
+            with mf.open(encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    words = json.loads(line)["ref"].split()
+                    grams.update(words)
+                    grams.update(" ".join(words[i:i + 2])
+                                 for i in range(len(words) - 1))
+        grams = {g.strip(" .,!?") for g in grams if g.strip(" .,!?")}
+        fired = []
+        for gram in grams:
+            for word in SEND_WORD_PRESETS:
+                trigs = (word, enter_word(word))
+                if gram.lower() in [t.lower() for t in trigs]:
+                    continue
+                if max(similarity(gram, t) for t in trigs) >= NEAR_MISS_SIMILARITY:
+                    fired.append((gram, word))
+                    break
+        self.assertEqual(fired, [],
+                         f"{len(fired)} false fires in {len(grams)} sequences")

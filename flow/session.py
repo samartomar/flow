@@ -46,6 +46,7 @@ from .edits import (
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
 from .help import auto_ask_notice, exits_note
+from .phonetic import similarity
 from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
@@ -97,6 +98,22 @@ def ask_framing(cwd: str | None) -> str:
 #: bounded, because it is the one word in that note the user's filesystem wrote.
 #: `help.MAX_HEAD`'s figure, `help.fit`'s idiom.
 WORKSPACE_LEAF_MAX = 24
+
+#: How close an utterance has to sound to a configured trigger before Flow says so.
+#:
+#: Swept, not chosen. Over every distinct one- and two-word sequence in the 580 real
+#: EdAcc utterances — **4 866 of them** — against all six shipped presets and their
+#: enter-variants: 0.70 fires 13 times, 0.75 fires 7 (`ZOOM`/boom, `MAN`/mango,
+#: `BOOK`/boom, `DOING`/tango, `POEM`/boom, `TONIC`/tango), and **0.78 and everything
+#: above it fires zero**. Against 25 plausible decoder misses written down before the
+#: sweep ran, 0.78 catches 22, 0.82 catches 21, 0.90 catches 15. So 0.78 is the knee:
+#: the lowest bar with no false fire on real speech, and the one that gives up least.
+#:
+#: Deliberately *not* `edits.MATCH_THRESHOLD` (0.82), and the difference is what the two
+#: numbers buy. That one fires an edit; this one only speaks. A notify rule can afford to
+#: be more sensitive than an editing one, and sharing a constant would tie a note's
+#: sensitivity to a rewrite's caution for no reason but tidiness.
+NEAR_MISS_SIMILARITY = 0.78
 
 #: How many recent items are kept for the Recent menu. Bounded by count the way `Thread`
 #: is, and for R8's reason: a long session must cost what a short one costs.
@@ -1208,6 +1225,11 @@ class Session:
         # one costs, and an unbounded list of every utterance ever spoken is a recording.
         self._sent.append(record)
         self._last_audio = audio
+        # The decoder is told the word exists, on every final decode, from the live
+        # profile — so a trigger renamed through the menu biases the very next
+        # utterance rather than the next launch. Set here rather than at construction
+        # because `send_words` reads the profile, and the menu writes it.
+        self.asr.trigger_words = self.send_words
         self.worker.submit_final(audio, record)
         self._utter = []
         self._decoded_sec = 0.0
@@ -1298,6 +1320,7 @@ class Session:
                 self._emit("note", "converse mode - asking; nothing to submit here")
             self._emit("send", thread_plan.op)
             return
+        self._note_near_miss(utterance)
         if thread_plan.kind == "recall":
             trace("recall")
             self._recall()
@@ -1417,6 +1440,38 @@ class Session:
         self.following_up = True
         self._emit("note", "brought back the last prompt")
         self._after_draft_change()
+
+    def _note_near_miss(self, utterance: str) -> None:
+        """Say when something almost was the send word, and never act on it.
+
+        Root 5's second half. The trigger fails every voice but the owner's *silently*:
+        the match is exact whole-utterance equality, so a miss lands in the draft as
+        text and the user's evidence that the feature exists at all is that nothing
+        happened. The reference shares this flaw — an unrecognised spoken command types
+        itself, quietly — and this note is the one point where Flow is better than it.
+
+        **Notify, never execute.** Letting edit distance fire a send is a standing
+        refusal: a send is irreversible in dictate mode (it pastes into somebody else's
+        window and presses nothing back), and the whole grammar is built on the
+        asymmetry that a wrong *edit* costs one undo while a wrong *send* costs a
+        paragraph in a stranger's terminal. So the exact-match rule stands untouched and
+        this only speaks.
+
+        Two words at most, because that is the shape a trigger has. A longer utterance
+        that happens to score is a sentence, not a mis-heard word.
+        """
+        if len(utterance.split()) > 2:
+            return
+        best, word = 0.0, ""
+        for configured in self.send_words:
+            score = similarity(utterance, configured)
+            if score > best:
+                best, word = score, configured
+        if best < NEAR_MISS_SIMILARITY or not word:
+            return
+        self.diag.write("route", route="near_miss")
+        self._emit("note", f"that sounded like “{word}”, which sends the draft — "
+                           f"say it on its own if that is what you meant")
 
     @property
     def send_words(self) -> tuple[str, str]:
