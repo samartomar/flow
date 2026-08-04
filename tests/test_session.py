@@ -377,3 +377,106 @@ class TestPauseIsAnUtteranceBoundary(unittest.TestCase):
         session._finalise()
         session._route("words from after", record=session._sent[-1])
         self.assertEqual(session.draft.text, "words from after")
+
+
+class TestRecentIsRememberedAndNeverWritten(unittest.TestCase):
+    """Item 65. A bounded ring of what happened to words, in memory and nowhere else.
+
+    The store is separate from `thread` on purpose, and the difference is the point:
+    `thread` is what the CLI is told — trimmed to a character budget for that, and
+    cleared by a workspace switch or a new conversation — while this is what the user
+    did, and survives both.
+    """
+
+    def test_dictation_lands_in_it(self):
+        # The utterance, not the draft it landed in: two sentences dictated one after
+        # the other are two things somebody said, and a ring of accumulating drafts
+        # would hold the same words over and over with only the last one complete.
+        s = run(["Send the report to Bob.", "Add the rollback plan."])
+        self.assertEqual([r for r, _t in s.recent], ["said", "said"])
+        self.assertEqual([t for _r, t in s.recent],
+                         ["Add the rollback plan.", "Send the report to Bob."])
+        s.close()
+
+    def test_it_is_newest_first(self):
+        s = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        for i in range(3):
+            s._remember_recent("said", f"utterance {i}")
+        self.assertEqual([t for _r, t in s.recent],
+                         ["utterance 2", "utterance 1", "utterance 0"])
+
+    def test_it_is_bounded(self):
+        from flow.session import RECENT_MAX
+
+        s = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        for i in range(RECENT_MAX * 3):
+            s._remember_recent("said", f"utterance {i}")
+        self.assertEqual(len(s.recent), RECENT_MAX)
+        self.assertEqual(s.recent[0][1], f"utterance {RECENT_MAX * 3 - 1}")
+
+    def test_a_question_replaces_the_dictation_it_was_built_from(self):
+        # Otherwise every converse turn fills two slots with one sentence: the words are
+        # remembered as they are dictated, and again as they are asked.
+        s = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        s._remember_recent("said", "how do I widen a column")
+        s._remember_recent("asked", "how do I widen a column")
+        self.assertEqual(s.recent, [("asked", "how do I widen a column")])
+
+    def test_the_answer_is_its_own_entry(self):
+        s = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        s._remember_recent("asked", "how do I widen a column")
+        s._remember_recent("answer", "Use ALTER TABLE.")
+        self.assertEqual([r for r, _t in s.recent], ["answer", "asked"])
+
+    def test_blank_words_are_not_an_entry(self):
+        s = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        s._remember_recent("said", "   ")
+        self.assertEqual(s.recent, [])
+
+    def test_a_new_conversation_does_not_take_it_away(self):
+        # `thread` is cleared and this is not, because "what did I say ten minutes ago"
+        # is a question about the session rather than about the conversation.
+        s = Session(asr=FakeTranscriber([]), mic=FakeMic())
+        s._remember_recent("said", "words from earlier")
+        s.new_conversation()
+        self.assertEqual(len(s.recent), 1)
+
+    def test_nothing_it_holds_reaches_the_settings_folder(self):
+        # The stance stated as a measurement: run a whole session with words in the
+        # ring, against a settings folder of its own, and require the folder to be
+        # exactly as it was. `diag.NEVER` already makes the trace structurally unable to
+        # carry them; this is the other half, and it is the one that would break first
+        # if somebody added persistence "just for Recent".
+        import tempfile
+        from pathlib import Path as _Path
+
+        from flow.diag import Diag
+        from flow.profile import Profile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = _Path(tmp)
+            before = sorted(p.name for p in folder.iterdir())
+            profile = Profile(folder / "profile.json")
+            s = Session(asr=FakeTranscriber(["a secret sentence nobody may store."]),
+                        mic=FakeMic(), profile=profile,
+                        diag=Diag(folder / "diag.jsonl"))
+            s.mic.utterance()
+            s.start()
+            s.wait_idle(timeout=5.0)
+            s._remember_recent("asked", "another secret sentence")
+            s._remember_recent("answer", "and the answer to it")
+            s.close()
+            after = sorted(p.name for p in folder.iterdir())
+            self.assertEqual(
+                [n for n in after if n not in before and n not in
+                 ("profile.json", "diag.jsonl")],
+                [], "Recent left a file behind")
+            blob = "".join(p.read_text(encoding="utf-8", errors="replace")
+                           for p in folder.iterdir() if p.is_file())
+        for secret in ("a secret sentence", "another secret sentence",
+                       "and the answer to it"):
+            self.assertNotIn(secret, blob, f"{secret!r} was written to disk")
+
+
+if __name__ == "__main__":
+    unittest.main()

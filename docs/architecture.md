@@ -1153,6 +1153,19 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 Send is the commit point for the profile: rare, user-initiated, and the moment a session's
 corrections have proved themselves by surviving to a handoff.
 
+**What is deliberately not in that table: Recent.** `Session._recent` is a
+`RECENT_MAX`-deep ring of what happened to words — dictated, asked, answered — behind
+**right-click ▸ Recent**, with a tap copying the whole entry through the app's one
+clipboard borrow. It is in memory and nowhere else, and that is the words-never-stored
+stance holding by construction rather than by care: `diag.NEVER` already makes the trace
+structurally unable to carry them, and a test drives a full session against a settings
+folder of its own and requires the folder to be as it was, with the sentences absent from
+every byte in it. The cost is real and was accepted with the decision: quitting loses it.
+If that ever bites somebody, the next shape is an **opt-in** on-disk history, never a
+default one. It is a separate store from `thread` rather than a view of it, because
+`thread` is what the CLI is told — trimmed for that purpose, and cleared by a workspace
+switch or a new conversation — while this is what the *user* did, and survives both.
+
 There is no settings dialog, and the two files above are the reason: everything a user can
 set is already hand-editable text. Finding it was **half** the gap — this document used to
 say it was the whole one, and the owner said otherwise: "unless it is exposed to UI right

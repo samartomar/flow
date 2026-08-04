@@ -24,6 +24,7 @@ from pathlib import Path
 from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
 from .help import (
     AUTO_ASK_OFF_LABEL,
+    fit,
     AUTO_ASK_ON_LABEL,
     TITLE as HELP_TITLE,
     open_guide,
@@ -381,6 +382,11 @@ HELP_MAX_H = 1040
 #: as a panel wedged against the edges.
 HELP_MARGIN = 48
 
+#: How much of one Recent entry a menu row carries. A native `TrackPopupMenu` row that
+#: runs the width of the screen is a menu nobody can read down, and the tap copies the
+#: whole thing anyway — the same bargain the answer window strikes.
+RECENT_LABEL_MAX = 56
+
 #: The conversation card. Wider than the draft bubble because its job is an exchange
 #: rather than a sentence — a question, its answer, and the turns behind them — and
 #: narrow enough to still anchor beside a pill in a corner of a 1280-wide work area.
@@ -639,6 +645,7 @@ class Pill(tk.Tk):
         # Above Clear draft, because one of them saves the words and the other destroys
         # them, and this menu is where the long-draft incident would have ended.
         m.add_command(label="Copy draft", command=self._copy_draft)
+        self._recent_menu(m)
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
         self._settings_menu(m, offered)
@@ -896,6 +903,40 @@ class Pill(tk.Tk):
                 command=lambda name=v.name: self.session.set_voice(name),
             )
         parent.add_cascade(label="Voice", menu=sub)
+
+    def _recent_menu(self, parent: tk.Menu) -> None:
+        """The last ~20 things, truncated to a row and copyable whole.
+
+        The reference's lesson, and the one Flow was furthest from: recovery is a
+        history, not a rescue chip (decisions.md 2026-08-03). "Was a command" reaches
+        one utterance back and only while the draft it landed in is still there; this
+        reaches the session.
+
+        Absent rather than inert on an empty ring, the way the trigger submenu is absent
+        under `--no-profile`: a submenu that opens onto nothing is a control that lies
+        about having something behind it.
+
+        The rows are truncated and the tap copies the **whole** text — the same bargain
+        the reply window strikes, and through `_copy`, which is the one clipboard borrow
+        this app has.
+        """
+        # A list, asked for as one: an embedding or a fake session may carry no ring at
+        # all, and `getattr(..., None) or []` is not the guard it looks like when the
+        # attribute is a Mock — which is what every UI fixture in this suite hands it.
+        items = getattr(self.session, "recent", None)
+        if not isinstance(items, list) or not items:
+            return
+        sub = tk.Menu(parent, tearoff=0)
+        for role, text in items:
+            sub.add_command(
+                label=f"{role}: {fit(text, RECENT_LABEL_MAX)}",
+                command=lambda t=text: self._copy_recent(t),
+            )
+        parent.add_cascade(label="Recent", menu=sub)
+
+    def _copy_recent(self, text: str) -> None:
+        problem = self._copy(text)
+        self.front.note(problem or f"copied {len(text)} characters")
 
     def _copy(self, text: str) -> str:
         """Lite's way out: the draft onto the clipboard. Returns what went wrong, or "".

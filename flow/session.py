@@ -95,8 +95,26 @@ def ask_framing(cwd: str | None) -> str:
 #: The moment of egress names the ground (decisions.md "Workspace grounding"): the
 #: leaf, not the path, because the note is glanced at as the question leaves — and
 #: bounded, because it is the one word in that note the user's filesystem wrote.
-#: `help.MAX_HEAD`'s figure, `help._fit`'s idiom.
+#: `help.MAX_HEAD`'s figure, `help.fit`'s idiom.
 WORKSPACE_LEAF_MAX = 24
+
+#: How many recent items are kept for the Recent menu. Bounded by count the way `Thread`
+#: is, and for R8's reason: a long session must cost what a short one costs.
+#:
+#: **In memory and nowhere else** (decisions.md 2026-08-03, part 3). Flow's standing
+#: position is that the words are never stored, and that holds here by construction
+#: rather than by care — nothing in this file writes, `diag.NEVER` refuses every field
+#: that could carry them, and a test asserts no new file appears under the settings
+#: folder across a full session. The cost is that quitting loses it. If that ever bites
+#: somebody the next shape is an opt-in on-disk history, never a default one.
+RECENT_MAX = 20
+
+#: What a Recent entry is, in one word: dictated, asked, or answered. Roles rather than a
+#: bare list, because "what I said" and "what came back" are the two things somebody is
+#: looking for and a flat list makes them look the same.
+RECENT_SAID = "said"
+RECENT_ASKED = "asked"
+RECENT_ANSWERED = "answer"
 
 #: Minimum audio growth before asking for a fresh partial. Paired with the
 #: worker-idle check below, this is what bounds partial latency.
@@ -491,6 +509,14 @@ class Session:
         #: P6: what has already been sent. Send appends here instead of erasing, so a
         #: follow-up has something to follow.
         self.thread = Thread()
+        #: The last `RECENT_MAX` things that happened to words, newest last: what was
+        #: dictated, what was asked, what came back. A separate store from `thread`
+        #: rather than a view of it, and the difference is the point — `thread` is what
+        #: the *CLI* is told, trimmed to a character budget for that purpose and cleared
+        #: by a workspace switch or a new conversation. This is what the *user* did, and
+        #: it survives both, because "what did I say ten minutes ago" is a question
+        #: about the session rather than about the current conversation.
+        self._recent: deque[tuple[str, str]] = deque(maxlen=RECENT_MAX)
         #: True when the current draft was opened as a follow-up, which is what lets a
         #: CLI rewrite see the thread tail without every ordinary correction paying for
         #: the extra context.
@@ -1539,6 +1565,28 @@ class Session:
         self._emit("note", f"following up on {len(self.thread)} sent")
         self._after_draft_change()
 
+    @property
+    def recent(self) -> list[tuple[str, str]]:
+        """The Recent menu's contents, newest first. In memory, never on disk."""
+        return list(reversed(self._recent))
+
+    def _remember_recent(self, role: str, text: str) -> None:
+        """One entry, deduped against the one before it.
+
+        The dedupe is not tidiness: a question is remembered when it is asked and the
+        same words are already in the ring as the dictation they were built from, so
+        without it every converse turn would fill two slots with one sentence.
+        """
+        text = text.strip()
+        if not text or (self._recent and self._recent[-1] == (role, text)):
+            return
+        if self._recent and self._recent[-1][1] == text:
+            # Same words, new role — the dictation just became a question. Replace
+            # rather than append, so the ring holds one entry per thing that happened.
+            self._recent[-1] = (role, text)
+            return
+        self._recent.append((role, text))
+
     def _remember_append(self, utterance: str, record: Utterance | None = None) -> None:
         """Keep the last dictation, with **its own** audio, for a reinterpretation.
 
@@ -1548,6 +1596,7 @@ class Session:
         serve, and reading the slot paired the words with the wrong sound.
         """
         self._last_append = Append(utterance, record, self.draft.revision)
+        self._remember_recent(RECENT_SAID, utterance)
 
     @property
     def can_rescue(self) -> bool:
@@ -2178,6 +2227,7 @@ class Session:
         kept = question if len(question) <= budget else question[-budget:]
         framed = kept + framing
 
+        self._remember_recent(RECENT_ASKED, question)
         self.diag.write("ask", op=op, chars=len(question),
                         sent=len(kept), mode=self.mode, artifact=artifact)
         self._cli_started = time.perf_counter()
@@ -2232,6 +2282,7 @@ class Session:
             self.reply = ""
         else:
             self.reply = answer
+            self._remember_recent(RECENT_ANSWERED, answer)
             # Recorded as a turn so the next question inherits it — this is what makes
             # "and what about the other one?" mean anything.
             self.thread.add(f"(reply) {answer}")

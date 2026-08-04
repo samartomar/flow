@@ -251,7 +251,7 @@ class TestNothingRunsOffTheEdge(unittest.TestCase):
         self.assertTrue(shown.endswith("…"))
 
     def test_a_gap_row_stays_empty_rather_than_becoming_an_ellipsis(self):
-        # `_fit` cuts to a limit and the gap's limit is zero, which is exactly the shape
+        # `fit` cuts to a limit and the gap's limit is zero, which is exactly the shape
         # that turns "" into "…" if the empty case is not handled first.
         for kind, left, right in helpfile.rows():
             if kind == "gap":

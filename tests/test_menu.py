@@ -85,7 +85,7 @@ class Menu(unittest.TestCase):
         return Profile(self.folder / "profile.json")
 
     def build(self, profile=None, *, speaker=None, converse=False, clis=(),
-              workspace=None, voices=()) -> FakeMenu:
+              workspace=None, voices=(), recent=()) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -103,9 +103,15 @@ class Menu(unittest.TestCase):
             send_words=(SEND_WORD, SEND_ENTER_WORD), workspace=workspace,
         )
         pill.session.voices.return_value = list(voices)
+        #: A real list, because `_recent_menu` asks for one by type — `getattr(..., None)
+        #: or []` is not a guard when the attribute is a Mock, which is exactly what this
+        #: fixture hands it.
+        pill.session.recent = list(recent)
         pill.settings_path = self.folder / "lexicon.txt"
         pill.hotkeys = None
         pill.bubble = mock.Mock()
+        pill.card = mock.Mock()
+        pill.card.note = self.notes.append
         pill.bubble.note = self.notes.append
         #: `surface` is the same line shown with no draft behind it, which is how the
         #: menu answers a tap that has nothing to act on.
@@ -205,6 +211,71 @@ class TestCopyDraftIsTheExitThatNeedsNothing(Menu):
     def test_a_refusing_clipboard_is_reported(self):
         self._tap("a draft", mock.Mock(return_value="could not copy: busy"))
         self.assertIn("could not copy", " | ".join(self.notes))
+
+
+class TestRecentIsAHistoryAndNotAFile(Menu):
+    """Decision part 3, and the reference's lesson: recovery is a history.
+
+    "Was a command" reaches one utterance back, and only while the draft it landed in is
+    still there. This reaches the session — and reaches it in memory, which is the whole
+    bargain: the words-never-stored stance holds by construction, and the cost is that
+    quitting loses it.
+    """
+
+    SOME = [("said", "the deploy failed after the migration"),
+            ("asked", "how do I widen a column"),
+            ("answer", "Use ALTER TABLE, then reindex.")]
+
+    def test_an_empty_ring_offers_no_submenu_at_all(self):
+        # Absent rather than inert, the way the trigger submenu is under --no-profile: a
+        # submenu that opens onto nothing is a control lying about having something.
+        self.assertNotIn("Recent", self.build(self.profile()).cascades)
+
+    def test_the_entries_are_listed_newest_first_with_their_role(self):
+        top = self.build(self.profile(), recent=list(reversed(self.SOME)))
+        labels = top.cascades["Recent"].order
+        self.assertEqual(len(labels), 3)
+        self.assertTrue(labels[0].startswith("answer: "), labels[0])
+        self.assertTrue(labels[-1].startswith("said: "), labels[-1])
+
+    def test_a_long_entry_is_cut_to_a_row(self):
+        # A native menu row the width of the screen is a menu nobody reads down.
+        long = "x" * 400
+        top = self.build(self.profile(), recent=[("said", long)])
+        label = top.cascades["Recent"].order[0]
+        self.assertLess(len(label), 80)
+        self.assertTrue(label.endswith("…"))
+
+    def test_a_tap_copies_the_whole_thing_and_not_the_row(self):
+        import flow.ui as ui
+
+        long = "y" * 400
+        top = self.build(self.profile(), recent=[("said", long)])
+        copied: list[str] = []
+        with mock.patch.object(ui.Pill, "_copy",
+                               lambda _s, t: copied.append(t) or ""):
+            top.cascades["Recent"].commands[top.cascades["Recent"].order[0]]()
+        self.assertEqual(copied, [long])
+        self.assertIn("400", " ".join(self.notes))
+
+    def test_a_clipboard_refusal_is_said_rather_than_swallowed(self):
+        import flow.ui as ui
+
+        top = self.build(self.profile(), recent=self.SOME)
+        with mock.patch.object(ui.Pill, "_copy", lambda _s, _t: "could not copy: nope"):
+            top.cascades["Recent"].commands[top.cascades["Recent"].order[0]]()
+        self.assertIn("could not copy", " ".join(self.notes))
+
+    def test_it_goes_through_the_one_clipboard_borrow_this_app_has(self):
+        # Not a second `clipboard_clear`/`append` pair. Item 50 made the borrow one
+        # transaction at a time on purpose, and a second caller would be outside it.
+        import inspect
+
+        import flow.ui as ui
+
+        body = inspect.getsource(ui.Pill._copy_recent)
+        self.assertIn("self._copy(", body)
+        self.assertNotIn("clipboard_", body)
 
 
 class TestWhatMovedInside(Menu):

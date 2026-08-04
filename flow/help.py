@@ -124,9 +124,13 @@ MAX_LEFT, MAX_RIGHT, MAX_NOTE = 32, 58, 82
 MAX_HEAD = 24
 
 
-def _fit(text: str, limit: int) -> str:
+def fit(text: str, limit: int) -> str:
     """Cut to the budget, marked. The same idiom `edits.removed_text` uses, and here for
-    the same reason: exactly one row carries text nobody in this file wrote."""
+    the same reason: exactly one row carries text nobody in this file wrote.
+
+    Public since item 65, which needed it for the Recent menu rows: a second truncation
+    with a slightly different ellipsis rule would be a second thing to keep true, and
+    the drift would be invisible because both would look right."""
     text = text.strip()
     if not text:
         return ""
@@ -263,7 +267,7 @@ def rows(hotkeys=None, send_words: tuple[str, str] | None = None,
     ]
     limits = {"pair": (MAX_LEFT, MAX_RIGHT), "note": (MAX_NOTE, 0),
               "head": (MAX_NOTE, MAX_RIGHT), "gap": (0, 0)}
-    return [(kind, _fit(left, limits[kind][0]), _fit(right, limits[kind][1]))
+    return [(kind, fit(left, limits[kind][0]), fit(right, limits[kind][1]))
             for kind, left, right in out]
 
 
