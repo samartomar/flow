@@ -1588,7 +1588,7 @@ what was true.
 
 | Layer | Harness | What it can and cannot see |
 |---|---|---|
-| units | `tests/` (1393 tests, ~39 s; the off-Windows count is last measured at 1168 and predates round ten, see Verification) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
+| units | `tests/` (1393 tests, ~39 s; 1310 of them run off Windows, see Verification) | routing, filters, phonetics, state machine, resilience — with a fake transcriber, so no mic or model needed. Cannot see wiring. `test_races.py` is the one layer that can see a CLI call and the router running at the same time: it holds a fake refine open on an event while it edits the draft underneath it. `test_lifecycle.py` is the only module that starts a real process, because a fake process cannot outlive anything — it is also ~5 s of the runtime, since proving a child did *not* survive means waiting long enough for it to have reported that it did |
 | one layer, real audio | `scripts/*_bench.py` | WER, latency, gate behaviour, command recall — real models on real recordings. Cannot see the app |
 | whole app | `scripts/selfdrive.py` | SAPI speaks → real `Session` → real gate → real two-tier decode → real router → assertions on the draft. 64 checks, including converse against the live CLI, and `scenario_chips` clicking real chips and reading the indicator and the level meter off the canvas. Cannot see accent — SAPI is a US-English synthesiser. **Cannot see focus**: `event_generate` hands Tk an event without Windows ever being involved, so the click it makes cannot move the foreground and cannot reproduce the defect that made Send useless |
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
@@ -1639,6 +1639,12 @@ interpreter is pinned to uv's own 3.12 on both legs.
 
 **§11's law is now measured rather than asserted.** "The platform decides what imports,
 `lite` decides what happens" had only ever been run on Windows. Green on both legs since
+2026-08-04, round ten: **Windows 1393 OK (1 skipped), macOS 1310 OK (65 skipped)**,
+green on both legs first time — 3 995 lines changed, two new windows and a new surface,
+and the platform law held without a single new marker. The reading below is 2026-08-03's
+and its analysis of the 65 stands: the skip count did not move, so nothing this round
+added a Win32 dependency anywhere but where one already was.
+
 2026-08-03: **Windows 1251 OK (1 skipped), macOS 1168 OK (65 skipped)**. Of those 65, 40
 are the six Win32 mechanisms that cannot exist off Windows — `ctypes.WinDLL`,
 `os.startfile`, kernel32's `NeedCurrentDirectoryForExePath`, the PowerShell speech host,
