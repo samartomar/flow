@@ -521,6 +521,10 @@ class MeasuringCanvas:
         item = {
             "x": x, "y": y, "text": text, "anchor": kw.get("anchor", "center"),
             "h": lines * self.LINE_H.get(size, 17), "lines": lines,
+            # Recorded because one surface draws the same slot in two colours to say
+            # whose words they are — the answer in REPLY, the question in MUTED — and a
+            # fake that dropped the colour could not see them swap.
+            "fill": kw.get("fill"),
         }
         self.items.append(item)
         return len(self.items) - 1

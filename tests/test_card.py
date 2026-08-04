@@ -1,0 +1,346 @@
+"""The conversation card — converse mode's own surface.
+
+Three outside users met converse mode on the draft bubble and every consequence of the
+sharing arrived at once (decisions.md 2026-08-03). The sharpest was auto-ask: a pause
+sent the question, the send cleared the draft, and the screen went blank with no record
+of what had been asked. "The prompt vanished, uncommanded" is that sentence.
+
+So the property this module exists to pin is the pinned question. Everything else here
+— the bound on the window, the bound on one render, the chips staying inside it — is the
+same discipline items 37, 42 and 45 already paid for on the bubble, restated for a
+window that renders on every partial too.
+"""
+
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
+
+import flow.ui as ui  # noqa: E402
+from test_editor import WORK, MeasuringCanvas  # noqa: E402
+
+WORD = "release notes about the migration on Tuesday with Sameer and the rollback plan "
+
+
+def prose(n: int) -> str:
+    return (WORD * (n // len(WORD) + 1))[:n]
+
+
+def card(**kw):
+    """A card with a measuring canvas and no Tk, built the way test_bubble builds one."""
+    c = ui.ConversationCard.__new__(ui.ConversationCard)
+    c.pill = mock.Mock()
+    c.pill.accent = "#a78bfa"
+    c.pill.work = WORK
+    c.pill.x, c.pill.y = 900, 560
+    c.pill.session = mock.Mock(can_take_reply=True, auto_ask_in=None)
+    c.canvas = MeasuringCanvas()
+    c._history, c._heights = [], []
+    c._top = 0
+    c._drag_y, c._drag_px = None, 0
+    c._question = c._answer = c._partial = c._note = ""
+    c._visible = True
+    c._h = ui.CARD_MIN_H
+    c._pinned_h = 0
+    c._countdown = None
+    c.placed = []
+    c.geometry = c.placed.append
+    c.deiconify = lambda: None
+    c.attributes = lambda *a, **kw: None
+    c.withdraw = lambda: None
+    for name, value in kw.items():
+        setattr(c, name, value)
+    return c
+
+
+def drawn(c) -> list[str]:
+    """Every string that reached the canvas as visible text, probes excluded.
+
+    `_render` measures before it draws and both go through `create_text`, so the drawn
+    set is the items after the last `delete`. `MeasuringCanvas.delete` clears its list,
+    which is what makes that separation free here.
+    """
+    return [i["text"] for i in c.canvas.items if i["text"]]
+
+
+class TestTheQuestionSurvivesItsAnswer(unittest.TestCase):
+    """The whole reason the card exists."""
+
+    def test_a_question_is_on_screen_before_the_answer_is(self):
+        c = card()
+        c.ask("how do I widen a column")
+        self.assertIn("how do I widen a column", drawn(c))
+
+    def test_and_is_still_on_screen_once_the_answer_arrives(self):
+        # The defect, inverted. On the bubble `show_reply` cleared the draft area, so
+        # this text was gone by the time its answer was readable.
+        c = card()
+        c.ask("how do I widen a column")
+        c.answer("Use ALTER TABLE.")
+        body = drawn(c)
+        self.assertIn("how do I widen a column", body)
+        self.assertIn("Use ALTER TABLE.", body)
+
+    def test_the_answer_is_drawn_in_the_reply_colour_and_the_question_is_not(self):
+        c = card()
+        c.ask("q")
+        c.answer("a")
+        colours = {i["text"]: i.get("fill") for i in c.canvas.items}
+        self.assertEqual(colours["a"], ui.REPLY)
+        self.assertEqual(colours["q"], ui.MUTED)
+
+    def test_the_forming_words_sit_where_the_question_will(self):
+        c = card()
+        c.show_partial("how do I wid")
+        self.assertIn("how do I wid", drawn(c))
+
+    def test_and_are_replaced_by_the_question_when_it_goes(self):
+        c = card()
+        c.show_partial("how do I wid")
+        c.ask("how do I widen a column")
+        self.assertNotIn("how do I wid", drawn(c))
+        self.assertIn("how do I widen a column", drawn(c))
+
+
+class TestOlderTurnsScrollAbove(unittest.TestCase):
+    def test_a_second_question_pushes_the_first_exchange_up(self):
+        c = card()
+        c.ask("first question")
+        c.answer("first answer")
+        c.ask("second question")
+        self.assertEqual(c._history, [("q", "first question"), ("a", "first answer")])
+        self.assertEqual(c._question, "second question")
+        self.assertEqual(c._answer, "")
+
+    def test_an_unanswered_question_still_becomes_history(self):
+        # A question that failed is still a question that was asked, and losing it
+        # would be the vanishing this card exists to end.
+        c = card()
+        c.ask("first")
+        c.ask("second")
+        self.assertEqual(c._history, [("q", "first")])
+
+    def test_the_history_is_bounded_like_the_thread_is(self):
+        c = card()
+        for i in range(60):
+            c.ask(f"question {i}")
+            c.answer(f"answer {i}")
+        self.assertLessEqual(len(c._history), 2 * ui.THREAD_MAX_TURNS)
+        self.assertEqual(len(c._heights), len(c._history))
+
+    def test_a_turn_is_measured_once_when_it_is_pushed_and_never_on_a_render(self):
+        # This card draws on every partial. A per-render walk of twenty wrapped turns
+        # is item 37's 476.7 ms rebuilt on a different surface.
+        c = card()
+        for i in range(8):
+            c.ask(f"question {i}")
+            c.answer(prose(2_000))
+        with mock.patch.object(ui.ConversationCard, "_row_h",
+                               side_effect=AssertionError("measured on a render")):
+            c.show_partial("still typing")
+            c.show_partial("still typing a bit more")
+
+    def test_one_enormous_turn_is_laid_out_from_its_head_under_a_cap(self):
+        c = card()
+        c.ask(prose(50_000))
+        c.answer("ok")
+        c.ask("next")
+        row = c._row_text(c._history[0])
+        # `head_window` runs forward to the next space rather than cutting mid-word, so
+        # the bound is the cap plus that scan — the point is that it is a bound at all.
+        self.assertLessEqual(len(row), ui.CARD_TURN_CHARS + ui.BODY_BOUNDARY_SCAN)
+        self.assertTrue(prose(50_000).startswith(row[:40]))
+
+
+class TestTheWindowStaysInsideTheDesktop(unittest.TestCase):
+    """Item 42's fit and item 44's anchor, on this window's width."""
+
+    def positions(self):
+        left, top, right, bottom = WORK
+        return [(left, top), (right - ui.PILL_W, top),
+                (left, bottom - ui.PILL_H), (right - ui.PILL_W, bottom - ui.PILL_H),
+                ((left + right) // 2, (top + bottom) // 2)]
+
+    def test_a_twelve_thousand_character_answer_does_not_grow_past_the_work_area(self):
+        left, top, right, bottom = WORK
+        for x, y in self.positions():
+            with self.subTest(pos=(x, y)):
+                c = card()
+                c.pill.x, c.pill.y = x, y
+                c.ask("write me a complete prompt")
+                c.answer(prose(12_000))
+                self.assertLessEqual(c._h, bottom - top - 2 * ui.EDGE_AIR)
+                geom = c.placed[-1]
+                size, gx, gy = geom.split("+")[0], *map(int, geom.split("+")[1:])
+                self.assertEqual(size, f"{ui.CARD_W}x{c._h}")
+                self.assertGreaterEqual(gx, left)
+                self.assertGreaterEqual(gy, top)
+                self.assertLessEqual(gx + ui.CARD_W, right)
+                self.assertLessEqual(gy + c._h, bottom)
+
+    def test_what_is_left_out_of_a_long_answer_is_said(self):
+        c = card()
+        c.ask("write me a complete prompt")
+        c.answer(prose(12_000))
+        self.assertTrue(any(t.startswith("… ") and t.endswith("more lines")
+                            for t in drawn(c)),
+                        "a clipped answer said nothing about the rest")
+
+    def test_the_chips_are_inside_the_window_however_tall_the_answer(self):
+        c = card()
+        c.ask("q")
+        c.answer(prose(12_000))
+        chips = [i for i in c.canvas.items
+                 if i["text"] in ("Ask", "Use this", "Copy", "New conversation")]
+        self.assertEqual(len(chips), 4)
+        for chip in chips:
+            self.assertLess(chip["y"], c._h, chip["text"])
+            self.assertGreater(chip["y"], 0, chip["text"])
+
+
+class TestTheChips(unittest.TestCase):
+    def labels(self, c) -> list[str]:
+        keys = ("Ask", "Use this", "Copy", "New conversation")
+        return [i["text"] for i in c.canvas.items
+                if any(i["text"].startswith(k) for k in keys)]
+
+    def test_ask_is_there_before_anything_has_been_asked(self):
+        c = card()
+        c.show()
+        self.assertIn("Ask", self.labels(c))
+
+    def test_the_countdown_rides_on_the_ask_chip(self):
+        c = card()
+        c.pill.session.auto_ask_in = 2.4
+        c.ask("q")
+        self.assertIn("Ask 3s", self.labels(c))
+
+    def test_use_this_and_copy_appear_only_with_an_answer(self):
+        c = card()
+        c.ask("q")
+        self.assertNotIn("Use this", self.labels(c))
+        self.assertNotIn("Copy", self.labels(c))
+        c.answer("an answer")
+        self.assertIn("Use this", self.labels(c))
+        self.assertIn("Copy", self.labels(c))
+
+    def test_copy_carries_the_whole_answer_and_not_the_head_that_is_drawn(self):
+        # Item 45's promise, restated on this surface: the window is a view, not a
+        # truncation.
+        c = card()
+        c.pill._copy = mock.Mock(return_value="")
+        c.ask("q")
+        c.answer(prose(12_000))
+        c._copy_answer()
+        c.pill._copy.assert_called_once_with(prose(12_000))
+
+    def test_use_this_hands_the_answer_over_and_stops_showing_it_as_one(self):
+        c = card()
+        c.pill.session.take_reply = mock.Mock(return_value=True)
+        c.ask("q")
+        c.answer("an answer")
+        c._take_reply()
+        self.assertEqual(c._answer, "")
+        self.assertNotIn("an answer", drawn(c))
+
+    def test_a_refused_take_leaves_the_answer_where_it_is(self):
+        c = card()
+        c.pill.session.take_reply = mock.Mock(return_value=False)
+        c.ask("q")
+        c.answer("an answer")
+        c._take_reply()
+        self.assertEqual(c._answer, "an answer")
+
+
+class TestNewConversationEmptiesTheCard(unittest.TestCase):
+    def test_everything_goes_in_one_act(self):
+        c = card()
+        c.ask("first")
+        c.answer("first answer")
+        c.ask("second")
+        c.note("a note")
+        c.clear()
+        self.assertEqual((c._history, c._question, c._answer, c._note), ([], "", "", ""))
+        self.assertEqual(c._top, 0)
+
+
+class TestScrolling(unittest.TestCase):
+    """Item 32's viewport, and the reason it has two ways in."""
+
+    def loaded(self):
+        c = card()
+        for i in range(12):
+            c.ask(f"question number {i}")
+            c.answer(f"answer number {i}")
+        c.ask("the current one")
+        c.answer("the current answer")
+        return c
+
+    def test_the_wheel_moves_the_view(self):
+        c = self.loaded()
+        c._top = 0
+        c._wheel(mock.Mock(delta=-120))
+        self.assertGreater(c._top, 0)
+
+    def test_the_drag_moves_it_too_and_is_the_one_that_cannot_be_switched_off(self):
+        # On Windows `WM_MOUSEWHEEL` goes to the *focused* window and this one is never
+        # focused; the wheel arrives only through a setting a user can turn off.
+        c = self.loaded()
+        c._top = 0
+        c._grab(mock.Mock(y=200))
+        c._drag(mock.Mock(y=100))
+        self.assertGreater(c._top, 0)
+
+    def test_it_never_scrolls_past_the_last_turn(self):
+        c = self.loaded()
+        c._scroll(10_000)
+        self.assertLessEqual(c._top, max(0, len(c._history) - 1))
+
+    def test_and_never_before_the_first(self):
+        c = self.loaded()
+        c._scroll(-10_000)
+        self.assertEqual(c._top, 0)
+
+    def test_a_new_question_scrolls_the_history_to_the_end(self):
+        # The turn that just happened is the one worth looking at; a card that stayed
+        # where the reader left it would answer into a view of last week.
+        c = self.loaded()
+        c._top = 0
+        c.ask("and one more")
+        self.assertEqual(c._top, c._max_top())
+
+
+class TestTheBubbleStaysShutInConverse(unittest.TestCase):
+    """`Pill.front`, which is what keeps two surfaces from being one again."""
+
+    def pill(self, mode):
+        p = ui.Pill.__new__(ui.Pill)
+        p.session = mock.Mock(mode=mode)
+        p.bubble = mock.Mock()
+        p.card = mock.Mock()
+        return p
+
+    def test_converse_notes_and_partials_go_to_the_card(self):
+        p = self.pill(ui.CONVERSE)
+        self.assertTrue(p.converse)
+        self.assertIs(p.front, p.card)
+
+    def test_dictate_notes_and_partials_go_to_the_bubble(self):
+        p = self.pill(ui.DICTATE)
+        self.assertFalse(p.converse)
+        self.assertIs(p.front, p.bubble)
+
+    def test_a_session_with_no_mode_at_all_is_dictate(self):
+        # `--no-profile`, a fixture, an embedding. The bubble is the safe default: it is
+        # the surface that existed before there were two.
+        p = ui.Pill.__new__(ui.Pill)
+        p.session = object()
+        p.bubble, p.card = mock.Mock(), mock.Mock()
+        self.assertIs(p.front, p.bubble)
+
+
+if __name__ == "__main__":
+    unittest.main()

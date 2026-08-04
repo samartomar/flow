@@ -1030,6 +1030,31 @@ the request before the CLI is called, and the spoken half changes with it — a 
 artifact is rendered whole and *spoken* as a one-line pointer, because Flow is deaf for
 exactly as long as it talks and a read-aloud prompt would cost minutes of that.
 
+**Converse has its own window.** `ui.ConversationCard` is the surface, and the draft
+bubble is dictation-only: two surfaces, two jobs (decisions.md 2026-08-03). Sharing one
+card was root 4 of the first-contact verdict — auto-ask sent the question, the send
+cleared the draft, and the screen went blank with no record of what had been asked. The
+card pins the question in `MUTED` with the answer under it in `REPLY`, so a premature
+send costs nothing; earlier turns scroll above it in the item-32 viewport (wheel where
+Windows delivers it, press-and-drag always); and the chip row is Ask — carrying the
+auto-ask countdown, on the button it is about to press — Use this, Copy, and New
+conversation.
+
+It is built the way `HelpWindow` was, because that window had already solved this one's
+problems: `WS_EX_NOACTIVATE` with the read-back reported rather than assumed, the shell
+palette, and a viewport whose second scroll path exists because the first one depends on
+a Windows setting. It is anchored like the bubble rather than centred like the help sheet
+— it is the surface somebody is working in — and fitted to the work area before anything
+reads its height (item 42), so a 12 000-character answer cannot put the chips below the
+display. Bounded on every axis that grows: each earlier turn is laid out from its head
+under `CARD_TURN_CHARS`, the answer takes `head_window` with `… N more lines` at its foot
+(item 45), and a turn's height is measured **once, when it is pushed** — this card
+renders on every partial, and a per-render walk of twenty wrapped turns is item 37's
+476.7 ms rebuilt on a different surface.
+
+`Pill.front` is what keeps the two apart: notes, errors and partials are the three things
+both surfaces carry, so they go through one name rather than a branch at each call site.
+
 ## 8. Constants, and what is behind them
 
 Only the ones with a measurement or a failure behind them. Everything else is in the source.

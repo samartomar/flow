@@ -31,7 +31,8 @@ from .lexicon import (
 )
 from .profile import path_key, resolve_workspace
 from .refine import available
-from .session import DICTATE, Session, State
+from .session import CONVERSE, DICTATE, Session, State
+from .thread import MAX_TURNS as THREAD_MAX_TURNS
 
 
 class _RECT(ctypes.Structure):
@@ -356,6 +357,24 @@ HELP_MAX_H = 1040
 #: as a panel wedged against the edges.
 HELP_MARGIN = 48
 
+#: The conversation card. Wider than the draft bubble because its job is an exchange
+#: rather than a sentence — a question, its answer, and the turns behind them — and
+#: narrow enough to still anchor beside a pill in a corner of a 1280-wide work area.
+CARD_W = 420
+
+#: A card with nothing on it yet is still a window somebody has to be able to see and
+#: reach the chips on.
+CARD_MIN_H = 120
+
+#: How much of one earlier turn is laid out in the history viewport. Read from the head,
+#: because a turn is read from its beginning — the opposite of the draft, which is read
+#: from the end. The bound is invariant 7: twenty turns of unbounded length laid out on
+#: every partial is item 37's defect with a different name on it.
+CARD_TURN_CHARS = 400
+
+#: Air between one history turn and the next, and between the question and its answer.
+CARD_GAP = 8
+
 #: How long each dot of the indeterminate-wait animation holds.
 #:
 #: Three dots at this cadence is a 1.2 s cycle — visibly alive without being a strobe,
@@ -500,6 +519,15 @@ class Pill(tk.Tk):
         self.canvas.pack()
 
         self.bubble = Bubble(self)
+        #: P9's own surface (decisions.md 2026-08-03, "two surfaces, two jobs"). Built
+        #: here beside the bubble rather than on first use like the help window, because
+        #: it has to be styled in the same breath as the other two — see below.
+        self.card = ConversationCard(self)
+        #: The last draft that was on screen. When the draft empties into an ask, this
+        #: is the question that went — read from what was displayed rather than from
+        #: `session.thread`, whose trimming is about what the CLI is told and would
+        #: otherwise decide what the user can still see.
+        self._last_draft = ""
         self._bind_drag()
         # add="+", and that is not decoration: `<Button-1>` and `<ButtonPress-1>` are
         # the same Tk event, so binding this one without it replaced the whole binding
@@ -516,7 +544,7 @@ class Pill(tk.Tk):
         # style on. Reported rather than assumed: see `_no_activate`. Built as a list
         # first because `all()` over a generator stops at the first False — which would
         # mean a pill that failed silently took the bubble down with it, unstyled.
-        applied = [_no_activate(win) for win in (self, self.bubble)]
+        applied = [_no_activate(win) for win in (self, self.bubble, self.card)]
         self.no_activate = all(applied)
 
         self._draw()
@@ -1126,6 +1154,21 @@ class Pill(tk.Tk):
         if hwnd and not owned_by_flow(hwnd):
             self.paste_target = hwnd
 
+    @property
+    def converse(self) -> bool:
+        """Which job is on, and therefore which window owns the screen."""
+        return getattr(self.session, "mode", DICTATE) == CONVERSE
+
+    @property
+    def front(self) -> object:
+        """The surface this mode's words belong on.
+
+        Notes, errors and partials are the three things both surfaces carry, so they go
+        through one name instead of a branch at each of the four call sites — which is
+        how the bubble came to be opened by a note while the card was the surface.
+        """
+        return self.card if self.converse else self.bubble
+
     def _frame(self) -> None:
         self._track_target()
 
@@ -1161,6 +1204,16 @@ class Pill(tk.Tk):
         for ev in self.session.events():
             if ev.kind == "draft":
                 if ev.text:
+                    self._last_draft = ev.text
+                if self.converse:
+                    # The forming question goes on the card, and the bubble stays shut:
+                    # two surfaces, two jobs. When the draft empties into an ask, the
+                    # words that were on screen are the words that went, so they pin.
+                    if ev.text:
+                        self.card.partial(ev.text)
+                    elif self.session.state is State.ASKING:
+                        self.card.ask(self._last_draft)
+                elif ev.text:
                     self.bubble.show(ev.text)
                 elif self.session.state is State.ASKING:
                     # Asking clears the draft, and hiding here left the user staring
@@ -1173,14 +1226,18 @@ class Pill(tk.Tk):
                 # sent card in the same breath. Hiding on that event is what used to
                 # take them straight back off the screen.
             elif ev.kind == "partial":
-                self.bubble.show_partial(ev.text)
+                self.front.show_partial(ev.text)
             elif ev.kind == "error":
                 self._flash = 12
-                self.bubble.note(ev.text)
+                self.front.note(ev.text)
             elif ev.kind == "note":
-                self.bubble.note(ev.text)
+                self.front.note(ev.text)
             elif ev.kind == "reply":
-                self.bubble.show_reply(ev.text)
+                if self.converse:
+                    if ev.text:
+                        self.card.answer(ev.text)
+                else:
+                    self.bubble.show_reply(ev.text)
             elif ev.kind == "mode":
                 pass  # the accompanying note is what the user reads
             elif ev.kind == "send":
@@ -1191,11 +1248,14 @@ class Pill(tk.Tk):
             elif ev.kind == "drop":
                 # Shown, not hidden: P2 is that a rejection is never silent. The
                 # recovery affordance itself is Phase 3's rescue chip.
-                self.bubble.note(ev.text)
+                self.front.note(ev.text)
 
-        self.bubble.tick_countdown()
-        self.bubble.tick_activity()
-        self.bubble.tick_sent()
+        if self.converse:
+            self.card.tick_countdown()
+        else:
+            self.bubble.tick_countdown()
+            self.bubble.tick_activity()
+            self.bubble.tick_sent()
         if self._flash:
             self._flash -= 1
         self._draw()
@@ -1530,6 +1590,385 @@ class HelpWindow(tk.Toplevel):
             c.create_text(PAD + w + 12, (y1 + y2) / 2, anchor="w",
                           text="scroll, or drag the page, for the rest",
                           fill=MUTED, font=("Segoe UI", 8))
+
+
+class ConversationCard(tk.Toplevel):
+    """P9's surface: a question, the answer it produced, and the turns behind them.
+
+    Converse mode used to share the draft bubble, and three outside users found every
+    consequence of that at once (decisions.md 2026-08-03). A bubble is about the words
+    being *worked on*; an exchange is about words that have already gone. Sharing one
+    card made the two indistinguishable — most sharply on auto-ask, where a four-second
+    pause sent the question, the send cleared the draft, and the screen went blank with
+    no record of what had just been asked. "The prompt vanished, uncommanded" is that
+    sentence, and the pinned question is the answer to it: the words stay on screen with
+    the answer growing underneath them, so a premature send costs nothing.
+
+    Built the way `HelpWindow` was, because that window already solved this one's
+    problems: `WS_EX_NOACTIVATE` with the read-back reported rather than assumed, the
+    shell palette, and a viewport that scrolls by wheel *and* by press-and-drag — the
+    wheel reaches an unfocused window only through "Scroll inactive windows when I hover
+    over them", which is a Windows default and a user preference, so the drag is the path
+    that cannot be switched off.
+
+    Anchored like the bubble rather than centred like the help sheet: this is the surface
+    somebody is working in, so it belongs where their eye already is.
+
+    Bounded like everything else. Each earlier turn is laid out from its head under
+    `CARD_TURN_CHARS`, the answer takes `head_window` with `… N more lines` at its foot
+    (item 45), and the measured heights of the history are cached and recomputed only
+    when the history itself changes — because this card renders on every partial, which
+    is where item 37's 476.7 ms came from.
+    """
+
+    def __init__(self, pill: Pill) -> None:
+        super().__init__(pill)
+        self.pill = pill
+        self.bg = _shell_window(self, pill.lite, 0.0)
+        self.configure(bg=self.bg)
+        self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
+        self.canvas.pack()
+        self.no_activate = _no_activate(self)
+        #: Exchanges already answered, oldest first, as `(kind, text)` with kind in
+        #: `{"q", "a"}`. Its own list rather than a read of `session.thread`: the thread
+        #: is what the *CLI* is told, trimmed to a character budget for that purpose,
+        #: and a window that re-derived itself from it would change what is on screen
+        #: whenever that budget moved.
+        self._history: list[tuple[str, str]] = []
+        self._heights: list[int] = []
+        self._top = 0
+        self._drag_y: int | None = None
+        self._drag_px = 0
+        self._question = ""
+        self._answer = ""
+        self._partial = ""
+        self._note = ""
+        self._visible = False
+        self._h = CARD_MIN_H
+        #: How tall the pinned block measured last render. Read by `_view_h`, which the
+        #: scroll arithmetic goes through — and which can be asked before the first
+        #: render, so it has a value from the start rather than an attribute error.
+        self._pinned_h = 0
+        #: Last auto-ask second painted, so the countdown repaints once a second rather
+        #: than on every frame. Same discipline as `Bubble.tick_countdown`.
+        self._countdown: int | None = None
+        self.canvas.bind("<MouseWheel>", self._wheel)
+        self.canvas.bind("<ButtonPress-1>", self._grab)
+        self.canvas.bind("<B1-Motion>", self._drag)
+        self.withdraw()
+
+    # -- content -----------------------------------------------------------
+
+    def ask(self, question: str) -> None:
+        """A question has gone. The exchange it displaces becomes history."""
+        if self._question:
+            self._push(("q", self._question))
+            if self._answer:
+                self._push(("a", self._answer))
+        self._question, self._answer, self._partial = question, "", ""
+        self._top = self._max_top()
+        self._show()
+
+    def answer(self, text: str) -> None:
+        self._answer = text
+        self._show()
+
+    def show_partial(self, text: str) -> None:
+        """The words forming now, where the question they are becoming will sit.
+
+        Named for the bubble's method rather than for itself: `Pill.front` hands notes
+        and partials to whichever surface the mode owns, and a protocol with two names
+        for one act is a protocol with a branch in every caller.
+        """
+        self._partial = text
+        self._show()
+
+    def note(self, msg: str) -> None:
+        self._note = msg
+        self._show()
+
+    def clear(self) -> None:
+        """Everything gone — history, question, answer, note. Item 64's one act."""
+        self._history, self._heights = [], []
+        self._question = self._answer = self._partial = self._note = ""
+        self._top = 0
+        if self._visible:
+            self._render()
+
+    def show(self) -> None:
+        self._show()
+
+    def close(self) -> None:
+        self._visible = False
+        self.withdraw()
+
+    @property
+    def showing(self) -> bool:
+        return bool(self.winfo_exists() and self.state() != "withdrawn")
+
+    def _push(self, row: tuple[str, str]) -> None:
+        self._history.append(row)
+        self._heights.append(self._row_h(row))
+        # Bounded by the same number the thread is bounded by, and for the same reason:
+        # a long session must cost what a short one costs (R8).
+        while len(self._history) > 2 * THREAD_MAX_TURNS:
+            self._history.pop(0)
+            self._heights.pop(0)
+
+    def _show(self) -> None:
+        if not self._visible:
+            self._visible = True
+            self.deiconify()
+            self.attributes("-alpha", 0.97)
+        self._render()
+
+    # -- scrolling ---------------------------------------------------------
+
+    def _view_h(self) -> int:
+        """What is left for the history once the pinned block and chips have theirs."""
+        return max(0, self._h - PAD - self._pinned_h - HELP_FOOT_BAND)
+
+    def _max_top(self) -> int:
+        height = 0
+        for i in range(len(self._history) - 1, -1, -1):
+            height += self._heights[i] + CARD_GAP
+            if height > self._view_h():
+                return min(i + 1, len(self._history) - 1)
+        return 0
+
+    def _scroll(self, rows: int) -> None:
+        top = max(0, min(self._top + rows, self._max_top()))
+        if top != self._top:
+            self._top = top
+            self._render()
+
+    def _wheel(self, e) -> None:
+        self._scroll(-(e.delta // 120 or (1 if e.delta > 0 else -1)))
+
+    def _grab(self, e) -> None:
+        self._drag_y, self._drag_px = e.y, 0
+
+    def _drag(self, e) -> None:
+        if self._drag_y is None:
+            return
+        self._drag_px += self._drag_y - e.y
+        self._drag_y = e.y
+        # Content follows the hand, whole turns at a time. A turn is the unit here
+        # rather than a line, because a turn is what the eye is looking for.
+        steps, self._drag_px = divmod(self._drag_px, 40)
+        if steps:
+            self._scroll(steps)
+
+    # -- geometry ----------------------------------------------------------
+
+    def work_h(self) -> int:
+        _left, top, _right, bottom = self.pill.work
+        return bottom - top - 2 * EDGE_AIR
+
+    def reposition(self) -> None:
+        """Item 44's anchor, with this window's width. Above whenever above fits."""
+        left, top, right, bottom = self.pill.work
+        x = self.pill.x + PILL_W - CARD_W
+        above = self.pill.y - self._h - 10
+        below = self.pill.y + PILL_H + 10
+        y = below if above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR \
+            else above
+        x = max(left + EDGE_AIR, min(x, right - CARD_W - EDGE_AIR))
+        y = max(top + EDGE_AIR, min(y, bottom - self._h - EDGE_AIR))
+        self.geometry(f"{CARD_W}x{self._h}+{x}+{y}")
+
+    # -- painting ----------------------------------------------------------
+
+    def _probe_h(self, text: str, font) -> int:
+        probe = self.canvas.create_text(
+            PAD, PAD, anchor="nw", text=text or " ", fill=TEXT,
+            font=font, width=CARD_W - 2 * PAD,
+        )
+        _x1, y1, _x2, y2 = self.canvas.bbox(probe)
+        return y2 - y1
+
+    def _row_h(self, row: tuple[str, str]) -> int:
+        """Measured once, when the turn is pushed. Never on a render.
+
+        This card draws on every partial, so a per-render walk of twenty wrapped turns
+        would be item 37's 476.7 ms rebuilt on a different surface. The history only
+        changes when a turn is added, so that is the only place it is measured.
+        """
+        return self._probe_h(self._row_text(row), ("Segoe UI", 9))
+
+    @staticmethod
+    def _row_text(row: tuple[str, str]) -> str:
+        _kind, text = row
+        return head_window(text, CARD_TURN_CHARS)
+
+    def _answer_slot(self, reply: str, cap: int) -> tuple[str, int, int]:
+        """`Bubble._reply_slot`'s bargain, on this card's width.
+
+        The head, not the tail, and `N` measured off the canvas rather than estimated —
+        an answer is laid out once when it arrives, which is what makes an exact count
+        affordable here and not in the draft.
+        """
+        font = ("Segoe UI", 10)
+        full_h = self._probe_h(reply, font)
+        if full_h <= cap:
+            return reply, 0, full_h
+        shown, shown_h = reply, full_h
+        for _ in range(BODY_PROBES):
+            shown = head_window(reply, max(1, int(len(shown) * cap * 0.95 / shown_h)))
+            shown_h = self._probe_h(shown, font)
+            if shown_h <= cap:
+                break
+        line_h = max(1, self._probe_h("M", font))
+        return shown, round(full_h / line_h) - round(shown_h / line_h), shown_h
+
+    def _render(self) -> None:
+        c = self.canvas
+        accent = self.pill.accent
+        c.delete("all")
+
+        question = self._partial or self._question
+        q_h = self._probe_h(question, ("Segoe UI", 9)) if question else 0
+        note_h = self._probe_h(self._note, ("Segoe UI", 8)) if self._note else 0
+        # The answer gets what the desktop has left after everything else on the card,
+        # which is arithmetic rather than a constant — the same bargain `Bubble._render`
+        # strikes, and the reason a 12 000-character artifact cannot size this window
+        # past the bottom of the display.
+        spare = (self.work_h() - PAD - HELP_FOOT_BAND - q_h - CARD_GAP
+                 - BODY_ELIDED_H - (note_h + 4 if self._note else 0))
+        shown, more, a_h = "", 0, 0
+        if self._answer:
+            shown, more, a_h = self._answer_slot(self._answer,
+                                                 max(BODY_ELIDED_H, spare))
+        self._pinned_h = (
+            q_h
+            + (CARD_GAP if q_h and a_h else 0)
+            + a_h
+            + (BODY_ELIDED_H if more else 0)
+            + (note_h + 4 if self._note else 0)
+        )
+        history_h = sum(h + CARD_GAP for h in self._heights)
+        self._h = min(
+            max(CARD_MIN_H, PAD + history_h + self._pinned_h + HELP_FOOT_BAND),
+            self.work_h(),
+        )
+        c.configure(width=CARD_W, height=self._h)
+        self.reposition()
+
+        c.delete("all")
+        _round_rect(c, 1, 1, CARD_W - 1, self._h - 1, 14, fill=SHELL, outline=accent)
+
+        # -- the history, in what is left above the pinned block
+        y, floor = PAD, PAD + self._view_h()
+        self._top = min(self._top, self._max_top())
+        drawn = self._top
+        for i in range(self._top, len(self._history)):
+            kind, _text = self._history[i]
+            h = self._heights[i]
+            if y + h > floor:
+                break
+            c.create_text(
+                PAD, y, anchor="nw", text=self._row_text(self._history[i]),
+                fill=MUTED if kind == "q" else REPLY,
+                font=("Segoe UI", 9), width=CARD_W - 2 * PAD,
+            )
+            y += h + CARD_GAP
+            drawn += 1
+        self._scrollbar(drawn)
+
+        # -- the pinned block, foot-anchored so it cannot drift into the chips
+        y = self._h - HELP_FOOT_BAND - self._pinned_h
+        if self._history:
+            c.create_line(PAD, y - CARD_GAP // 2, CARD_W - PAD, y - CARD_GAP // 2,
+                          fill=CHIP)
+        if question:
+            c.create_text(
+                PAD, y, anchor="nw", text=question, fill=MUTED,
+                font=("Segoe UI", 9), width=CARD_W - 2 * PAD,
+            )
+            y += q_h + (CARD_GAP if a_h else 0)
+        if self._answer:
+            c.create_text(
+                PAD, y, anchor="nw", text=shown, fill=REPLY,
+                font=("Segoe UI", 10), width=CARD_W - 2 * PAD,
+            )
+            y += a_h
+            if more:
+                c.create_text(
+                    PAD, y - 4, anchor="nw", text=f"… {more} more lines", fill=MUTED,
+                    font=("Segoe UI", 8, "italic"),
+                )
+                y += BODY_ELIDED_H
+        if self._note:
+            c.create_text(
+                PAD, y, anchor="nw", text=self._note, fill=MUTED,
+                font=("Segoe UI", 8), width=CARD_W - 2 * PAD,
+            )
+
+        self._chips()
+
+    def _scrollbar(self, drawn: int) -> None:
+        if self._top == 0 and drawn >= len(self._history):
+            return
+        c = self.canvas
+        x = CARD_W - 9
+        y1, y2 = PAD, PAD + self._view_h()
+        c.create_rectangle(x, y1, x + 3, y2, fill=CHIP, outline="")
+        span = max(1, len(self._history))
+        shown = max(1, drawn - self._top)
+        height = max(24, int((y2 - y1) * shown / span))
+        offset = int((y2 - y1 - height) * self._top / max(1, span - shown))
+        c.create_rectangle(x, y1 + offset, x + 3, y1 + offset + height,
+                           fill=MUTED, outline="")
+
+    def _chips(self) -> None:
+        session = self.pill.session
+        left = getattr(session, "auto_ask_in", None)
+        specs = [("Ask", "Ask" if left is None else f"Ask {int(left) + 1}s",
+                  self.pill._send)]
+        if self._answer and getattr(session, "can_take_reply", False):
+            specs.append(("Use this", "Use this", self._take_reply))
+        if self._answer:
+            specs.append(("Copy", "Copy", self._copy_answer))
+        specs.append(("New conversation", "New conversation", self._new_conversation))
+        c = self.canvas
+        x = PAD
+        y2 = self._h - PAD
+        y1 = y2 - CHIP_H
+        for key, label, cmd in specs:
+            w = 20 + 7 * len(label)
+            primary = key == "Ask"
+            tag = chip_tag(key)
+            _round_rect(c, x, y1, x + w, y2, 13,
+                        fill=self.pill.accent if primary else CHIP,
+                        outline="", tags=tag)
+            c.create_text(x + w / 2, (y1 + y2) / 2, text=label,
+                          fill=SHELL if primary else TEXT,
+                          font=("Segoe UI", 9, "bold"), tags=tag)
+            c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
+            x += w + 8
+
+    def tick_countdown(self) -> None:
+        """Repaint when the auto-ask number changes, and only then."""
+        left = getattr(self.pill.session, "auto_ask_in", None)
+        shown = None if left is None else int(left) + 1
+        if shown == self._countdown:
+            return
+        self._countdown = shown
+        if self._visible:
+            self._render()
+
+    def _take_reply(self) -> None:
+        if self.pill.session.take_reply():
+            self._answer = ""
+            self._render()
+
+    def _copy_answer(self) -> None:
+        """The whole answer, never the head that is drawn — item 45's promise."""
+        problem = self.pill._copy(self._answer)
+        self.note(problem or "answer copied")
+
+    def _new_conversation(self) -> None:
+        self.clear()
 
 
 class Bubble(tk.Toplevel):
