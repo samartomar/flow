@@ -543,12 +543,23 @@ being admitted, **0/580** misroutes on real utterances (unchanged), adversarial 
 whole result file came back identical apart from its date, because the corpus contains no
 "follow and" utterance at all — which is what "costs nothing" means here.
 
-**Converse mode is a prompt workshop.** `_start_ask` frames every outgoing question
-with `session.WORKSHOP`: the CLI is helping refine a prompt for an agentic coding CLI,
-the workspace is X, discuss and improve the prompt rather than carrying it out. The
-definition came from use rather than from design — general conversation was tried at the
-desk and failed on its own merits (no internet access, and hallucinations), while talking
-a prompt into shape worked. `docs/product.md`'s P9 says so now.
+**An ask asks for an answer.** `_start_ask` frames every outgoing question with
+`session.ask_framing()`: answer the question above, and — when there is a workspace —
+the developer is working in X, consult it when the question concerns it. The clause
+grants rather than instructs, so a question about the weather does not send the CLI
+reading source files and a question about the project does.
+
+It used to say the opposite, and that sentence is root 1 of the first-contact verdict
+(decisions.md 2026-08-03). `WORKSHOP` told the CLI it was helping refine a prompt for an
+agentic coding CLI and to *not carry out the task it describes*, from the most
+recency-weighted position in the prompt. Asked "how are you", codex answered *"The prompt
+is clear but not an actionable coding task…"* — obeying exactly, which is the proof the
+instruction was wrong. Three outside users were asking to learn about a project and every
+one of them got their phrasing critiqued. The improve-this-prompt brief survives where a
+prompt actually exists, which is Refine (`_PROMPT`, `_POLISH_PROMPT`); the ask path no
+longer carries it. `docs/product.md`'s P9 still describes converse as a prompt workshop,
+which is now narrower than what the mode does — flagged in NEEDS_YOU rather than rewritten
+here, because P9 is the owner's definition to move.
 
 The framing **trails** the question, and is cut to fit before it is handed over. Both are
 defect fixes rather than style. `ask()` keeps the tail of an over-long input *and walks

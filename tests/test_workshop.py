@@ -25,7 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
 
 from flow.profile import Profile, resolve_workspace  # noqa: E402
 from flow.refine import MAX_CHARS  # noqa: E402
-from flow.session import AUTO_ASK_SEC, CONVERSE, WORKSHOP, Session  # noqa: E402
+from flow.session import (  # noqa: E402
+    AUTO_ASK_SEC, CONVERSE, GROUNDING, Session, ask_framing,
+)
 from flow.thread import CONTEXT_CHARS  # noqa: E402
 from cli_env import cli_on_path  # noqa: E402
 
@@ -132,8 +134,14 @@ class TestWhereTheQuestionIsAskedFrom(Temp):
         self.assertIsNone(p.workspace)
 
 
-class TestTheQuestionCarriesTheWorkshop(Temp):
-    """What `_invoke` actually receives — asserted there, not at `ask()`'s door."""
+class TestTheQuestionAsksForAnAnswer(Temp):
+    """What `_invoke` actually receives — asserted there, not at `ask()`'s door.
+
+    This class used to pin the opposite (`test_it_says_what_the_conversation_is_for`
+    asserted "refine" and "prompt" in the framing) and it was green through the whole of
+    root 1: three outside users asked questions and got their phrasing critiqued, because
+    the framing told codex to critique it and codex obeyed. The inversion is the item.
+    """
 
     def framed(self, question: str, workspace=None, context=()) -> str:
         seen: list[str] = []
@@ -164,15 +172,25 @@ class TestTheQuestionCarriesTheWorkshop(Temp):
         self.assertIn("write a migration for last_seen_at", prompt)
         self.assertIn(r"D:\dev\products\acme", prompt)
 
-    def test_it_says_what_the_conversation_is_for(self):
+    def test_it_asks_for_an_answer_rather_than_a_critique(self):
+        # The exact sentence the users met, gone: "Discuss and improve the prompt
+        # itself … Do not carry out the task it describes."
         prompt = self.framed("write a migration", workspace=str(self.dir))
-        self.assertIn("refine", prompt.lower())
-        self.assertIn("prompt", prompt.lower())
+        tail = prompt[prompt.index("---\n") + 4:]
+        self.assertIn("answer the question above", tail.lower())
+        for word in ("do not carry out", "improve the prompt", "refine the prompt"):
+            self.assertNotIn(word, tail.lower(), f"the workshop framing survived: {word}")
+
+    def test_the_workspace_clause_grants_rather_than_instructs(self):
+        # "consult it when the question concerns it" — a question about the weather
+        # must not send the CLI reading source files, and one about the project must.
+        prompt = self.framed("how is this structured", workspace=str(self.dir))
+        self.assertIn("consult it when the question concerns it", prompt)
 
     def test_with_no_workspace_it_still_frames_and_claims_no_project(self):
         prompt = self.framed("write a migration")
         self.assertIn("write a migration", prompt)
-        self.assertIn("refine", prompt.lower())
+        self.assertIn("Answer the question above", prompt)
         self.assertNotIn("WORKSPACE:", prompt)
 
     def test_the_thread_context_still_rides_along(self):
@@ -185,16 +203,30 @@ class TestTheQuestionCarriesTheWorkshop(Temp):
     def test_a_question_past_max_chars_still_carries_the_workspace(self):
         # The framing trails the question deliberately: `ask()` keeps the *tail* of an
         # over-long input, so anything placed in front of it is the first thing thrown
-        # away — and it would be thrown away for exactly the long prompts a workshop is
+        # away — and it would be thrown away for exactly the long questions this is
         # most likely to be handling.
         long = "x" * (MAX_CHARS + 3_000)
         prompt = self.framed(long, workspace=str(self.dir))
         self.assertIn(str(self.dir), prompt)
-        self.assertIn("refine", prompt.lower())
+        self.assertIn("Answer the question above", prompt)
 
     def test_the_preamble_is_a_constant_rather_than_a_string_in_the_call(self):
-        self.assertIn("{workspace}", WORKSHOP)
-        self.assertTrue(WORKSHOP.strip())
+        self.assertIn("{workspace}", GROUNDING)
+        self.assertTrue(GROUNDING.strip())
+
+    def test_the_budget_keeps_the_framed_question_inside_max_chars(self):
+        # What makes `ask()`'s sentence-boundary walk a no-op rather than a coin toss.
+        # It is arithmetic against `len(ask_framing(...))`, so it has to be re-asserted
+        # whenever the framing changes length — which is what this item did.
+        for cwd in (None, str(self.dir), "D:\\" + "d" * 200):
+            framing = ask_framing(cwd)
+            budget = max(0, MAX_CHARS - len(framing))
+            question = "y" * (MAX_CHARS * 3)
+            self.assertLessEqual(len(question[-budget:] + framing), MAX_CHARS)
+
+    def test_no_workspace_means_no_workspace_line_at_all(self):
+        self.assertNotIn("WORKSPACE", ask_framing(None))
+        self.assertIn("WORKSPACE", ask_framing("D:\\dev\\flow"))
 
 
 class TestTheWorkspaceIsVisible(Temp):

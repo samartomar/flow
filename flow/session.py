@@ -52,27 +52,45 @@ from .refine import MAX_CHARS as REFINE_MAX_CHARS
 from .refine import ask, available, refine, tail_sent
 from .thread import Thread
 
-#: P9, as the owner defined it from use: converse mode is a prompt workshop, not a
-#: general assistant. General conversation failed at the desk on its own merits — the
-#: CLI answered that it has no internet access, and hallucinated — so the question this
-#: frames is always the same one: help make this prompt better.
+#: What every converse ask carries after the question. It used to say the opposite of
+#: this — "help the developer refine the prompt above … do not carry out the task it
+#: describes" — and that is the sentence Flow's first three outside users met
+#: (decisions.md 2026-08-03). Asked "how are you", codex answered *"The prompt is clear
+#: as casual conversation, but it does not request any coding work"*. The instruction
+#: was obeyed exactly, which is the proof it was the wrong instruction: nobody was
+#: workshopping a prompt, they were asking to learn about a project. The
+#: improve-this-prompt brief survives where a prompt actually exists, which is Refine.
 #:
 #: **Placed after the question, and that is not a style choice.** `refine.ask()` keeps
 #: the *tail* of an over-long input, so anything in front of the text is the first thing
-#: discarded — and it would be discarded for exactly the long prompts a workshop is most
+#: discarded — and it would be discarded for exactly the long questions this is most
 #: likely to be handling. Trailing framing survives the cut that heading framing does
 #: not, which a test asserts on a question 3 000 characters past `MAX_CHARS`.
-WORKSHOP = (
+GROUNDING = (
     "\n\n---\n"
-    "You are helping a developer refine the prompt above, which they will hand to an "
-    "agentic coding CLI.{workspace}\n"
-    "Discuss and improve the prompt itself: what it leaves ambiguous, what context it "
-    "is missing, what it should say instead. Do not carry out the task it describes."
+    "Answer the question above for the developer who asked it.{workspace}"
 )
 
 #: The workspace clause, empty when there is none, so an ungrounded ask does not claim
-#: a project it has not got.
-WORKSHOP_WHERE = "\nWORKSPACE: {path} - assume the prompt will be run there."
+#: a project it has not got. It grants rather than instructs: a question about the
+#: weather must not send the CLI reading source files, and a question about the project
+#: must.
+GROUNDING_WHERE = (
+    "\nWORKSPACE: {path} - the developer is working there; consult it when the question "
+    "concerns it."
+)
+
+
+def ask_framing(cwd: str | None) -> str:
+    """The trailing clause `_start_ask` appends, and what the budget is measured against.
+
+    A function rather than a `.format` inside `_start_ask` because two callers need the
+    same string to agree — the one that sends it and the one that sizes the question to
+    fit beside it.
+    """
+    return GROUNDING.format(
+        workspace=GROUNDING_WHERE.format(path=cwd) if cwd else ""
+    )
 
 #: The moment of egress names the ground (decisions.md "Workspace grounding"): the
 #: leaf, not the path, because the note is glanced at as the question leaves — and
@@ -2108,10 +2126,7 @@ class Session:
         # instructions and none of the prompt. Keeping the framed string inside
         # `MAX_CHARS` makes that split a no-op, so the framing is intact by construction
         # rather than by luck.
-        framing = WORKSHOP.format(
-            workspace=(WORKSHOP_WHERE.format(path=self._refine_cwd)
-                       if self._refine_cwd else "")
-        )
+        framing = ask_framing(self._refine_cwd)
         budget = max(0, REFINE_MAX_CHARS - len(framing))
         kept = question if len(question) <= budget else question[-budget:]
         framed = kept + framing
