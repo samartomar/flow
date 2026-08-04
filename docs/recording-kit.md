@@ -25,7 +25,7 @@ nothing anyone can download or browse contains a clip, and the one archive that 
 holds the old version sits in that same private folder and goes when the clips go.
 Publishing the code changed none of this and was never going to — a clip that is not in
 the repository cannot be published with it. What does get published is the scoring: how
-many of the eleven items the tool understood, and, where a miss needs explaining, the
+many of the seventeen items the tool understood, and, where a miss needs explaining, the
 sheet sentence it misheard. Not your name, not the forty-five seconds in your own words.
 Ask for it to be deleted and it is, along with everything cut from it — no form, no
 notice period, and you never have to say why.
@@ -76,7 +76,7 @@ Imagine you just dictated this message and it came out like this:
 **Each item starts again from that same text.** They do not stack up — item 5 does not
 happen after item 4. Just imagine the message above is on screen each time.
 
-## The eleven items
+## The eleven corrections
 
 | # | What you want | One way to say it |
 |---|---|---|
@@ -95,9 +95,38 @@ happen after item 4. Just imagine the message above is on screen each time.
 Item 1 says **every** on purpose. "Change Tuesday to Wednesday" only changes the first
 one, which is a different instruction.
 
-## 12 — the last part, in your own words
+## 12 to 17 — six single words
 
-Say **"twelve"**, pause, then talk to it however you like for about forty-five seconds.
+These are different from everything above, and they take about twenty seconds in total.
+Say the number, pause, then say **just the one word**, the way you would say it to
+somebody across a room. Nothing else in the sentence.
+
+| # | The word |
+|---|---|
+| 12 | boom |
+| 13 | tango |
+| 14 | mango |
+| 15 | falcon |
+| 16 | rocket |
+| 17 | banana |
+
+**Why six random words.** One of them is what sends the message. You say it on its own
+and the draft goes wherever it was going — no button, no keyboard. Which one is a
+setting, and these six are the whole list.
+
+They were chosen by measuring how often each is said by accident: every one of them
+appears **zero** times in 580 real recorded utterances, so none of them can fire when you
+did not mean it. What that measurement cannot tell us is the thing that actually matters
+— whether a speech model **hears** the word when you *do* say it — because that has only
+ever been checked at one microphone, by one person, in one accent. If a word turns out to
+be hard for some voices, it comes off the list. That is what these six clips decide.
+
+Say each one once, normally. If it comes out wrong, say the number again and say the word
+again — the last take is the one we keep.
+
+## 18 — the last part, in your own words
+
+Say **"eighteen"**, pause, then talk to it however you like for about forty-five seconds.
 This is the part that matters most, because it is the only part where we did not put
 words in your mouth.
 

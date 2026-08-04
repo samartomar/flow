@@ -796,6 +796,17 @@ irreversible in dictate mode and the whole grammar rests on a wrong edit costing
 while a wrong send costs a paragraph in a stranger's terminal. Routing is untouched and
 the exact-match rule stands.
 
+**The recording kit teaches the six words** (item 70). `docs/recording-kit.md`,
+`docs/record.html` and `ingest_recordings.EXPECTED` gained items 12–17 — one per shipped
+preset, said alone — and the free-speech window moved from 12 to 18. They are a different
+kind of item from the eleven corrections above them and the docs say so: those measure the
+*router*, these measure the *decoder*. The four-leg gate every preset passed prices false
+fires and structurally cannot price recognition, so "the six presets decode" is currently
+true of exactly one voice. A trigger row carries the word the speaker was **asked** for
+alongside what they said, kept in a table rather than derived from `SEND_WORD_PRESETS` at
+read time — a preset swapped later must not silently relabel a clip recorded against the
+old list. Older recordings ingest unchanged, since items 1–11 did not move.
+
 The threshold is swept, not chosen. Over every distinct one- and two-word sequence in the
 580 real EdAcc utterances — 4 866 of them — against all six shipped presets and their
 enter-variants: 0.70 fires 13 times, 0.75 fires 7 (`ZOOM`/boom, `MAN`/mango, `BOOK`/boom,

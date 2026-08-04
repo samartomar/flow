@@ -223,7 +223,19 @@
     {
       label: "It typed your words instead of obeying them",
       eg: ["that was a command", "no, I meant that as an instruction"]
-    }
+    },
+    // Six single words, and a different kind of item from the eleven above: those are
+    // corrections aimed at the message and they measure the router, while these measure
+    // the *decoder*. One of the six is what sends the draft, said on its own. Every one
+    // appears zero times in 580 real recorded utterances, so none can fire by accident
+    // — but that measurement prices false fires and structurally cannot price
+    // recognition, which has only ever been checked at one microphone. These clips are
+    // the other half.
+    ...["boom", "tango", "mango", "falcon", "rocket", "banana"].map((w) => ({
+      label: "Just this one word, on its own",
+      word: w,
+      eg: [w]
+    }))
   ];
 
   const FREE_SECONDS = 45;
@@ -309,6 +321,10 @@
         </div>
         ${it.show ? `<div class="msg">${it.show}</div>` : ""}
         <p class="want">${it.change || it.label}</p>
+        ${it.word ? `<p class="msg" style="text-align:center;font-size:1.6rem">
+        ${it.word}</p><p class="hint">One of these six is what sends the message when you
+        say it on its own. Which one is a setting, and these are the whole list — say it
+        the way you would say it to somebody across a room.</p>` : ""}
         <span class="say">Start with <b>&ldquo;${i + 1}&rdquo;</b>, then say it.</span>
         <div class="egs">
           <p class="eglead">Say it your way &mdash; or just say one of these:</p>
@@ -336,8 +352,9 @@
     foot.textContent = "";
     stage.innerHTML = `
       <div class="card">
-        <div class="eyebrow"><span>Last part — your own</span><span class="num">12</span></div>
-        <p class="want">Say &ldquo;twelve&rdquo;, then anything you like to it.</p>
+        <div class="eyebrow"><span>Last part — your own</span>
+        <span class="num">${ITEMS.length + 1}</span></div>
+        <p class="want">Say &ldquo;eighteen&rdquo;, then anything you like to it.</p>
         <p class="hint">This part matters most, because it is the only part where we did
         not put words in your mouth.</p>
         <details class="help" open>

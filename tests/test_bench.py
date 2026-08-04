@@ -267,3 +267,96 @@ class TestFreeEnd(unittest.TestCase):
         words = [w("Eleven.", 0.0, 0.4), w(" fix", 0.5, 0.8),
                  w(" the", 0.8, 1.0), w(" spelling", 1.0, 1.5)]
         self.assertIsNone(free_end(words, 0.0, "that was a command"))
+
+
+class TestTheKitTeachesTheTriggerWords(unittest.TestCase):
+    """Item 70. The six presets became recorded items, so cross-accent recognition of
+    the send word stops being a claim about one microphone.
+
+    The four-leg gate in `test_triggers.py` prices *false fires* — 0/580 on real speech —
+    and structurally cannot price recognition: a word nobody says by accident may also be
+    a word the decoder never hears. This is the other half, and until these clips exist
+    "the six presets decode" is true of exactly one voice (NEEDS_YOU, 2026-08-02).
+    """
+
+    def kit(self) -> str:
+        return (Path(__file__).resolve().parent.parent / "docs" / "recording-kit.md"
+                ).read_text(encoding="utf-8")
+
+    def page(self) -> str:
+        return (Path(__file__).resolve().parent.parent / "docs" / "record.html"
+                ).read_text(encoding="utf-8")
+
+    def test_every_shipped_preset_is_an_item(self):
+        from flow.edits import SEND_WORD_PRESETS
+        from ingest_recordings import TRIGGER_WORDS
+
+        self.assertEqual(sorted(TRIGGER_WORDS.values()), sorted(SEND_WORD_PRESETS))
+
+    def test_the_numbers_are_contiguous_and_end_before_the_free_window(self):
+        from ingest_recordings import EXPECTED, FREE_ITEM, TRIGGER_WORDS
+
+        self.assertEqual(sorted(TRIGGER_WORDS), list(range(12, 18)))
+        self.assertEqual([n for n, _op, _note in EXPECTED], list(range(1, 18)))
+        self.assertEqual(FREE_ITEM, 18)
+
+    def test_a_number_word_exists_for_every_item(self):
+        # The spoken number is the only boundary marker that survived a phone speaker, a
+        # room and a phone mic; tones, silence and punctuation did not.
+        from ingest_recordings import FREE_ITEM, WORDS, number_at
+
+        for n in range(1, FREE_ITEM + 1):
+            with self.subTest(n=n):
+                self.assertIn(n, WORDS.values())
+        self.assertEqual(number_at("eighteen"), 18)
+        self.assertEqual(number_at("eight"), 8, "eighteen swallowed eight")
+
+    def test_the_trigger_rows_carry_the_word_they_were_asked_for(self):
+        # A scorer has to compare `said` against what the speaker was *asked* to say, and
+        # deriving that from `SEND_WORD_PRESETS` at read time would silently relabel an
+        # old clip the day a preset is swapped.
+        from ingest_recordings import EXPECTED, TRIGGER_WORDS
+
+        for num, word in TRIGGER_WORDS.items():
+            with self.subTest(word=word):
+                self.assertEqual(EXPECTED[num - 1][1], "trigger")
+                self.assertIn(word, EXPECTED[num - 1][2])
+
+    def test_the_eleven_corrections_did_not_move(self):
+        # An older recording ingests unchanged: its items are still 1..11, and only the
+        # free window needs the newer sheet to be found by number.
+        from ingest_recordings import EXPECTED
+
+        self.assertEqual([op for _n, op, _note in EXPECTED[:11]],
+                         ["replace_all", "replace", "capitalize", "lower", "delete",
+                          "delete_last", "insert_before", "undo", "polish", "followup",
+                          "rescue"])
+
+    def test_the_sheet_names_all_six_and_the_new_free_number(self):
+        from flow.edits import SEND_WORD_PRESETS
+
+        kit = self.kit()
+        for word in SEND_WORD_PRESETS:
+            with self.subTest(word=word):
+                self.assertIn(word, kit)
+        self.assertIn("## 18 —", kit)
+        self.assertIn("eighteen", kit)
+
+    def test_and_says_why_a_volunteer_is_being_asked_for_them(self):
+        # The one thing a volunteer is owed here: these are not another correction, and
+        # the reason they exist is that recognition was measured at one microphone.
+        kit = self.kit().lower()
+        self.assertIn("sends the message", kit)
+        self.assertIn("one microphone", kit)
+
+    def test_the_guided_page_carries_them_too(self):
+        # `record.html` is the page volunteers are actually walked through, so a sheet
+        # the page does not match is a sheet nobody follows.
+        from flow.edits import SEND_WORD_PRESETS
+
+        page = self.page()
+        for word in SEND_WORD_PRESETS:
+            with self.subTest(word=word):
+                self.assertIn(f'"{word}"', page)
+        self.assertIn("eighteen", page)
+        self.assertNotIn('Say &ldquo;twelve&rdquo;', page)

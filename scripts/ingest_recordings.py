@@ -60,16 +60,46 @@ EXPECTED = [
     (9, "polish", "make it a proper prompt"),
     (10, "followup", "add to something already sent"),
     (11, "rescue", "that was a command"),
+    #: The six shipped trigger words, one item each, said alone (item 70).
+    #:
+    #: A different kind of item from the eleven above, and deliberately so. Those are
+    #: *corrections* aimed at a draft and they measure the router; these are single words
+    #: measuring the **decoder**, which is where root 5 lives — the trigger fails every
+    #: voice but the owner's, and recognition had been measured at exactly one microphone
+    #: (decisions.md 2026-08-03). `edits.SEND_WORD_PRESETS` passed a four-leg corpus gate
+    #: that prices *false fires* and structurally cannot price recognition; this is the
+    #: other half, and until these clips exist "the six presets decode" is a claim about
+    #: one voice.
+    (12, "trigger", "boom, said alone"),
+    (13, "trigger", "tango, said alone"),
+    (14, "trigger", "mango, said alone"),
+    (15, "trigger", "falcon, said alone"),
+    (16, "trigger", "rocket, said alone"),
+    (17, "trigger", "banana, said alone"),
 ]
+
+#: What each trigger item should have been said, by item number. Kept beside `EXPECTED`
+#: rather than derived from `SEND_WORD_PRESETS` at read time, because the manifest is a
+#: record of what somebody was *asked* to say: a preset swapped later must not silently
+#: relabel a clip recorded against the old list.
+TRIGGER_WORDS = {12: "boom", 13: "tango", 14: "mango", 15: "falcon",
+                 16: "rocket", 17: "banana"}
 
 #: The free-speech window that closes the session. It is numbered like the rest so it
 #: has a boundary: the first recording proved spoken numbers survive a phone speaker,
 #: a room and a phone mic intact, while tones, silence and punctuation do not.
-FREE_ITEM = 12
+#:
+#: **It moved from 12 to 18 when the trigger words were added**, and older manifests keep
+#: their numbering: nothing re-reads a manifest to renumber it, and `item: 0` is what a
+#: free clip carries in every row ever written. A recording made against the old sheet
+#: therefore ingests unchanged — the eleven items are still 1..11 — and only the free
+#: window needs the newer sheet to be found by number rather than by `free_end`.
+FREE_ITEM = 18
 
 WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
 }
 
 
@@ -271,6 +301,7 @@ def main() -> None:
                 "".join(w["word"] for w in words if start <= w["start"] < end),
             ).strip()
             _, op, note = EXPECTED[num - 1]
+            word = TRIGGER_WORDS.get(num)
             wav = ROOT / group / f"{ident}_{num:02d}.wav"
             write_wav(wav, clip)
             rows.append({
@@ -283,6 +314,9 @@ def main() -> None:
                 "said": said,
                 "duration": round(len(clip) / SR, 2),
                 "dataset": "recorded",
+                # Only on a trigger row: the word the speaker was asked for, so a scorer
+                # can compare it against `said` without re-deriving the sheet.
+                **({"word": word} if word else {}),
             })
             print(f"  {num:2d} {start:6.1f}s +{len(clip) / SR:4.1f}s  "
                   f"[{op:<13}] {said[:52]}")
