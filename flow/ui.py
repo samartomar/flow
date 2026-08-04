@@ -2783,9 +2783,20 @@ class Bubble(tk.Toplevel):
                     font=("Segoe UI", 8, "italic"), tags="body")
                 y += BODY_ELIDED_H
             # Muted once it has gone: these are no longer the words being worked on.
+            #
+            # `draft` is a second tag on the live text only, and it is what makes
+            # `help.exits_note`'s promise true: that note has said "click the draft to
+            # edit" since item 38, and nothing was bound to the body — the one exit named
+            # in the sentence somebody reads when the microphone has died. Only the text,
+            # so the chips keep their own clicks and the empty card is not a hit region;
+            # and not on the sent card, where the words have already gone and `Put it
+            # back` is the action.
             c.create_text(
                 PAD, y, anchor="nw", text=shown, fill=MUTED if self._sent else TEXT,
-                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD, tags="body")
+                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
+                tags="body" if self._sent else ("body", "draft"))
+            if not self._sent:
+                c.tag_bind("draft", "<Button-1>", lambda _e: self._edit())
             y += text_h + 6
         if self._partial:
             c.create_text(

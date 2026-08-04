@@ -445,6 +445,9 @@ class MeasuringCanvas:
 
     def __init__(self) -> None:
         self.items: list[dict] = []
+        #: (tag, sequence, callback) per `tag_bind`. Recorded since item 72, whose whole
+        #: subject is whether a binding exists at all.
+        self.bindings: list[tuple] = []
 
     def delete(self, *specs, **kw) -> None:
         """Tag-aware, since item 66 made the tag the whole point.
@@ -478,7 +481,8 @@ class MeasuringCanvas:
         })
         return len(self.items) - 1
 
-    def tag_bind(self, *a, **kw) -> None: ...
+    def tag_bind(self, tag=None, sequence=None, func=None, *a, **kw) -> None:
+        self.bindings.append((tag, sequence, func))
 
     def tag_raise(self, *a, **kw) -> None: ...
 
@@ -760,3 +764,71 @@ class TestStartingFromTheClipboard(unittest.TestCase):
         s = session()
         s.paste_draft("a paragraph from somewhere else")
         self.assertEqual(s.recent[0], ("said", "a paragraph from somewhere else"))
+
+
+class TestClickingTheDraftOpensEdit(unittest.TestCase):
+    """Item 72. `help.exits_note` has promised this since item 38 and nothing
+    was bound.
+
+    That note is the one line shown at the moment the microphone dies with a draft still
+    held — every spoken rescue needs a decode, a decode needs the models, the models need
+    the mic — and it names three exits. One of them, "click the draft to edit", did
+    nothing at all.
+    """
+
+    def bubble(self, text="a draft", sent=""):
+        import flow.ui as ui
+
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock()
+        b.pill.accent = "#000000"
+        b.pill.work = WORK
+        b.pill.session = mock.Mock(mode="dictate", editing=False, can_rescue=False,
+                                   can_take_reply=False, auto_ask_in=None)
+        b.canvas = MeasuringCanvas()
+        b._text, b._sent, b._partial, b._note = text, sent, "", ""
+        b._editor, b._act, b._h, b._bar_y = None, None, 120, 0
+        b._sent_at = time.perf_counter()
+        b.reposition = lambda *a, **kw: None
+        b.after = lambda *a, **kw: None
+        return b
+
+    def tagged(self, b):
+        return [i for i in b.canvas.items if "draft" in i["tags"]]
+
+    def test_the_body_text_carries_the_binding(self):
+        b = self.bubble()
+        b._render()
+        self.assertEqual(len(self.tagged(b)), 1)
+        self.assertEqual(self.tagged(b)[0]["text"], "a draft")
+
+    def test_the_note_that_promises_it_still_does(self):
+        # The promise and the binding, checked together: either alone can rot.
+        from flow.help import exits_note
+
+        self.assertIn("click the draft to edit", exits_note(None))
+
+    def test_the_sent_card_is_not_a_hit_region(self):
+        # Those words have already gone, and `Put it back` is the action there.
+        b = self.bubble(text="", sent="already gone")
+        b._render()
+        self.assertEqual(self.tagged(b), [])
+
+    def test_an_empty_draft_offers_nothing_to_click(self):
+        b = self.bubble(text="")
+        b._render()
+        self.assertEqual(self.tagged(b), [])
+
+    def test_it_goes_through_the_same_edit_the_chip_does(self):
+        # Not a second way in. `_edit` is where the foreground dance, the refusal and
+        # the verification live, and a click that bypassed them would be an editor
+        # that silently collects nothing.
+        import flow.ui as ui
+
+        b = self.bubble()
+        with mock.patch.object(ui.Bubble, "_edit") as edit:
+            b._render()
+            bound = [c for c in b.canvas.bindings if c[0] == "draft"]
+            self.assertTrue(bound, "nothing was bound to the draft")
+            bound[-1][2](None)
+        edit.assert_called_once()

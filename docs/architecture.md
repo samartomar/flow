@@ -884,6 +884,21 @@ whole utterance 44 times in that corpus, "yes" 12, "okay" 10. What it does *not*
 whether a word decodes from a given accent — that is recognition, not false fires, and it
 is a desk question.
 
+### Clicking the draft opens Edit
+
+`help.exits_note` has said "click the draft to edit" since item 38, and until item 72
+nothing was bound to the body. That note is the one line shown at the moment the
+microphone dies with a draft still held — every spoken rescue needs a decode, a decode
+needs the models, the models need the mic — and it names three exits, one of which did
+nothing at all.
+
+The live body text carries a second tag, `draft`, and `<Button-1>` on it calls the same
+`_edit` the chip does. Only the text: the chips keep their own clicks (they are raised
+above the body, so an overlap goes to the chip), the empty card is not a hit region, and
+the **sent** card carries no such tag — those words have already gone and `Put it back`
+is the action there. Measured on real Tk: one tagged item at (13, 14)–(363, 31), a click
+in it opens the editor, a click on `Send` does not, and the sent card has none.
+
 ### The one window that deliberately takes the focus
 
 The Edit chip opens the draft in a real `tk.Text` inside the bubble, and to receive a
