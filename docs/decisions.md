@@ -6,6 +6,48 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-06 — A voice from this decade, and the first output path that leaves the machine
+
+Every voice Flow could speak with was from 2013, and no amount of installing better ones
+changed that. The mechanism is worth recording because it closes off the obvious fixes:
+Windows 11 installs Ava, Guy and Sonia as MSIX packages, each shipping a **complete and
+valid SAPI token** — and then registers that token into `HKLM\SOFTWARE\Microsoft\Speech
+Server\v11.0`, a hive that **does not exist**, behind an engine CLSID present in **no COM
+store**. A registry-wide search for the token name returns nothing. WinRT `AllVoices`
+returns the same six OneCore voices. There is no registry hack and no alternate API; the
+voices are Narrator-only by construction. Measured against a machine carrying all three.
+
+So: two optional engines, chosen per voice from one menu. `flow/piper.py` (`[voice]`) is
+local neural speech. `flow/edge.py` (`[edge]`) reaches the natural voices through
+Microsoft's service. R16 holds for both — they are extras, and a default install still
+fetches three packages, the reading already applied to `[cuda]`.
+
+**The part that is a real narrowing, taken deliberately.** `[edge]` is the first *output*
+path in Flow that sends anything off the machine: the text of each spoken reply, to be
+voiced. It was declined once on exactly that ground and then asked for again, which is the
+bar this project sets for reopening. It ships because the alternative is not "a local
+version of these voices" but "these voices, never" — they are on the disk and unreachable.
+The narrowing is bounded and is stated in three places rather than implied: no API key or
+account, no audio and no workspace path, and nothing at all unless someone has installed
+the extra *and* selected one of its voices. `product.md`'s non-goal on cloud ASR is
+untouched — this is not ASR, and audio never leaves.
+
+**Reopen conditions.** (1) A local engine reaches the natural voices — then `[edge]` is
+redundant and should go. (2) The service starts requiring a key or an account, which would
+put it back under R9's flat prohibition rather than beside it.
+
+**The 2013 voices are hidden, not removed.** They vanish from the menu as soon as any
+better voice is installed, and come back when none is — a default install has neither
+extra, and dropping SAPI outright would leave it silent. Hidden is not withdrawn: `pick`
+resolves against the full list, so a profile naming `Microsoft George` still gets it.
+
+One bug worth keeping, because it was found by ear and not by a test. The first `[edge]`
+build crackled continuously while the words stayed perfectly clear. A PyAV audio plane is
+padded to an alignment boundary, so `bytes(plane)` returns more than was decoded — 1216
+bytes for 576 samples, 64 bytes of stale buffer on every one of 133 frames — and all of it
+was being written to the device. `edge.pcm` now slices to `samples * 2`, and
+`TestEdgePadding` exists so it cannot come back silently.
+
 ### 2026-08-03 — First contact: three users, one verdict, five roots, and a surface split
 
 Flow met its first three outside users on v0.2.0 and all three reached the same

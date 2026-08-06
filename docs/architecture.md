@@ -59,8 +59,16 @@ the list widens *whose* cloud rather than reopening whether there is one. The da
 boundary is this:
 
 - **Always local.** Microphone audio, the utterance buffers, the lexicon, the profile,
-  every local edit, and SAPI speech. R9 is enforced by absence — there is no code in
-  those modules that could send anything anywhere.
+  every local edit, SAPI speech, and Piper speech. R9 is enforced by absence — there is no
+  code in those modules that could send anything anywhere.
+- **Sent to Microsoft's speech service, if and only if you installed `[edge]` and chose
+  one of its voices.** Added 2026-08-06, and it is the first output path that leaves the
+  machine, so it gets its own line rather than a footnote. What goes out is the *text of
+  each spoken reply* — not audio, not the draft, not the workspace path — and no API key
+  or account is involved. It exists because the natural voices Windows 11 installs are
+  unreachable by any local API (`speak.installed_voices` has the mechanism), so this is
+  the only way to hear them; `flow/piper.py` is the local answer for anyone who would
+  rather not. Absent the extra, no socket is opened and `flow/edge.py` is never imported.
 - **Sent to the configured agent CLI, and so to its provider.** A Refine sends the
   draft tail (≤ `refine.MAX_CHARS`) plus the instruction; an Ask sends the question
   tail, the thread tail, **and the workshop preamble** — which names the workspace, so

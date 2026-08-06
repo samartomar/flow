@@ -27,6 +27,7 @@ The second is that a request should not have to be exact. `--voice female` and
 `--voice mark` are how people actually ask.
 """
 
+import contextlib
 import sys
 import time
 import types
@@ -470,6 +471,169 @@ class TestPiperReal(unittest.TestCase):
         self.assertTrue(piper.available())
 
 
+class TestEdgeVoices(unittest.TestCase):
+    """What the service returns, turned into rows a menu can show and `pick` can choose.
+
+    No network: every case feeds `voices()` a canned service payload, because the ordering
+    rules below are the whole point and they must not depend on what Microsoft published
+    this morning.
+    """
+
+    #: Trimmed from the real payload, keeping only the fields this module reads.
+    PAYLOAD = [
+        {"ShortName": "en-US-AnaNeural", "Locale": "en-US", "Gender": "Female",
+         "VoiceTag": {"ContentCategories": ["Cartoon", "Conversation"]}},
+        {"ShortName": "en-US-AvaNeural", "Locale": "en-US", "Gender": "Female",
+         "VoiceTag": {"ContentCategories": ["Conversation", "Copilot"]}},
+        {"ShortName": "en-US-AvaMultilingualNeural", "Locale": "en-US", "Gender": "Female",
+         "VoiceTag": {"ContentCategories": ["Conversation", "Copilot"]}},
+        {"ShortName": "en-US-AriaNeural", "Locale": "en-US", "Gender": "Female",
+         "VoiceTag": {"ContentCategories": ["News", "Novel"]}},
+        {"ShortName": "en-GB-SoniaNeural", "Locale": "en-GB", "Gender": "Female",
+         "VoiceTag": {"ContentCategories": ["General"]}},
+        {"ShortName": "en-AU-NatashaNeural", "Locale": "en-AU", "Gender": "Female",
+         "VoiceTag": {"ContentCategories": ["General"]}},
+        {"ShortName": "fr-FR-DeniseNeural", "Locale": "fr-FR", "Gender": "Female",
+         "VoiceTag": {"ContentCategories": ["General"]}},
+    ]
+
+    def _voices(self, locale="en-US"):
+        from flow import edge
+
+        with mock.patch("flow.edge._CACHE", None), \
+             mock.patch("flow.edge.available", return_value=True), \
+             mock.patch("flow.edge._cached", return_value=self.PAYLOAD), \
+             mock.patch("flow.edge._system_locale", return_value=locale):
+            return edge.voices(refresh=False)
+
+    def test_only_english_is_offered(self):
+        # 322 voices across every locale would make the menu useless, and Flow produces
+        # English to read.
+        self.assertNotIn("fr-FR", [v.culture for v in self._voices()])
+
+    def test_a_cartoon_voice_is_never_what_an_unnamed_request_gets(self):
+        # en-US-Ana is tagged Cartoon/Cute. Alphabetically it is first among the en-US
+        # females, so plain name order handed it to anyone who typed `--voice female`.
+        self.assertEqual(pick("female", self._voices()), "Natural en-US-AvaNeural")
+
+    def test_conversational_voices_outrank_news_ones(self):
+        names = [v.name for v in self._voices()]
+        self.assertLess(names.index("Natural en-US-AvaNeural"),
+                        names.index("Natural en-US-AriaNeural"))
+
+    def test_plain_outranks_multilingual(self):
+        # Both match `--voice ava`; en-US-AvaNeural is the one somebody means, and name
+        # order alone returns the Multilingual variant, which is a different voice.
+        self.assertEqual(pick("ava", self._voices()), "Natural en-US-AvaNeural")
+
+    def test_the_machines_own_locale_comes_first(self):
+        # Left in service order this was en-AU-Natasha: alphabetically first, Australian,
+        # and handed to a user who asked only for "female".
+        gb = [v.culture for v in self._voices(locale="en-GB")]
+        self.assertEqual(gb[0], "en-GB")
+        us = [v.culture for v in self._voices(locale="en-US")]
+        self.assertEqual(us[0], "en-US")
+
+    def test_a_locale_nobody_asked_for_is_ordered_last_not_dropped(self):
+        cultures = [v.culture for v in self._voices()]
+        self.assertIn("en-AU", cultures)
+        self.assertEqual(cultures[-1], "en-AU")
+
+    def test_gender_survives_the_trip(self):
+        # Unlike Piper, the service states it — so `--voice female` works here.
+        self.assertTrue(all(v.gender == "Female" for v in self._voices()))
+
+    def test_no_extra_means_no_voices_and_no_network(self):
+        from flow import edge
+
+        with mock.patch("flow.edge._CACHE", None), \
+             mock.patch("flow.edge.available", return_value=False), \
+             mock.patch("flow.edge._fetch", side_effect=AssertionError("no network")):
+            self.assertEqual(edge.voices(refresh=True), [])
+
+    def test_rate_maps_onto_the_percentage_the_service_takes(self):
+        from flow.edge import rate_percent
+
+        self.assertEqual(rate_percent(0), "+0%")
+        self.assertEqual(rate_percent(1), "+10%")
+        self.assertEqual(rate_percent(-3), "-30%")
+        # Clamped to what the service accepts.
+        self.assertEqual(rate_percent(50), "+100%")
+        self.assertEqual(rate_percent(-50), "-50%")
+
+
+class TestEdgePadding(unittest.TestCase):
+    """The crackle. A regression test for a bug that was found by ear, not by a test."""
+
+    class FakeFrame:
+        def __init__(self, samples, padding):
+            self.samples = samples
+            # Real samples are 0x11; the padding after them is 0xFF, standing in for
+            # whatever the allocator last left in the buffer.
+            self.planes = [b"\x11" * (samples * 2) + b"\xff" * padding]
+
+    def test_the_padding_after_the_samples_is_not_played(self):
+        from flow.edge import pcm
+
+        # The measured shape: 576 samples in a 1216-byte plane, so 64 bytes of noise
+        # spliced into the speech every 1152 bytes, on every frame of the reply.
+        out = pcm(self.FakeFrame(576, 64))
+        self.assertEqual(len(out), 1152)
+        self.assertNotIn(b"\xff", out)
+
+    def test_an_unpadded_frame_is_unchanged(self):
+        from flow.edge import pcm
+
+        self.assertEqual(len(pcm(self.FakeFrame(576, 0))), 1152)
+
+
+class TestLegacyVoicesAreHidden(unittest.TestCase):
+    """The 2013 voices stay reachable by name after they stop being offered."""
+
+    SAPI = [Voice("Microsoft George", "Male", "en-GB"),
+            Voice("Microsoft Zira", "Female", "en-US")]
+    PIPER = [Voice("Piper en_GB-cori-high", "NotSet", "en-GB", engine="piper",
+                   path="/v/c.onnx", sample_rate=22050)]
+
+    @contextlib.contextmanager
+    def _machine(self, piper_voices=(), edge_voices=()):
+        """A machine with these engines installed, and both caches cleared."""
+        with contextlib.ExitStack() as stack:
+            for patch in (
+                mock.patch("flow.speak._CACHE", None),
+                mock.patch("flow.speak._ALL", None),
+                mock.patch("flow.piper.voices", return_value=list(piper_voices)),
+                mock.patch("flow.edge.voices", return_value=list(edge_voices)),
+                mock.patch("flow.speak._sapi_voices", return_value=self.SAPI),
+            ):
+                stack.enter_context(patch)
+            yield
+
+    def test_windows_voices_are_offered_when_nothing_better_exists(self):
+        # The default install: three declared dependencies, neither extra. Removing SAPI
+        # unconditionally would leave it with no spoken replies at all.
+        from flow.speak import installed_voices
+
+        with self._machine():
+            self.assertEqual(installed_voices(refresh=True), self.SAPI)
+
+    def test_they_disappear_once_a_better_engine_has_one(self):
+        from flow.speak import installed_voices
+
+        with self._machine(piper_voices=self.PIPER):
+            offered = installed_voices(refresh=True)
+        self.assertEqual([v.name for v in offered], ["Piper en_GB-cori-high"])
+
+    def test_a_hidden_voice_is_still_reachable_by_name(self):
+        # Hidden from the menu is not withdrawn: a profile written last month, or a
+        # `--voice george` typed from habit, must still resolve to the voice it names.
+        from flow.speak import all_voices, pick
+
+        with self._machine(piper_voices=self.PIPER):
+            self.assertEqual(pick("george"), "Microsoft George")
+            self.assertIn("Microsoft George", [v.name for v in all_voices()])
+
+
 class TestHost(unittest.TestCase):
     """*Which* host is chosen. That it arrives as a path is `test_speak.py`'s question.
 
@@ -508,13 +672,19 @@ class TestEnumeration(unittest.TestCase):
     """`installed_voices` parses the host's output, and must not trust it."""
 
     def _voices(self, stdout):
-        # The Piper half is stubbed out, not left to answer for itself. These cases are
-        # about parsing what PowerShell printed, and `installed_voices` concatenates the
-        # two engines — so without this they assert "the SAPI parse plus whatever this
+        # Every other engine is stubbed out, not left to answer for itself. These cases
+        # are about parsing what PowerShell printed, and `installed_voices` concatenates
+        # all three — so without this they assert "the SAPI parse plus whatever this
         # developer happens to have installed", and pass or fail by machine. They did
-        # exactly that once the dev box grew two Piper voices.
+        # exactly that twice: once when the dev box grew two Piper voices, and again when
+        # it grew forty-seven natural ones.
+        #
+        # `_ALL` as well as `_CACHE`, because the offered list is now derived from the
+        # full one and a stale full list would survive the refresh.
         with mock.patch("flow.speak._CACHE", None), \
+             mock.patch("flow.speak._ALL", None), \
              mock.patch("flow.piper.voices", return_value=[]), \
+             mock.patch("flow.edge.voices", return_value=[]), \
              mock.patch("flow.speak.subprocess.run") as run:
             run.return_value = mock.Mock(stdout=stdout)
             from flow.speak import installed_voices
@@ -545,10 +715,12 @@ class TestEnumeration(unittest.TestCase):
         self.assertEqual(self._voices(out), [Voice("Microsoft Mark", "Male", "en-US")])
 
     def test_no_engine_is_an_empty_list_and_not_a_crash(self):
-        # "No engine" means neither of them: no PowerShell to enumerate SAPI, and no
-        # Piper either. With one still answering this asserts the wrong thing.
+        # "No engine" means none of the three: no PowerShell to enumerate SAPI, no Piper
+        # and no network voices. With any one still answering this asserts the wrong thing.
         with mock.patch("flow.speak._CACHE", None), \
+             mock.patch("flow.speak._ALL", None), \
              mock.patch("flow.piper.voices", return_value=[]), \
+             mock.patch("flow.edge.voices", return_value=[]), \
              mock.patch("flow.speak.subprocess.run", side_effect=OSError("no shell")):
             from flow.speak import installed_voices
 

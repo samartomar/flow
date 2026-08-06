@@ -731,14 +731,12 @@ that fails.
 That is the whole install. With the extra absent, or with no models downloaded, the menu
 looks exactly as it always did.
 
-**Why Piper and not the voices you already have.** The obvious answer is `edge-tts`, which
-serves the very Ava/Guy/Sonia voices sitting unusable on the disk. It is ruled out twice
-over. **R16** caps declared dependencies — but this is an *optional* extra, so a default
-install still fetches three, the same reading already applied to `[cuda]`. **R9** is the
-promise that nothing leaves the machine, which `product.md` records as non-negotiable, and
-a WebSocket carrying the text of every spoken reply to Microsoft breaks it whether or not
-it needs an API key. Piper synthesises locally, so R9 holds. It is also why spoken replies
-work on macOS, where there is no SAPI half at all.
+**Why Piper first.** The Microsoft natural voices are also available — see below — but they
+come over the network. Piper synthesises locally, so nothing leaves the machine, no reply
+waits on a connection, and it works on a train. It is also the engine that works on macOS,
+where there is no SAPI half at all. **R16** holds for both because they are *optional*
+extras: a default install still fetches three packages, the same reading already applied
+to `[cuda]`.
 
 **Loaded once, in the background.** Flow uses Piper in-process rather than shelling out to
 its CLI, and that is a measurement rather than a preference. The CLI takes **3.30 s to
@@ -757,6 +755,36 @@ nothing about the speaker. Unless the name says so outright (`hfc_female`,
 `northern_english_male`), Flow leaves it unset rather than reading a gender off a first
 name. The consequence is worth knowing: `--voice female` will not select such a voice, so
 it stays on the Windows ones. Asking by name — `--voice cori` — always works.
+
+### The Microsoft natural voices — the ones you already have and cannot use
+
+Ava, Guy and Sonia are sitting on your disk and Windows will not let anything but Narrator
+speak them. The `edge` extra reaches the same voice family through Microsoft's speech
+service, which is the only way to hear them.
+
+```bash
+uv pip install -e ".[edge]"
+```
+
+They appear under **Microsoft Natural** in the Voice menu — 47 English voices, the ones
+tagged for conversation first, your own locale before the others. Unlike Piper these
+report a gender, so `--voice female` reaches them; on this machine it resolves to
+`en-US-AvaNeural`.
+
+> **This is the one part of Flow that sends anything off your machine.** Choosing one of
+> these voices means the *text of each spoken reply* goes to Microsoft to be synthesised.
+> Not your audio, not your draft, not your workspace path — and no API key or account is
+> involved. Install neither extra, or pick any other voice, and no socket is ever opened.
+> `docs/architecture.md` § *What leaves the machine* states the boundary precisely, and
+> `flow/piper.py` is the local answer if you would rather not.
+
+**It is fast enough to talk to.** The service returns MP3 rather than PCM, so there is a
+decode step — `av`, which faster-whisper already installs, so no new download. Buffering
+the whole reply before decoding measured 1.18 s to first sound; feeding the decoder as the
+bytes arrive measured *1.94 s*, which was worse, because PyAV probes the stream and the
+probe waited on the network. Capping the probe gives **0.58 s to first sound**, 0.13 s
+behind the first byte off the wire. Synthesis then runs about six times faster than
+playback, so it does not stall mid-reply.
 
 ### Asking without pressing anything
 

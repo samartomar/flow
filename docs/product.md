@@ -91,7 +91,13 @@ minimal dependencies (R16), long sessions without drift (R8).
   whole point; Hindi/Spanish/Japanese *output* is out of scope. The one obligation to
   code-switched speech: a stray L1 word must never trigger a destructive edit.
 - **Cloud ASR or any API key.** Non-negotiable, inherited from R9. Accuracy improvements
-  come from model choice, decoding, biasing and personalisation — never from egress.
+  come from model choice, decoding, biasing and personalisation — never from egress. This
+  is about what Flow *hears*, and it is unchanged: no key is read anywhere, and audio
+  never leaves. Since 2026-08-06 one **output** path can leave — the optional `[edge]`
+  speech engine sends the text of a spoken reply to Microsoft to be voiced, because the
+  natural voices Windows installs cannot be reached locally at all. Off unless installed
+  and selected, keyless, and never carrying audio; `docs/architecture.md` §"What leaves
+  the machine" states it precisely.
 - **Writing code by voice.** Flow is for prose — prompts, messages, docs, commit
   messages. Symbol-level code dictation ("open paren, self dot") is a different product.
 - **General voice control.** No "open browser", no OS automation. Text in, text out —

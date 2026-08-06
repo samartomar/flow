@@ -904,14 +904,35 @@ class Pill(tk.Tk):
     #: voice name, and those name a person, not a fallback.
     VOICE_ENGINE_DEFAULT = "Engine default"
 
+    #: Engine key to the heading it is listed under, in the order the sections appear.
+    #: The order matches `speak._legacy`, so what the menu puts at the top is what
+    #: `--voice female` would have chosen — the list and the resolver agree, which is the
+    #: same discipline `speak.host` keeps between enumerating and speaking.
+    VOICE_SECTIONS = (
+        ("edge", "Microsoft Natural"),
+        ("piper", "Piper"),
+        ("sapi", "Windows"),
+    )
+
     def _voice_menu(self, parent: tk.Menu) -> None:
-        """A submenu of the voices this machine actually has.
+        """A submenu of the voices this machine actually has, grouped by engine.
 
         Listed rather than cycled: "next voice" is unusable when the good one is fourth
         of nine, and the whole reason this exists is that the engine's default is the
         oldest voice on the box and nobody had ever chosen it. A tick marks the one in
         use, so the answer to "which am I hearing" is on screen and not in a log line
         that scrolled away at startup.
+
+        Grouped once there was more than one engine to group. A flat list mixed three
+        kinds of voice that differ in ways the name does not show — one is local and
+        instant, one is local and needs a model downloaded, one goes over the network —
+        and "Piper en_GB-cori-high" next to "Microsoft Zira" told nobody which was which.
+        Headings are disabled rows rather than nested cascades, so choosing a voice is
+        still one click and not two.
+
+        Sections with nothing in them are skipped entirely, which is the normal case:
+        with no extras installed there is one section, and it looks like the old flat
+        list with a heading on top.
         """
         voices = self.session.voices()
         if not voices:
@@ -929,12 +950,22 @@ class Pill(tk.Tk):
             variable=self._voice_var,
             command=lambda: self.session.set_voice(None),
         )
-        sub.add_separator()
-        for v in voices:
-            sub.add_radiobutton(
-                label=v.describe(), value=v.name, variable=self._voice_var,
-                command=lambda name=v.name: self.session.set_voice(name),
-            )
+        known = {key for key, _ in self.VOICE_SECTIONS}
+        for key, heading in self.VOICE_SECTIONS:
+            # An engine added later and not listed here still reaches the menu, under the
+            # last heading, rather than vanishing from it. A voice nobody can select is
+            # the one failure this menu must not have.
+            group = [v for v in voices
+                     if v.engine == key or (key == "sapi" and v.engine not in known)]
+            if not group:
+                continue
+            sub.add_separator()
+            sub.add_command(label=heading, state="disabled")
+            for v in group:
+                sub.add_radiobutton(
+                    label=v.describe(), value=v.name, variable=self._voice_var,
+                    command=lambda name=v.name: self.session.set_voice(name),
+                )
         parent.add_cascade(label="Voice", menu=sub)
 
     def _recent_menu(self, parent: tk.Menu) -> None:

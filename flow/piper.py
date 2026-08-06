@@ -6,15 +6,13 @@ through Narrator's settings are unreachable by any public API — `speak.install
 carries the measurement. Installing more Windows voices cannot improve the reply.
 Shipping a different engine is the only thing that can, and this is it.
 
-**Why Piper and not the voices already on the disk.** The tempting answer is `edge-tts`,
-which serves the exact Ava/Guy/Sonia voices sitting unusable in `WindowsApps`. It is ruled
-out twice over and either would be enough. R16 caps declared dependencies; and R9 is the
-promise that nothing leaves the machine, which `product.md` records as non-negotiable and
-`speak.py` repeats in its own first paragraph — a WebSocket carrying the text of every
-spoken reply to Microsoft breaks it whether or not it needs an API key. Piper synthesises
-locally, so R9 holds, and it is an *optional* extra, so R16 holds by the same reading that
-`pyproject.toml` already applies to `[cuda]`: a default install still fetches three
-packages. It is also why this works on macOS, where there is no SAPI half at all.
+**Why this and not the network engine.** `flow/edge.py` serves the exact Ava/Guy/Sonia
+voices sitting unusable in `WindowsApps`, and it ships too — but it ships *beside* this
+one, not instead of it, and this is the one to reach for first. It synthesises locally, so
+nothing leaves the machine and no reply depends on a connection. Both are optional extras,
+so R16 holds either way by the reading `pyproject.toml` already applies to `[cuda]`: a
+default install still fetches three packages. This is also the engine that works on macOS,
+where there is no SAPI half at all, and the one that works on a train.
 
 **In-process, not a subprocess, and that is a measurement rather than a preference.** This
 module was first built around the `piper` CLI — one process per utterance, killed on
@@ -43,6 +41,7 @@ and behaves exactly as before when one is not.
 from __future__ import annotations
 
 import json
+import queue
 import threading
 import time
 from pathlib import Path
@@ -72,7 +71,36 @@ LOAD_WAIT_SEC = 20.0
 #: `RawOutputStream.write` blocks until the device has taken all of it — so writing a
 #: whole chunk would make `stop()` wait for the end of the sentence. Splitting bounds how
 #: long an interruption can take to be heard.
-CHUNK_FRAMES = 1024
+#:
+#: 4096 and not the 1024 this started at, which is a trade against the *other* failure.
+#: Every write is a GIL round trip, and at 1024 frames that is one every 46 ms on a thread
+#: competing with the UI, the audio pump and a decode — enough contention and the writes
+#: stop arriving in time. `write` blocks inside PortAudio with the GIL released, so fewer
+#: and larger writes leave the interpreter for longer. The cost is that `stop()` is heard
+#: after up to ~190 ms instead of ~50 ms, which is well inside what reads as immediate.
+CHUNK_FRAMES = 4096
+
+#: How much audio to hold before the first sample is written, and the reason synthesis
+#: and playback are separate threads at all.
+#:
+#: Piper yields one chunk per *sentence*, and generating the next one takes real CPU. Done
+#: in a single thread the device is fed nothing at all for the length of each synthesis,
+#: and the only thing standing between that and an audible gap is the device's own buffer
+#: — measured at 0.183 s here. On an idle machine synthesis outruns playback about six to
+#: one and it holds; with a `faster-whisper` decode running on the same cores it does not,
+#: and the reply breaks up at every sentence boundary. Reported from use, which is how
+#: this was found: "sounds good but breaking".
+#:
+#: So a producer thread synthesises into a queue and a consumer thread writes, and this is
+#: the cushion the consumer builds before it starts. Half a second costs half a second of
+#: added latency on the first reply and absorbs a sentence that takes that much longer
+#: than expected to generate.
+PREBUFFER_SEC = 0.5
+
+#: Requested from PortAudio for the same reason. It made no measurable difference on an
+#: idle machine — the device reported 0.183 s either way — but asking for headroom is free
+#: and the failure it guards against only appears under load.
+LATENCY = "high"
 
 
 def available() -> bool:
@@ -270,13 +298,12 @@ class Synth:
                 return False
             return True
 
-    def _feed(self, text: str, epoch: int) -> None:
-        """Synthesise and play, checking after every chunk whether it still should.
+    def _synthesise(self, text: str, q: queue.Queue, epoch: int) -> None:
+        """Generate PCM into `q`. Always terminates the queue with None.
 
-        The generator is what makes `stop` cheap: abandoning it stops synthesis at the
-        next sentence boundary, and nothing has to be killed or drained.
+        The generator is what makes `stop` cheap: abandoning it ends synthesis at the next
+        sentence boundary, and nothing has to be killed or drained.
         """
-        stream = None
         try:
             if not self._loaded.wait(LOAD_WAIT_SEC):
                 return
@@ -286,11 +313,46 @@ class Synth:
                     return
             if model is None or failed:
                 return
-            import sounddevice as sd
             from piper import SynthesisConfig
 
+            cfg = SynthesisConfig(length_scale=length_scale(self._rate))
+            for chunk in model.synthesize(text, cfg):
+                with self._lock:
+                    if epoch != self._epoch:
+                        return
+                q.put(chunk.audio_int16_bytes)
+        except Exception:
+            # A model that failed on this input. The reply falls silent and the session
+            # carries on, which is the contract every engine here shares.
+            pass
+        finally:
+            q.put(None)
+
+    def _play(self, q: queue.Queue, epoch: int) -> None:
+        """Write what the producer generates, after building a cushion first."""
+        import sounddevice as sd
+
+        stream = None
+        current = False
+        try:
+            need = int(self._voice.sample_rate * 2 * PREBUFFER_SEC)
+            pending, done = bytearray(), False
+            # Filled before the device is opened, so the cushion is audio in hand rather
+            # than an empty buffer the consumer is already behind on.
+            while len(pending) < need and not done:
+                with self._lock:
+                    if epoch != self._epoch:
+                        return
+                item = q.get()
+                if item is None:
+                    done = True
+                else:
+                    pending += item
+            if not pending:
+                return
             stream = sd.RawOutputStream(
-                samplerate=self._voice.sample_rate, channels=1, dtype="int16"
+                samplerate=self._voice.sample_rate, channels=1, dtype="int16",
+                latency=LATENCY,
             )
             stream.start()
             with self._lock:
@@ -298,18 +360,21 @@ class Synth:
                     stream.close()
                     return
                 self._stream = stream
-            cfg = SynthesisConfig(length_scale=length_scale(self._rate))
-            for chunk in model.synthesize(text, cfg):
-                data = chunk.audio_int16_bytes
-                # Written in slices rather than whole. Piper emits a chunk per sentence,
-                # so a long answer arrives as several seconds of audio at a time, and
-                # `write` blocks until the device has taken all of it — one `write` per
-                # chunk would make an interruption wait for the end of the sentence.
-                for i in range(0, len(data), CHUNK_FRAMES * 2):
+            while True:
+                # Written in slices rather than whole. `write` blocks until the device has
+                # taken everything handed to it, so passing a whole sentence would make an
+                # interruption wait for that sentence to finish playing.
+                for i in range(0, len(pending), CHUNK_FRAMES * 2):
                     with self._lock:
                         if epoch != self._epoch:
                             return
-                    stream.write(data[i:i + CHUNK_FRAMES * 2])
+                    stream.write(bytes(pending[i:i + CHUNK_FRAMES * 2]))
+                if done:
+                    break
+                item = q.get()
+                if item is None:
+                    break
+                pending = bytearray(item)
         except Exception:
             # A device that disappeared mid-reply, a model that failed on this input.
             # Both mean the utterance is over.
@@ -341,17 +406,19 @@ class Synth:
         # The ceiling covers the load as well as the speech, because on the very first
         # reply after a voice is chosen the model may still be coming in.
         ceiling = len(text.split()) / WORDS_PER_SEC + CEILING_SLACK_SEC + LOAD_WAIT_SEC
+        q: queue.Queue = queue.Queue()
         with self._lock:
             self._epoch += 1
             epoch = self._epoch
-            # Set before the feeder starts, for the reason `speak.Speaker.say` gives:
-            # sound follows within milliseconds and the microphone has to be gated by
-            # then, or the reply's first syllable is transcribed as the user's.
+            # Set before either worker starts, for the reason `speak.Speaker.say` gives:
+            # the microphone has to be gated before the first sample, or the reply's
+            # opening syllable is transcribed as the user's.
             self._speaking = True
             self._deadline = time.monotonic() + ceiling
-        threading.Thread(
-            target=self._feed, args=(text, epoch), daemon=True, name="piper"
-        ).start()
+        threading.Thread(target=self._synthesise, args=(text, q, epoch),
+                         daemon=True, name="piper-synth").start()
+        threading.Thread(target=self._play, args=(q, epoch),
+                         daemon=True, name="piper-play").start()
         return True
 
     def stop(self) -> bool:

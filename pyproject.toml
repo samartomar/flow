@@ -40,10 +40,9 @@ dependencies = [
 #     uv pip install -e ".[voice]"
 #     python -m piper.download_voices en_GB-cori-high --data-dir ~/.flow/voices
 #
-# `edge-tts` would have served those natural voices directly and was rejected: it needs a
-# network round trip per reply, and R9 is the promise that nothing leaves the machine.
-# Piper synthesises locally, so the promise holds — and it is why spoken replies work on
-# macOS, where there is no SAPI half at all.
+# Prefer this over `[edge]` below unless you specifically want the Microsoft voices: it
+# synthesises locally, so nothing leaves the machine and no reply waits on a connection.
+# It is also the engine that works on macOS, where there is no SAPI half at all.
 #
 # Not pinned tighter than a major version: what this depends on is `PiperVoice.load` and
 # `synthesize()` yielding chunks with `audio_int16_bytes`, which `TestPiperReal` checks
@@ -55,6 +54,20 @@ cuda = [
 ]
 voice = [
     "piper-tts>=1.6",
+]
+# `edge` is the one part of Flow that sends anything off the machine, which is why it is
+# an extra you have to ask for and why `flow/edge.py` says so in its first paragraph. It
+# reaches the natural voices Windows installs for Narrator and then makes unreachable —
+# see `speak.installed_voices` for the mechanism. No API key and no account; what leaves
+# is the text of each spoken reply, and only once you have both installed this and chosen
+# one of its voices. ASR, corrections and refinement stay local either way.
+#
+#     uv pip install -e ".[edge]"
+#
+# `av` is not listed because it is already here: faster-whisper depends on it, so the MP3
+# the service returns can be decoded without adding a wheel anyone was not downloading.
+edge = [
+    "edge-tts>=7.2",
 ]
 
 [project.scripts]

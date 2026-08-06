@@ -1,19 +1,26 @@
 """Spoken replies (P9, optional half) through the speech engine Windows already has.
 
-R16 caps this project at three declared dependencies, so a TTS *package* is not an
-option. `System.Speech.Synthesis` is part of .NET on every Windows install and is
-reachable through PowerShell, which is how `scripts/` already synthesises the SAPI
-control voice for the benchmarks. Nothing is installed and nothing leaves the machine
-(R9).
+R16 caps this project at three declared dependencies, so a TTS *package* is not an option
+for the engine that has to be there. `System.Speech.Synthesis` is part of .NET on every
+Windows install and is reachable through PowerShell, which is how `scripts/` already
+synthesises the SAPI control voice for the benchmarks. Nothing is installed, and on this
+path nothing leaves the machine.
 
 That is the floor and not the ceiling. `installed_voices` records why it cannot be raised
 from inside Windows — every reachable voice is the 2013 generation, and the natural voices
-Windows 11 installs are unreachable by any public API — so a second engine is offered
-alongside this one in `flow/piper.py`, chosen per voice from the same menu. It is an
-external binary rather than a package, which is what keeps R16 intact, and it synthesises
-locally, which is what keeps R9 intact. Everything below is the Windows path; `Speaker`
-routes between the two on the name of the chosen voice and nothing else in Flow knows
-there are two.
+Windows 11 installs are unreachable by any public API — so two more engines are offered
+alongside this one, each an optional extra so a default install still declares three
+dependencies:
+
+- `flow/piper.py`, local neural speech from a downloaded model. Nothing leaves the
+  machine, and it is the one that works on macOS and offline.
+- `flow/edge.py`, the Microsoft natural voices. The only way to hear them, and the one
+  part of Flow that sends anything out — the text of each spoken reply, keyless, and only
+  once someone has installed the extra *and* chosen one of its voices. See its first
+  paragraph, and `docs/architecture.md` §"What leaves the machine".
+
+Everything below is the Windows path. `Speaker` routes between all three on the name of
+the chosen voice, and nothing else in Flow knows there is more than one.
 
 **One long-lived host process, not one per reply.** The obvious implementation shells
 out per utterance, and it is wrong twice: PowerShell costs ~700 ms of startup before
@@ -268,11 +275,39 @@ def installed_voices(refresh: bool = False) -> list[Voice]:
     global _CACHE
     if _CACHE is not None and not refresh:
         return _CACHE
-    from . import piper
+    modern = [v for v in all_voices(refresh=refresh) if v.engine != "sapi"]
+    # The 2013 voices are offered only when nothing better is installed. They are not
+    # removed outright, and the difference is the whole point: a default install declares
+    # three dependencies and has neither extra, so SAPI is the only thing it can speak
+    # with — dropping it unconditionally would make converse mode silent for everyone who
+    # never opted in. Once a Piper model or a natural voice exists, nobody should be
+    # offered a voice from 2013, so they disappear from the menu.
+    #
+    # Disappearing from the *menu* is not the same as becoming unreachable: `pick`
+    # resolves against `all_voices`, so a profile or a `--voice` that names a Windows
+    # voice still gets it, and `Speaker` still speaks it. Hidden, not withdrawn.
+    _CACHE = modern or _sapi_voices()
+    return _CACHE
 
-    found = _sapi_voices() + piper.voices(refresh=refresh)
-    _CACHE = found
-    return found
+
+_ALL: list[Voice] | None = None
+
+
+def all_voices(refresh: bool = False) -> list[Voice]:
+    """Every voice from every engine, including ones the menu no longer offers.
+
+    `installed_voices` is what to show someone; this is what to resolve a name against.
+    They differ only when a better engine is installed, and the split exists so that
+    hiding the 2013 voices cannot break a saved profile that names one.
+    """
+    global _ALL
+    if _ALL is not None and not refresh:
+        return _ALL
+    from . import edge, piper
+
+    _ALL = (edge.voices(refresh=refresh) + piper.voices(refresh=refresh)
+            + _sapi_voices())
+    return _ALL
 
 
 def _sapi_voices() -> list[Voice]:
@@ -306,18 +341,25 @@ def _legacy(v: Voice) -> int:
     development machine, where the SAPI5 store held three Desktop voices and OneCore held
     six more.
 
-    Piper sorts above both, and that one *is* a judgement — it is the reason the engine
-    was added at all. `installed_voices` records what the Windows voices are: every one
-    of them is the 2013 `MSTTS_V110` generation, and no newer one can be reached. A
-    machine that has gone to the trouble of installing a Piper model did so to be heard
-    in it.
+    The other two sort above both, and that ordering *is* a judgement — it is the reason
+    the engines were added at all. `installed_voices` records what the Windows voices
+    are: every one of them is the 2013 `MSTTS_V110` generation, and no newer one can be
+    reached. A machine that went to the trouble of installing a Piper model or the
+    natural voices did so to be heard in them.
+
+    Natural first, Piper second. Not a claim that everyone prefers it, but the narrower
+    one that reaching this list at all took an explicit `pip install` *and* choosing the
+    voice: `flow/edge.py` is the only engine that opens a socket, it is off by default,
+    and someone who has turned it on has said what they want.
 
     This only decides a request that names no voice, like `--voice female`. Asking for
     one by name always gets that one.
     """
-    if v.engine == "piper":
+    if v.engine == "edge":
         return 0
-    return 2 if v.name.strip().lower().endswith("desktop") else 1
+    if v.engine == "piper":
+        return 1
+    return 3 if v.name.strip().lower().endswith("desktop") else 2
 
 
 def _select(name: str) -> str:
@@ -337,7 +379,11 @@ def pick(want: str | None, voices: list[Voice] | None = None) -> str | None:
     then any voice whose name contains what was typed. English is preferred when a
     gender matches several, since Flow only produces English to read.
     """
-    voices = installed_voices() if voices is None else voices
+    # `all_voices`, not `installed_voices`: naming a voice must keep working after a
+    # better engine hides the Windows ones from the menu. A profile written last month,
+    # or a `--voice george` typed from habit, resolves to the voice it names. The
+    # preference below is unaffected — the hidden voices sort last anyway.
+    voices = all_voices() if voices is None else voices
     if not want or not voices:
         return None
     wanted = want.strip().lower()
@@ -424,16 +470,19 @@ class Speaker:
             synth = self._synth
             if synth is not None and synth.voice.name == name:
                 return synth
-        from . import piper
+        from . import edge, piper
 
-        match = next((v for v in piper.voices() if v.name == name), None) if name else None
+        match = None
+        if name:
+            match = next((v for v in all_voices() if v.name == name), None)
         with self._lock:
             stale, self._synth = self._synth, None
         if stale is not None:
             stale.close()
-        if match is None:
+        if match is None or match.engine == "sapi":
             return None
-        synth = piper.Synth(match, self._rate)
+        module = {"piper": piper, "edge": edge}[match.engine]
+        synth = module.Synth(match, self._rate)
         with self._lock:
             self._synth = synth
         return synth
