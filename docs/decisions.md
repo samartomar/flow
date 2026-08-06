@@ -32,9 +32,22 @@ account, no audio and no workspace path, and nothing at all unless someone has i
 the extra *and* selected one of its voices. `product.md`'s non-goal on cloud ASR is
 untouched — this is not ASR, and audio never leaves.
 
+**Two engines, two audiences, and neither is a stopgap.** The owner's framing when the
+narrowing was confirmed, and it is the reason both stay: **most organisations will never
+install `[edge]`** — a policy that forbids sending text to a third-party service forbids
+this, whatever the guarantees around it — so **Piper carries the load**, and it has to be
+good enough to be the primary engine rather than a fallback that exists to be replaced.
+`[edge]` is for individuals, who can make that call for themselves and mostly will.
+
+That is why the README leads with Piper, why `speak.py`'s module docstring lists it first,
+and why effort spent on Piper's voice quality is not effort spent on a compatibility
+shim. Reading `[edge]` as "the good one" and Piper as "the offline compromise" would get
+the investment backwards.
+
 **Reopen conditions.** (1) A local engine reaches the natural voices — then `[edge]` is
 redundant and should go. (2) The service starts requiring a key or an account, which would
-put it back under R9's flat prohibition rather than beside it.
+put it back under R9's flat prohibition rather than beside it. Note that neither is "Piper
+turns out to be good enough": Piper being good enough is the plan, not the exit.
 
 **The 2013 voices are hidden, not removed.** They vanish from the menu as soon as any
 better voice is installed, and come back when none is — a default install has neither
