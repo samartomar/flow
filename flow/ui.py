@@ -587,6 +587,13 @@ class Pill(tk.Tk):
         #: `session.thread`, whose trimming is about what the CLI is told and would
         #: otherwise decide what the user can still see.
         self._last_draft = ""
+        #: Whether the question for the ask now in flight has already been put on the
+        #: card. `card.ask` is not idempotent — it files the current question into
+        #: history and starts a new one — so it must be called exactly once per ask, and
+        #: the condition that calls it fires on an event that can arrive many times
+        #: while one ask is outstanding. Cleared the moment the session leaves ASKING,
+        #: so asking the same question twice on purpose still shows twice.
+        self._asked = False
         self._bind_drag()
         # add="+", and that is not decoration: `<Button-1>` and `<ButtonPress-1>` are
         # the same Tk event, so binding this one without it replaced the whole binding
@@ -988,6 +995,30 @@ class Pill(tk.Tk):
                 for v in group:
                     self._voice_row(sub, v)
         parent.add_cascade(label="Voice", menu=sub)
+
+    def _ask_is_new(self) -> bool:
+        """True once per ask — the first empty draft that lands while one is in flight.
+
+        The draft emptying is how the UI learns a question has gone, and it is the right
+        signal, but it is not a *unique* one: more than one empty-draft event can arrive
+        while a single ask is outstanding, and a slow ask leaves a long window for them.
+        `ConversationCard.ask` is deliberately not idempotent — it files the current
+        question into history and starts a new one, which is what makes a second question
+        push the first one up — so calling it twice for one ask puts the same question on
+        screen twice.
+
+        Measured from a real session: the diag log holds exactly one `ask` (82 chars, a
+        20 s timeout), and the card showed the question three times. Two extra calls, two
+        extra copies. The condition used to be "is the session asking", which is a level
+        and stays true for the whole wait; this makes it an edge.
+
+        `_asked` is cleared in `_pump` on the first frame the session is no longer
+        ASKING, so asking the same question again really does show it again.
+        """
+        if self.session.state is not State.ASKING or self._asked:
+            return False
+        self._asked = True
+        return True
 
     def _voice_row(self, menu: tk.Menu, v) -> None:
         """One selectable voice. Every row in every section goes through here.
@@ -1457,6 +1488,12 @@ class Pill(tk.Tk):
             self.levels.append(0.0)
 
         self._pump_warnings()
+        # Cleared on the frame the ask ends, whether it answered or failed, so the next
+        # one puts its question on the card — including the same question asked again.
+        # Here rather than inside `_ask_is_new` because it has to run on every frame,
+        # and that only runs when a draft event arrives.
+        if self.session.state is not State.ASKING:
+            self._asked = False
         for ev in self.session.events():
             if ev.kind == "draft":
                 if ev.text:
@@ -1467,7 +1504,7 @@ class Pill(tk.Tk):
                     # words that were on screen are the words that went, so they pin.
                     if ev.text:
                         self.card.show_partial(ev.text)
-                    elif self.session.state is State.ASKING:
+                    elif self._ask_is_new():
                         self.card.ask(self._last_draft)
                 elif ev.text:
                     self.bubble.show(ev.text)

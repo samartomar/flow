@@ -123,6 +123,53 @@ class TestOlderTurnsScrollAbove(unittest.TestCase):
         c.ask("second")
         self.assertEqual(c._history, [("q", "first")])
 
+    def test_one_ask_puts_the_question_on_screen_once(self):
+        """From a real session: one ask in the log, three copies on the card.
+
+        The draft emptying is how the UI learns a question has gone, and more than one
+        empty-draft event can land while a single ask is outstanding — a slow one leaves
+        a long window. `ask` files the current question into history every time it is
+        called, which is exactly what `test_a_second_question_pushes_the_first_exchange_up`
+        depends on, so the fix belongs at the caller: `Pill._ask_is_new` turns the level
+        ("is the session asking") into an edge ("has this ask been shown").
+
+        Measured case: an 82-character question, one `ask` event, a 20 s timeout, and the
+        question drawn three times with "ask failed" under it.
+        """
+        from flow.session import State
+
+        pill = ui.Pill.__new__(ui.Pill)
+        pill.session = mock.Mock(state=State.ASKING)
+        pill._asked = False
+
+        c = card()
+        for _ in range(5):  # five empty-draft events during one slow ask
+            if pill._ask_is_new():
+                c.ask("Can you tell me about this project?")
+        rows = [t for _, t in c._history] + [c._question]
+        self.assertEqual(rows.count("Can you tell me about this project?"), 1)
+        self.assertEqual(c._history, [])
+
+    def test_asking_the_same_question_again_still_shows_it_again(self):
+        # The flag must not swallow a real second ask — it is cleared on the first frame
+        # the session is no longer ASKING, which is what `_pump` does.
+        from flow.session import State
+
+        pill = ui.Pill.__new__(ui.Pill)
+        pill.session = mock.Mock(state=State.ASKING)
+        pill._asked = False
+
+        c = card()
+        for _ in range(3):
+            if pill._ask_is_new():
+                c.ask("same question")
+        pill._asked = False  # the ask ended
+        for _ in range(3):
+            if pill._ask_is_new():
+                c.ask("same question")
+        self.assertEqual(c._history, [("q", "same question")])
+        self.assertEqual(c._question, "same question")
+
     def test_the_history_is_bounded_like_the_thread_is(self):
         c = card()
         for i in range(60):
