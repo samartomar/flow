@@ -280,16 +280,23 @@ def main(argv: list[str] | None = None) -> int:
     # the opt-in; a conversation you have to read is not the feature.
     speaker = None
     if not args.no_speak:
-        from .speak import Speaker, installed_voices, pick
+        from .speak import Speaker, default_voice, installed_voices, pick
 
-        # The flag wins over the profile, and the profile over the engine default. A
+        # The flag wins over the profile, and the profile over whatever is best. A
         # saved voice that has since been uninstalled resolves to None and is said out
         # loud rather than silently ignored — the reply would otherwise come back in a
         # voice nobody chose, which reads as the setting not working.
         wanted = args.voice or (profile.voice if profile is not None else None)
         chosen = pick(wanted)
+        # `default_voice` and not None, so that a machine with a better engine installed
+        # does not fall through to `System.Speech`'s own default — which is one of the
+        # 2013 voices the menu has stopped offering. See its docstring: hiding them from
+        # the list while still speaking in them is the worst of both.
+        fallback = default_voice()
         if wanted and chosen is None:
-            say(f"voice: {wanted!r} is not installed - using the engine default")
+            say(f"voice: {wanted!r} is not installed - using "
+                f"{fallback or 'the engine default'}")
+        chosen = chosen or fallback
         speaker = Speaker(voice=chosen)
         if not speaker.available:
             say("speech: engine unavailable - replies will be silent")

@@ -215,6 +215,54 @@ class TestPiperDiscovery(unittest.TestCase):
         self.assertEqual(found[0].culture, "en-GB")  # underscore normalised
         self.assertEqual(found[0].sample_rate, 22050)
 
+    def test_the_best_model_is_listed_first(self):
+        # The head of this list is what `speak.default_voice` hands somebody who never
+        # chose anything. Sorted by filename it was alphabetical, so `alan-medium` became
+        # the default over `cori-high` for a reason nobody could have named.
+        import json as _json
+        import tempfile
+
+        from flow import piper
+
+        with tempfile.TemporaryDirectory() as d:
+            for stem, quality in (("en_GB-alan-medium", "medium"),
+                                  ("en_GB-cori-high", "high"),
+                                  ("en_GB-zzz-low", "low")):
+                (Path(d) / (stem + ".onnx")).write_bytes(b"")
+                (Path(d) / (stem + ".onnx.json")).write_text(_json.dumps({
+                    "audio": {"sample_rate": 22050, "quality": quality},
+                    "language": {"code": "en_GB"}, "dataset": stem,
+                }))
+            with mock.patch("flow.piper._CACHE", None), \
+                 mock.patch("flow.piper.VOICES_DIR", Path(d)), \
+                 mock.patch("flow.piper.available", return_value=True):
+                found = piper.voices(refresh=True)
+        self.assertEqual([v.name for v in found], [
+            "Piper en_GB-cori-high", "Piper en_GB-alan-medium", "Piper en_GB-zzz-low",
+        ])
+
+    def test_a_model_that_states_no_quality_sorts_last(self):
+        # Not first: a model that does not say what it is is not one to hand somebody by
+        # default.
+        import json as _json
+        import tempfile
+
+        from flow import piper
+
+        with tempfile.TemporaryDirectory() as d:
+            for stem, audio in (("aaa-mystery", {"sample_rate": 22050}),
+                                ("zzz-known", {"sample_rate": 22050, "quality": "low"})):
+                (Path(d) / (stem + ".onnx")).write_bytes(b"")
+                (Path(d) / (stem + ".onnx.json")).write_text(_json.dumps({
+                    "audio": audio, "language": {"code": "en_GB"}, "dataset": stem,
+                }))
+            with mock.patch("flow.piper._CACHE", None), \
+                 mock.patch("flow.piper.VOICES_DIR", Path(d)), \
+                 mock.patch("flow.piper.available", return_value=True):
+                found = piper.voices(refresh=True)
+        self.assertEqual([v.name for v in found],
+                         ["Piper zzz-known", "Piper aaa-mystery"])
+
     def test_a_missing_sample_rate_is_refused_rather_than_defaulted(self):
         import json as _json
         import tempfile
@@ -623,6 +671,42 @@ class TestLegacyVoicesAreHidden(unittest.TestCase):
         with self._machine(piper_voices=self.PIPER):
             offered = installed_voices(refresh=True)
         self.assertEqual([v.name for v in offered], ["Piper en_GB-cori-high"])
+
+    def test_the_default_moves_to_the_better_engine(self):
+        # The other half of hiding them. `Speaker(voice=None)` falls through to
+        # System.Speech's own default, which is a Windows voice — so without this a
+        # machine with Piper installed and no --voice still *spoke* in the generation the
+        # menu had just stopped offering.
+        from flow.speak import default_voice
+
+        with self._machine(piper_voices=self.PIPER):
+            self.assertEqual(default_voice(), "Piper en_GB-cori-high")
+
+    def test_a_default_install_keeps_its_engine_default(self):
+        # No extras, so nothing is hidden and nothing should be substituted: this is the
+        # behaviour Flow had before any of it, and it must survive.
+        from flow.speak import default_voice
+
+        with self._machine():
+            self.assertIsNone(default_voice())
+
+    def test_a_gender_request_may_still_reach_a_hidden_voice(self):
+        # Asserted so it stays a decision rather than a surprise. No Piper voice states a
+        # gender — Piper's own catalogue has no such field, checked across all 171 entries
+        # — so "female" can only be satisfied by a Windows voice. Honouring the request
+        # beats ignoring it, and `piper._gender` reads a `gender` key from the sidecar for
+        # anyone who wants to fix it for their own models.
+        from flow.speak import pick
+
+        with self._machine(piper_voices=self.PIPER):
+            self.assertEqual(pick("female"), "Microsoft Zira")
+
+    def test_a_piper_voice_that_states_its_gender_wins_the_request(self):
+        from flow.speak import pick
+
+        tagged = [self.PIPER[0]._replace(name="Piper en_GB-cori-high", gender="Female")]
+        with self._machine(piper_voices=tagged):
+            self.assertEqual(pick("female"), "Piper en_GB-cori-high")
 
     def test_a_hidden_voice_is_still_reachable_by_name(self):
         # Hidden from the menu is not withdrawn: a profile written last month, or a

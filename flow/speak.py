@@ -332,6 +332,34 @@ def _sapi_voices() -> list[Voice]:
     return found
 
 
+def default_voice() -> str | None:
+    """What to speak with when nobody has asked for anything. None means "let SAPI decide".
+
+    Hiding the 2013 voices from the menu was not enough on its own, and this is the other
+    half of it. `Speaker(voice=None)` falls through to `System.Speech`'s own default, which
+    is a Windows voice — so a machine with Piper installed, no `--voice` and no saved
+    profile still *spoke* in the generation the menu had just stopped offering. The voices
+    were hidden and used anyway, which is the worst of both.
+
+    So: when a better engine is installed, the default is the best voice it offers, and
+    `_legacy` decides "best" exactly as it does for `--voice female`. When none is, this
+    returns None and the behaviour is what it always was — a default install has no extras
+    and must not have its engine default taken away.
+
+    On a machine with both extras that means **Piper**, never a natural voice, because
+    `_legacy` ranks the local engine first on purpose. Nothing should start sending spoken
+    replies to Microsoft because a package was installed; see `_legacy` for the rule.
+
+    Deliberately *not* saved to the profile. It is a fallback, not a choice, and writing it
+    down would turn "the best available voice" into "this specific voice", which would then
+    go stale the day a better one is installed.
+    """
+    offered = installed_voices()
+    if not offered or any(v.engine == "sapi" for v in offered):
+        return None
+    return min(offered, key=_legacy).name
+
+
 def _legacy(v: Voice) -> int:
     """Sort key that puts the older engine last when nothing else separates two voices.
 
@@ -347,17 +375,27 @@ def _legacy(v: Voice) -> int:
     reached. A machine that went to the trouble of installing a Piper model or the
     natural voices did so to be heard in them.
 
-    Natural first, Piper second. Not a claim that everyone prefers it, but the narrower
-    one that reaching this list at all took an explicit `pip install` *and* choosing the
-    voice: `flow/edge.py` is the only engine that opens a socket, it is off by default,
-    and someone who has turned it on has said what they want.
+    **Piper before the natural voices, and that one is a safety rule rather than a taste.**
+    `flow/edge.py` is the only engine that sends anything off the machine, so installing
+    the extra should make those voices *available*, not start using them. Ranked the other
+    way, `pip install -e ".[edge]"` would have silently made the next spoken reply — and
+    every one after it — a network round trip that nobody asked for.
+
+    Two honest limits on that. Sorting last among the *offered* engines is not the same as
+    being unreachable: with only `[edge]` installed it is what `default_voice` returns, and
+    that is right, because installing only the natural voices says which voices you want.
+    And `--voice female` can still land on one, because no Piper model declares a gender
+    (`piper._gender` explains why it will not guess), so a gendered request has nothing
+    local to match. The guarantee that holds without exception is the narrower one:
+    *nothing at all was asked for* never selects the network engine while a local one
+    exists. Naming a voice always gets that voice, from any engine.
 
     This only decides a request that names no voice, like `--voice female`. Asking for
     one by name always gets that one.
     """
-    if v.engine == "edge":
-        return 0
     if v.engine == "piper":
+        return 0
+    if v.engine == "edge":
         return 1
     return 3 if v.name.strip().lower().endswith("desktop") else 2
 

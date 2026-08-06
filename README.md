@@ -749,12 +749,25 @@ synthesised in 0.95 s. The load is hoisted onto a background thread the moment y
 voice, so by the time you say anything it has usually finished — and the microphone is
 gated from the instant a reply starts, even while the model is still coming in.
 
-**Genders are mostly blank, on purpose.** Piper sidecars carry no gender field — verified
-against the installed models, which describe the dataset, language, and phoneme tables and
-nothing about the speaker. Unless the name says so outright (`hfc_female`,
-`northern_english_male`), Flow leaves it unset rather than reading a gender off a first
-name. The consequence is worth knowing: `--voice female` will not select such a voice, so
-it stays on the Windows ones. Asking by name — `--voice cori` — always works.
+**Genders are mostly blank, on purpose.** Piper carries no gender field anywhere — not in
+the model sidecars, and not in the project's own catalogue of 171 voices, both checked.
+Unless the name says so outright (`hfc_female`, `northern_english_male`), Flow leaves it
+unset rather than reading a gender off a first name.
+
+The consequence is worth knowing: `--voice female` cannot match such a voice, so it falls
+through to a Windows one even when the menu has stopped offering those. Asking by name —
+`--voice cori` — always works. **If it bothers you, say so in the sidecar** and Flow will
+believe it:
+
+```bash
+python -c "import json,pathlib; p=pathlib.Path.home()/'.flow/voices/en_GB-cori-high.onnx.json'; d=json.loads(p.read_text(encoding='utf-8')); d['gender']='female'; p.write_text(json.dumps(d),encoding='utf-8')"
+```
+
+**Once any Piper voice is installed, the Windows voices leave the menu** — and Flow stops
+*defaulting* to one too. Without a `--voice` or a saved profile it now picks the best voice
+you actually have — highest quality first, so `cori-high` beats `alan-medium` — rather than
+falling through to `System.Speech`'s own default, which is one of the 2013 voices. They
+stay reachable by name; they stop being what you get by accident.
 
 ### The Microsoft natural voices — the ones you already have and cannot use
 
@@ -766,10 +779,18 @@ service, which is the only way to hear them.
 uv pip install -e ".[edge]"
 ```
 
-They appear under **Microsoft Natural** in the Voice menu — 47 English voices, the ones
-tagged for conversation first, your own locale before the others. Unlike Piper these
+They appear in the Voice menu as **Microsoft Natural — Female** and **— Male**, nested
+because there are 47 of them and a flat list filled the screen. Inside, the voices tagged
+for conversation come first and your own locale before the others. Unlike Piper these
 report a gender, so `--voice female` reaches them; on this machine it resolves to
 `en-US-AvaNeural`.
+
+**Installing this never changes which voice you hear.** Piper still wins the default, and
+that is a rule rather than a ranking: nothing should start sending your replies to
+Microsoft because a package got installed. Pick one of these voices, or name one with
+`--voice`, and you get it — that is the only thing that turns it on. (With `[edge]` and
+*no* Piper models, the natural voices are the default, because installing only those says
+which voices you want.)
 
 > **This is the one part of Flow that sends anything off your machine.** Choosing one of
 > these voices means the *text of each spoken reply* goes to Microsoft to be synthesised.

@@ -151,8 +151,14 @@ def _gender(dataset: str, sidecar: dict) -> str:
     return "NotSet"
 
 
-def _read(model: Path) -> Voice | None:
-    """One model file as a `Voice`, or None if it is not a usable pair."""
+#: Sidecar `audio.quality` values, best first. Not a field on `Voice` because nothing
+#: outside this module has any use for it — it only decides the order `voices()` returns,
+#: and so which model `speak.default_voice` lands on.
+QUALITY_ORDER = {"high": 0, "medium": 1, "low": 2, "x_low": 3}
+
+
+def _read(model: Path) -> tuple[str, Voice] | None:
+    """One model file as `(quality, Voice)`, or None if it is not a usable pair."""
     from .speak import Voice
 
     sidecar = model.with_suffix(model.suffix + ".json")
@@ -181,7 +187,7 @@ def _read(model: Path) -> Voice | None:
     # unselectable. A filename is unique within a directory by construction, and it is
     # also what the user typed to download the voice, so it is what they will recognise.
     stem = model.name[: -len(MODEL_SUFFIX)]
-    return Voice(
+    return str(audio.get("quality") or ""), Voice(
         name=f"Piper {stem}",
         gender=_gender(str(meta.get("dataset") or stem), meta),
         culture=culture,
@@ -215,9 +221,15 @@ def voices(refresh: bool = False) -> list[Voice]:
             entries = sorted(VOICES_DIR.glob(f"*{MODEL_SUFFIX}"))
         except OSError:
             entries = []
-        for model in entries:
-            if (v := _read(model)) is not None:
-                found.append(v)
+        pairs = [p for model in entries if (p := _read(model)) is not None]
+        # Best model first, because the head of this list is what `speak.default_voice`
+        # takes when nobody has chosen anything. Sorted by filename it was alphabetical,
+        # so `en_GB-alan-medium` became the default over `en_GB-cori-high` for no reason
+        # anybody could have named. Quality is stated in the sidecar; ties fall back to
+        # the name so the order is stable, and an unknown quality sorts last rather than
+        # first — a model that does not say is not a model to hand somebody by default.
+        pairs.sort(key=lambda p: (QUALITY_ORDER.get(p[0], len(QUALITY_ORDER)), p[1].name))
+        found = [v for _, v in pairs]
     _CACHE = found
     return found
 

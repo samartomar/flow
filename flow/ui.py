@@ -907,12 +907,25 @@ class Pill(tk.Tk):
     #: Engine key to the heading it is listed under, in the order the sections appear.
     #: The order matches `speak._legacy`, so what the menu puts at the top is what
     #: `--voice female` would have chosen — the list and the resolver agree, which is the
-    #: same discipline `speak.host` keeps between enumerating and speaking.
+    #: same discipline `speak.host` keeps between enumerating and speaking. Piper leads
+    #: for the reason `_legacy` gives: it is the engine nothing leaves the machine for.
     VOICE_SECTIONS = (
-        ("edge", "Microsoft Natural"),
         ("piper", "Piper"),
+        ("edge", "Microsoft Natural"),
         ("sapi", "Windows"),
     )
+
+    #: Above this many voices an engine is nested behind gender cascades instead of
+    #: listed inline. The natural voices are 47 rows; listed flat they filled the screen,
+    #: pushed Piper's two off the bottom, and made the *shorter and better* list the one
+    #: you had to scroll for. Piper and the Windows nine stay inline — nesting a list you
+    #: can already see costs a click and buys nothing.
+    VOICE_INLINE_MAX = 12
+
+    #: Gender values a cascade is built for, in order, with the label to put on it.
+    #: Anything else — Piper's `NotSet`, mostly — collects under the last one, so a voice
+    #: can never be dropped from the menu by failing to declare something.
+    VOICE_GENDER_GROUPS = (("female", "Female"), ("male", "Male"), (None, "Other"))
 
     def _voice_menu(self, parent: tk.Menu) -> None:
         """A submenu of the voices this machine actually has, grouped by engine.
@@ -927,8 +940,16 @@ class Pill(tk.Tk):
         kinds of voice that differ in ways the name does not show — one is local and
         instant, one is local and needs a model downloaded, one goes over the network —
         and "Piper en_GB-cori-high" next to "Microsoft Zira" told nobody which was which.
-        Headings are disabled rows rather than nested cascades, so choosing a voice is
-        still one click and not two.
+
+        **Short sections inline, long ones nested, and that split came from a screenshot.**
+        Grouping alone was not enough: the natural voices are 47 rows, so the menu opened
+        past the bottom of the screen with arrows at both ends, and Piper's two — the
+        engine you would usually want — were somewhere below the fold. Headings stay
+        disabled rows for the short sections, because nesting a list you can already read
+        costs a click and buys nothing; anything over `VOICE_INLINE_MAX` becomes cascades
+        instead, split by gender because that is the cut people make first and the service
+        states it for every voice. So the natural voices cost two rows rather than
+        forty-seven, and no section can push another off the screen.
 
         Sections with nothing in them are skipped entirely, which is the normal case:
         with no extras installed there is one section, and it looks like the old flat
@@ -960,13 +981,51 @@ class Pill(tk.Tk):
             if not group:
                 continue
             sub.add_separator()
-            sub.add_command(label=heading, state="disabled")
-            for v in group:
-                sub.add_radiobutton(
-                    label=v.describe(), value=v.name, variable=self._voice_var,
-                    command=lambda name=v.name: self.session.set_voice(name),
-                )
+            if len(group) > self.VOICE_INLINE_MAX:
+                self._voice_cascades(sub, heading, group)
+            else:
+                sub.add_command(label=heading, state="disabled")
+                for v in group:
+                    self._voice_row(sub, v)
         parent.add_cascade(label="Voice", menu=sub)
+
+    def _voice_row(self, menu: tk.Menu, v) -> None:
+        """One selectable voice. Every row in every section goes through here.
+
+        The radio variable is shared across the cascades as well as the inline rows, so
+        the tick lands on the chosen voice wherever it lives — and `value=v.name` is why
+        nothing else in Flow had to learn there are three engines.
+        """
+        menu.add_radiobutton(
+            label=v.describe(), value=v.name, variable=self._voice_var,
+            command=lambda name=v.name: self.session.set_voice(name),
+        )
+
+    def _voice_cascades(self, parent: tk.Menu, heading: str, group: list) -> None:
+        """A long engine as `Heading — Female` / `Heading — Male` submenus.
+
+        Flattened one level on purpose: the obvious shape is a single "Microsoft Natural"
+        cascade holding Male and Female cascades, which puts three hops between the pill
+        and a voice. Hanging the gender submenus straight off the Voice menu costs the
+        same two rows and one hop fewer.
+
+        A gender with nobody in it is not rendered, so this cannot produce an empty
+        submenu — and `VOICE_GENDER_GROUPS` ends in a catch-all, so a voice that declares
+        no gender still appears rather than falling out of the menu.
+        """
+        seen: set[str] = set()
+        for want, label in self.VOICE_GENDER_GROUPS:
+            if want is None:
+                members = [v for v in group if v.name not in seen]
+            else:
+                members = [v for v in group if v.gender.lower() == want]
+            if not members:
+                continue
+            seen.update(v.name for v in members)
+            inner = tk.Menu(parent, tearoff=0)
+            for v in members:
+                self._voice_row(inner, v)
+            parent.add_cascade(label=f"{heading} — {label}", menu=inner)
 
     def _recent_menu(self, parent: tk.Menu) -> None:
         """The last ~20 things, truncated to a row and copyable whole.

@@ -85,7 +85,8 @@ class Menu(unittest.TestCase):
         return Profile(self.folder / "profile.json")
 
     def build(self, profile=None, *, speaker=None, converse=False, clis=(),
-              workspace=None, voices=(), recent=()) -> FakeMenu:
+              workspace=None, voices=(), recent=(), notes=None,
+              can_take_reply=True) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -107,6 +108,10 @@ class Menu(unittest.TestCase):
         #: or []` is not a guard when the attribute is a Mock, which is exactly what this
         #: fixture hands it.
         pill.session.recent = list(recent)
+        #: A real `Notes` for the same reason, and `_notes_menu` asks by type too. The
+        #: default is None — a Mock — so the row is absent unless a test asks for it.
+        pill.session.notes = notes
+        pill.session.can_take_reply = can_take_reply
         pill.settings_path = self.folder / "lexicon.txt"
         pill.hotkeys = None
         pill.bubble = mock.Mock()
@@ -549,6 +554,81 @@ class TestTheVoiceMenuCanTickEngineDefault(Menu):
         sub = self.voice_sub(chosen=None)
         sub.commands["Engine default"]()
         self.pill.session.set_voice.assert_called_once_with(None)
+
+
+class TestTheVoiceMenuStaysOnScreen(Menu):
+    """A long engine must not push a short one off the bottom.
+
+    Grouping by engine was not enough on its own. With the natural voices installed the
+    submenu was **50 rows** — past the bottom of the screen, scroll arrows at both ends,
+    and Piper's two down below the fold, so the shorter and better list was the one you
+    had to hunt for. Seen in a screenshot, which is the only way this kind of thing gets
+    noticed.
+
+    So: short sections inline, long ones behind gender cascades, and Piper first because
+    `speak._legacy` puts it first — the menu and the resolver agree on what is best.
+    """
+
+    PIPER = [
+        Voice("Piper en_GB-cori-high", "NotSet", "en-GB", engine="piper",
+              path="/v/c.onnx", sample_rate=22050),
+        Voice("Piper en_GB-alan-medium", "NotSet", "en-GB", engine="piper",
+              path="/v/a.onnx", sample_rate=22050),
+    ]
+    #: Enough to cross VOICE_INLINE_MAX, alternating so both cascades are populated.
+    EDGE = [
+        Voice("Natural en-US-V%02dNeural" % i, "Female" if i % 2 else "Male", "en-US",
+              engine="edge", path="en-US-V%02dNeural" % i, sample_rate=24000)
+        for i in range(20)
+    ]
+
+    def sub(self, voices) -> FakeMenu:
+        menu = self.build(self.profile(), speaker=mock.Mock(voice=None), voices=voices)
+        return menu.cascades["Settings"].cascades["Voice"]
+
+    def test_a_long_engine_becomes_two_rows_instead_of_twenty(self):
+        sub = self.sub(self.PIPER + self.EDGE)
+        self.assertIn("Microsoft Natural — Female", sub.cascades)
+        self.assertIn("Microsoft Natural — Male", sub.cascades)
+        # None of its voices are inline; all of them are reachable.
+        self.assertFalse([r for r in sub.radios if r[1].startswith("Natural ")])
+        inside = (sub.cascades["Microsoft Natural — Female"].radios
+                  + sub.cascades["Microsoft Natural — Male"].radios)
+        self.assertEqual(len(inside), len(self.EDGE))
+
+    def test_a_short_engine_stays_inline_and_comes_first(self):
+        sub = self.sub(self.PIPER + self.EDGE)
+        # Nesting a list you can already read costs a click and buys nothing.
+        self.assertIn(("Piper en_GB-cori-high (en-GB)", "Piper en_GB-cori-high"),
+                      sub.radios)
+        self.assertLess(sub.order.index("Piper"),
+                        sub.order.index("Microsoft Natural — Female"))
+
+    def test_with_no_extras_it_is_the_flat_list_it_always_was(self):
+        # The default install. Nine Windows voices is under the threshold, so nothing
+        # nests and the menu looks exactly as it did before any of this.
+        windows = [Voice("Microsoft V%d" % i, "Male", "en-GB") for i in range(9)]
+        sub = self.sub(windows)
+        self.assertEqual(sub.cascades, {})
+        self.assertEqual(len(sub.radios), len(windows) + 1)  # + Engine default
+
+    def test_a_voice_with_no_gender_still_appears_in_a_nested_engine(self):
+        # `VOICE_GENDER_GROUPS` ends in a catch-all precisely so that a voice declaring
+        # nothing cannot fall out of the menu and become unselectable.
+        odd = self.EDGE + [Voice("Natural en-US-MysteryNeural", "NotSet", "en-US",
+                                 engine="edge", path="x", sample_rate=24000)]
+        sub = self.sub(odd)
+        self.assertIn("Microsoft Natural — Other", sub.cascades)
+        self.assertIn(("Natural en-US-MysteryNeural (en-US)",
+                       "Natural en-US-MysteryNeural"),
+                      sub.cascades["Microsoft Natural — Other"].radios)
+
+    def test_choosing_a_nested_voice_reaches_the_session(self):
+        sub = self.sub(self.PIPER + self.EDGE)
+        inner = sub.cascades["Microsoft Natural — Female"]
+        label = inner.radios[0][0]
+        inner.commands[label]()
+        self.pill.session.set_voice.assert_called_once_with(inner.radios[0][1])
 
 
 if __name__ == "__main__":
