@@ -18,6 +18,45 @@ dependencies = [
     "numpy>=2",
 ]
 
+# R16 holds: a default install still fetches three packages and runs on the CPU. This is
+# the CUDA 12 runtime CTranslate2 links against at *decode* time, and it is an extra
+# because it is roughly a gigabyte of DLLs that a machine without an NVIDIA GPU has no
+# use for. With it, `asr.cuda_ready()` finds the libraries under `site-packages/nvidia`
+# and the decode moves to the GPU — which is worth about six times the speed and lets the
+# strongest model drive both tiers. Without it, nothing changes and nothing breaks.
+#
+#     uv pip install -e ".[cuda]"
+#
+# Pinned only by major version, because the constraint that matters is CTranslate2's
+# (CUDA 12, cuDNN 9) and not a specific patch of either.
+#
+# `voice` is the second engine for spoken replies, and it is an extra for the same reason
+# and by the same reading of R16: a default install still fetches three packages. What it
+# buys is the only thing that can improve the voice at all — `speak.installed_voices`
+# records why. Every voice Windows will enumerate is the 2013 `MSTTS_V110` generation, and
+# the natural voices Windows 11 installs are unreachable by any public API, so no amount
+# of installing Windows voices changes the reply.
+#
+#     uv pip install -e ".[voice]"
+#     python -m piper.download_voices en_GB-cori-high --data-dir ~/.flow/voices
+#
+# `edge-tts` would have served those natural voices directly and was rejected: it needs a
+# network round trip per reply, and R9 is the promise that nothing leaves the machine.
+# Piper synthesises locally, so the promise holds — and it is why spoken replies work on
+# macOS, where there is no SAPI half at all.
+#
+# Not pinned tighter than a major version: what this depends on is `PiperVoice.load` and
+# `synthesize()` yielding chunks with `audio_int16_bytes`, which `TestPiperReal` checks
+# against whatever is actually installed rather than against a version number.
+[project.optional-dependencies]
+cuda = [
+    "nvidia-cublas-cu12>=12",
+    "nvidia-cudnn-cu12>=9",
+]
+voice = [
+    "piper-tts>=1.6",
+]
+
 [project.scripts]
 flow = "flow.__main__:main"
 

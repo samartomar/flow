@@ -1,10 +1,19 @@
 """Spoken replies (P9, optional half) through the speech engine Windows already has.
 
-R16 caps this project at three declared dependencies, so a TTS package is not an
+R16 caps this project at three declared dependencies, so a TTS *package* is not an
 option. `System.Speech.Synthesis` is part of .NET on every Windows install and is
 reachable through PowerShell, which is how `scripts/` already synthesises the SAPI
 control voice for the benchmarks. Nothing is installed and nothing leaves the machine
 (R9).
+
+That is the floor and not the ceiling. `installed_voices` records why it cannot be raised
+from inside Windows — every reachable voice is the 2013 generation, and the natural voices
+Windows 11 installs are unreachable by any public API — so a second engine is offered
+alongside this one in `flow/piper.py`, chosen per voice from the same menu. It is an
+external binary rather than a package, which is what keeps R16 intact, and it synthesises
+locally, which is what keeps R9 intact. Everything below is the Windows path; `Speaker`
+routes between the two on the name of the chosen voice and nothing else in Flow knows
+there are two.
 
 **One long-lived host process, not one per reply.** The obvious implementation shells
 out per utterance, and it is wrong twice: PowerShell costs ~700 ms of startup before
@@ -125,16 +134,26 @@ _LIST = (
 
 #: Which PowerShell hosts the speech, in order of preference.
 #:
-#: This is not a style choice, it is the difference between two voices and five.
+#: This is not a style choice, it is the difference between three voices and nine.
 #: `System.Speech` is a .NET API and the two editions ship different implementations of
 #: it: Windows PowerShell 5.1 (.NET Framework) enumerates only the legacy SAPI5 token
 #: store, PowerShell 7 (.NET) also reads the OneCore store. Measured on this machine —
-#: powershell: David Desktop, Zira Desktop. pwsh: those two plus David, Mark and Zira.
+#: powershell: David, Hazel and Zira Desktop. pwsh: those three plus David, Hazel, Susan,
+#: George, Mark and Zira.
 #:
-#: The OneCore store is where Windows puts everything modern, including the Natural
-#: voices added through Narrator's settings, so a host that cannot see it cannot ever be
-#: given a good voice. `pwsh` is not on every machine, hence the fallback — and 5.1 is,
-#: which is why the fallback is guaranteed to work rather than merely likely.
+#: What neither store holds is a natural voice, and this comment claimed the opposite
+#: until it was tested. `installed_voices` records the mechanism in full; the short form
+#: is that the MSIX package ships a valid SAPI token pointing at a registry hive that does
+#: not exist, and an engine CLSID that is registered nowhere, so there is nothing for
+#: `System.Speech` to enumerate under either host and nothing for WinRT to instantiate
+#: either. Measured against a machine carrying AvaHD, Guy and Sonia.
+#:
+#: So preferring `pwsh` buys more voices, not better ones: three classic `TTS_MS_*_11.0`
+#: tokens and six `MSTTS_V110_*`, all of them the 2013 generation. A better voice comes
+#: from `flow/piper.py` or from nowhere.
+#:
+#: `pwsh` is not on every machine, hence the fallback — and 5.1 is, which is why the
+#: fallback is guaranteed to work rather than merely likely.
 HOSTS = ("pwsh", "powershell")
 
 #: Resolved once, and used by *both* the enumeration and the speech host. They must be
@@ -185,13 +204,31 @@ def host() -> str:
 
 
 class Voice(NamedTuple):
-    """One installed voice, as the engine describes it."""
+    """One installed voice, as its engine describes it.
+
+    The last three fields arrived with the Piper backend and every one of them is
+    defaulted, which is not tidiness — `Voice(name, gender, culture)` is written in tests,
+    in `scripts/`, and by anything that reconstructs a row, and a required field would
+    have broken all of them to record something only one engine has.
+
+    `engine` is what `Speaker` routes on, and it is the only field a caller outside this
+    module needs: `path` and `sample_rate` are Piper's, and mean nothing for a SAPI voice
+    whose model is inside the OS.
+    """
 
     name: str
     gender: str  # Male | Female | Neutral | NotSet
     culture: str  # en-US, en-GB, ...
+    engine: str = "sapi"  # sapi | piper
+    path: str = ""  # Piper: the .onnx. SAPI: the engine owns it.
+    sample_rate: int = 0  # Piper: from the sidecar. SAPI: not ours to know.
 
     def describe(self) -> str:
+        # Gender is dropped when the engine did not state it rather than rendered as
+        # "notset", which is a field name leaking into a menu. Piper models mostly do not
+        # carry one — see `piper._gender` for why that is left unguessed.
+        if self.gender.lower() in ("notset", ""):
+            return f"{self.name} ({self.culture})"
         return f"{self.name} ({self.gender.lower()}, {self.culture})"
 
 
@@ -201,18 +238,45 @@ _CACHE: list[Voice] | None = None
 
 
 def installed_voices(refresh: bool = False) -> list[Voice]:
-    """Every voice this machine can speak with. Empty if the engine is unavailable.
+    """Every voice this machine can speak with, from both engines. Empty if it has none.
 
-    Worth knowing where these come from, because it is the difference between "you are
-    stuck with what you hear" and "install better ones and they appear here". Measured
-    on this machine: the SAPI5 token store holds only the two *Desktop* voices, yet
-    `System.Speech` enumerates five — so it is reading the OneCore store as well, and
-    that is where Windows puts the modern voices, including the Natural ones added
-    through Narrator's settings. Nothing in Flow has to change for those to show up.
+    Windows first, then Piper. The order is what the menu renders, and it puts the voices
+    that are always there above the ones that are there only if someone installed them.
+
+    Worth knowing where the Windows half comes from, because for a long time this comment
+    claimed something better was reachable and it is not. Measured on the development
+    machine: the SAPI5 store holds three `... Desktop` voices, `System.Speech` under
+    `pwsh` enumerates nine, so it reads the OneCore store too — three classic
+    `TTS_MS_*_11.0` tokens plus six `MSTTS_V110_*`, every one of them the 2013 generation.
+
+    The natural voices added through Narrator's settings are not among them, and the
+    reason is more specific than "Windows registers no token". The MSIX package ships a
+    complete and valid SAPI token — `TTS_MS_en-US_AvaNeural_11.0`, engine CLSID
+    `{a12bdfa1-c3a1-48ea-8e3f-27945e16cf7e}` — but it declares its `categoryBase` as
+    `HKLM\\SOFTWARE\\Microsoft\\Speech Server\\v11.0`, a hive that does not exist; a
+    registry-wide search for the token name returns nothing, and the engine CLSID is
+    registered in no COM store, so even a hand-written token would have nothing to
+    instantiate. The definition lives only in the package's own `Registry.dat`, which
+    Narrator loads in-process under package identity. `Windows.Media.SpeechSynthesis`
+    `AllVoices` returns the same six OneCore voices, so WinRT is not a way round it.
+    Measured against a machine carrying AvaHD, Guy and Sonia; none of the three enumerate
+    under either host or either API.
+
+    So installing more Windows voices cannot improve the reply, and that is what `piper`
+    is for. See `flow/piper.py`.
     """
     global _CACHE
     if _CACHE is not None and not refresh:
         return _CACHE
+    from . import piper
+
+    found = _sapi_voices() + piper.voices(refresh=refresh)
+    _CACHE = found
+    return found
+
+
+def _sapi_voices() -> list[Voice]:
+    """What Windows offers, via one short-lived PowerShell. Empty off Windows."""
     try:
         out = subprocess.run(
             [host(), "-NoProfile", "-NonInteractive", "-Command", _LIST],
@@ -230,22 +294,30 @@ def installed_voices(refresh: bool = False) -> list[Voice]:
         parts = line[len(VOICE_PREFIX):].split("|")
         if len(parts) == 3 and parts[0]:
             found.append(Voice(*parts))
-    _CACHE = found
     return found
 
 
 def _legacy(v: Voice) -> int:
     """Sort key that puts the older engine last when nothing else separates two voices.
 
-    A registry fact rather than an opinion about how they sound, which is not something
-    this file is in a position to have: the `... Desktop` voices are registered in the
-    SAPI5 token store, and everything else — including every modern voice Windows
-    installs — is registered under Speech_OneCore. Measured on the development machine,
-    where the SAPI5 store held exactly the two Desktop voices and OneCore held three
-    more. It only decides a request that names no voice, like `--voice female`; asking
-    for one by name always gets that one.
+    Three tiers now, and the first two are registry facts rather than opinions about how
+    they sound: the `... Desktop` voices are registered in the SAPI5 token store, and the
+    rest of what Windows offers is registered under Speech_OneCore. Measured on the
+    development machine, where the SAPI5 store held three Desktop voices and OneCore held
+    six more.
+
+    Piper sorts above both, and that one *is* a judgement — it is the reason the engine
+    was added at all. `installed_voices` records what the Windows voices are: every one
+    of them is the 2013 `MSTTS_V110` generation, and no newer one can be reached. A
+    machine that has gone to the trouble of installing a Piper model did so to be heard
+    in it.
+
+    This only decides a request that names no voice, like `--voice female`. Asking for
+    one by name always gets that one.
     """
-    return 1 if v.name.strip().lower().endswith("desktop") else 0
+    if v.engine == "piper":
+        return 0
+    return 2 if v.name.strip().lower().endswith("desktop") else 1
 
 
 def _select(name: str) -> str:
@@ -308,6 +380,11 @@ class Speaker:
         #: resolved here: `pick()` costs a PowerShell start-up and this constructor runs
         #: on the launch path whether or not anyone ever speaks.
         self._voice = voice
+        #: The Piper backend, built only if the chosen voice turns out to be one of its
+        #: models. None means "speak through Windows", which is both the default and what
+        #: a machine with no Piper installed always gets. Resolved on first use for the
+        #: same reason `_voice` is not: finding out costs an enumeration.
+        self._synth = None
         self._proc: subprocess.Popen | None = None
         self._tried = False
         self._lock = threading.Lock()
@@ -320,6 +397,11 @@ class Speaker:
 
     @property
     def available(self) -> bool:
+        # A chosen Piper voice answers for itself and must not drag a PowerShell up to
+        # say so — `piper.voices()` only lists a model when the binary to run it exists,
+        # so having resolved one is the availability check.
+        if self._backend() is not None:
+            return True
         return self._ensure() is not None
 
     @property
@@ -327,14 +409,51 @@ class Speaker:
         """The chosen voice, or None while the engine's own default is in use."""
         return self._voice
 
+    def _backend(self):
+        """The Piper synth for the chosen voice, or None meaning "speak through Windows".
+
+        The routing decision, and it is made by name because a name is all the rest of
+        Flow carries: the menu stores `Voice.name`, so does the profile, so does
+        `--voice`. Nothing outside this module had to learn that there are two engines.
+
+        Rebuilt when the name changes and torn down when it stops matching, so switching
+        from a Piper voice to a Windows one does not leave a child process behind.
+        """
+        name = self._voice
+        with self._lock:
+            synth = self._synth
+            if synth is not None and synth.voice.name == name:
+                return synth
+        from . import piper
+
+        match = next((v for v in piper.voices() if v.name == name), None) if name else None
+        with self._lock:
+            stale, self._synth = self._synth, None
+        if stale is not None:
+            stale.close()
+        if match is None:
+            return None
+        synth = piper.Synth(match, self._rate)
+        with self._lock:
+            self._synth = synth
+        return synth
+
     def use(self, name: str | None) -> bool:
         """Switch voice. Takes effect on the next reply, and on this host if it is up.
 
         Stops first, because selecting a voice out from under an utterance already being
         spoken is the one thing the engine can be asked here that it may refuse.
+
+        `_backend()` runs on the way out rather than being left to the next `say`, so that
+        switching *away* from a Piper voice tears its child down now. Left lazy, a user
+        who tried a Piper voice and went back to Windows would keep the process until the
+        next reply — and if they never spoke again, until the session ended.
         """
-        self._voice = name
         self.stop()
+        self._voice = name
+        self._backend()
+        if self._synth is not None:
+            return True
         if self._proc is None:
             return True  # nothing running; the bootstrap will carry it
         return self._write(_select(name)) if name else True
@@ -347,7 +466,14 @@ class Speaker:
         ceiling is enforced here rather than in the watcher: a wedged host must not be
         able to leave Flow deaf. Past the deadline this reports False regardless of what
         the watcher has or has not seen.
+
+        Reads `_synth` directly instead of calling `_backend()`, which would resolve it —
+        the microphone polls this property continuously (`Session._pump_audio`), and an
+        enumeration on that path would be a PowerShell start-up per poll.
         """
+        synth = self._synth
+        if synth is not None and synth.voice.name == self._voice:
+            return synth.speaking
         with self._lock:
             if not self._speaking:
                 return False
@@ -438,6 +564,12 @@ class Speaker:
         """Speak `text`, cutting off whatever is already speaking. False if silent."""
         if not text.strip():
             return False
+        # The one place the engine is chosen. Everything below it is SAPI's path, and
+        # `Synth.say` carries the same contract: cut off whatever is speaking, gate the
+        # microphone before the first sample, False if nothing will be heard.
+        synth = self._backend()
+        if synth is not None:
+            return synth.say(text)
         b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
         # Marked as speaking *before* the write, not after: the engine starts producing
         # sound within milliseconds, and the microphone has to already be gated by then
@@ -456,7 +588,16 @@ class Speaker:
         return True
 
     def stop(self) -> bool:
-        """Cut off the current reply — the user has taken the answer back."""
+        """Cut off the current reply — the user has taken the answer back.
+
+        A live Piper synth handles this alone and returns. Falling through to `_write`
+        would be worse than redundant: it goes through `_ensure`, which *starts* the
+        PowerShell host — so stopping a Piper reply would launch the engine that is not
+        speaking, on a machine that may never use it.
+        """
+        synth = self._synth
+        if synth is not None and synth.voice.name == self._voice:
+            return synth.stop()
         with self._lock:
             self._speaking = False
         return self._write(_STOP)
@@ -470,6 +611,9 @@ class Speaker:
         with self._lock:
             self._speaking = False
             proc, self._proc = self._proc, None
+            synth, self._synth = self._synth, None
+        if synth is not None:
+            synth.close()
         if proc is None:
             return
         try:

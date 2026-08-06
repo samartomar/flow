@@ -5,17 +5,31 @@ development machine that was `Microsoft David Desktop` — the oldest one instal
 chosen by anybody. Two things came out of fixing that and both are pinned here.
 
 The first is that "what is installed" depends on which PowerShell asks. `System.Speech`
-is a .NET API with two implementations: Windows PowerShell 5.1 enumerated two voices on
-that machine, PowerShell 7 enumerated five, and the three it adds are the OneCore ones —
-the store Windows registers every modern voice in. A host that cannot see that store can
-never be given a good voice, so the enumeration and the speech host must run under the
-same executable or the menu offers names the host will refuse.
+is a .NET API with two implementations: Windows PowerShell 5.1 enumerated three voices on
+that machine, PowerShell 7 enumerated nine, and the six it adds are the OneCore ones. So
+the enumeration and the speech host must run under the same executable, or the menu offers
+names the host will refuse.
+
+What that difference is *not* is a route to a better voice. Nine is 3 classic
+`TTS_MS_*_11.0` tokens plus 6 `MSTTS_V110_*`, all of them the 2013 generation, and
+Windows 11's natural voices are unreachable from `System.Speech` under either host — the
+package ships a valid token aimed at a registry hive that does not exist, behind an engine
+CLSID registered in no COM store. `speak.installed_voices` carries the full measurement.
+`test_a_voice_that_is_not_installed_resolves_to_nothing` reaches for `Microsoft Aria
+(Natural)` to mean "a name nobody has" — which turns out to be true of every natural voice
+on every machine, not the arbitrary miss it looked like when it was written.
+
+That is what the Piper engine is for, and `TestTwoEngines` pins the part of it that this
+module owns: a second engine changes which voice an *unnamed* request resolves to, and
+must change nothing else.
 
 The second is that a request should not have to be exact. `--voice female` and
 `--voice mark` are how people actually ask.
 """
 
 import sys
+import time
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -23,6 +37,16 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.speak import HOSTS, VOICE_PREFIX, Voice, host, pick  # noqa: E402
+
+#: Whether the optional `[voice]` extra is installed here. Decided once, at import,
+#: rather than inside a test: `TestPiperSynthesis` fakes the `piper` module in
+#: `sys.modules`, so asking later could get the fake and skip nothing.
+try:
+    import piper as _piper  # noqa: F401
+
+    _HAS_PIPER = True
+except Exception:  # pragma: no cover - depends on what is installed
+    _HAS_PIPER = False
 
 #: What `pwsh` reported on the development machine, in the order it reported it — the
 #: legacy pair first, which is why order alone is not a safe way to choose.
@@ -84,6 +108,368 @@ class TestPick(unittest.TestCase):
         self.assertEqual(pick("female", voices), "Microsoft Hanako")
 
 
+class TestTwoEngines(unittest.TestCase):
+    """Piper voices sit in the same list and are chosen by the same rules.
+
+    The design this pins is that `Voice.name` stayed the only handle: the menu, the
+    profile and `--voice` all carry a name and nothing else, so adding an engine did not
+    have to touch any of them. These cases are what would fail if that stopped being true.
+    """
+
+    #: The same machine as INSTALLED, with one Piper model installed alongside.
+    MIXED = INSTALLED + [
+        Voice("Piper en_GB-alba-medium", "NotSet", "en-GB", engine="piper",
+              path="/v/en_GB-alba-medium.onnx", sample_rate=22050),
+        Voice("Piper en_US-hfc_female-medium", "Female", "en-US", engine="piper",
+              path="/v/en_US-hfc_female-medium.onnx", sample_rate=22050),
+    ]
+
+    def test_the_old_shape_still_constructs(self):
+        # Three positional fields is how every existing caller builds one, including
+        # `_sapi_voices` and half of `scripts/`. The engine fields are additive or they
+        # are a breaking change wearing a default.
+        v = Voice("Microsoft Mark", "Male", "en-US")
+        self.assertEqual(v.engine, "sapi")
+        self.assertEqual((v.path, v.sample_rate), ("", 0))
+
+    def test_a_gender_request_prefers_piper_over_both_windows_stores(self):
+        # The whole point of adding the engine: `--voice female` should land on the good
+        # voice, not on the newest of nine voices that are all from 2013.
+        self.assertEqual(pick("female", self.MIXED), "Piper en_US-hfc_female-medium")
+
+    def test_an_exact_windows_name_still_wins_against_a_piper_voice(self):
+        # Preference never overrides someone who named a voice — the rule that already
+        # protected `Microsoft Zira Desktop` has to hold across engines too.
+        self.assertEqual(pick("Microsoft Zira", self.MIXED), "Microsoft Zira")
+        self.assertEqual(
+            pick("Microsoft Zira Desktop", self.MIXED), "Microsoft Zira Desktop"
+        )
+
+    def test_a_gendered_request_cannot_reach_an_unstated_piper_voice(self):
+        # `piper._gender` refuses to read a gender off a dataset name, so `alba` is
+        # NotSet and `female` must not select it. Documented in the README as the price
+        # of not guessing; asserted here so it stays a decision rather than a surprise.
+        only_alba = [v for v in self.MIXED if v.name != "Piper en_US-hfc_female-medium"]
+        self.assertEqual(pick("female", only_alba), "Microsoft Zira")
+
+    def test_an_unstated_piper_voice_is_still_reachable_by_name(self):
+        self.assertEqual(pick("alba", self.MIXED), "Piper en_GB-alba-medium")
+
+    def test_describe_drops_the_gender_it_does_not_have(self):
+        # "notset" is a field name, and the menu renders this string.
+        self.assertEqual(
+            Voice("Piper en_GB-alba-medium", "NotSet", "en-GB", engine="piper").describe(),
+            "Piper en_GB-alba-medium (en-GB)",
+        )
+        self.assertEqual(
+            Voice("Microsoft Mark", "Male", "en-US").describe(),
+            "Microsoft Mark (male, en-US)",
+        )
+
+
+class TestPiperDiscovery(unittest.TestCase):
+    """A machine with no Piper is the normal case and must be a quiet one."""
+
+    def test_no_binary_means_no_voices_and_no_directory_read(self):
+        from flow import piper
+
+        with mock.patch("flow.piper._CACHE", None), \
+             mock.patch("flow.piper.available", return_value=False):
+            self.assertEqual(piper.voices(refresh=True), [])
+
+    def test_a_model_without_its_sidecar_is_not_a_voice(self):
+        # Half a model is worse than none: the sidecar carries the sample rate, and a
+        # guessed rate plays every syllable at the wrong pitch instead of failing.
+        import tempfile
+
+        from flow import piper
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "en_GB-alba-medium.onnx").write_bytes(b"")
+            with mock.patch("flow.piper._CACHE", None), \
+                 mock.patch("flow.piper.VOICES_DIR", Path(d)), \
+                 mock.patch("flow.piper.available", return_value=True):
+                self.assertEqual(piper.voices(refresh=True), [])
+
+    def test_a_complete_pair_becomes_a_voice(self):
+        import json as _json
+        import tempfile
+
+        from flow import piper
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "en_GB-alba-medium.onnx").write_bytes(b"")
+            (Path(d) / "en_GB-alba-medium.onnx.json").write_text(_json.dumps({
+                "audio": {"sample_rate": 22050},
+                "language": {"code": "en_GB"},
+                "dataset": "alba",
+            }))
+            with mock.patch("flow.piper._CACHE", None), \
+                 mock.patch("flow.piper.VOICES_DIR", Path(d)), \
+                 mock.patch("flow.piper.available", return_value=True):
+                found = piper.voices(refresh=True)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].name, "Piper en_GB-alba-medium")
+        self.assertEqual(found[0].engine, "piper")
+        self.assertEqual(found[0].culture, "en-GB")  # underscore normalised
+        self.assertEqual(found[0].sample_rate, 22050)
+
+    def test_a_missing_sample_rate_is_refused_rather_than_defaulted(self):
+        import json as _json
+        import tempfile
+
+        from flow import piper
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "x.onnx").write_bytes(b"")
+            (Path(d) / "x.onnx.json").write_text(_json.dumps({"dataset": "x"}))
+            with mock.patch("flow.piper._CACHE", None), \
+                 mock.patch("flow.piper.VOICES_DIR", Path(d)), \
+                 mock.patch("flow.piper.available", return_value=True):
+                self.assertEqual(piper.voices(refresh=True), [])
+
+    def test_gender_is_read_only_when_the_name_states_it(self):
+        from flow.piper import _gender
+
+        self.assertEqual(_gender("hfc_female", {}), "Female")
+        self.assertEqual(_gender("northern_english_male", {}), "Male")
+        # Not inferred from a first name, which is the whole rule.
+        self.assertEqual(_gender("alba", {}), "NotSet")
+        self.assertEqual(_gender("ryan", {}), "NotSet")
+        # A sidecar that does state it is believed.
+        self.assertEqual(_gender("alba", {"gender": "female"}), "Female")
+
+    def test_rate_maps_onto_pipers_inverted_scale(self):
+        from flow.piper import length_scale
+
+        # SAPI's rate is higher-is-faster; Piper's length scale is lower-is-faster.
+        self.assertLess(length_scale(5), length_scale(0))
+        self.assertGreater(length_scale(-5), length_scale(0))
+        self.assertAlmostEqual(length_scale(0), 1.0)
+        # Clamped, so the extremes stay intelligible.
+        self.assertGreaterEqual(length_scale(-100), 0.4)
+        self.assertLessEqual(length_scale(100), 2.0)
+
+
+class TestPiperSynthesis(unittest.TestCase):
+    """The synthesise-to-speakers path, against a fake model and a fake device.
+
+    Both halves are faked, for different reasons. The device because a test that plays
+    audio needs one and CI has none. The model because `piper` is an *optional* extra, so
+    these cases have to run on a machine that never installed it — which is most of them.
+    `TestPiperReal` covers the real package when it happens to be present.
+
+    What the fake pins is the contract this module actually depends on: `PiperVoice.load`
+    returns something whose `synthesize` yields chunks carrying `audio_int16_bytes`. If a
+    future Piper changes that, `TestPiperReal` fails while these still pass, and that
+    split is what tells you it was the dependency rather than this file.
+    """
+
+    SAMPLES = 16000  # bytes, so 8000 frames — several passes of CHUNK_FRAMES
+
+    class FakeChunk:
+        def __init__(self, data):
+            self.audio_int16_bytes = data
+            self.sample_rate = 22050
+
+    class FakeStream:
+        def __init__(self, **kw):
+            self.kw, self.written = kw, bytearray()
+            self.aborted = self.closed = self.stopped = self.started = False
+
+        def start(self):
+            self.started = True
+
+        def write(self, data):
+            self.written.extend(data)
+
+        def stop(self):
+            self.stopped = True
+
+        def abort(self):
+            self.aborted = True
+
+        def close(self):
+            self.closed = True
+
+    def _fake_piper(self, chunks=None, load_error=None, slow=0.0):
+        """A stand-in `piper` module, injected into `sys.modules` for the duration."""
+        test = self
+
+        class FakeVoice:
+            @staticmethod
+            def load(path, *a, **kw):
+                if slow:
+                    time.sleep(slow)
+                if load_error:
+                    raise load_error
+                return FakeVoice()
+
+            def synthesize(self, text, cfg=None, **kw):
+                for data in (chunks if chunks is not None else [b"\0" * test.SAMPLES]):
+                    yield test.FakeChunk(data)
+
+        mod = types.ModuleType("piper")
+        mod.PiperVoice = FakeVoice
+        mod.SynthesisConfig = lambda **kw: kw
+        return mock.patch.dict(sys.modules, {"piper": mod})
+
+    def _synth(self, rate=0):
+        from flow.piper import Synth
+        from flow.speak import Voice
+
+        v = Voice("Piper test-medium", "NotSet", "en-GB", engine="piper",
+                  path="/v/test.onnx", sample_rate=22050)
+        return Synth(v, rate=rate)
+
+    def _device(self, made):
+        def factory(**kw):
+            st = self.FakeStream(**kw)
+            made.append(st)
+            return st
+
+        return mock.patch("sounddevice.RawOutputStream", side_effect=factory)
+
+    def _drain(self, s, limit=20):
+        deadline = time.monotonic() + limit
+        while s.speaking and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    def test_it_plays_the_whole_utterance_and_then_stops_speaking(self):
+        made = []
+        # A load slow enough to observe, which is also the real first-utterance case:
+        # 3.16 s was measured for the largest English model. Without the delay the fake
+        # finishes inside `say()` and there is no window in which to check the gate.
+        with self._fake_piper(slow=0.3):
+            s = self._synth()
+            try:
+                with self._device(made):
+                    self.assertTrue(s.say("hello there"))
+                    # Gated *before* a sample is written — and before the model has even
+                    # finished loading — or the reply's first syllable is transcribed as
+                    # the user's. The invariant `Speaker.say` shares.
+                    self.assertTrue(s.speaking)
+                    self._drain(s)
+                self.assertFalse(s.speaking, "speaking must clear when the audio ends")
+                self.assertEqual(len(made), 1)
+                self.assertEqual(len(made[0].written), self.SAMPLES)
+                self.assertEqual(made[0].kw["samplerate"], 22050, "rate from the sidecar")
+                self.assertEqual(made[0].kw["dtype"], "int16")
+                # Drained, not aborted: this is the end of an answer, and clipping the
+                # last word would sound like a fault.
+                self.assertTrue(made[0].stopped)
+                self.assertFalse(made[0].aborted)
+            finally:
+                s.close()
+
+    def test_a_long_chunk_is_written_in_slices_so_stop_can_interrupt_it(self):
+        # Piper emits a chunk per sentence, which for a long answer is seconds of audio.
+        # One `write` per chunk would block until the device had taken all of it, so an
+        # interruption would not be heard until that sentence finished.
+        from flow.piper import CHUNK_FRAMES
+
+        made = []
+        with self._fake_piper(chunks=[b"\0" * (CHUNK_FRAMES * 2 * 5)]):
+            s = self._synth()
+            try:
+                with self._device(made):
+                    s.say("one long sentence")
+                    self._drain(s)
+                self.assertEqual(len(made[0].written), CHUNK_FRAMES * 2 * 5)
+            finally:
+                s.close()
+
+    def test_stop_aborts_the_device_and_abandons_the_generator(self):
+        made = []
+        with self._fake_piper():
+            s = self._synth()
+            try:
+                with self._device(made):
+                    s.say("hello there")
+                    self.assertTrue(s.stop())
+                    self.assertFalse(s.speaking)
+                    self._drain(s, limit=5)
+                # `abort`, not `stop`: silence now rather than silence after the rest of
+                # the sentence has played.
+                if made:
+                    self.assertTrue(made[0].aborted or made[0].closed)
+            finally:
+                s.close()
+
+    def test_empty_text_is_silent_without_starting_anything(self):
+        made = []
+        with self._fake_piper():
+            s = self._synth()
+            try:
+                with self._device(made):
+                    self.assertFalse(s.say("   "))
+                self.assertEqual(made, [])
+                self.assertFalse(s.speaking)
+            finally:
+                s.close()
+
+    def test_a_model_that_will_not_load_falls_silent_rather_than_raising(self):
+        made = []
+        with self._fake_piper(load_error=RuntimeError("corrupt model")):
+            s = self._synth()
+            try:
+                s._loaded.wait(5)  # noqa: SLF001
+                self.assertFalse(s.ready)
+                with self._device(made):
+                    # False, and no exception: a bad model must not take the session down
+                    # or leave the microphone gated.
+                    self.assertFalse(s.say("hello"))
+                self.assertEqual(made, [])
+                self.assertFalse(s.speaking)
+            finally:
+                s.close()
+
+    def test_the_ceiling_releases_the_microphone_even_if_synthesis_never_ends(self):
+        # The safety property `speak.Speaker.speaking` exists for, carried into the second
+        # engine: a stalled synthesis must not latch `speaking` True, because the
+        # microphone is gated on it and Flow would go permanently deaf.
+        made = []
+        with self._fake_piper(slow=30):
+            s = self._synth()
+            try:
+                with self._device(made):
+                    s.say("hello there")
+                    self.assertTrue(s.speaking)
+                    with s._lock:  # noqa: SLF001
+                        s._deadline = time.monotonic() - 1  # noqa: SLF001
+                    self.assertFalse(s.speaking)
+            finally:
+                s.close()
+
+
+@unittest.skipUnless(_HAS_PIPER, "the piper extra is not installed")
+class TestPiperReal(unittest.TestCase):
+    """The real package, when this machine has it. Skipped everywhere else.
+
+    Two things the fakes cannot check, and both are contracts with someone else's code:
+    that `PiperVoice.synthesize` still yields chunks exposing `audio_int16_bytes`, and
+    that `SynthesisConfig` still accepts `length_scale`. A break in either shows up here
+    and nowhere else.
+
+    No model is loaded, so this stays fast and works on a machine that installed the
+    extra but never downloaded a voice.
+    """
+
+    def test_the_api_this_module_is_built_on_still_exists(self):
+        import inspect
+
+        from piper import PiperVoice, SynthesisConfig
+
+        self.assertTrue(hasattr(PiperVoice, "load"))
+        self.assertIn("length_scale", inspect.signature(SynthesisConfig).parameters)
+        self.assertIn("text", inspect.signature(PiperVoice.synthesize).parameters)
+
+    def test_available_agrees_with_the_import(self):
+        from flow import piper
+
+        self.assertTrue(piper.available())
+
+
 class TestHost(unittest.TestCase):
     """*Which* host is chosen. That it arrives as a path is `test_speak.py`'s question.
 
@@ -122,7 +508,13 @@ class TestEnumeration(unittest.TestCase):
     """`installed_voices` parses the host's output, and must not trust it."""
 
     def _voices(self, stdout):
+        # The Piper half is stubbed out, not left to answer for itself. These cases are
+        # about parsing what PowerShell printed, and `installed_voices` concatenates the
+        # two engines — so without this they assert "the SAPI parse plus whatever this
+        # developer happens to have installed", and pass or fail by machine. They did
+        # exactly that once the dev box grew two Piper voices.
         with mock.patch("flow.speak._CACHE", None), \
+             mock.patch("flow.piper.voices", return_value=[]), \
              mock.patch("flow.speak.subprocess.run") as run:
             run.return_value = mock.Mock(stdout=stdout)
             from flow.speak import installed_voices
@@ -153,7 +545,10 @@ class TestEnumeration(unittest.TestCase):
         self.assertEqual(self._voices(out), [Voice("Microsoft Mark", "Male", "en-US")])
 
     def test_no_engine_is_an_empty_list_and_not_a_crash(self):
+        # "No engine" means neither of them: no PowerShell to enumerate SAPI, and no
+        # Piper either. With one still answering this asserts the wrong thing.
         with mock.patch("flow.speak._CACHE", None), \
+             mock.patch("flow.piper.voices", return_value=[]), \
              mock.patch("flow.speak.subprocess.run", side_effect=OSError("no shell")):
             from flow.speak import installed_voices
 

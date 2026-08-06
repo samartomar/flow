@@ -675,20 +675,88 @@ choice is saved to `~/.flow/profile.json` immediately, so it survives a restart.
 voice that has since been uninstalled falls back to the engine default and *says so* at
 startup rather than quietly speaking in something else.
 
-**If everything on offer sounds dated, that is the machine and not Flow.** Windows ships
-far better voices than it installs. Add them under *Settings → Accessibility → Narrator →
-Add natural voices*; anything you add appears in the list and the menu with no change to
-Flow. macOS has the same shape of fix under *Settings → Accessibility → Spoken Content →
-Manage Voices* — though Flow does not run there yet.
+**Every Windows voice on offer sounds dated, and installing better ones does not fix it.**
+This was documented the other way round until it was tested. Measured on the development
+machine, which has `MicrosoftWindows.Voice.en-US.AvaHD.1`, `…en-US.Guy.2` and
+`…en-GB.Sonia.1` installed through *Settings → Accessibility → Narrator → Add natural
+voices*: **not one of them appears in the menu.**
+
+The reason is more specific than "Windows registers no token", and worth writing down
+because it closes off the obvious workarounds. The package *does* ship a complete, valid
+SAPI token — `TTS_MS_en-US_AvaNeural_11.0`, with an engine CLSID and a proper attribute
+set. Two things make it inert. It declares its `categoryBase` as
+`HKLM\SOFTWARE\Microsoft\Speech Server\v11.0`, **a hive that does not exist** on the
+machine; a registry-wide search for the token name returns nothing. And the engine CLSID
+`{a12bdfa1-…}` is **registered in no COM store**, so even hand-writing the token into a
+store that *is* read would produce a voice with nothing behind it. The definition lives
+only in the package's private `Registry.dat`, which Narrator loads in-process under
+package identity. `Windows.Media.SpeechSynthesis.AllVoices` returns the same six OneCore
+voices, so WinRT is not a way round it either.
+
+So there is no registry hack and no alternate API. Every *Windows* voice Flow can offer is
+the 2013 `MSTTS_V110` generation — three classic `TTS_MS_*_11.0` tokens and six
+`MSTTS_V110_*`. Shipping a different engine is the only thing that changes the answer,
+which is what the Piper support below is for.
 
 One measured detail that decides what you can reach: `System.Speech` is a .NET API with
 two implementations, and they do not enumerate the same voices. Windows PowerShell 5.1
-reads only the legacy SAPI5 store; PowerShell 7 also reads the OneCore store, which is
-where Windows registers everything modern, natural voices included. On the development
-machine that was the difference between **2 voices and 9**. Flow therefore prefers `pwsh`
+reads only the legacy SAPI5 store; PowerShell 7 also reads the OneCore store. On the
+development machine that is the difference between **3 voices and 9**, which is worth
+having — Susan, George and Mark beat the Desktop pair — but it buys *more* of the same
+generation rather than a better one. Flow therefore prefers `pwsh`
 and falls back to `powershell`, and uses the same executable to list and to speak — a
 menu offering voices the host cannot select would fail silently, which is how you end up
 choosing a voice and hearing a different one.
+
+### A better voice, if you want one
+
+Windows is the floor, not the ceiling. Install the `voice` extra and any Piper voices you
+want, and they appear in the same right-click → **Voice** menu, listed above the Windows
+ones and chosen the same way. Nothing else about Flow changes.
+
+```bash
+uv pip install -e ".[voice]"
+```
+
+```bash
+python -m piper.download_voices en_GB-cori-high --data-dir ~/.flow/voices
+```
+
+`python -m piper.download_voices` with no arguments lists everything available — around
+forty English voices and many other languages. Models land in `~/.flow/voices/` as an
+`.onnx` and an `.onnx.json` sidecar, and **both halves are required**: the sidecar carries
+the sample rate, and a guessed rate produces audio at the wrong pitch rather than audio
+that fails.
+
+That is the whole install. With the extra absent, or with no models downloaded, the menu
+looks exactly as it always did.
+
+**Why Piper and not the voices you already have.** The obvious answer is `edge-tts`, which
+serves the very Ava/Guy/Sonia voices sitting unusable on the disk. It is ruled out twice
+over. **R16** caps declared dependencies — but this is an *optional* extra, so a default
+install still fetches three, the same reading already applied to `[cuda]`. **R9** is the
+promise that nothing leaves the machine, which `product.md` records as non-negotiable, and
+a WebSocket carrying the text of every spoken reply to Microsoft breaks it whether or not
+it needs an API key. Piper synthesises locally, so R9 holds. It is also why spoken replies
+work on macOS, where there is no SAPI half at all.
+
+**Loaded once, in the background.** Flow uses Piper in-process rather than shelling out to
+its CLI, and that is a measurement rather than a preference. The CLI takes **3.30 s to
+produce its first sample**, and the figure barely moves between a 61 MB model and a 109 MB
+one — so it is not model loading, it is Python start-up and the `onnxruntime` import, paid
+again on every single reply. Three seconds of silence before each answer is not a
+conversation. In-process, the same sentence and model measure `import piper` 0.33 s,
+`PiperVoice.load` 3.16 s, then **0.13–0.22 s to the first audio** with 5.6 s of speech
+synthesised in 0.95 s. The load is hoisted onto a background thread the moment you pick the
+voice, so by the time you say anything it has usually finished — and the microphone is
+gated from the instant a reply starts, even while the model is still coming in.
+
+**Genders are mostly blank, on purpose.** Piper sidecars carry no gender field — verified
+against the installed models, which describe the dataset, language, and phoneme tables and
+nothing about the speaker. Unless the name says so outright (`hfc_female`,
+`northern_english_male`), Flow leaves it unset rather than reading a gender off a first
+name. The consequence is worth knowing: `--voice female` will not select such a voice, so
+it stays on the Windows ones. Asking by name — `--voice cori` — always works.
 
 ### Asking without pressing anything
 
