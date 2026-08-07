@@ -48,6 +48,8 @@ correct it, keep talking to add more, type into it when that is faster, then **S
 | **Keep talking** | Anything that isn't a correction is appended |
 | **Shape it into a prompt** | "make it a proper prompt" restructures dictation via your agent CLI |
 | **Work the prompt over** | Converse mode puts the draft to `codex`/`claude` as a prompt to improve, reads the reply back, and **Use this** makes that reply the draft |
+| **Ask it anything** | Converse mode answers questions too, grounded in the project you point it at — or ungrounded if you point it at nothing |
+| **Keep the good parts** | "keep note" files an answer with the question that produced it; "wrap up" writes every kept note into one markdown file in your project |
 | **Fix it by hand** | The **Edit** chip turns the draft into a text box; the mic stands down while you type |
 | **Say the send** | "boom" pastes, "enter boom" pastes and presses Enter — whole utterance only |
 | **Remember the thread** | Send doesn't erase — "follow up", "follow and …", and "bring back my last prompt" all work |
@@ -647,6 +649,32 @@ brings your text back, and the note names what was displaced.
 Taking an answer **flips back to dictate mode**, and says so, because it changes what the
 button under your cursor does. Staying in converse would make the next Send re-ask Flow's
 own answer back at the CLI, which is the confusion this verb exists to remove.
+
+### Keeping what the conversation was worth
+
+A conversation used to die on quit. Two verbs keep the parts you want:
+
+| | |
+|---|---|
+| *"keep note"* | files the answer on screen **with the question that produced it** — also "make a note", "take a note", "note that", "save that" |
+| *"note that X"* | files words you dictate instead. Only when no draft is held: with one on screen, those words belong in it |
+| *"wrap up"* | every kept note into one markdown file — also "give me my notes", "write up the notes", "notes please" |
+
+Or right-click → **Keep this answer** / **Wrap up (N notes)**. The menu is the floor under
+both, because the decoder mis-hears and this product is for people it mis-hears most.
+
+The file lands in `<your project>/flow-notes/2026-08-05-1432.md`, and the same document
+goes onto the card, where **Copy** takes it. **With no workspace set there is no file** —
+Flow picks no folder on your behalf — and the notes stop at the card. Two wrap-ups in the
+same minute get two files; the first is never overwritten.
+
+Flow does not summarise them. The document is what you kept, in the order you kept it,
+verbatim — so it needs no CLI, cannot invent anything, and costs no wait. If you want the
+CLI's reading of it, ask for one; that is an ordinary question in converse mode.
+
+**Nothing is written until you have said so twice.** Keeping a note is one act and wrapping
+up is a second, and a session that keeps a dozen notes and is never told to wrap up leaves
+your disk exactly as it found it. Flow's own settings folder is never where notes go.
 
 ### Hearing the reply
 

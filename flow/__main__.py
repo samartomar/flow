@@ -24,7 +24,7 @@ import math
 import os
 import sys
 
-from .asr import FINAL_MODEL, PARTIAL_MODEL
+from .asr import CUDA_MODEL, DEVICE, FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
@@ -101,16 +101,22 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(prog="flow", description=__doc__)
     ap.add_argument(
-        "--partial-model", default=PARTIAL_MODEL,
-        help="fast model for live partials (latency-bound, R4)",
+        "--partial-model", default=None,
+        help=f"fast model for live partials (latency-bound, R4; default "
+             f"{PARTIAL_MODEL} on CPU, {CUDA_MODEL} on GPU)",
     )
     ap.add_argument(
-        "--final-model", default=FINAL_MODEL,
-        help="stronger model for the text that gets pasted (accuracy-bound)",
+        "--final-model", default=None,
+        help=f"stronger model for the text that gets pasted (accuracy-bound; default "
+             f"{FINAL_MODEL} on CPU, {CUDA_MODEL} on GPU)",
     )
     ap.add_argument(
         "--model", default=None,
         help="pin BOTH tiers to one model (benchmarking, or a low-memory machine)",
+    )
+    ap.add_argument(
+        "--decode-device", default=DEVICE, choices=("auto", "cuda", "cpu"),
+        help="where decoding runs (default auto: the GPU when there is a working one)",
     )
     ap.add_argument(
         "--lexicon", default=None,
@@ -234,9 +240,24 @@ def main(argv: list[str] | None = None) -> int:
         say(f"  ({unverified_note(cli)})")
     say(f"CLI timeout: {args.cli_timeout:.0f}s per call")
 
-    partial_name = args.model or args.partial_model
-    final_name = args.model or args.final_model
-    say(f"models: {partial_name} for partials, {final_name} for finals")
+    # The device first, because which model each tier should be depends on it: a GPU
+    # runs one strong model for both paths and a CPU cannot. Named out loud for the same
+    # reason the models are — the two answers are a 3.7 s final decode and a 0.3 s one,
+    # and somebody whose GPU quietly did not engage has no other way to tell.
+    from .asr import default_models, resolve_device
+
+    decode_device = resolve_device(args.decode_device)
+    say(f"decoding on: {decode_device}"
+        + ("" if decode_device != "cpu" or args.decode_device == "cpu"
+           else " (no usable CUDA device found)"))
+
+    default_partial, default_final = default_models(decode_device)
+    partial_name = args.model or args.partial_model or default_partial
+    final_name = args.model or args.final_model or default_final
+    if partial_name == final_name:
+        say(f"model: {final_name}, for partials and finals both")
+    else:
+        say(f"models: {partial_name} for partials, {final_name} for finals")
 
     from .diag import Diag
     from .profile import Profile, resolve_workspace
@@ -324,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
         asr=WhisperTranscriber(
             partial_name, final_name, lexicon=lexicon,
             baseline=profile.confidence if profile is not None else None,
+            device=args.decode_device,
         ),
         device=args.device,
         speaker=speaker,

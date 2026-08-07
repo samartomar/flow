@@ -146,6 +146,42 @@ ADVERSARIAL = [
 ]
 
 
+#: What counts as a silent misroute: the router took a sentence away from the user and
+#: did something with it instead of typing it.
+#:
+#: `note` and `wrap` joined `local` and `undo` when the note verbs shipped, and the
+#: addition is not cosmetic. Both take an utterance out of the draft — one files it, the
+#: other replaces the reply with a document — so a false fire costs a sentence exactly
+#: the way a spurious delete does. A grammar priced only on the kinds that existed when
+#: the harness was written scores every *new* verb as free.
+MISROUTES = ("local", "undo", "note", "wrap")
+
+
+#: The same idea for the verbs that are only live with **no draft held**, which the set
+#: above cannot reach: every case in it is judged against a draft, and a draft is exactly
+#: what switches the payload note form off.
+#:
+#: These are written down rather than sampled because **the corpus cannot supply them**.
+#: EdAcc is conversation and contains the word "node" zero times in 580 utterances, so it
+#: scores the note grammar 0 misroutes whatever that grammar admits — an absence of
+#: evidence reading as evidence. The word is a developer's, and the product is pointed at
+#: developers. Two of these were live defects when they were written: `keep node three
+#: drained` filed a note reading "three drained", and it was the mis-hearing fix that
+#: introduced it.
+ADVERSARIAL_EMPTY = [
+    "keep node three drained until the upgrade finishes.",
+    "keep nodes warm for the rollout.",
+    "node the server is down again.",
+    "the node is down and the pod will not reschedule.",
+    "node modules are huge and nobody prunes them.",
+    "wrap up the sprint before Friday.",
+    "let's wrap up and go home.",
+    "save the notes from the standup somewhere sensible.",
+    "note taking is not the same as listening.",
+    "keep noting the same defect and nothing changes.",
+]
+
+
 def adversarial() -> dict:
     """Dictation shaped like a command, judged against a draft full of its own words."""
     print(f"\nadversarial dictation ({len(ADVERSARIAL)} sentences that start like "
@@ -153,12 +189,23 @@ def adversarial() -> dict:
     out = {}
     for label, fn in (("exact", _plan_exact), ("snapped", plan)):
         bad = [(u, fn(u, d).kind, fn(u, d).op)
-               for u, d in ADVERSARIAL if fn(u, d).kind in ("local", "undo")]
+               for u, d in ADVERSARIAL if fn(u, d).kind in MISROUTES]
         out[label] = len(bad)
         print(f"  {label:<9} {len(bad):>4} misroutes  "
               f"{len(bad) / len(ADVERSARIAL):>7.2%}")
         for u, kind, op in bad:
             print(f"     {kind}/{op}: {u!r}")
+
+    print(f"\nadversarial dictation, no draft held ({len(ADVERSARIAL_EMPTY)} sentences "
+          "that start like the whole-utterance verbs):")
+    empty_bad = [(u, plan(u, "").kind, plan(u, "").op)
+                 for u in ADVERSARIAL_EMPTY if plan(u, "").kind in MISROUTES]
+    print(f"  {'empty':<9} {len(empty_bad):>4} misroutes  "
+          f"{len(empty_bad) / len(ADVERSARIAL_EMPTY):>7.2%}")
+    for u, kind, op in empty_bad:
+        print(f"     {kind}/{op}: {u!r}")
+    out["empty"] = len(empty_bad)
+    out["n_empty"] = len(ADVERSARIAL_EMPTY)
     return out | {"n": len(ADVERSARIAL)}
 
 
@@ -175,22 +222,33 @@ def precision() -> dict:
     # Each utterance is judged against the *next* one as the held draft: real text,
     # and adversarial, because consecutive turns share vocabulary and so the targets
     # a mis-parse would look for are unusually likely to be present.
+    #
+    # And then judged again against an **empty** draft, which is not a second helping of
+    # the same measurement. Two routes are only reachable with no draft held — the
+    # payload note verb is gated on it by design (`_KEEP_NOTE_PAYLOAD`) — so a harness
+    # that only ever passes a draft cannot see them fire at all, and would have scored
+    # them a perfect 0 while they swallowed speech. That gap was real: it existed for as
+    # long as it took to add these four lines, and it is the reason the column is here.
     refs = [e["ref"] for e in entries]
-    misroutes = {"exact": [], "snapped": []}
+    misroutes: dict[str, list] = {
+        "exact": [], "snapped": [], "exact-empty": [], "snapped-empty": [],
+    }
     for i, ref in enumerate(refs):
-        draft = refs[(i + 1) % len(refs)]
+        following = refs[(i + 1) % len(refs)]
         for label, fn in (("exact", _plan_exact), ("snapped", plan)):
-            p = fn(ref, draft)
-            if p.kind in ("local", "undo"):
-                misroutes[label].append((ref, p.kind, p.op))
+            for suffix, draft in (("", following), ("-empty", "")):
+                p = fn(ref, draft)
+                if p.kind in MISROUTES:
+                    misroutes[label + suffix].append((ref, p.kind, p.op))
 
     n = len(refs)
     print(f"\nprecision on {n} real utterances (none of them commands):")
-    for label in ("exact", "snapped"):
+    for label in ("exact", "snapped", "exact-empty", "snapped-empty"):
         hits = misroutes[label]
-        print(f"  {label:<9} {len(hits):>4} misroutes  {len(hits) / n:>7.2%}")
-    for ref, kind, op in misroutes["snapped"][:5]:
-        print(f"     {kind}/{op}: {ref[:64]!r}")
+        print(f"  {label:<15} {len(hits):>4} misroutes  {len(hits) / n:>7.2%}")
+    for label in ("snapped", "snapped-empty"):
+        for ref, kind, op in misroutes[label][:5]:
+            print(f"     {label} {kind}/{op}: {ref[:64]!r}")
     return {k: len(v) for k, v in misroutes.items()} | {"n": n}
 
 

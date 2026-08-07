@@ -572,65 +572,105 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestTheDecoderIsToldTheWordExists(unittest.TestCase):
-    """Root 5's first half. The `hotwords` parameter has been wired since the lexicon
-    shipped, and nothing ever put the send word in it — so the one word whose
-    recognition decides whether a spoken command works at all was the only word Flow
-    never biased toward. Recognition had been measured at exactly one microphone.
+class TestTheDecoderIsNeverToldTheSendWord(unittest.TestCase):
+    """The reversal of Root 5's first half, and the reason is a safety one.
+
+    b7bc6aa put the send words into `hotwords` on every final decode, reasoning that the
+    one word whose recognition decides whether a spoken command works should not be the
+    only word Flow never biased toward. The reasoning is fine and the mechanism is not:
+    faster-whisper spends `hotwords` as `<|startofprev|>` context — the slot
+    `condition_on_previous_text=False` exists to keep empty — so the bias does not teach
+    the decoder a word, it gives it a word to guess with.
+
+    Measured against no bias at all, `small.en`, EdAcc:
+
+      - 300 conversational clips: the send word appears in text nobody said 4 times
+        against 0; pooled WER moves -0.007, inside the sampling noise.
+      - 280 short clips: 26 against 0, WER 0.534 -> 0.624, and **6 decode to exactly
+        "boom"** — "MM HMM", "UM", "YEAH THAT'S COOL", "MM HMM TRUE", "I THINK THAT WAS
+        WHAT HAPPEND". A whole-utterance match is a Send.
+      - `large-v3-turbo` on the same 280 is no safer: 14 against 0, and the same 6 false
+        sends. This is not a weak-model problem.
+
+    Whole-utterance matching was doing its job. The bias was manufacturing whole
+    utterances for it to match, which is the one direction a spoken execute trigger may
+    not fail in — the same standing refusal that keeps edit distance from firing a send.
     """
 
-    def transcriber(self, terms=(), triggers=()):
+    def transcriber(self, terms=()):
         from flow.asr import WhisperTranscriber
 
         t = WhisperTranscriber.__new__(WhisperTranscriber)
         t.lexicon = mock.Mock()
         t.lexicon.terms.return_value = list(terms)
-        t.trigger_words = tuple(triggers)
         return t
 
-    def test_the_send_words_join_the_final_bias(self):
-        bias = self.transcriber(terms=["Sameer"], triggers=("tango", "enter tango"))
-        self.assertIn("tango", bias._standing_bias(final=True))
-        self.assertIn("Sameer", bias._standing_bias(final=True))
+    def test_the_bias_is_the_lexicon_and_nothing_else(self):
+        self.assertEqual(self.transcriber(terms=["Sameer", "Priya"])._standing_bias(),
+                         "Sameer Priya")
 
-    def test_they_join_it_rather_than_replacing_it(self):
-        # The difference from the rescue path, which *does* replace: a rescue is aimed
-        # at one utterance and the trigger is standing, so it has to ride along with
-        # whatever the user has taught.
-        bias = self.transcriber(terms=["Sameer", "Priya"], triggers=("boom",))
-        for word in ("Sameer", "Priya", "boom"):
-            self.assertIn(word, bias._standing_bias(final=True))
+    def test_an_empty_lexicon_biases_nothing_at_all(self):
+        # None rather than "", because an empty string still makes the library build a
+        # prompt prefix — and a prompt that biases toward nothing is the whole defect in
+        # miniature.
+        self.assertIsNone(self.transcriber()._standing_bias())
 
-    def test_a_partial_is_not_biased_toward_them(self):
-        # A partial is never routed and never matched against a trigger, so biasing one
-        # costs prompt tokens for a decision nobody makes.
-        bias = self.transcriber(terms=["Sameer"], triggers=("boom",))
-        self.assertNotIn("boom", bias._standing_bias(final=False) or "")
-
-    def test_the_trigger_goes_in_front_of_a_full_lexicon(self):
-        # The list is capped from a measured 223-token truncation in the library, and a
-        # trigger that fell off the end of a full lexicon would be the same silent
-        # failure one layer down.
+    def test_the_lexicon_is_still_capped(self):
         from flow.lexicon import MAX_TERMS
 
-        bias = self.transcriber(terms=[f"term{i}" for i in range(MAX_TERMS)],
-                                triggers=("boom",))
-        joined = bias._standing_bias(final=True)
-        self.assertTrue(joined.startswith("boom"), joined[:40])
+        joined = self.transcriber(
+            terms=[f"term{i}" for i in range(MAX_TERMS + 20)])._standing_bias()
+        self.assertEqual(len(joined.split()), MAX_TERMS)
 
-    def test_a_word_already_in_the_lexicon_is_not_repeated(self):
-        bias = self.transcriber(terms=["boom", "Sameer"], triggers=("boom",))
-        self.assertEqual(bias._standing_bias(final=True).split().count("boom"), 1)
+    def test_no_send_word_reaches_a_real_decode(self):
+        # Through `text()`, because the defect was never in a helper: it was that the
+        # array handed to the model carried a prompt. Both tiers, since a partial that
+        # decoded to "boom" would still be shown to the user as their own words.
+        from flow import SAMPLE_RATE
+        from flow.asr import WhisperTranscriber
 
-    def test_no_triggers_at_all_is_the_lexicon_unchanged(self):
-        bias = self.transcriber(terms=["Sameer"], triggers=())
-        self.assertEqual(bias._standing_bias(final=True), "Sameer")
+        lexicon = mock.Mock()
+        lexicon.terms.return_value = []
+        lexicon.apply.side_effect = lambda s: s
+        asr = WhisperTranscriber(lexicon=lexicon)
+        model = mock.Mock()
+        model.transcribe.return_value = ([], None)
+        asr._models = {True: model, False: model}
+        asr.load = lambda final=None: None
 
-    def test_the_session_publishes_them_on_every_final_decode(self):
-        # From the live profile rather than at construction, so a trigger renamed
-        # through the menu biases the very next utterance rather than the next launch.
-        import numpy as np
+        for seconds in (0.6, 1.5, 12.0):
+            for final in (False, True):
+                asr.text(np.zeros(int(SAMPLE_RATE * seconds), dtype=np.float32),
+                         final=final)
+                self.assertIsNone(
+                    model.transcribe.call_args.kwargs.get("hotwords"),
+                    f"{seconds}s final={final}")
 
+    def test_a_caller_supplied_rescue_bias_still_works(self):
+        # The rescue re-decode is a different thing and keeps its bias: it is aimed at
+        # one utterance the router already suspects, and it cannot fire a Send — the
+        # trigger is tested before any rescue happens.
+        from flow import SAMPLE_RATE
+        from flow.asr import WhisperTranscriber
+
+        lexicon = mock.Mock()
+        lexicon.terms.return_value = []
+        lexicon.apply.side_effect = lambda s: s
+        asr = WhisperTranscriber(lexicon=lexicon)
+        model = mock.Mock()
+        model.transcribe.return_value = ([], None)
+        asr._models = {True: model, False: model}
+        asr.load = lambda final=None: None
+
+        asr.text(np.zeros(SAMPLE_RATE, dtype=np.float32), final=True,
+                 hotwords="Tuesday Wednesday")
+        self.assertEqual(model.transcribe.call_args.kwargs["hotwords"],
+                         "Tuesday Wednesday")
+
+    def test_the_session_hands_the_decoder_no_trigger(self):
+        # `_finalise` used to publish the live profile's send words onto the transcriber
+        # before every final. Nothing does now, and this pins that: a Transcriber with
+        # no such attribute must survive a finalise.
         from flow.audio import BLOCK
         from flow.session import Session
 
@@ -640,17 +680,15 @@ class TestTheDecoderIsToldTheWordExists(unittest.TestCase):
             s = Session(asr=_FakeAsr(), mic=_FakeMic(), profile=p)
             s._utter = [np.full(BLOCK, 0.2, dtype=np.float32)]
             s._finalise()
-            self.assertEqual(s.asr.trigger_words, ("tango", "enter tango"))
-            p.send_word, p.send_enter_word = "mango", "enter mango"
-            s._utter = [np.full(BLOCK, 0.2, dtype=np.float32)]
-            s._finalise()
-            self.assertEqual(s.asr.trigger_words, ("mango", "enter mango"))
+            self.assertFalse(hasattr(s.asr, "trigger_words"))
+            # The words are still the profile's — they just reach the router, not the
+            # decoder, which is the whole point.
+            self.assertEqual(s.send_words, ("tango", "enter tango"))
             s.close()
 
 
 class _FakeAsr:
     loading = False
-    trigger_words = ()
 
     def load(self, final=None) -> None: ...
 

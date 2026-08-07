@@ -34,6 +34,15 @@ TIMEOUT_SEC = 20.0
 #: property that matters: every arithmetic below assumes the deadline can be reached.
 MAX_TIMEOUT_SEC = 600.0
 
+#: What `_abandon` may spend reaping a call that has already been given up on.
+#:
+#: Counted into the walk's budget in `_invoke_any` rather than treated as free, which is
+#: what it used to be. A candidate that times out costs its wait *and* this, so a budget
+#: that ignored it handed the next candidate less than its own wait — and with three
+#: candidates the shortfall compounds. Naming it once means the arithmetic below and the
+#: reap that makes it true cannot drift apart.
+ABANDON_SEC = 5.0
+
 
 def sane_timeout(value) -> float:
     """A wait that can actually expire, whatever the caller passed.
@@ -385,6 +394,7 @@ def _invoke_any(
     timeout: float,
     cwd: str | None = None,
     cancel: threading.Event | None = None,
+    skipped: list[str] | None = None,
 ) -> tuple[str | None, str, Cli | None]:
     """Run `prompt`, falling through the preference order until one CLI answers.
 
@@ -402,18 +412,44 @@ def _invoke_any(
     An explicit `cli=` is a decision, not a preference, so it is never second-guessed.
     Cancellation stops the walk: quitting should not start a second process.
 
-    **One deadline for the whole operation, not one per candidate.** Every attempt used
-    to get the full budget, so three unhealthy providers made one spoken question wait
-    out three timeouts — and worse than the naive sum, because each abandoned call also
-    pays `_abandon`'s 5 s reap. Measured against three hanging fakes at a 0.6 s budget:
-    **16.8 s**. The user set one number and can see it; a chain that multiplies it is not
-    a fallback, it is a different feature wearing the same name.
+    `skipped` is filled with the reason each candidate was passed over, **including when
+    a later one goes on to answer**. Every earlier failure used to be dropped on the
+    floor at the `return` below, so a codex timeout rescued by kiro-cli left no mark in
+    the note, the trace or anywhere else — the run looked identical to one where codex
+    was never installed. That is invariant 5 read from the other side: a refusal is not
+    silent just because something else eventually said yes.
 
-    The budget is `max(timeout, largest candidate floor)`, so `Cli.timeout_sec` stays
-    honest inside it: the one CLI measured needing 60 s still gets 60 s when it is first,
-    even if the global timeout was lowered. What it does not get is 60 s *after* two
-    other CLIs have already spent the budget — a floor is a floor under the wait, not a
-    promise that survives somebody else's failure.
+    **One deadline for the whole walk, sized for the candidates it has to walk.** Each
+    attempt used to get the full budget, so three unhealthy providers made one spoken
+    question wait out three timeouts — 16.8 s against three hanging fakes at a 0.6 s
+    budget (AGENT-09). The fix made the budget `max(timeout, largest floor)`, which is
+    the size of a *single* call: the first candidate could spend all of it, and on a
+    timeout there was never anything left for the second.
+
+    AGENT-09 knew that and took it, on the argument that a genuine hang is one failure
+    mode out of the four this falls over on, and that the other three — failing to
+    start, exiting non-zero, returning nothing — cost milliseconds and leave the
+    fallback intact. **The trace says the argument had the frequencies backwards.**
+    Every ask failure in `~/.flow/diag.jsonl` on this machine, 11 of 11 across five
+    weeks, is `reason:"timeout"` at ~20.3 s with `provider:null`; the fallback has never
+    once fired on a real failure, with three working CLIs installed. The case dismissed
+    as the rare fourth is the only one that has ever happened.
+
+    So the budget is now what the whole pool needs: every candidate's own wait, plus the
+    `ABANDON_SEC` reap each abandoned one costs on its way out. What is deliberately
+    *not* done is dividing one budget among the candidates — AGENT-09 rejected that and
+    was right to: it shortens every individual call, so a slow but working codex times
+    out where it would have answered, breaking a working setup to serve a hypothetical
+    second provider. The per-call wait is still the user's number, undivided.
+
+    The bill for that is real and belongs in the open: with the shipped pool at the
+    default, a walk in which nothing answers is 20 + 5 + 20 + 5 + 60 = **110 s**. So
+    `--cli-timeout` is how long any one CLI may take, not how long Ask may take. That is
+    the trade the owner chose on 2026-08-06 — waiting longer on a bad day, against a
+    fallback that has never worked on a real one.
+
+    `Cli.timeout_sec` stays honest inside it: the one CLI measured needing 60 s gets 60 s
+    wherever it sits in the order, rather than only when it happens to be first.
     """
     timeout = sane_timeout(timeout)
     if cli is not None:
@@ -421,8 +457,12 @@ def _invoke_any(
         return out, reason, cli
 
     candidates = available()
-    floors = [c.timeout_sec for c in candidates if c.timeout_sec]
-    deadline = time.monotonic() + max([timeout, *floors])
+    # The wait `_invoke` will compute for each, mirrored here rather than guessed: this
+    # sum is a promise that every candidate gets the number that function will ask for,
+    # and the two drifting apart is exactly how the last one starves.
+    waits = [timeout if c.timeout_sec is None else max(timeout, c.timeout_sec)
+             for c in candidates]
+    deadline = time.monotonic() + sum(waits) + ABANDON_SEC * max(0, len(waits) - 1)
 
     reasons: list[str] = []
     for candidate in candidates:
@@ -436,6 +476,8 @@ def _invoke_any(
         out, reason = _invoke(candidate, prompt, timeout=timeout, cwd=cwd,
                               cancel=cancel, cap=left)
         if out is not None:
+            if skipped is not None:
+                skipped.extend(reasons)
             return out, "", candidate
         reasons.append(reason)
         if cancel is not None and cancel.is_set():
@@ -559,7 +601,7 @@ def _abandon(proc: subprocess.Popen, reason: str) -> tuple[None, str]:
     """Kill a call and reap it, so no thread of ours is left waiting on a dead pipe."""
     _kill_tree(proc)
     try:
-        proc.communicate(timeout=5.0)
+        proc.communicate(timeout=ABANDON_SEC)
     except subprocess.TimeoutExpired:
         pass
     return None, reason
@@ -688,6 +730,22 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 #: cleaner becoming the parser the module docstring argues against.
 _KIRO_STATUS = re.compile(r"^[ \t]*▸ Credits:.*$", re.MULTILINE)
 
+#: The marker kiro-cli puts in front of each thing it says — its preamble as well as its
+#: answer. On its own it cannot tell the two apart; `_KIRO_TOOL` is what does.
+_KIRO_ANSWER = re.compile(r"^> ", re.MULTILINE)
+
+#: A tool receipt, matched as a **shape** for the same reason `_KIRO_STATUS` is: these are
+#: lines the CLI prints about itself, in a form it controls, and the words in them ("read",
+#: "grep", "Completed") are ordinary enough that matching on words alone would eat
+#: sentences out of a real answer. Three shapes, all transcribed from the 2026-08-06
+#: capture in `tests/test_refine.py::KIRO_TOOLS`: the action line, which always ends
+#: `(using tool: X)`; the result line, which always opens with a tick or a cross; and the
+#: timing line. Nothing here matches an assistant turn, which is the property that makes
+#: it usable as a landmark rather than as a filter.
+_KIRO_TOOL = re.compile(
+    r"^(?:.*\(using tool: .*\)|[ \t]*[✓✗] .*|[ \t]*- Completed in .*)$", re.MULTILINE
+)
+
 
 def _clean_kiro(out: str) -> str:
     """Strip kiro-cli's chrome and leave the answer.
@@ -696,6 +754,53 @@ def _clean_kiro(out: str) -> str:
     stdout is `\\x1b[m> \\x1b[0m` then the answer, with `\\x1b[0m\\x1b[0m` between lines of
     a multi-line one — so the `> ` marker is on the **first line only**, and stripping it
     per line would eat a quoted shell command or a diff out of a real answer.
+
+    **That measurement was taken on a prompt that ran no tools, and "first line only" is
+    the wrong generalisation of it.** Re-measured 2026-08-06 against a question that makes
+    kiro-cli read the workspace: the marker is in front of *everything it says*, and with
+    tools it says several things. 1 189 characters of stdout, of which 842 survived this
+    function and 350 of those were narration —
+
+        > Let me search for "buzz" across the docs directory.
+        Searching for: buzz in D:\\dev\\tools\\Proxmox\\docs (*.md) (using tool: grep)
+         ✓ Successfully found 89 matches in 3 files under ...
+         - Completed in 0.5s
+        Reading file: ...buzz-pilot.md, from line 1 to 30 (using tool: read)
+         ✓ Successfully read 1180 bytes from ...
+        > Three files mention buzz: ...
+
+    — and the card rendered the lot, tool receipts above the answer, which is what the
+    owner reported on 2026-08-06. The old strip did fire: it took the marker off the
+    *preamble*, at position 0, and left everything after it. There is no shape here that
+    `startswith` could have caught, which is why the 2026-08-02 note reads as a complete
+    description of the output and is not one.
+
+    **The marker cannot do this on its own, and the suite already proved it.** The
+    obvious repair — cut at the *last* marker rather than the first — passes the capture
+    above and breaks `test_an_angle_bracket_inside_an_answer_survives`, which pins an
+    answer that quotes a shell line:
+
+        > Run it as:
+        > git push --force-with-lease
+
+    Two markers, one turn. The stream gives no structural difference between that and two
+    turns with narration between them, because a continued answer line and a narration
+    line look identical: neither carries a marker.
+
+    So the landmark is the narration itself. Tool receipts have a shape (`_KIRO_TOOL`);
+    everything up to the last one is the CLI talking about its own work, and the answer is
+    the turn that opens after it. With no receipts — every 2026-08-02 capture, and every
+    ungrounded Ask — nothing has changed: the leading marker comes off and the rest is the
+    answer, quoted shell lines and all. That is why this is a landmark and not a filter.
+    It never removes a line from inside an answer; it only decides where the answer began.
+
+    The risk it does take, named rather than hidden: an answer *about* kiro-cli's own
+    output, quoting a receipt line back, would be read as narration and cut short. That is
+    a narrower case than the one it fixes — asking a grounded question is the common path
+    and it narrates every time — and it fails toward showing less rather than toward
+    showing chrome as though it were the answer. If it ever bites, the fix is not a
+    cleverer shape but the one kiro-cli already offers and this module has not asked for:
+    a machine-readable output mode.
 
     The status line is stripped anyway and that is worth saying: with the streams apart —
     which is this module's discipline and what `_invoke` does — `▸ Credits: … • Time: …`
@@ -706,7 +811,17 @@ def _clean_kiro(out: str) -> str:
     warning on the stream this module already discards.
     """
     s = _KIRO_STATUS.sub("", _ANSI.sub("", out)).strip()
-    return s[2:].lstrip() if s.startswith("> ") else s
+    # Everything up to the last receipt is the CLI narrating its own work. Zero when the
+    # call used no tools, which makes the line below the original first-marker strip.
+    narrated = 0
+    for receipt in _KIRO_TOOL.finditer(s):
+        narrated = receipt.end()
+    marker = _KIRO_ANSWER.search(s, narrated)
+    if marker is not None:
+        return s[marker.end():].lstrip()
+    # Narration that never got an answer after it: still better than handing back the
+    # receipts. Without narration this is the untouched output, as it has always been.
+    return s[narrated:].lstrip() if narrated else s
 
 
 #: Per CLI, keyed by name, and empty for everything that writes its answer alone. A tidy
@@ -782,6 +897,7 @@ def refine(
     polish: bool = False,
     context: list[str] | None = None,
     cancel: threading.Event | None = None,
+    skipped: list[str] | None = None,
 ) -> tuple[str | None, str]:
     """Apply a semantic instruction to `text`.
 
@@ -795,6 +911,13 @@ def refine(
 
     `cancel` abandons the call — the session sets it on close, so quitting does not
     wait out a rewrite nobody is going to read.
+
+    `skipped` is an out-parameter rather than a third return value, and that is a
+    judgement about blast radius: the two-tuple is unpacked at fifteen call sites across
+    the tests and two scripts, none of which care which CLI was passed over on the way to
+    the one that answered. A caller that does care hands in a list; the rest are
+    untouched. It is filled on the worker thread and read by the session after the call
+    returns, under the lock it already takes — see `_invoke_any`.
 
     Returns `(revised_text, note)`, or `(None, reason)` on any failure. Failure must
     always be non-destructive: the caller keeps the pre-edit draft, so a CLI that is
@@ -814,7 +937,7 @@ def refine(
         )
 
     out, reason, chosen = _invoke_any(
-        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel
+        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel, skipped=skipped
     )
     if out is None:
         return None, reason
@@ -842,6 +965,7 @@ def ask(
     sentences: int = ASK_SENTENCES,
     cancel: threading.Event | None = None,
     artifact: bool = False,
+    skipped: list[str] | None = None,
 ) -> tuple[str | None, str]:
     """P9: put a question to the agent CLI and return its answer.
 
@@ -880,7 +1004,7 @@ def ask(
         )
 
     out, reason, chosen = _invoke_any(
-        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel
+        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel, skipped=skipped
     )
     if out is None:
         return None, reason

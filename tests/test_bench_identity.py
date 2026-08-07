@@ -31,7 +31,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 WRITERS = (
     "accent_bench.py", "asr_bench.py", "command_bench.py", "gate_bench.py",
     "guardrail_bench.py", "lexicon_bench.py", "live_check.py", "polish_check.py",
-    "rescue_bench.py",
+    "rescue_bench.py", "trigger_bias_bench.py",
 )
 
 #: Deliberately not on that list. These write a manifest of the *data* a benchmark reads
@@ -96,6 +96,49 @@ class TestTheBlockItself(unittest.TestCase):
     def test_a_model_that_is_not_cached_says_so_instead_of_lying(self):
         block = bench_identity(models=("no-such-model-anywhere",))
         self.assertEqual(block["models"]["no-such-model-anywhere"], "uncached")
+
+    def test_the_repo_comes_from_the_library_not_from_a_prefix_guess(self):
+        # `Systran/faster-whisper-<name>` holds for the .en tiers and for nothing else
+        # that matters now. Guessing it made `large-v3-turbo` — the GPU default — record
+        # "uncached" forever, which is the one value provenance must not silently take.
+        from flow.diag import _hf_repo
+
+        self.assertEqual(_hf_repo("large-v3-turbo"),
+                         "mobiuslabsgmbh/faster-whisper-large-v3-turbo")
+        self.assertEqual(_hf_repo("distil-large-v3"),
+                         "Systran/faster-distil-whisper-large-v3")
+        self.assertEqual(_hf_repo("small.en"), "Systran/faster-whisper-small.en")
+
+    def test_an_explicit_repo_id_is_left_alone(self):
+        # `--model` takes any CTranslate2 repo, and prefixing one would break a name
+        # that was already correct.
+        from flow.diag import _hf_repo
+
+        self.assertEqual(_hf_repo("org/my-ct2-model"), "org/my-ct2-model")
+
+    def test_an_unknown_short_name_still_resolves_to_something(self):
+        # It has to produce a path so the caller can miss and say "uncached", rather
+        # than raising inside a block that is written on a best-effort basis.
+        from flow.diag import _hf_repo
+
+        self.assertEqual(_hf_repo("not-a-model"), "Systran/faster-whisper-not-a-model")
+
+    def test_the_gpu_default_resolves_on_this_machine(self):
+        # The point of the fix, asserted against the cache rather than the mapping: a
+        # correct repo id that still misses the cache would record "uncached" just the
+        # same. Skipped, not failed, on a machine that has never decoded with it.
+        from flow.asr import CUDA_MODEL
+
+        revision = bench_identity(models=(CUDA_MODEL,))["models"][CUDA_MODEL]
+        if revision == "uncached":
+            self.skipTest(f"{CUDA_MODEL} is not in this machine's HF cache")
+        self.assertRegex(revision, r"^[0-9a-f]{8,}$")
+
+    def test_the_device_is_named_only_when_the_caller_knows_it(self):
+        # Same rule as `clis`: absent beats guessed. A bench that did not track which
+        # device it ran on must not have one invented for it.
+        self.assertNotIn("device", bench_identity())
+        self.assertEqual(bench_identity(device="cuda")["device"], "cuda")
 
     def test_a_cli_is_named_only_when_it_is_asked_for(self):
         # Each costs a process start, and most benches never touch a CLI.

@@ -28,7 +28,7 @@ from typing import Literal
 from .phonetic import find_span, find_spans
 
 Kind = Literal["append", "local", "semantic", "undo", "rescue",
-              "recall", "followup", "take", "send_trigger"]
+              "recall", "followup", "take", "send_trigger", "note", "wrap"]
 
 # Spoken numbers, for "delete the last two words".
 _NUMS = {
@@ -244,6 +244,115 @@ _TAKE_REPLY = re.compile(
     r"(?: that| the| this)?(?: last)?"
     r"(?: answer| reply| response)"
     r"[.!?]*$",
+    re.I,
+)
+
+#: P9. "That is worth keeping" — the two shapes a note verb comes in, and the reason
+#: there are two rather than one.
+#:
+#: **Bare** is a whole-utterance command and keeps *the last exchange*: the question and
+#: the answer it produced. That is the shape the feature is actually for — somebody asks
+#: something, likes the answer, and says two words. Whole-utterance-only is the same
+#: safety argument the send trigger makes: a false fire needs the speaker to have said
+#: nothing else.
+#:
+#: **With a payload** keeps words the speaker supplies, and it is accepted **only when
+#: the draft is empty** (`_plan_exact` enforces it, not this pattern). With a draft held,
+#: every word being said is going into that draft — "note that the API is deprecated" is
+#: a sentence somebody is dictating into a prompt, and swallowing it into a note buffer
+#: would take the words out of the thing they were being written into. An empty draft is
+#: exactly the state an answer arrives into, since asking clears the question, so the
+#: shape is unambiguous precisely where it is useful.
+#:
+#: Priced before admitting, the way every trigger in this file is, on the 580 real EdAcc
+#: utterances (`scripts/command_bench.py`): **both shapes fire 0 times**. A third was
+#: written and rejected by the same run — `remember (that) X` hit a real utterance
+#: ("REMEMBER THAT BRINGS UP REMEMBER THE WHOLE LIKE GOOGLE GLASSES THING…"), which is
+#: ordinary speech that would have been swallowed. It is not here, and the measurement is
+#: why rather than taste.
+#: The noun, and the one thing the decoder does to it.
+#:
+#: **"keep note" comes back as "Keep node"**, measured through the real microphone path
+#: on 2026-08-05 and reproducible: `scripts/selfdrive.py --only notes` failed on it the
+#: first time it ran, while the same words handed straight to the decoder came back
+#: "Keep note." exactly. Different audio slice, different answer — the padding and the
+#: gate are what separate the two paths, which is the whole reason that harness exists.
+#: A /t/ heard as /d/ between vowels is the commonest consonant confusion there is, and
+#: nothing about the four anchor accents makes it *less* likely.
+#:
+#: **The corpus cannot price this one and says so.** Both patterns still fire 0 times
+#: across the 580 real EdAcc utterances with "node" admitted — but those utterances
+#: contain the word "node" **zero** times, so that 0 is an absence of evidence rather
+#: than evidence. EdAcc is conversation; "node" is a developer's word, and this product
+#: is pointed at developers. So the safety here is structural rather than measured, and
+#: it is two rules:
+#:
+#: - the bare form is a **whole utterance**, so "keep node" has to be everything said;
+#: - the payload form admits "node" **only in front of `that`/`this`** — "node that the
+#:   release goes out" is not a sentence, while "node the server is down" is one somebody
+#:   might dictate, and only the correctly-spelled "note" opens that shape.
+#:
+#: **At three mis-heard spellings this stops**, the rule `_MISHEARD_PROMPT` set for the
+#: same situation: a third spelling is a measurement that the family is open, and the
+#: honest fix is then decode-time command bias rather than a longer list here.
+_NOTE_NOUN = r"(?:note|node)"
+
+_KEEP_NOTE_BARE = re.compile(
+    "^" + _LEAD + r"(?:(?:keep|make|take) (?:a )?" + _NOTE_NOUN + r"|"
+    + _NOTE_NOUN + r" (?:that|this|it)(?: down)?|write (?:that|this|it) down|"
+    r"save (?:that|this|it)|jot (?:that|this|it) down)"
+    r"(?: of (?:that|this|it))?[.!?]*$",
+    re.I,
+)
+
+#: The payload form takes the **correct spelling only**, everywhere a payload can follow
+#: it, and that asymmetry with the bare form above is deliberate. "keep node three
+#: drained" is a sentence a developer dictates, and admitting the mis-hearing here turned
+#: it into a note with "three drained" in it — caught by writing the case down rather than
+#: by a corpus, since EdAcc has no "node" to catch it with. The bare form can afford the
+#: mis-hearing because it is a whole utterance and "keep node" alone says nothing else;
+#: this one cannot, because everything after the verb is the payload.
+#:
+#: `node` survives in exactly one place: in front of `that`/`this`, where the frame
+#: carries the meaning and English does not offer a competing reading.
+#:
+#: **A bare `note X` is not here, and it was.** It swallowed *"note taking is not the same
+#: as listening"* — found by `ADVERSARIAL_EMPTY` in `command_bench.py` the first run after
+#: that set was written. The lesson is this module's oldest one, stated in `plan()` about
+#: "delete": a weak verb is safe only when something else confirms it. `note` alone
+#: confirms nothing — every sentence opening with the word is a candidate — while `note
+#: that`, `keep a note` and `make a note` are frames a sentence does not fall into by
+#: accident. So the payload needs a frame, and the cost is that "note the build is red"
+#: is dictation while "note **that** the build is red" is a note. The Help sheet teaches
+#: the frame, which is the shape people say anyway.
+_KEEP_NOTE_PAYLOAD = re.compile(
+    "^" + _LEAD + r"(?:(?:keep|make|take) (?:a )?note|"
+    + _NOTE_NOUN + r"(?=\s+(?:that|this)\b)|"
+    r"jot down|write down)"
+    r"(?: (?:that|this|of that|of the fact that))?[,:]?\s+(.+)$",
+    re.I,
+)
+
+#: P9. "We are done — give me what I kept." Whole-utterance only, 0 hits on the same 580.
+#:
+#: "wrap up" is common enough in speech that the whole-utterance rule is doing real work
+#: here: "let's wrap up the sprint and move on" is a sentence, and it is not this. The
+#: `notes` phrasings are included because "wrap up" is not what everybody reaches for —
+#: half the point of the feature is named by its output, not by its ending.
+#:
+#: **`wrap[- ]?up`, and the hyphen is measured.** Said on its own, "wrap up" comes back
+#: from the decoder as **"Wrap-up"** — 4 times in 6 through the real microphone path,
+#: 2026-08-05 — because a two-word phrase with nothing around it is exactly where Whisper
+#: reaches for the compound noun. A space-only pattern therefore missed it two runs in
+#: three, and the flake surfaced as a `selfdrive` check that passed three runs and failed
+#: the fourth. `_FOLLOWUP` carries `follow[- ]?up` for the same reason and `_ARTIFACT`
+#: carries `write[- ]?up`; this is that idiom, not a new one.
+_WRAP_UP = re.compile(
+    "^" + _LEAD + r"(?:wrap[- ]?(?:up|it up|this up|things up)|"
+    r"(?:write|type)[- ]?up (?:the|my|our) notes|"
+    r"(?:give|show|send) me (?:the|my|our) notes|"
+    r"(?:the |my )?notes,? please|"
+    r"(?:save|export) (?:the|my|our) notes)[.!?]*$",
     re.I,
 )
 
@@ -739,6 +848,21 @@ def _plan_exact(utterance: str, draft: str = "") -> Plan:
 
     if m := _FOLLOWUP.match(u):
         return Plan("followup", payload=_strip(m[1] or ""))
+
+    # After `_TAKE_REPLY`, and the order is the whole reason both can exist: "keep that
+    # answer" moves it into the draft and "keep note" files it, and they share a verb.
+    # Testing the more specific one first is what keeps the shared verb from being
+    # ambiguous — the same argument `_trigger` makes about "enter boom" ending in "boom".
+    if _KEEP_NOTE_BARE.match(u):
+        return Plan("note")
+
+    # The payload form, empty draft only — see `_KEEP_NOTE_PAYLOAD`. Falling through to
+    # dictation is the correct outcome with a draft held, not a missed command.
+    if not draft.strip() and (m := _KEEP_NOTE_PAYLOAD.match(u)):
+        return Plan("note", payload=_strip(m[1]))
+
+    if _WRAP_UP.match(u):
+        return Plan("wrap")
 
     if _UNDO.match(u):
         return Plan("undo")

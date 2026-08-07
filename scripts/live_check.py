@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow import SAMPLE_RATE  # noqa: E402
 from flow.audio import BLOCK, Mic, SpeechGate, rms_db  # noqa: E402
-from flow.asr import FINAL_MODEL, PARTIAL_MODEL  # noqa: E402
+from flow.asr import WhisperTranscriber  # noqa: E402
 from flow.diag import bench_identity  # noqa: E402
 from flow.edits import plan  # noqa: E402
 
@@ -389,10 +389,14 @@ def main() -> None:
 
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / "live-check.json"
-    # Both tiers: live_check runs the app's own transcriber, which loads whichever the
-    # defaults name rather than a model this script chose.
+    # Both tiers, asked of a transcriber rather than read off the CPU constants. Those
+    # constants stopped being the answer when the defaults became device-dependent —
+    # a GPU run is `large-v3-turbo` twice — and a result naming models that did not
+    # decode it is worse than one naming none.
+    probe = WhisperTranscriber()
     path.write_text(
-        json.dumps({"identity": bench_identity(models=(PARTIAL_MODEL, FINAL_MODEL)),
+        json.dumps({"identity": bench_identity(models=probe.names,
+                                               device=probe.device),
                     **out}, indent=1), encoding="utf-8")
     print(f"\nwritten -> {path}")
 

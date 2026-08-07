@@ -150,7 +150,7 @@ class TestAStaleRewriteNeverLands(RefineInFlight):
         s.draft.set("widen the column")
         s._after_draft_change()
         with s._refine_lock:
-            s._refine_result = (999, s.draft.revision, ("REVISED", "codex"))
+            s._refine_result = (999, s.draft.revision, ("REVISED", "codex"), ())
         s._pump_refine()
         self.assertEqual(s.draft.text, "widen the column")
 

@@ -171,6 +171,8 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("that was a command", "re-read what you just said as an instruction", "rescue/"),
     ("bring back my last prompt", "restore what Send handed over", "recall/"),
     ("follow up: and add a rollback", "continue the last prompt", "followup/"),
+    ("keep note", "file the answer on screen, with its question", "note/"),
+    ("wrap up", "every kept note into one file (or 'give me my notes')", "wrap/"),
     ("make it a proper prompt", "restructure it (agent CLI, a few seconds)",
      "semantic/polish"),
     ("make it more formal", "any other rewrite (agent CLI)", "semantic/"),

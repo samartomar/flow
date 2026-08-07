@@ -57,7 +57,8 @@ FIELDS = frozenset({
     "op",         # operation id, for matching a CLI result to its request
     "state",      # a State value
     "was",        # the State it replaced
-    "route",      # append | local | semantic | undo | rescue | recall | followup | take
+    "route",      # append | local | semantic | undo | rescue | recall | followup |
+                  # take | note | wrap
     "tier",       # base.en | small.en
     "ms",         # a duration
     "provider",   # codex | claude
@@ -73,6 +74,9 @@ FIELDS = frozenset({
     "component",  # what a version belongs to: a package, the OS, a model, a CLI
     "version",    # a version string or a revision hash, never a path
     "artifact",   # whether the ask requested a piece of work rather than an answer
+    "kept",       # a count: notes held (P9)
+    "exchange",   # whether a kept note carried the question that produced it
+    "wrote",      # whether a wrap-up reached a file, never where it went
 })
 
 #: Named so that adding one to FIELDS fails loudly. These are the words themselves —
@@ -182,9 +186,36 @@ class Diag:
 #: which is why this whole section runs off the startup path.
 _VERSION_TIMEOUT_SEC = 10.0
 
-#: Where faster-whisper's short names come from. Recorded so a decode result can be
-#: matched to the weights that produced it: "base.en" names a model, not a build of one.
+#: Where *most* of faster-whisper's short names come from, and the fallback when its own
+#: table cannot be read. Recorded so a decode result can be matched to the weights that
+#: produced it: "base.en" names a model, not a build of one.
+#:
+#: A fallback rather than the rule, because the pattern does not hold for the names that
+#: matter most now: `large-v3-turbo` lives at `mobiuslabsgmbh/faster-whisper-large-v3-turbo`
+#: and `distil-large-v3` at `Systran/faster-distil-whisper-large-v3`. Assuming the prefix
+#: made both resolve to a cache directory that does not exist, so every GPU-era result
+#: recorded `"uncached"` — which is exactly the provenance the model-pinning decision's
+#: reopen condition needs, quietly absent on the runs that have it.
 _HF_PREFIX = "Systran/faster-whisper-"
+
+
+def _hf_repo(name: str) -> str:
+    """The Hugging Face repo a faster-whisper model name resolves to.
+
+    Asked of the library's own table rather than reconstructed, because the mapping is
+    data and a second copy of it is a second thing to keep true. Private, and knowingly:
+    `available_models()` is the public surface and returns only the names, not what they
+    point at. Guarded, so a library that reorganises it degrades to the old guess rather
+    than taking the trace down — this is provenance, and nothing here may raise.
+    """
+    if "/" in name:
+        return name
+    try:
+        from faster_whisper.utils import _MODELS
+
+        return _MODELS.get(name) or _HF_PREFIX + name
+    except Exception:
+        return _HF_PREFIX + name
 
 _VERSION_IN = re.compile(r"\d+(?:\.\d+)+[A-Za-z0-9._+-]*")
 
@@ -230,8 +261,8 @@ def model_revision(name: str) -> str:
     needed is worse than a recorded fact that always does. The pin is a decision for
     the owner, with the cost written down in NEEDS_YOU.md.
     """
-    repo = name if "/" in name else _HF_PREFIX + name
-    ref = _hub_cache() / ("models--" + repo.replace("/", "--")) / "refs" / "main"
+    ref = (_hub_cache() / ("models--" + _hf_repo(name).replace("/", "--"))
+           / "refs" / "main")
     try:
         return ref.read_text(encoding="utf-8").strip()
     except OSError:
@@ -320,13 +351,19 @@ def record_identity(diag, models=()) -> None:
 BENCH_KEY = "identity"
 
 
-def bench_identity(models=(), clis=()) -> dict:
+def bench_identity(models=(), clis=(), device=None) -> dict:
     """What produced a measurement, as one block for a result file.
 
     The same question `identity()` answers for the app's trace, in the shape a `.bench`
     result wants and without the parts it does not: no OS build, no numpy, and no CLI
     version unless the bench actually used one — each of those costs a process start,
     and most benches never touch a CLI at all.
+
+    `device` belongs in here rather than beside it, and only became worth recording when
+    it stopped being a constant: the same weights at the same revision decode on CPU or
+    on CUDA now, the tiers the defaults pick differ between them, and a WER that does not
+    say which one it came from is a number two runs can disagree on for a reason nothing
+    in the file explains. Omitted when the caller does not know, never guessed.
 
     Records the model revisions rather than pinning them, for the reason
     `model_revision` gives: there is no complete table to pin from. What this does buy
@@ -342,6 +379,8 @@ def bench_identity(models=(), clis=()) -> dict:
             block[name] = md.version(name)
         except Exception:
             block[name] = "absent"
+    if device is not None:
+        block["device"] = device
     block["models"] = {name: model_revision(name) or "uncached" for name in models}
     if clis:
         block["clis"] = {name: _cli_version(name) or "absent" for name in clis}

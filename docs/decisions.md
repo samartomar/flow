@@ -6,6 +6,125 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-06 — Four from one screenshot set, and a fallback that had never once fired
+
+Five observations from one converse session, reported together. Four were real defects and
+three of them shared a shape: the app knew something and did not say it.
+
+**The fallback chain was unreachable on a timeout, which is the only failure that ever
+happens.** AGENT-09 gave the walk one deadline sized `max(timeout, largest floor)` — the
+size of a *single* call — so the first candidate could spend all of it and a timeout left
+nothing for the second. That was known and defended: a genuine hang is one of four failure
+modes, and the other three cost milliseconds. **The trace says the frequencies were
+backwards.** Every ask failure in `~/.flow/diag.jsonl`, 11 of 11 across five weeks, is
+`reason:"timeout"` at ~20.3 s with `provider:null`, against 39 successes spread over all
+three CLIs. The rare fourth case was every case, and with codex, claude and kiro-cli all
+installed and answering — 14.9 s, 19.2 s, 13.8 s when run directly — the fallback had never
+rescued a single call. Reproduced on the real functions with two fakes at a 3 s budget:
+`hangs timed out after 3s; then no time left to try answers`, 3 156 ms, no answer, while
+the second CLI would have answered in 50 ms.
+
+Decided: the budget covers the candidates it has to walk — each one's own wait, plus the
+`ABANDON_SEC` reap an abandoned call costs. The half of AGENT-09 that stands is the half
+about *division*: the per-call wait is still the user's number and is never shared out,
+because shortening every call turns a slow but working codex into a failing one. The bill
+is stated rather than hidden — at the shipped defaults a walk where nothing answers is
+20 + 5 + 20 + 5 + 60 = **110 s**, so `--cli-timeout` is how long any one CLI may take, not
+how long Ask may take. The owner took that trade on being shown both numbers. *Reopens if*
+a real session waits out the full walk and the owner would rather have had the failure at
+20 s — the fix then is a per-pool ceiling, not a return to a budget the size of one call.
+
+**A fallback that rescued a call left no trace of the rescue.** `_invoke_any` dropped every
+earlier reason the moment a later CLI answered, so a codex timeout saved by kiro-cli was
+indistinguishable from a run where codex was never installed — in the note, in the trace,
+everywhere. That is invariant 5 read from the other side: a refusal is not silent because
+something else eventually said yes. `skipped` is now carried out to the session, which
+names it in one sentence ("answered via kiro-cli, after codex timed out after 20s") and
+records the categories in the trace. It is an out-parameter rather than a third return
+value because the two-tuple is unpacked at fifteen call sites that do not care.
+
+**kiro-cli's tool narration was rendering as the answer.** The cleaner was built on a
+2026-08-02 capture taken from a prompt that ran no tools, and "the marker is on the first
+line only" is not a property of the output — it is a property of that prompt. Re-measured
+2026-08-06 in a real workspace: kiro-cli prefixes *everything it says* with `> `, so with
+tools the old strip took the marker off the preamble and handed the card 350 characters of
+grep receipts above the answer. The obvious repair — cut at the last marker — passes that
+capture and breaks `test_an_angle_bracket_inside_an_answer_survives`, an answer that quotes
+a shell line. So the landmark is the narration itself, matched as a shape the way the
+Credits line already is: everything up to the last tool receipt is the CLI talking about
+its own work. It decides where the answer began and never removes a line from inside one.
+1 145 chars → 359 on the live call. *Reopens if* an answer about kiro-cli's own output gets
+cut short — the fix then is asking the CLI for machine-readable output, not a cleverer
+shape.
+
+**A conversation on screen was larger than the conversation the CLI was given.** Converse
+inherited `refine`'s 1 500-character context budget, and that number's whole justification
+is about rewrites: enough thread to know what "the other endpoint" refers to. A
+conversation *is* its context, and P9's card renders every turn — so a constant sized for
+disambiguation was deciding how much of a visible conversation the CLI could remember, and
+replies are stored as turns too and are the longer half, so every answer evicted a
+question. Rebuilt from the owner's own session: five turns on the card, 1 765 characters,
+three of the four prior turns sent. The CLI then answered "I only have this conversation,
+which started with a question about a step-by-step plan" — an accurate report of what it
+was handed, read as amnesia inside one session. `ASK_CONTEXT_CHARS = 8 000` is a separate
+number from the rewrite's, still under half the 20 000-char store so R8's bound holds, and
+**the cut now says so when it happens**: the silence was the worse half. *Reopens if* a
+session outruns 8 000 in ordinary use — per-workspace CLI session resume is the better fix
+and is still unbuilt, blocked on `codex exec resume` rejecting `-s read-only`.
+
+**"nothing to send - the draft is empty", under a chip that says Ask, at a card showing
+five turns.** Not a defect in the refusal — the draft really was empty — but three names
+for two things, and it read as Flow denying the conversation it was displaying. Converse
+now says "nothing to ask - say a question first".
+
+The fifth observation is unresolved: the filler dropper ate "Thank you.", and separately a
+10-character "Thank you." reached the CLI as a question and cost 3.2 s and a thread turn.
+Left open pending the owner saying which of the two they meant.
+
+### 2026-08-06 — An answer that outlives its mode is held, not dropped and not forced
+
+Reported from a screenshot: a dictate draft with the conversation card standing behind it.
+The sequence was ask in converse, clear, switch to dictate, start a new draft from the
+clipboard — and the CLI, still working, answered several seconds into a mode that had
+moved on. `Pill._swap_surfaces` promises exactly one window is up afterwards and that was
+true when it ran; the reply branch then reopened the card on top of the bubble, from
+behind, with nothing on screen explaining it. The owner's words were **"both modes got
+activated"**, which is precisely what two windows look like.
+
+**The defect was a comment that proved the wrong thing.** The branch read "converse only,
+by construction: `Session.send()` returns "" in dictate mode and never asks". That is
+true, and it constrains where a question *leaves*. It says nothing about where the answer
+*arrives* — and between the two sits the whole 4-20 s the CLI takes, during which one
+keypress changes the mode. A constraint on the send path was being spent on the receive
+path.
+
+**Decided: file it, do not raise it, and say so.** `ConversationCard.answer` takes
+`surface=`; the text lands on the card whichever mode is up, and the window opens only
+when the card is the surface that mode owns. In dictate the bubble gets `ANSWER_HELD`
+instead, through `surface()` rather than `note()` because the case that needs the line
+most is the one with nothing on screen to paint it on. Reading the answer costs one mode
+switch: `_swap_surfaces` opens the card and it renders what it was given while down.
+
+**Both alternatives were worse and both keep one window.** Dropping the answer at the mode
+switch — the way `new_conversation` drops one at the operation id — throws away seconds of
+CLI work and a question that is spent with them, for a user who switched mode to do
+something else while waiting, which is the reasonable thing to do. Forcing the card up is
+the reported defect. Holding is the only option that keeps the one-window rule *and* the
+answer.
+
+**Scope, taken with it:** `_tick`'s crash handler had the same bug in the other direction
+— an exception in a converse frame surfaced the *bubble* over the card. It now goes
+through `front`, falling back to the bubble, because the surface is a plausible thing to
+have just crashed and a raise from inside that handler breaks the `after()` chain it
+exists to protect.
+
+The event drain moved out of `_frame` into `Pill._pump_events` to make any of this
+testable. Nothing about it changed; it was unreachable without driving a real Tk frame,
+which is why a routing rule with an invariant on it had no test to break.
+
+Reopen bar: an answer held and then wanted *without* a mode switch — a chip on the bubble
+that opens the card would be the smaller fix, and nobody has asked for one yet.
+
 ### 2026-08-06 — A voice from this decade, and the first output path that leaves the machine
 
 Every voice Flow could speak with was from 2013, and no amount of installing better ones
@@ -60,6 +179,122 @@ padded to an alignment boundary, so `bytes(plane)` returns more than was decoded
 bytes for 576 samples, 64 bytes of stale buffer on every one of 133 frames — and all of it
 was being written to the device. `edge.pcm` now slices to `samples * 2`, and
 `TestEdgePadding` exists so it cannot come back silently.
+
+### 2026-08-05 — The conversation should leave something behind: two verbs, one file
+
+Converse mode answers questions now (below, part 1), and once it did, the mode grew a
+gap nobody had specified: **a conversation worth having produced nothing that survived
+it**. `Thread` holds what was sent, Recent holds the last twenty of everything — both in
+memory, both gone on quit, and neither is a record of what the speaker judged worth
+keeping, because neither was *chosen*. The owner asked for the chosen half: talk as long
+as you like, mark the good parts as they go by, and have them at the end.
+
+**This is the reopen on part 3 below, taken deliberately.** That entry says the words are
+never stored and names the next shape as "an opt-in on-disk history, **never a default
+one**". What ships is opt-in twice over rather than once: keeping a note is one explicit
+act, writing the file is a second, and a session that takes a dozen notes and is never
+told to wrap up leaves the disk untouched — asserted, not intended. The file lands in the
+**workspace**, the folder the user already pointed Flow at, never in the settings folder.
+Item 65's test that a whole session leaves that folder as it found it keeps passing, and
+a second test now says the same thing about this feature by name.
+
+Decided, five parts:
+
+1. **Two verbs, and the shapes were priced before they were admitted.** `keep note` bare
+   keeps the exchange on screen — the answer *and* the question that produced it, because
+   an answer filed without its question reads a week later as an assertion from nowhere.
+   `note that X` keeps dictated words. `wrap up` turns everything kept into one file.
+   All three fire **0 times across the 580 real EdAcc utterances** (`command_bench.py`).
+   A fourth was written and rejected by that same run: `remember that X` hit a real
+   sentence, so it is not in the grammar, and a test pins its absence.
+2. **The payload form is gated on an empty draft**, and that gate is the feature's one
+   real risk closed. With a draft held, every word being said is going into it — "note
+   that the API is deprecated" is a sentence somebody is dictating into a prompt, and
+   swallowing it would take the words out of the thing they were being written into. An
+   empty draft is exactly the state an answer arrives into, so the shape is unambiguous
+   precisely where it is useful.
+3. **Flow does not summarise the notes.** R9, not modesty: Flow never generates content
+   on its own — it is the microphone, the editor and the courier (product.md). The
+   document is what was kept, in the order it was kept, verbatim. It therefore needs no
+   CLI, cannot hallucinate, costs no wait, and works on a machine with nothing on PATH.
+   Somebody who wants the CLI's reading of it asks for one, which is an ordinary converse
+   question and already works.
+4. **The menu is the floor, and the reason is measured.** The card's chip row already
+   runs to **377 px of `CARD_W`'s 420**; one more chip at its narrowest takes it to 433,
+   off the card. So Keep and Wrap up are menu rows. The split that falls out is better
+   than the row would have been: Keep is frequent and one tap, and Wrap up — the only act
+   in this app that puts the user's words on disk — earns a deliberate two-step.
+5. **No workspace, no file.** With nothing set there is no folder this app has any
+   business choosing on somebody's behalf, so the notes stop at the card, where Copy
+   already takes them. That is Lite's answer to the same question (the last inch is the
+   clipboard) rather than a degraded version of it.
+
+**Also settled here: P9's text, which LOOP_PLAN raised at the close of round ten and did
+not take.** product.md still called converse mode a prompt workshop and scoped it to
+"discuss and refine prompts only, nothing more" — written 2026-08-01, and made false four
+days later by part 1 below, which removed `WORKSHOP` from the ask path precisely so the
+mode would answer general questions. The mode has answered anything since; only the
+document disagreed. Rewritten to say what it does.
+
+**Three defects found by instruments, and two of them by the instrument built for this.**
+Worth recording because in each case the written grammar was right and the *spoken* one
+was not, which is the gap this product exists inside:
+
+- **"keep note" decodes as "Keep node."** `selfdrive --only notes` failed on it the first
+  time it ran, while the same words handed straight to the decoder came back correct —
+  the padding and the gate are the difference. Admitted as a mis-hearing, but only where
+  English will not carry a competing reading, because "keep node three drained" is a
+  sentence and the first fix swallowed it.
+- **"wrap up" decodes as "Wrap-up"**, 4 times in 6, because a two-word phrase with
+  nothing around it is where Whisper reaches for the compound noun. It passed three
+  selfdrive runs and failed the fourth. `follow[- ]?up` had already learned this.
+- **A bare `note X` swallowed "note taking is not the same as listening"**, found by a
+  new empty-draft adversarial set. The corpus could not have found it: EdAcc is
+  conversation and contains "node" zero times in 580 utterances, so it scored the note
+  grammar a perfect 0 whatever that grammar admitted. An absence of evidence was reading
+  as evidence, and the fix was to write the developer sentences down where the harness
+  runs them.
+
+`command_bench.py` gained two columns for this: `MISROUTES` now counts the new kinds
+(a grammar priced only on the kinds that existed when the harness was written scores
+every new verb as free), and precision is measured against an **empty draft** as well as
+a held one, since two of these routes are only reachable with no draft at all.
+
+**And one in the harness itself, whose first fix was wrong and passed anyway.** Every
+`Driver` loaded the decoder onto the GPU and none was ever released, so a full
+`selfdrive` run exhausted CUDA around the sixth scenario. It presented as three
+CLI-shaped failures with no CLI involved, and every affected scenario passed alone —
+which is exactly what makes a leak read as flake.
+
+The first fix closed each session between scenarios, and the suite went 62/72 → **73/73**,
+which looked like proof and was not. `Session.close` gives back what `start()` took — the
+microphone, the worker, the speaker, the preload — and deliberately **not** the models:
+the path it was written for is quit, where the process is ending anyway, and the path
+that does release them is R8's idle unload, which runs while the session is still alive.
+Dropping the last reference does not help either, because CTranslate2 returns nothing on
+`__del__`. Measured over four create/close cycles, `close()` + `gc.collect()` read
+**+3870, +5179, +5195, +5219 MiB** — a plateau, not a release. The suite went green
+because the plateau happened to sit under the ceiling for this mix of scenarios, which is
+a different fact from the one the fix claimed.
+
+Calling `asr.unload()` as well reads **+104, +371, +341, +357 MiB** over the same four
+cycles, and the whole run now sits flat at its baseline scenario to scenario. **This is a
+harness fix and not a product one**: the app runs one session per process and already
+releases on idle (R8, `IDLE_UNLOAD_SEC`), while the harness is the only thing that builds
+a dozen sessions in one interpreter. Three runs since: 73/73, 72/73, 72/73, the single
+failure each time being the pre-existing `insert draft before release notes` decode
+flake, which passes in isolation.
+
+**Recorded because the near-miss is the lesson.** A green suite was taken as evidence for
+a mechanism nobody had measured, and the number that would have caught it — GPU memory
+after teardown — took four minutes to obtain. `measure-before-and-after` applies to
+instrument fixes exactly as it does to product ones.
+
+**Reopen bars.** If a user reports a sentence swallowed by a note verb, the payload form
+loses its remaining ground and becomes bare-only. If a third mis-heard spelling of "note"
+turns up, the list stops growing and decode-time command bias is the honest fix instead.
+If anyone asks where their notes went after a crash, the buffer gets a periodic write —
+and that, not this, is the point where the never-stored stance would actually be spent.
 
 ### 2026-08-03 — First contact: three users, one verdict, five roots, and a surface split
 

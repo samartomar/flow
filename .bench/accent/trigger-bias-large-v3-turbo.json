@@ -1,0 +1,2179 @@
+{
+ "identity": {
+  "date": "2026-08-05",
+  "faster-whisper": "1.2.1",
+  "ctranslate2": "4.8.1",
+  "device": "cuda",
+  "models": {
+   "large-v3-turbo": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+  }
+ },
+ "model": "large-v3-turbo",
+ "device": "cuda",
+ "manifest": "manifest-edacc.jsonl",
+ "clips": 300,
+ "stats": {
+  "none": {
+   "us-control": [
+    236,
+    1143
+   ],
+   "indian": [
+    183,
+    969
+   ],
+   "japanese": [
+    177,
+    782
+   ],
+   "russian": [
+    169,
+    1142
+   ],
+   "spanish": [
+    156,
+    1119
+   ]
+  },
+  "trigger": {
+   "us-control": [
+    208,
+    1143
+   ],
+   "indian": [
+    161,
+    969
+   ],
+   "japanese": [
+    173,
+    782
+   ],
+   "russian": [
+    122,
+    1142
+   ],
+   "spanish": [
+    145,
+    1119
+   ]
+  }
+ },
+ "flags": {
+  "none": {
+   "invented": [],
+   "false_send": []
+  },
+  "trigger": {
+   "invented": [
+    {
+     "wav": "edacc/russian/03470.wav",
+     "ref": "OBAN WAIT BUT IT'S NOT ON THE MAP IS IT",
+     "hyp": "boom wait but it's not on the map is it"
+    }
+   ],
+   "false_send": []
+  }
+ },
+ "detail": [
+  {
+   "wav": "edacc/us-control/00001.wav",
+   "group": "us-control",
+   "ref": "C ELEVEN DASH P TWO",
+   "none": "C11-P2.",
+   "trigger": "C11-P2"
+  },
+  {
+   "wav": "edacc/us-control/00005.wav",
+   "group": "us-control",
+   "ref": "IS THAT UH I MEAN REALISTICALLY I WOULD RATHER GO TO THE BEACH TODAY",
+   "none": "Is that... I mean, realistically, I would rather go to the beach today.",
+   "trigger": "is that uh i mean realistically i would rather go to the beach today"
+  },
+  {
+   "wav": "edacc/us-control/00007.wav",
+   "group": "us-control",
+   "ref": "I MEAN OBVIOUSLY BUT IT'S BEEN I'D RATHER GO RIGHT NOW AS WELL AS EVERYBODY IS GOING THERE AND <DTMF> A LITTLE BIT GRIM",
+   "none": "I mean, obviously, but it's been, I'd rather go right now as well as everybody's going there and public to be a little bit grim.",
+   "trigger": "I mean, obviously, but it's been, I'd rather go right now as well as everybody's going there and public to be a little bit grim."
+  },
+  {
+   "wav": "edacc/us-control/00009.wav",
+   "group": "us-control",
+   "ref": "ESPECIALLY IN THIS TIME STAYING INSIDE",
+   "none": "Especially in this time, staying inside.",
+   "trigger": "especially in this time staying inside"
+  },
+  {
+   "wav": "edacc/us-control/00011.wav",
+   "group": "us-control",
+   "ref": "I MEAN WE COULD AFTER A AFTER THIS YEAH BUT AND I'LL SAY EVERYBODY'S LIKE SAYING OH YEAH GO BOURBON AND ALL THAT STUFF LIKE NOBODY REALLY CARES",
+   "none": "I mean, we could after this, yeah, but I don't say everybody's like saying, oh yeah, go bourbon and all that stuff. Like, nobody really cares.",
+   "trigger": "i mean we could after after this yeah but i don't say everybody's like saying oh yeah go bourbon and all that stuff like somebody really cares"
+  },
+  {
+   "wav": "edacc/us-control/00013.wav",
+   "group": "us-control",
+   "ref": "IT SOUNDS REALLY GRIM I WOULD NOT WANNA GO THERE",
+   "none": "It sounds really grim. I would not want to go there.",
+   "trigger": "It sounds really grim I would not want to go there"
+  },
+  {
+   "wav": "edacc/us-control/00015.wav",
+   "group": "us-control",
+   "ref": "NO NEVER AGAIN I KNOW YOU'RE A BIG PROMO <OVERLAP> YOU'RE THE BIG BIG PROMOTER THERE BUT",
+   "none": "no never again i know you're a big you're the big big promoter there but",
+   "trigger": "no never again i know you're a big you're the big big promoter there but"
+  },
+  {
+   "wav": "edacc/us-control/00017.wav",
+   "group": "us-control",
+   "ref": "I MEAN PLEASE DO NOT EVER MENTION THAT EVER AGAIN",
+   "none": "I mean, please do not ever mention that ever again.",
+   "trigger": "please do not ever mention that ever again"
+  },
+  {
+   "wav": "edacc/us-control/00019.wav",
+   "group": "us-control",
+   "ref": "I'M SEEING A GREAT I'M SEEING A GREAT QUESTION HERE I'M NOT GONNA LIE IT'S UH",
+   "none": "I'm seeing a great question here. I'm not going to lie. It's...",
+   "trigger": "oh i'm seeing a great i'm seeing a great question here i'm not gonna lie it's uh"
+  },
+  {
+   "wav": "edacc/us-control/00021.wav",
+   "group": "us-control",
+   "ref": "IT'S IS THERE A PARTICULAR FOOD YOU USED TO LIKE AS A CHILD I'M QUITE TEMPTED BY THAT",
+   "none": "Is there a particular food you used to like as a child? I'm quite tempted by that.",
+   "trigger": "it's is there a particular food you used to like as a child i'm quite tempted by that"
+  },
+  {
+   "wav": "edacc/us-control/00023.wav",
+   "group": "us-control",
+   "ref": "I MEAN I MEAN I MEAN DEPENDS WHEN 'CAUSE I THINK WHEN I WAS IN UKRAINE I WOULD DEFINITELY SAY IT WAS LIKE THE DUMPLING <FOREIGN>",
+   "none": "I mean, I mean, depends when, because I think when I was in Ukraine, I would definitely say it was like the dumplings, the vanyuki.",
+   "trigger": "i mean i mean depends when because i think when i was in ukraine i would definitely say it was like the dumplings dividing you keep"
+  },
+  {
+   "wav": "edacc/us-control/00025.wav",
+   "group": "us-control",
+   "ref": "<FOREIGN> IS LIKE MORE POLISH I'D SAY",
+   "none": "boston yeah beauty is like more polish i'd say",
+   "trigger": "boston yeah beautiful you know he's like more polish i'd say"
+  },
+  {
+   "wav": "edacc/us-control/00027.wav",
+   "group": "us-control",
+   "ref": "I MEAN THEY'RE JUST ALL JUST REALISTICALLY THEY'RE ALL JUST LIKE LAMB OR BEEF OR PORK WITH STUFFED WITH HERBS WHICH I MEAN DEPENDS OBVIOUSLY BY DIFFERENTLY DEPENDING WHERE YOU'RE FROM BUT IT'S REALISTIC REALISTICALLY THAT WITH VERY THICK OUTER CRUST AND MOST OF THE TIME YOU'LL HAVE CREAM UH SOUR CREAM WITH THEM AND THEY ARE SO GOOD THEY'RE DELICIOUS",
+   "none": "I mean, they're just all just, realistically, they're all just like lamb or beef or pork with stuffed with herbs, which, I mean, depends, obviously, you might do it differently, depending on where you're from, but it's realistically that with a very thick outer crust, and most of the time you'll have cream, sour cream with them, and they are so good. They're delish.",
+   "trigger": "I mean they're just all just realistically they're all just like lamb or beef or pork with stuffed with herbs which I mean depends obviously but differently depending where you're from but it's really realistically that with a very thick outer crust and most of the time you'll have cream sour cream with them and they are so good they're delish."
+  },
+  {
+   "wav": "edacc/us-control/00029.wav",
+   "group": "us-control",
+   "ref": "HOW DO YOU NOT HAVE THAT YOU MUST HAVE THAT IN ROMANIA LIKE SOME FORM OR VERSION OF IT",
+   "none": "How do you not have that? You must have that in Romania, like some form or version of it.",
+   "trigger": "how do you not have that you must have that in romania like some form or version of it"
+  },
+  {
+   "wav": "edacc/us-control/00043.wav",
+   "group": "us-control",
+   "ref": "YEAH YOU YOU WATCH DIE HARD AS WELL FOR CHRISTMAS WHICH IS LIKE HONESTLY THE BEST FAMILY TRADITION LIKE WHO CARES",
+   "none": "You watch Die Hard as well for Christmas, which is like honestly the best salvage version, like who cares?",
+   "trigger": "you watch die hard as well for christmas which is like honestly the best salvage version like who cares"
+  },
+  {
+   "wav": "edacc/us-control/00045.wav",
+   "group": "us-control",
+   "ref": "HOW IS THAT IS THAT JUST A YOU THING BEING LIKE VERY SPECIAL",
+   "none": "Is that just a you thing being like very special?",
+   "trigger": "Is that just a you thing being like very special?"
+  },
+  {
+   "wav": "edacc/us-control/00049.wav",
+   "group": "us-control",
+   "ref": "HE'S AN ABSOLUTE SPECIMEN HE SHOULD NOT BE LET OUT OF THE HOUSE",
+   "none": "He's an absolute specimen. He should not be let out of the house.",
+   "trigger": "He's an absolute specimen, he should not be let out of the house"
+  },
+  {
+   "wav": "edacc/us-control/00051.wav",
+   "group": "us-control",
+   "ref": "DO YOU THINK ACTUALLY LIKE FUCKING LOST IT THROUGHOUT CORONA IT'S LIKE OH MY GOD",
+   "none": "Do you think I actually, like, fucking lost it throughout Corona? It's like, oh, my God.",
+   "trigger": "do you think i actually like fucking lost it throughout corona it's like oh my god"
+  },
+  {
+   "wav": "edacc/us-control/00053.wav",
+   "group": "us-control",
+   "ref": "I MEAN ANY MAN WOULD LO WOULD IS INSANE WHEN THEY WATCH DIE HARD FOUR I'M NOT GONNA LIE",
+   "none": "I mean, any man is insane when they watch Die Hard 4, I'm not going to lie.",
+   "trigger": "I mean any man is insane when they watch Die Hard 4, I'm not gonna lie"
+  },
+  {
+   "wav": "edacc/us-control/00055.wav",
+   "group": "us-control",
+   "ref": "<LAUGH> YOU CAN JUST TRACK THE MALE PATTERN BALDNESS <LAUGH> <NO-SPEECH> TRACK IT ON THE TV SCREEN",
+   "none": "you can just track the male pattern boldness you just track it on the tv screen",
+   "trigger": "you can just track the male pattern boldness you just track it on the tv screen"
+  },
+  {
+   "wav": "edacc/us-control/00057.wav",
+   "group": "us-control",
+   "ref": "WHAT NO NEVER IN MY LIFE",
+   "none": "What? No, never in my life.",
+   "trigger": "what no never in my life"
+  },
+  {
+   "wav": "edacc/us-control/00059.wav",
+   "group": "us-control",
+   "ref": "I THINK PEOPLE SAID THAT ABOUT AIRPODS EVERYBODY'S WEARING THAT RIGHT NOW",
+   "none": "People said that about AirPods, everybody's wearing that right now.",
+   "trigger": "people said that about airpods everybody's wearing that right now"
+  },
+  {
+   "wav": "edacc/us-control/00063.wav",
+   "group": "us-control",
+   "ref": "I WAS ONE OF THEM I USED TO MOCK THEM EVERYWHERE AND HERE I AM",
+   "none": "I used to mock them everywhere, and here I am.",
+   "trigger": "I used to mock them everywhere and here I am"
+  },
+  {
+   "wav": "edacc/us-control/00069.wav",
+   "group": "us-control",
+   "ref": "EXACTLY AND AS WELL AS THAT LIKE OH MY GOD LIKE YOU CAN LITERALLY LIKE DO WALK I THINK LIKE TEN METERS SOMETHING LIKE THAT AND NOBODY CARES IT'S GOING TO BE FUN",
+   "none": "exactly and as well as that like oh my god like you can literally like do walk like i think like 10 meters something like that and nobody cares like it's gonna be fun",
+   "trigger": "exactly and as well as that like oh my god like you can literally like do walk like i think like 10 meters something like that and nobody cares like it's gonna be fun"
+  },
+  {
+   "wav": "edacc/us-control/00071.wav",
+   "group": "us-control",
+   "ref": "REMEMBER THAT BRINGS UP REMEMBER THE WHOLE LIKE GOOGLE GLASSES THING THAT CAME OUT THAT WHOLE THING THAT WAS SO DUMB",
+   "none": "Remember the whole Google Glasses thing that came out, that whole thing, that was so dumb.",
+   "trigger": "remember that reason remember the whole like google glasses thing that came out that whole thing that was so dumb"
+  },
+  {
+   "wav": "edacc/us-control/00075.wav",
+   "group": "us-control",
+   "ref": "PROBABLY CAUSE YOU NUMBER ONE PROBABLY LIKE A TOOL JUST WEARING THAT AND SECOND OF ALL YOU JUST",
+   "none": "Probably because you're number one, probably like a tool, just wearing that. And second of all, you just.",
+   "trigger": "probably because you're number one probably like a tool just wearing that and second of all you just"
+  },
+  {
+   "wav": "edacc/us-control/00077.wav",
+   "group": "us-control",
+   "ref": "PROBABLY THEY PROBABLY HAVE LIKE CATARACTS",
+   "none": "Probably, they probably have, like, Google, Google.",
+   "trigger": "probably they probably have like Google Google"
+  },
+  {
+   "wav": "edacc/us-control/00079.wav",
+   "group": "us-control",
+   "ref": "JUST NO THERE'S NO GOOGLE GLASSES 'CAUSE NOBODY'S TRIED TO LIKE DO IT EVER SINCE",
+   "none": "just no there's no google glasses because nobody's tried to like do it ever since",
+   "trigger": "just now there's no google glasses because nobody's tried to like do it ever since"
+  },
+  {
+   "wav": "edacc/us-control/00081.wav",
+   "group": "us-control",
+   "ref": "I MEAN YEAH THEY LOOKED REALLY YOU LOOK LIKE AN ABSOLUTE TOOL WALKING AROUND WITH THAT BUT IT'S FINE I'M NOT GONNA JUDGE",
+   "none": "I mean, yeah, you look like an absolute tool walking around with that, but it's fine. I'm not going to judge.",
+   "trigger": "I mean yeah you look like an absolute tool walking around with that but it's fine I'm not gonna judge"
+  },
+  {
+   "wav": "edacc/us-control/00083.wav",
+   "group": "us-control",
+   "ref": "<LIPSMACK> SOME BEAUTIFUL QUESTIONS THAT I'M SEEING",
+   "none": "Some beautiful questions.",
+   "trigger": "there's some beautiful questions that i'm seeing"
+  },
+  {
+   "wav": "edacc/us-control/00085.wav",
+   "group": "us-control",
+   "ref": "AH ABSOLUTELY ADVENTURE TIME SUPREMACY ALL THE WAY HONESTLY STILL",
+   "none": "Oh, absolutely. Adventure types of privacy all the way, honestly.",
+   "trigger": "oh absolutely adventure types of privacy all the way honestly"
+  },
+  {
+   "wav": "edacc/us-control/00087.wav",
+   "group": "us-control",
+   "ref": "TO THIS DAY TO THIS DAY ADVENTURE TIME SUPREMACY",
+   "none": "To this day, to this day, Adventure Time is Supremacy.",
+   "trigger": "To this day, to this day, Adventure Time of Supremacy"
+  },
+  {
+   "wav": "edacc/us-control/00089.wav",
+   "group": "us-control",
+   "ref": "IT'S AMAZING WHEN HAVE YOU EVER SEEN LIKE AS A KID WATCHING THAT COMING BACK FROM SCHOOL I JUST WATCHED THAT THAT WAS AMAZING",
+   "none": "It's amazing. What have you ever seen? Like, as a kid, watching that, coming back from school, I just watched that. That was amazing.",
+   "trigger": "it's amazing what have you ever seen like as a kid watching that coming back from school i just watched that that was amazing"
+  },
+  {
+   "wav": "edacc/us-control/00091.wav",
+   "group": "us-control",
+   "ref": "I'VE HEARD OF THAT I'VE HEARD OF THAT",
+   "none": "I've heard of that. I've heard of that.",
+   "trigger": "I've heard of that"
+  },
+  {
+   "wav": "edacc/us-control/00099.wav",
+   "group": "us-control",
+   "ref": "I'M JUST GOING TO LIKE TRY I'M JUST GOING TO IMAGINE LIKE A LIKE A PRIMARY SCHOOL TEACHER TRYING TO EXPLAIN TO THE KIDS THAT THIS IS SOMEHOW NORMAL JUST TO ANY CHILD",
+   "none": "I'm just trying to imagine a primary school teacher trying to explain to kids that this is somehow normal.",
+   "trigger": "I'm just trying to imagine like a primary school teacher trying to explain to kids that this is somehow normal just to each other"
+  },
+  {
+   "wav": "edacc/us-control/00101.wav",
+   "group": "us-control",
+   "ref": "IT'S LIKE WHAT ARE YOU DOING LIKE IMAGINE LIKE THAT CHILD IS LIKE IMAGINE LIKE THE CHILDREN ARE LIKE SUPER SMALL LIKE IT'S GOING TO BE LIKE A FOOT LEVEL OF THE D ONE",
+   "none": "It's like, what are you doing? Like, imagine, like, that child is, like, imagine, like, the children, like, super small. There's going to be, like, a foot level of the D1.",
+   "trigger": "like what are you doing like imagine like that child is like imagine like the children like super small there's gonna be like a foot level of the d1"
+  },
+  {
+   "wav": "edacc/us-control/00103.wav",
+   "group": "us-control",
+   "ref": "JUST PLAYING FOOTBALL WITH THEIR HEAD FLOATING ABOUT",
+   "none": "Just playing football with their head. Loathing about.",
+   "trigger": "just playing football with their head losing about"
+  },
+  {
+   "wav": "edacc/us-control/00105.wav",
+   "group": "us-control",
+   "ref": "WAIT BUT WHAT WHAT WAS LIKE YOUR I I CAN SEE YOU AS A VERY LIKE BIG MOVIE MAN WHAT WAS LIKE YOUR LIKE FORMATTING MOVIE AS A KID",
+   "none": "What about, what was like your, I can see it's a very like big movie, man. What was like your like formatting movie as a kid?",
+   "trigger": "what about what was like your i i can see it's a very like big movie man what was like your like formatting movie of the kid"
+  },
+  {
+   "wav": "edacc/us-control/00115.wav",
+   "group": "us-control",
+   "ref": "AND THE SOUNDTRACK TO IT IS SO GOOD <OVERLAP> SOUNDTRACK IS AMAZING",
+   "none": "The soundtrack to it is so good. Yeah, it's great. It's amazing.",
+   "trigger": "the soundtrack to it is so good yeah it's great it's amazing"
+  },
+  {
+   "wav": "edacc/us-control/00117.wav",
+   "group": "us-control",
+   "ref": "BUT IT'S LIKE IT REMINDS ME REMEMBER I REMEMBER WATCHING AS A KID LIKE THE WHOLE LIKE I REMEMBER MY TEACHER SHOWED ME THE THE WHAT WAS IT AGAIN THE WIZARD OF OZ AND I REAL AND I LEARNED LIKE TEN YEARS LATER THAT APPARENTLY LIKE ALL",
+   "none": "But it reminds me, remember, I remember watching as a kid, like, the whole, like, I remember my teacher showed me the, what was it again, the Wizard of Oz, and I, like, learned, like, ten years later, Oh, yeah.",
+   "trigger": "it reminds me remember i remember watching as a kid like the whole like i remember my teacher showed me the the what was it again the wizard evolves and i really i like learned like 10 years later"
+  },
+  {
+   "wav": "edacc/us-control/00119.wav",
+   "group": "us-control",
+   "ref": "THE CHARACTERS GOT MASSIVE AMOUNTS OF SKIN CANCER FROM THE MERCURY IN THE PAINTS BECAUSE THE LIGHTING WAS SO POOR",
+   "none": "It's got like massive amounts of skin cancer from the mercury and the paints because the lighting was so poor.",
+   "trigger": "Like massive amounts of skin cancer from the mercury and the paints because the lighting was so poor"
+  },
+  {
+   "wav": "edacc/us-control/00123.wav",
+   "group": "us-control",
+   "ref": "AND LIKE GOT LIKE MASSIVE AMOUNTS OF RADIATION DAMAGE",
+   "none": "and got massive amounts of radiation damage.",
+   "trigger": "and like got like massive amounts of radiation damage."
+  },
+  {
+   "wav": "edacc/us-control/00125.wav",
+   "group": "us-control",
+   "ref": "WICKED OH MY GOD YEAH I REMEMBER WATCHING THAT AT THE WEST END",
+   "none": "Wicked. Oh, my God. Yeah, I remember watching that.",
+   "trigger": "wicked oh my god yeah i remember watching that like i"
+  },
+  {
+   "wav": "edacc/us-control/00127.wav",
+   "group": "us-control",
+   "ref": "BUT I THINK IT'S SUCH A CULT THING IT'S LIKE IT'S LIKE DISNEY MOVIES LIKE PEOPLE WILL JUST REWATCH THEM WHENEVER SO BUT LIKE IN THE IN THE PLAY INDUSTRY",
+   "none": "Because I think it's such a cult thing. It's like Disney movies. People would just re-watch them whenever. But in the play industry...",
+   "trigger": "because i think it's such a cult thing it's like it's like disney movies like people would just rewatch them whenever so but like in the in the industry"
+  },
+  {
+   "wav": "edacc/us-control/00131.wav",
+   "group": "us-control",
+   "ref": "BECAUSE YOU DON'T SEE THAT IN COUNTRIES THAT JUST LIKE ARE NOT LIKE ENGLISH SPEAKING LIKE YOU ONLY EVER SEE THAT IN LIKE",
+   "none": "see that in in countries that are not like english-speaking like you only ever see that in like",
+   "trigger": "see that in in countries that are not like english speaking like you only ever see that in like"
+  },
+  {
+   "wav": "edacc/us-control/00133.wav",
+   "group": "us-control",
+   "ref": "ENGLISH SPEAKING COUNTRIES LIKE WHEN HAVE YOU EVER SEEN THAT IN LIKE GREECE",
+   "none": "like when have you ever seen that in like",
+   "trigger": "like when have you ever seen that in like"
+  },
+  {
+   "wav": "edacc/us-control/00151.wav",
+   "group": "us-control",
+   "ref": "BUT AND IT MUST'VE JUST LIKE DID YOU DID YOU UNDERSTAND ALL OF IT OR WERE YOU JUST <OVERLAP> IT'S LIKE OH",
+   "none": "Did you understand all of it, where he's still playing as a kid?",
+   "trigger": "did you did you understand all of it or he's like still living as a kid"
+  },
+  {
+   "wav": "edacc/us-control/00153.wav",
+   "group": "us-control",
+   "ref": "OH WERE THEY SINGING IN ENGLISH OR WERE THEY LIKE ADAPTED TO GREEK",
+   "none": "Oh, what are you saying in English, like adapted to Greek?",
+   "trigger": "oh what are you saying in english where they like adapted to greek"
+  },
+  {
+   "wav": "edacc/us-control/00155.wav",
+   "group": "us-control",
+   "ref": "I DON'T KNOW FINDING NEMO I DON'T KNOW",
+   "none": "Finding Nemo, I don't know.",
+   "trigger": "Finding Nemo, I don't know"
+  },
+  {
+   "wav": "edacc/us-control/00159.wav",
+   "group": "us-control",
+   "ref": "DID YOU EVER SEE IN FINDING NEMO IN THE SWEDISH ONE AT THE AT THE VERY END",
+   "none": "Did you ever see Finding Nemo in the Swedish one at the very end?",
+   "trigger": "did you ever see in finding nemo in the swedish one at the at the very end"
+  },
+  {
+   "wav": "edacc/us-control/00161.wav",
+   "group": "us-control",
+   "ref": "I HAVEN'T EITHER BUT IT'S THIS WHOLE THING AT THE END I THINK IT I THINK IT'S AT THE END IT'S LIKE IT'S LIKE THE END OF IT IT JUST SAYS SLUT AND THAT'S THE END OF IT",
+   "none": "I haven't either, but it's this cold thing at the end. I think it's like the end of something. It just says slut, and that's the end.",
+   "trigger": "i haven't either but it's this whole thing at the end i think i think it's at the end it's like the end it just says slut and that's the end"
+  },
+  {
+   "wav": "edacc/us-control/00163.wav",
+   "group": "us-control",
+   "ref": "IT'S JUST IN ONE FRAME IT JUST SAYS THE WORD SLUT IN THE OCEAN IT'S AMAZING",
+   "none": "It's just in one frame. It just is the one slut in the ocean. It's amazing.",
+   "trigger": "It's just in one frame It just is the one slut in the ocean It's amazing"
+  },
+  {
+   "wav": "edacc/us-control/00165.wav",
+   "group": "us-control",
+   "ref": "PROBABLY NOT IT PROBABLY MEANS SOMETHING <DTMF> LIKE IT'S IMAGINE THAT WE'RE WATCHING A REALLY EMOTIONAL KIDS MOVIE AND ALL OF HIS FAMILY DIES LOOKING FOR HIS WIFE HE'S MET A REALLY LIKE SPECIAL FRIEND AND NOW IT'S JUST LIKE IT JUST SAYS SLUT AT THE END",
+   "none": "Probably not, it probably means something other than the end, but it's like, imagine like watching a really emotional kids movie, all of his family died looking for his wife, he's met a really like special friend, and now it's just like, it's just a slut at the end.",
+   "trigger": "Probably not. It probably means something other than the end. Imagine watching a really emotional kids movie. All of his family died looking for his wife. He's met a really like special friend and now it's like it's just a slut at the end."
+  },
+  {
+   "wav": "edacc/us-control/00169.wav",
+   "group": "us-control",
+   "ref": "IT'S LIKE A I FEEL LIKE I'M ON A JOE ROGAN PODCAST",
+   "none": "It's like a Joe Rogan podcast.",
+   "trigger": "on a Joe Rogan podcast"
+  },
+  {
+   "wav": "edacc/us-control/00173.wav",
+   "group": "us-control",
+   "ref": "ALL RIGHT UM I AM PARTICIPANT C ONE THREE P ONE",
+   "none": "all right I am participant C 1 3 P 1",
+   "trigger": "all right I am participant C 1 3 P 1"
+  },
+  {
+   "wav": "edacc/us-control/00175.wav",
+   "group": "us-control",
+   "ref": "MM HMM OKAY NOW UH I HAVE TO READ OUT THIS TEXT SO AGAIN",
+   "none": "okay now I have to read out this text so again",
+   "trigger": "okay now I have to read out this text so again"
+  },
+  {
+   "wav": "edacc/us-control/00179.wav",
+   "group": "us-control",
+   "ref": "ALL RIGHT SO UH NOW WE CAN JUST GO INTO A NORMAL CONVERSATION SO",
+   "none": "And so now we can just go into a normal conversation. So.",
+   "trigger": "and so now we can just go into a normal conversation so"
+  },
+  {
+   "wav": "edacc/us-control/00181.wav",
+   "group": "us-control",
+   "ref": "UH WHICH WE HAVE NOT HAD ALL DAY SO WE CAN ACTUALLY HAVE A NICE RELAXING CONVERSATION RIGHT NOW SO HOW'S WORK",
+   "none": "Uh, which we have not had all day. So we can actually have a nice relaxing conversation right now. So how's work?",
+   "trigger": "uh which we have not had all day so we can actually have a nice relaxing conversation right now so how's work"
+  },
+  {
+   "wav": "edacc/us-control/00209.wav",
+   "group": "us-control",
+   "ref": "YEAH I KNOW I WAS GOING TO MENTION IT BECAUSE USUALLY EVERY TIME YOU TOLD ME THAT YOU'RE GONNA GO TO WORK IT'S LIKE BECAUSE OF THE WHOLE TWENTY FOUR HOUR THING I EXPECT THAT OKAY RIGHT NOW YOU WOULD STILL BE AT WORK AND THEN TOMORROW IN THE AFTERNOON YOU'D SAY OH I GOT I GOT FREE NOW I'M FREE",
+   "none": "And I was going to mention, because usually every time you tell me that you're going to go to work, it's like, because of the whole 24 hour thing, I expect that, okay, right now you would still be at work. And then tomorrow in the afternoon, you'd say, ah, I got free now, I'm free.",
+   "trigger": "and i was going to mention because usually every time you tell me that you're going to go to work it's like because of the whole 24-hour thing i expect that okay right now you would still be at work and then tomorrow in the afternoon you'd say ah i got free now i'm free"
+  },
+  {
+   "wav": "edacc/us-control/00211.wav",
+   "group": "us-control",
+   "ref": "UM BUT IT'S WEIRD THAT YOU STARTED IN THE MORNING AND YOU'RE FREE NOW WHICH IS HOW THE THE AVERAGE PERSON WORKS WITH WITH WITH YOU IT'S THE TWENTY FOUR HOUR SHIFT SO UM",
+   "none": "um but it's weird that you started in the morning and you're free now which is how the average person works but with you it's the 24-hour shift so um",
+   "trigger": "um but it's weird that you started in the morning and you're free now which is how the average person works but with you it's the 24-hour shift so um"
+  },
+  {
+   "wav": "edacc/indian/00440.wav",
+   "group": "indian",
+   "ref": "UH YEAH SO THE TOPIC THAT WE'VE CHOSEN WAS BASICALLY WHAT WAS THE FIRST UH MOVIE THAT WE WATCHED THAT WAS BASED ON A BOOK SO FOR ME IT'S ALICE IN WONDERLAND WHAT WAS IT FOR YOU",
+   "none": "Yeah, so the topic that we chosen was basically what was the first movie that we watched that was based on a book. So for me, it's Alice in Wonderland. What is it for you?",
+   "trigger": "uh yeah so the topic that we chosen was basically what was the first uh movie that we watched that was based on a book so for me it's alice in wonderland what is it for you"
+  },
+  {
+   "wav": "edacc/indian/00441.wav",
+   "group": "indian",
+   "ref": "UH FOR ME I THINK IT'S HARRY POTTER LIKE",
+   "none": "For me, I think it's Harry Potter.",
+   "trigger": "uh for me i think it's harry porter like"
+  },
+  {
+   "wav": "edacc/indian/00443.wav",
+   "group": "indian",
+   "ref": "YEAH THE FIRST ONE I MEAN I REMEMBER READING UH PHILOSOPHER'S OH <LAUGH> SORCERER'S STONE AND THEN I WATCHED THE MOVIE LIKE MY SISTER TOLD ME THAT THERE ARE MOVIES ON THESE BOOKS",
+   "none": "Yeah, the first one. I mean, I remember reading Sorcerer's Toad and then I watched the movie. My sister told me that there are movies on these books.",
+   "trigger": "yeah the first one i mean i remember reading uh philosophy uh sorcerer's toad and then i watched the movie like my sister told me that there are movies on these books"
+  },
+  {
+   "wav": "edacc/indian/00445.wav",
+   "group": "indian",
+   "ref": "AND THEN I WATCHED IT AND IT WAS AMUSING THE FIRST ONE WAS A REALLY NICE ONE",
+   "none": "and then I watched it and then there was some music. The first one was really nice.",
+   "trigger": "and then I watched it and there was some music The first one was really nice one"
+  },
+  {
+   "wav": "edacc/indian/00446.wav",
+   "group": "indian",
+   "ref": "MM HMM TRUE WHAT WAS YOUR FAVORITE UH HAVE YOU SEEN ALL THE SEVEN HARRY POTTER MOVIES OR OH WAIT",
+   "none": "true what was your favorite uh have you seen all the seven harry potter movies or yeah",
+   "trigger": "true what was your favorite have you seen all the seven harry potter movies or yeah"
+  },
+  {
+   "wav": "edacc/indian/00447.wav",
+   "group": "indian",
+   "ref": "YES YES YES UM I'M A PUREBLOOD <LAUGH>",
+   "none": "Yes, I am pure blood.",
+   "trigger": "Yes, I am pure blood"
+  },
+  {
+   "wav": "edacc/indian/00448.wav",
+   "group": "indian",
+   "ref": "SURE YOU ARE UH WHAT IS WHAT WHAT'S YOUR FAVORITE ONE OUT OF ALL OF THOSE",
+   "none": "What's your favorite one out of all of those?",
+   "trigger": "what is what's your favorite one out of all of those"
+  },
+  {
+   "wav": "edacc/indian/00449.wav",
+   "group": "indian",
+   "ref": "I THINK THE FIRST ONE BECAUSE SO THE FIRST ONE WAS LIKE THE EXACT LIKE THE MOST APPROPRIATE REPRESENTATION OF WHAT I HAD THOUGHT",
+   "none": "I think the first one was the most appropriate representation of what I had thought.",
+   "trigger": "I think the first one because so the first one was like the exact like the most appropriate representation of what I had thought"
+  },
+  {
+   "wav": "edacc/indian/00451.wav",
+   "group": "indian",
+   "ref": "WHAT I HAD IMAGINED FROM THE BOOK",
+   "none": "what I had imagined from the book.",
+   "trigger": "what I had imagined from the book"
+  },
+  {
+   "wav": "edacc/indian/00453.wav",
+   "group": "indian",
+   "ref": "UM SO THE FIRST ONE WAS THE MOST APPROPRIATE ONE FOR ME",
+   "none": "So the first one was the most appropriate one for me.",
+   "trigger": "So the first one was the most appropriate one for me."
+  },
+  {
+   "wav": "edacc/indian/00455.wav",
+   "group": "indian",
+   "ref": "AND THAT'S JUST YEAH AND IT WAS ALSO LIKE UH I DON'T KNOW IT WAS NICE AND GOOD",
+   "none": "Yeah, and it was also like, I don't know, it was nice and good.",
+   "trigger": "just yeah and it was also like uh i don't know it was nice and good"
+  },
+  {
+   "wav": "edacc/indian/00456.wav",
+   "group": "indian",
+   "ref": "LIKE LIKE VER VERY SIMILAR TO WHAT SHE WROTE AT LEAST LIKE JK ROWLING WROTE",
+   "none": "Like very similar to what she wrote at least like J.K. Rowling.",
+   "trigger": "like like very similar to what she wrote at least like jk rolling yeah"
+  },
+  {
+   "wav": "edacc/indian/00459.wav",
+   "group": "indian",
+   "ref": "WHAT ABOUT YOU HOW DID YOU FEEL AFTER WATCHING ALICE IN WONDERLAND",
+   "none": "What about you? How did you feel after watching Alice in Wonderland? It was Alice in Wonderland was...",
+   "trigger": "what about you how did you feel after watching it he was Alice in Wonderland was"
+  },
+  {
+   "wav": "edacc/indian/00460.wav",
+   "group": "indian",
+   "ref": "HEY IT WAS ALICE IN WONDERLAND WAS AN ANIMATION MOVIE OF COURSE SO IT WAS INTERESTING OF COURSE BUT UM I OBVIOUSLY PREFERRED THE BOOKS I ACTUALLY PREFERRED THE SEQUEL TO ALICE IN WONDERLAND CALLED THROUGH THE LOOKING GLASS MUCH MORE THAN",
+   "none": "animation movie of course so it was interesting of course but I obviously preferred the books I actually preferred the sequel to Alice in Wonderland through the looking glass much more than",
+   "trigger": "animation movie of course so it was interesting of course but um i obviously preferred the books i actually preferred the sequel to alice in wonderland through the looking glass much more than"
+  },
+  {
+   "wav": "edacc/indian/00461.wav",
+   "group": "indian",
+   "ref": "OH YES I REMEMBER THEIR POEM JABBERWOCKY",
+   "none": "Oh, yes. I remember that poem, Jabberwocky.",
+   "trigger": "oh yes i remember that poem jab on walkie"
+  },
+  {
+   "wav": "edacc/indian/00462.wav",
+   "group": "indian",
+   "ref": "'TWAS BRILLIG AND THE SLITHY TOVES",
+   "none": "It was brilliant and the slightly goes.",
+   "trigger": "it was brilliant and the slightly goes"
+  },
+  {
+   "wav": "edacc/indian/00464.wav",
+   "group": "indian",
+   "ref": "AND THEN GIMBLE IN THE WABE <DTMF> I FORGOT IT'S A NONSENSE POEM",
+   "none": "I don't give them the wave. We should know. I forget. This is a nonsense poem.",
+   "trigger": "and give me the wave we should know I forget this is a nonsense poem"
+  },
+  {
+   "wav": "edacc/indian/00467.wav",
+   "group": "indian",
+   "ref": "HUNG HAVE YOU WATCHED HUNGER GAMES",
+   "none": "Hunger game. Hunger.",
+   "trigger": "hunger game hunger"
+  },
+  {
+   "wav": "edacc/indian/00468.wav",
+   "group": "indian",
+   "ref": "HAVE I WATCHED HUNGER GAMES I HAVE WATCHED THE FIRST MOVIE THAT THAT'S THE",
+   "none": "Have I watched Hunger Games? I was the first movie. That's true.",
+   "trigger": "i watched hunger games i was the first movie that's that's"
+  },
+  {
+   "wav": "edacc/indian/00470.wav",
+   "group": "indian",
+   "ref": "YEAH I HAVE READ HUNGER GAMES OF COURSE I'VE READ HUNGER GAMES",
+   "none": "Yeah, I've read 100 games. Of course I've read 100 games.",
+   "trigger": "Yeah I've read 100 games, of course I've read 100 games"
+  },
+  {
+   "wav": "edacc/indian/00472.wav",
+   "group": "indian",
+   "ref": "THE HUNGER GAMES HONESTLY I THINK OKAY LIKE I THIS IS GOING TO BE A SPOILER FILLED CONVERSATION I FEEL <LAUGH> BUT THE ENDING OF HUNGER GAMES DO YOU REMEMBER IT OR NOT",
+   "none": "the hunger games uh honestly i feel okay like i this is going to be a spoiler filled conversation i feel but uh the ending of hunger games do you remember it or not",
+   "trigger": "the hunger games uh honestly i feel okay like i this is going to be a spoiler filled conversation i feel but uh the ending of hunger games do you remember it or not"
+  },
+  {
+   "wav": "edacc/indian/00473.wav",
+   "group": "indian",
+   "ref": "YEAH I HAVE READ IT I'VE WATCHED IT",
+   "none": "Yeah, I have read it, I've read it.",
+   "trigger": "yeah i have read it"
+  },
+  {
+   "wav": "edacc/indian/00474.wav",
+   "group": "indian",
+   "ref": "YEAH RIGHT SO IT'S SO REALISTIC RIGHT",
+   "none": "Yeah, right. So it's so realistic, right?",
+   "trigger": "yeah right so it's so realistic right"
+  },
+  {
+   "wav": "edacc/indian/00476.wav",
+   "group": "indian",
+   "ref": "THAT'S EXACTLY WHAT HAPPENS AND THAT IS WHY I HATE IT SO MUCH",
+   "none": "That's exactly what happens and that is why I hate it so much.",
+   "trigger": "that's exactly what happens and that is why I hate it so much"
+  },
+  {
+   "wav": "edacc/indian/00477.wav",
+   "group": "indian",
+   "ref": "THE MY FAVORITE PART OF HUNGER GAMES WAS LIKE UH KATNISS THE DRESSES THAT SHE WORE",
+   "none": "My favorite part of Hunger Games was like Katniss, the dresses that she wore.",
+   "trigger": "the my favorite part of hunger games was like uh cat miss the dresses that she wore"
+  },
+  {
+   "wav": "edacc/indian/00478.wav",
+   "group": "indian",
+   "ref": "OH RIGHT CINNA YEAH",
+   "none": "Or I'd say, nah, yeah.",
+   "trigger": "what I used to know, yeah"
+  },
+  {
+   "wav": "edacc/indian/00481.wav",
+   "group": "indian",
+   "ref": "SO EVERY TIME LIKE AND THE REPRESENTATION OF IT IN MOVIES ALSO WAS SO AMAZING LIKE I REALIZED SHE WOULD OPEN SOME DRESS AND SHE'D TURN INTO MOCKINGJAY OR SOMETHING",
+   "none": "So every time, like, and the representation of it in movies also was so amazing. Like every time she'd open some dress and she'd turn into Mockingjay or something.",
+   "trigger": "so every time like and the representation of it in movies also was so amazing like every time she'd open some dress and she'd turn into mockingjay or something"
+  },
+  {
+   "wav": "edacc/indian/00482.wav",
+   "group": "indian",
+   "ref": "YEAH THAT'S TRUE I MEAN I THINK THAT'S THE UH THE TWO DRESSES RIGHT THE FIRST IS ONE WHERE SHE'S ON FIRE 'CAUSE LIKE SHE'S <OVERLAP>",
+   "none": "yeah that's true i mean i think that's the uh the two dresses right the first is one where she's on fire because like she's called",
+   "trigger": "yeah that's true i mean i think that's the uh the two dresses right the first is one where she's on fire because like she's called"
+  },
+  {
+   "wav": "edacc/indian/00484.wav",
+   "group": "indian",
+   "ref": "AND THEN OTHER ONE IS THE ONE WHERE SHE TURNS INTO THE MOCKINGJAY RIGHT",
+   "none": "And then the other one is the one where she turns into the mockingjay, right?",
+   "trigger": "and then the other one is the one where she turns into the mocking jay right"
+  },
+  {
+   "wav": "edacc/indian/00485.wav",
+   "group": "indian",
+   "ref": "YEAH AND THERE'S ANOTHER ONE WHEN THEY ARE RE WHEN THEY ARE CALLED AGAIN FOR THE GAMES",
+   "none": "Yeah, and there's another one when they are called again for the games.",
+   "trigger": "yeah and there's another one when they are when they called again for the games"
+  },
+  {
+   "wav": "edacc/indian/00487.wav",
+   "group": "indian",
+   "ref": "WHEN ALL THAT WHEN SH WHEN THEY SAY THAT'S SHE'S PREGNANT SHE COMES AS A BRIDE UM",
+   "none": "When all that, when they say that she's pregnant, she comes as a bride.",
+   "trigger": "when all that when when they say that she's pregnant she comes as a bride um"
+  },
+  {
+   "wav": "edacc/indian/00488.wav",
+   "group": "indian",
+   "ref": "OH SHE OH I I HAVEN'T SEEN THAT PART SO I DON'T REMEMBER",
+   "none": "Oh, I haven't seen that part, so I don't remember.",
+   "trigger": "oh i i haven't seen that part so i don't remember"
+  },
+  {
+   "wav": "edacc/indian/00489.wav",
+   "group": "indian",
+   "ref": "OH SO THERE'S THIS LIKE EVERY HER DRESSES ALWAYS FOR ME I DON'T KNOW HER DRESS DRESS SPEAKS WAY MORE THAN ANYTHING ELSE THAT'S HAPPENING THERE",
+   "none": "Oh, so there's this, like, her dresses always, for me, I don't know, her dress speaks way more than anything else that's happening there.",
+   "trigger": "oh so there's this like her dresses always for me i don't know her dress dress speaks way more than anything else that's happening there"
+  },
+  {
+   "wav": "edacc/indian/00491.wav",
+   "group": "indian",
+   "ref": "LIKE IT'S A IT'S A STORY OF ITS OWN",
+   "none": "Like it's a story of its own.",
+   "trigger": "Like it's a story of its own"
+  },
+  {
+   "wav": "edacc/indian/00492.wav",
+   "group": "indian",
+   "ref": "FAIR ENOUGH UM I GET IT I MEAN THAT IS WHAT UH THEY WANTED TO SHOW IN THE BOOKS ALSO RIGHT LIKE THAT WAS",
+   "none": "fair enough on i get i mean that is what uh they wanted to show in the books also right like that",
+   "trigger": "fair enough on i get it i mean that is what uh they wanted to show in the books also right like that"
+  },
+  {
+   "wav": "edacc/indian/00494.wav",
+   "group": "indian",
+   "ref": "THE PLOTLINE WITH CINNA THAT HE USED THE LIKE HE USED FASHION TO BRING UP AND IT IS JUST ACTUALLY INTERESTING TO THINK ABOUT CONSIDERING LIKE THROUGHOUT AT LEAST THE FIRST BOOK THEY REALLY KEEP DESCRIBING THE CAPITOL'S FASHION AND HOW OUTRAGEOUS IT IS",
+   "none": "plotline with Sina that he used the like he used fashion to bring up and it is actually interesting to think about considering like throughout at least the first book they really keep describing the capital's fashion and how outrageous it is.",
+   "trigger": "plotline with Sina that he used the like he used fashion to bring up and it is actually interesting to think about considering like throughout at least the first book they really keep describing the capitol's fashion and how outrageous it is"
+  },
+  {
+   "wav": "edacc/indian/00495.wav",
+   "group": "indian",
+   "ref": "EXACTLY EXACTLY",
+   "none": "Exactly, exactly.",
+   "trigger": "exactly exactly"
+  },
+  {
+   "wav": "edacc/indian/00496.wav",
+   "group": "indian",
+   "ref": "JUST CINNA USING IT TO YOU KNOW CREATE TO LIKE DISPLAY KATNISS' PERSONALITY IN SUCH A LIKE IT'S A SO HER LIKE HE LITERALLY JUST TURNS IT ON ITS HEAD TURNS THE TROPE ON ITS HEAD LIKE THE OUTRAGEOUS FASHION AND IT'S LIKE SUDDENLY BECOMES UH WHAT DO YOU CALL IT LIKE LIKE A SYMBOL",
+   "none": "Sina using it to, you know, create, like display Katniss's personality is such a, like it's a, so like he literally just turns it on its head, turns the trope on its head, like the outrageous fashion and it's like suddenly it becomes a, what do you call it? Like, like a symbol.",
+   "trigger": "Senna using it to you know create like display Katniss's personality is such a like it's a so like he literally just turns it on its head turns the trope on its head like the outrageous fashion and it's like suddenly it becomes a what do you call it like like a symbol."
+  },
+  {
+   "wav": "edacc/indian/00497.wav",
+   "group": "indian",
+   "ref": "EXACTLY IT BECOMES A SYMBOL AND LIKE EXPRESSION BECAUSE YOU CAN'T",
+   "none": "Exactly. It becomes a symbol and like expression because",
+   "trigger": "exactly it becomes a symbol and like expression because"
+  },
+  {
+   "wav": "edacc/indian/00499.wav",
+   "group": "indian",
+   "ref": "REALLY SAY ANYTHING AGAINST THE CAPITOL OUT LOUD",
+   "none": "really say anything against the capital out loud.",
+   "trigger": "say anything against the capital out loud"
+  },
+  {
+   "wav": "edacc/indian/00501.wav",
+   "group": "indian",
+   "ref": "YOU CAN'T STAND AGAINST THE CAPITOL",
+   "none": "You can't stand against the capital.",
+   "trigger": "you can't stand against the capital"
+  },
+  {
+   "wav": "edacc/indian/00503.wav",
+   "group": "indian",
+   "ref": "AND SO LIKE THIS IS VERY SUBTLY REBELLING AGAINST THE CAPITOL",
+   "none": "And so, like this is very subtly rebelling against the capital.",
+   "trigger": "and so like this is very subtly rebelling against the capital"
+  },
+  {
+   "wav": "edacc/indian/00505.wav",
+   "group": "indian",
+   "ref": "WHICH WAS EXTREMELY AMAZING",
+   "none": "which was extremely amazing.",
+   "trigger": "which was extremely amazing."
+  },
+  {
+   "wav": "edacc/indian/00506.wav",
+   "group": "indian",
+   "ref": "MM HMM THAT'S TRUE ACTUALLY LIKE I I FEEL LIKE FOR I MEAN IT WAS PRETTY BRILLIANT HOW IF YOU LOOK AT IT FOR UM FOR LIKE THE PEOPLE OF THE CAPITOL THAT WAS JUST ANOTHER KIND OF OUTRAGEOUS FASHION FOR AT LEAST THE",
+   "none": "that's true actually like i i feel like for i mean it was pretty brilliant how if you look at it for um for like the people of the capital that was just another kind of outrageous fashion for at least",
+   "trigger": "that's true actually like i i feel like for i mean it was pretty brilliant how if you look at it for um for like the people of the capital that was just another kind of outrageous fashion for at least"
+  },
+  {
+   "wav": "edacc/indian/00508.wav",
+   "group": "indian",
+   "ref": "CAPITOL PEOPLE THEY WERE LIKE OH WOW LOOK AT THIS NEW DESIGNER <LAUGH> LIKE NEW YORK FASHION TYPE FEELINGS",
+   "none": "People, they were like, oh, wow, look at this new designer, like New York type feelings.",
+   "trigger": "people they were like oh wow look at this new designer like new york fashion type feelings"
+  },
+  {
+   "wav": "edacc/indian/00510.wav",
+   "group": "indian",
+   "ref": "BUT FOR THE PEOPLE IN POWER LIKE PRESIDENT SNOW AND ALL THESE PEOPLE",
+   "none": "But for the people in power, like President Snow and all these people.",
+   "trigger": "but for the people in power like president snow and all these people"
+  },
+  {
+   "wav": "edacc/indian/00512.wav",
+   "group": "indian",
+   "ref": "HE KNEW WHAT IT MEANT AND AND THIS IS ALSO WHY THEY BASICALLY KILLED CINNA LIKE",
+   "none": "He knew what it meant. And this is also why they basically killed Sina.",
+   "trigger": "he knew what it meant and this is also why they basically killed Sina like"
+  },
+  {
+   "wav": "edacc/indian/00513.wav",
+   "group": "indian",
+   "ref": "YEAH WHICH IS WHY THEY KILLED CINNA",
+   "none": "Yeah, which is either key in the final.",
+   "trigger": "yeah which is either key final"
+  },
+  {
+   "wav": "edacc/indian/00515.wav",
+   "group": "indian",
+   "ref": "LIKE EVEN THE REPORTER UM WHO USED TO LIKE HOST THE WHOLE UH EVENT OF THE GAMES",
+   "none": "Like even the reporter who used to like host the whole event.",
+   "trigger": "like even the reporter who used to like host the whole event and"
+  },
+  {
+   "wav": "edacc/indian/00517.wav",
+   "group": "indian",
+   "ref": "OH YEAH I CANNOT REMEMBER HIS NAME <DTMF> HER NAME",
+   "none": "Oh yeah, I do not remember his love for him.",
+   "trigger": "oh yeah I do not remember his love for him you"
+  },
+  {
+   "wav": "edacc/indian/00519.wav",
+   "group": "indian",
+   "ref": "SO UM EVEN THE HOST WAS VERY UM I DON'T KNOW HOW TO SAY LIKE SHE KNEW WHAT QUESTIONS TO ASK",
+   "none": "So, even the host was very, I don't know what to say, like, she knew what questions to ask.",
+   "trigger": "so um even the host was very uh i don't know what to say like she knew what questions to ask"
+  },
+  {
+   "wav": "edacc/indian/00521.wav",
+   "group": "indian",
+   "ref": "SHE KNEW WHAT QUESTIONS TO ASK AND HOW TO GET INFORMATION LIKE",
+   "none": "new word questions to us and how to get information like",
+   "trigger": "new word questions to us and how to get information like"
+  },
+  {
+   "wav": "edacc/indian/00523.wav",
+   "group": "indian",
+   "ref": "WHENEVER UH KATNISS USED TO SHOW UP AND SHE USED TO YOU KNOW WEAR SOME LIKE LIKE SOME DRESS AND SOMETHING",
+   "none": "Whenever Katniss used to show up and she used to wear some dress and something.",
+   "trigger": "whenever Katniss used to show up and she used to, you know, wear some, like some dress and something."
+  },
+  {
+   "wav": "edacc/indian/00525.wav",
+   "group": "indian",
+   "ref": "HE USED TO CALL HER OUT THAT SHE USED TO POINT THAT SHE USED TO BRING ATTENTION TO THAT",
+   "none": "She used to call her out for that, she used to point, like she used to bring attention to that.",
+   "trigger": "she used to call her out for that she used to point like she used to bring attention to that"
+  },
+  {
+   "wav": "edacc/indian/00528.wav",
+   "group": "indian",
+   "ref": "I LIKE THE EFFIE TRINKET'S CHARACTER TO BE HONEST",
+   "none": "And F.E. Trinket's character, to be honest.",
+   "trigger": "F.E. Trinket's character to be honest"
+  },
+  {
+   "wav": "edacc/indian/00529.wav",
+   "group": "indian",
+   "ref": "WELL I LIKED HUNGER GAMES A LOT LIKE IT WAS A VERY",
+   "none": "I liked Hunger Games a lot like it was a very",
+   "trigger": "I liked Hunger Games a lot like it was a very"
+  },
+  {
+   "wav": "edacc/indian/00531.wav",
+   "group": "indian",
+   "ref": "GOOD BOOK AND MOVIE",
+   "none": "Good book and movie.",
+   "trigger": "good book and movie"
+  },
+  {
+   "wav": "edacc/indian/00532.wav",
+   "group": "indian",
+   "ref": "YEAH LIKE IT WAS ONE OF THE DYSTOPIAN BOOKS DONE RIGHT EVEN THOUGH",
+   "none": "yeah like was one of the dystopian books done right even though",
+   "trigger": "yeah like was one of the dystopian books done right even though"
+  },
+  {
+   "wav": "edacc/indian/00534.wav",
+   "group": "indian",
+   "ref": "THE THING IS LIKE AGAIN LIKE BACK TO THE ENDING IT WAS IT'S NOT LIKE IT WAS THE PERFECT ENDING IT WAS A BRILLIANT ENDING",
+   "none": "The thing is, like, again, like, back to the ending, it's not, like, it was the perfect ending. It was a brilliant ending.",
+   "trigger": "the thing is like again like back to the ending it's not like it was the perfect ending it was a brilliant ending"
+  },
+  {
+   "wav": "edacc/indian/00536.wav",
+   "group": "indian",
+   "ref": "IT WAS JUST THAT IT WAS SO GODDAMN REALISTIC THAT I DIDN'T LIKE IT",
+   "none": "It was so goddamn realistic that I didn't like it.",
+   "trigger": "it was so goddamn realistic that I didn't like it"
+  },
+  {
+   "wav": "edacc/japanese/01352.wav",
+   "group": "japanese",
+   "ref": "HI MY PARTICIPANT NUMBER IS C",
+   "none": "Hi, my participant number is C.",
+   "trigger": "hi my participant number is c"
+  },
+  {
+   "wav": "edacc/japanese/01354.wav",
+   "group": "japanese",
+   "ref": "TWO SIX P TWO",
+   "none": "to 6P2.",
+   "trigger": "two six p two"
+  },
+  {
+   "wav": "edacc/japanese/01364.wav",
+   "group": "japanese",
+   "ref": "I THINK YOU WILL TEND TO TALK ABOUT PERSONAL THINGS YOU KNOW FOOD",
+   "none": "I think you will tend to talk about personal things, not food.",
+   "trigger": "I think you will tend to talk about personal things not food I know"
+  },
+  {
+   "wav": "edacc/japanese/01366.wav",
+   "group": "japanese",
+   "ref": "VERY PERSONAL BUT I CAN TRY WE HAVE TO HAVE LIKE A SIGN LIKE <DTMF> <LAUGH>",
+   "none": "very personal but i can try we have to have like a sign like",
+   "trigger": "very personal but i can try we have to have like a sign like"
+  },
+  {
+   "wav": "edacc/japanese/01368.wav",
+   "group": "japanese",
+   "ref": "BECAUSE OF MY YOU KNOW THE WHOLE ENTIRE <DTMF> THINKS MY BRAIN IS OR MAYBE BECAUSE I LIVE IN ISLAND TROPICAL ISLAND MY BRAIN WILL BE SUPER SLOW SO",
+   "none": "Because of my, you know, the entire COVID thing, so my brain is, or maybe because I live in the island, tropical island, my brain moves super slow.",
+   "trigger": "because of my you know the entire COVID thing so my brain is or maybe because I live in the island tropical island my brain moves super slow"
+  },
+  {
+   "wav": "edacc/japanese/01378.wav",
+   "group": "japanese",
+   "ref": "UH I MISS THERE IS UH THE MARKET WE WENT TO THE WEEKEND MARKET",
+   "none": "There is the market. We went to the weekend market.",
+   "trigger": "there is uh the market we went to the weekend market"
+  },
+  {
+   "wav": "edacc/japanese/01380.wav",
+   "group": "japanese",
+   "ref": "WHERE YOU FOUND YOU FOUND THE FOOD THAT YOU DON'T SEE HERE IN JAPAN LIKE UH RABBIT",
+   "none": "Where you found the food that you don't see here in Japan, like a rabbit.",
+   "trigger": "where you found you found the food that you don't see here in japan like a rabbit"
+  },
+  {
+   "wav": "edacc/japanese/01382.wav",
+   "group": "japanese",
+   "ref": "YOU KNOW AND EXPLORING THOSE FOOD IN EACH UH STAND THAT WAS COOL",
+   "none": "And exploring those food in each stand, that was cool.",
+   "trigger": "and exploring those food in each stand that was cool"
+  },
+  {
+   "wav": "edacc/japanese/01389.wav",
+   "group": "japanese",
+   "ref": "THAT WILL GO BAD BUT UM",
+   "none": "That will go bad, but.",
+   "trigger": "That will go back, but..."
+  },
+  {
+   "wav": "edacc/japanese/01391.wav",
+   "group": "japanese",
+   "ref": "THAT CHEESE WAS GOOD AND THE THE THE THE HONEY WAS GOOD EVERYTHING WAS SO GOOD YEAH",
+   "none": "Cheese was good and honey was good. Everything was so good.",
+   "trigger": "cheese was good and the honey was good everything was so good"
+  },
+  {
+   "wav": "edacc/japanese/01393.wav",
+   "group": "japanese",
+   "ref": "BUT JUST WHISKEY IS FINE BECAUSE I <FOREIGN> NO I SHOULDN'T SAY THE JAPANESE WORD",
+   "none": "just whiskey is fine because i got a bunch of them awesome no i shouldn't say the japanese word",
+   "trigger": "just whiskey is fine because i got a bunch of them awesome no i shouldn't say the japanese word"
+  },
+  {
+   "wav": "edacc/japanese/01403.wav",
+   "group": "japanese",
+   "ref": "SO THAT'S WHAT I'M DOING BUT THE FLIGHTS ARE GETTING EXPENSIVE",
+   "none": "So that's what I'm doing, but the flights are getting expensive.",
+   "trigger": "so that's what i'm doing but the flights are getting expensive"
+  },
+  {
+   "wav": "edacc/japanese/01405.wav",
+   "group": "japanese",
+   "ref": "SO I DON'T KNOW HOW HOW LONG I CAN DO IT",
+   "none": "So I don't know how long I can do this.",
+   "trigger": "so I don't know how long I can do this"
+  },
+  {
+   "wav": "edacc/japanese/01407.wav",
+   "group": "japanese",
+   "ref": "IT REALLY SUCKS UH SO FAR UM BECAUSE THEY AREN'T MANY GOOD RESTAURANTS IN MIYAKO SO",
+   "none": "So far, because there aren't many good restaurants in Miyako, so...",
+   "trigger": "so far um because there aren't many good restaurants in miyakko so"
+  },
+  {
+   "wav": "edacc/japanese/01409.wav",
+   "group": "japanese",
+   "ref": "YEAH LIKE I MADE A LIST LIKE I'M GONNA EAT HERE UM SO I FIND OUT I PICK THE THE HOTEL DEPENDS ON WHERE I WANNA EAT",
+   "none": "Yeah, like I made the list, like I'm going to eat here. I find out. I think the hotel depends on what I want to eat.",
+   "trigger": "yeah like i made the list like i'm gonna eat here and i find out i think the hotel depends on what i want to eat"
+  },
+  {
+   "wav": "edacc/japanese/01411.wav",
+   "group": "japanese",
+   "ref": "YEAH LAST WEEKEND I SPEND IN ROPPONGI",
+   "none": "Last weekend, I spent in Roppongi.",
+   "trigger": "last weekend I spent in Roppongi"
+  },
+  {
+   "wav": "edacc/japanese/01413.wav",
+   "group": "japanese",
+   "ref": "YEAH AND IT REMINDED ME OF YOU YOU KNOW THAT <DTMF> DO YOU REMEMBER",
+   "none": "yeah and it reminded me of you you know that bike parking",
+   "trigger": "yeah and it reminded me of you you know that bike parking"
+  },
+  {
+   "wav": "edacc/japanese/01415.wav",
+   "group": "japanese",
+   "ref": "NO THERE AREN'T THAT MANY FOREIGNERS IN ROPPONGI ANYMORE",
+   "none": "No, there aren't many foreigners in Roppongi anymore.",
+   "trigger": "No, there aren't many foreigners in Roppongi anymore."
+  },
+  {
+   "wav": "edacc/japanese/01419.wav",
+   "group": "japanese",
+   "ref": "THAT TOO AND MAYBE THE ENTIRE COVID AND WORK FROM HOME YEAH SURPRISING",
+   "none": "That too, and maybe the entire COVID and work from home. Yeah, surprising.",
+   "trigger": "that too and maybe the entire covet and work from home yeah surprising"
+  },
+  {
+   "wav": "edacc/japanese/01421.wav",
+   "group": "japanese",
+   "ref": "MM HMM MM HMM AND MAYBE BECAUSE I SPENT ON THE WEEKEND SO PROBABLY THAT'S WHY",
+   "none": "and maybe because i spend on the weekend so probably that's why",
+   "trigger": "and maybe because i spend on the weekend so probably that's why"
+  },
+  {
+   "wav": "edacc/japanese/01425.wav",
+   "group": "japanese",
+   "ref": "SO I'M UM SO DO THAT TODAY BECAUSE ONE I WANNA STOP AT THE PACHINKO BEFORE I LEAVE FOR MIYAKO AND MY MUM IS GOING TO A TRIP TOMORROW",
+   "none": "today because one I want to shop at Depachika before I leave for Miyako and my mom is going to a trip tomorrow.",
+   "trigger": "today because one i want to shop at the pachika before i leave for me and my mom is going to a trip tomorrow"
+  },
+  {
+   "wav": "edacc/japanese/01427.wav",
+   "group": "japanese",
+   "ref": "AND I'M GONNA MEET UP WITH MY MOM IN TOKYO STATION WHICH IS WALKING DISTANCE FROM HERE I'M I'M STAYING IN GINZA",
+   "none": "And I'm going to meet up with my mom in Tokyo Station, which is walking distance from here. I'm staying in Ginza.",
+   "trigger": "and I'm gonna meet up with my mom in Tokyo station which is walking distance from here. I'm staying in Ginza."
+  },
+  {
+   "wav": "edacc/japanese/01429.wav",
+   "group": "japanese",
+   "ref": "SO MM HMM",
+   "none": "Mm-hmm.",
+   "trigger": "mm mm"
+  },
+  {
+   "wav": "edacc/japanese/01431.wav",
+   "group": "japanese",
+   "ref": "YEAH GINZA FEELS KIND OF ADULT <LAUGH>",
+   "none": "Yeah, Ginza feels kind of adult.",
+   "trigger": "yeah ginsess feels kind of adult"
+  },
+  {
+   "wav": "edacc/japanese/01435.wav",
+   "group": "japanese",
+   "ref": "YEAH IT'S <OVERLAP> ADULTS YOU KNOW THE BARS",
+   "none": "You know, the boys.",
+   "trigger": "I became an adult you know the boys"
+  },
+  {
+   "wav": "edacc/japanese/01437.wav",
+   "group": "japanese",
+   "ref": "AND RESTAURANTS YEAH",
+   "none": "restaurants yeah",
+   "trigger": "restaurants yeah"
+  },
+  {
+   "wav": "edacc/japanese/01439.wav",
+   "group": "japanese",
+   "ref": "HAI IF YOU COME BACK",
+   "none": "Hi, you should come back.",
+   "trigger": "you should come back"
+  },
+  {
+   "wav": "edacc/japanese/01443.wav",
+   "group": "japanese",
+   "ref": "I CONTROL THE OTHER TEAM THAT I WORK WITH I'M GOING TO LONDON NEXT MONTH",
+   "none": "Actually, other team that I work with are going to London next month.",
+   "trigger": "actually other team that i work with are going to london next month"
+  },
+  {
+   "wav": "edacc/japanese/01445.wav",
+   "group": "japanese",
+   "ref": "I WAS LIKE WHY AND WHY DIDN'T YOU TAKE ME WITH THEM I WAS A LITTLE PISSED",
+   "none": "I was like, why? And why didn't you take me with them some little piss?",
+   "trigger": "I was like why and why didn't you take me make them some little piss"
+  },
+  {
+   "wav": "edacc/japanese/01447.wav",
+   "group": "japanese",
+   "ref": "I MIGHT GO TO LONDON IN SEPTEMBER THOUGH UM THERE'S LIKE UH DO YOU REMEMBER SILVER WEEK IN OH IS THAT NOVEMBER OH THAT'S NOVEMBER BUT THERE'S LIKE UH TWO DAYS OFF IN A WEEK",
+   "none": "I might go to London in September, though. There's like a, do you remember Silver Week? Oh, is that November? Oh, that's November. But there's like a two days off in a week.",
+   "trigger": "i might go to london in september though um there's like uh do you remember silver week in oh is that november oh that's november but there's like a two days off in a week"
+  },
+  {
+   "wav": "edacc/japanese/01449.wav",
+   "group": "japanese",
+   "ref": "AND MY FRIEND MOVED TO LONDON SO WE WERE TALKING ABOUT VISITING AND THIS IS A GUY ACTUALLY WHO UM DRUNK MY HIBIKI YEAH",
+   "none": "My friend moved to London, so we were talking about visiting, and this is a guy, actually, who drank my hibiki.",
+   "trigger": "My friend moved to London. So we were talking about visiting. And this is a guy actually who drunk my hibiki."
+  },
+  {
+   "wav": "edacc/japanese/01451.wav",
+   "group": "japanese",
+   "ref": "AND HE'S IN UM HE'S IN SCOTLAND RIGHT NOW",
+   "none": "And he's in Scotland right now.",
+   "trigger": "and he's in um he's in scotland right now"
+  },
+  {
+   "wav": "edacc/japanese/01457.wav",
+   "group": "japanese",
+   "ref": "MM HMM HOW LONG ARE YOU GONNA BE IN US",
+   "none": "How long are you going to be in US?",
+   "trigger": "How long are you going to be in the US?"
+  },
+  {
+   "wav": "edacc/japanese/01467.wav",
+   "group": "japanese",
+   "ref": "E E E E E E STARTS WITH E",
+   "none": "starts with e",
+   "trigger": "starts with e"
+  },
+  {
+   "wav": "edacc/japanese/01469.wav",
+   "group": "japanese",
+   "ref": "THE GIRL WE WERE SKIING IN WHISTLER",
+   "none": "The girl we went skiing in Whistler?",
+   "trigger": "the girl we went skiing in Whistler"
+  },
+  {
+   "wav": "edacc/japanese/01477.wav",
+   "group": "japanese",
+   "ref": "AH THEN UH",
+   "none": "Ah, then...",
+   "trigger": "and then they they they"
+  },
+  {
+   "wav": "edacc/japanese/01496.wav",
+   "group": "japanese",
+   "ref": "ARE YOU GOING TO GRADUATE THIS SUMMER",
+   "none": "Are you going to graduate this summer?",
+   "trigger": "Are you going to graduate this summer?"
+  },
+  {
+   "wav": "edacc/japanese/01500.wav",
+   "group": "japanese",
+   "ref": "WOW BECAUSE YOU KNOW WE DISCUSSED MAYBE YOU WON'T BE THERE FOR THAT LONG",
+   "none": "Well, because, you know, we discussed maybe you won't be there for that long.",
+   "trigger": "well because you know we discussed maybe you won't be there for that long"
+  },
+  {
+   "wav": "edacc/japanese/01502.wav",
+   "group": "japanese",
+   "ref": "IT WASN'T ONE OF THE OPTION WE WHEN YOU WERE CHOOSING WHAT TO DO SO WOW",
+   "none": "That was one of the options when you were choosing what to do. So, wow.",
+   "trigger": "that was one of the options when you were choosing what to do so wow"
+  },
+  {
+   "wav": "edacc/japanese/01520.wav",
+   "group": "japanese",
+   "ref": "UH AND MARKET HUNTING",
+   "none": "And market hunting.",
+   "trigger": "and market hunting"
+  },
+  {
+   "wav": "edacc/japanese/01526.wav",
+   "group": "japanese",
+   "ref": "AND I LOVED THEIR UH WHAT IS IT THE BREAD WITH CHEESE CHEESE SANDWICH",
+   "none": "What is it? The bread with cheese.",
+   "trigger": "what is it the bread with cheese"
+  },
+  {
+   "wav": "edacc/japanese/01532.wav",
+   "group": "japanese",
+   "ref": "THE TWO TWO NO NO TWO GUYS COOKED THAT AT THE CAMP ON BRITISH CAMP",
+   "none": "No, no, two guys took that at the camp. Yeah.",
+   "trigger": "two two no no two guys took that at the camp yeah"
+  },
+  {
+   "wav": "edacc/japanese/01534.wav",
+   "group": "japanese",
+   "ref": "GRILLED CHEESE SANDWICH",
+   "none": "a grilled cheese sandwich.",
+   "trigger": "a grilled cheese sandwich"
+  },
+  {
+   "wav": "edacc/japanese/01536.wav",
+   "group": "japanese",
+   "ref": "SO GOOD I COULD EAT IT EVERY DAY I REGRETTED I VISITED THE MARKET LIKE THE VERY LATE OF MY STAY SO I COULDN'T REVISIT",
+   "none": "So good. I could eat it every day. I regret it. I visited the market like very late of my stay. So I couldn't revisit.",
+   "trigger": "so good i could eat it every day i i regret it i visited the market like very late of my stay so i couldn't revisit"
+  },
+  {
+   "wav": "edacc/japanese/01538.wav",
+   "group": "japanese",
+   "ref": "LIKE THE FOLLOWING DAY WAS SUNDAY AND THEY WERE CLOSED OR SOMETHING AND I HATED MYSELF YEAH <LAUGH>",
+   "none": "Like, that following day was Sunday. They were closed or something. And I hated myself. Yeah.",
+   "trigger": "like that following day was sunday they were closed or something and i hated myself"
+  },
+  {
+   "wav": "edacc/japanese/01539.wav",
+   "group": "japanese",
+   "ref": "OH I MISS FOOD",
+   "none": "Oh, I miss food.",
+   "trigger": "oh i miss food"
+  },
+  {
+   "wav": "edacc/japanese/01541.wav",
+   "group": "japanese",
+   "ref": "BECAUSE I'VE BEEN HAVING STUFFED NOSE I COULDN'T TASTE MUCH AND THAT TASTE CAME BACK SO I'M SO EVERYTHING TASTES SO GOOD SO I'VE BEEN THINKING ABOUT FOOD ALL DAY",
+   "none": "Because I've been having stuffed nose, I couldn't taste much and the taste came back. So I'm so, everything tastes so good. So I've been thinking about food, okay.",
+   "trigger": "because i've been having stuffed nose i couldn't taste much and the taste came back so i'm so happy everything tastes so good so i've been thinking about food okay"
+  },
+  {
+   "wav": "edacc/japanese/01543.wav",
+   "group": "japanese",
+   "ref": "YEAH THIS LAST WEEKEND",
+   "none": "This last weekend",
+   "trigger": "yeah this last weekend"
+  },
+  {
+   "wav": "edacc/japanese/01551.wav",
+   "group": "japanese",
+   "ref": "YOU COULDN'T STOP YOU KNOW IT'S GIN TONIC AND THERE MUST BE SOME FINE TASTE RIGHT BECAUSE IT'S A FAMOUS A BAR CALLED STARBAR IN <DTMF>",
+   "none": "You know, it's a gin tonic, and there must be some fine taste, right? Because it's a famous bar called Star Bar in Guangzhou.",
+   "trigger": "it's a gin tonic and there must be some fine taste right because it's a famous a bar called star bar"
+  },
+  {
+   "wav": "edacc/japanese/01553.wav",
+   "group": "japanese",
+   "ref": "YEAH BUT I COULDN'T TASTE IT",
+   "none": "Yeah, but I couldn't taste it.",
+   "trigger": "yeah but i couldn't taste"
+  },
+  {
+   "wav": "edacc/japanese/01555.wav",
+   "group": "japanese",
+   "ref": "YEAH THEY'RE I THEY'RE UH FAMOUS OR POPULAR OR SOMETHING THEY'RE ON HE HE SAID THE BARTENDER SAID HE THEIR BAR WAS ON THE TV SHOW ONE TIME",
+   "none": "Yeah, they're famous or popular or something. He said, the bartender said their bar was on a TV show one time.",
+   "trigger": "yeah they're i they're famous or popular or something they're he said the bartender said he their bar was on the tv show one time"
+  },
+  {
+   "wav": "edacc/japanese/01557.wav",
+   "group": "japanese",
+   "ref": "MM SO NOW I'M BACK EAT DRINK",
+   "none": "So, love that.",
+   "trigger": "so love that"
+  },
+  {
+   "wav": "edacc/japanese/01559.wav",
+   "group": "japanese",
+   "ref": "LOOK AT THIS <LAUGH>",
+   "none": "Yes.",
+   "trigger": "this"
+  },
+  {
+   "wav": "edacc/japanese/01563.wav",
+   "group": "japanese",
+   "ref": "OKAY OKAY I DIDN'T EVEN TRY UH BUT LIKE I SAID BECAUSE I LIVE IN ISLAND MY BRAIN IS MOVING SO SLOW I'M SERIOUS <DTMF>",
+   "none": "okay okay i didn't even check uh but like i said because i live in island my brain is moving so slow i'm serious",
+   "trigger": "okay okay i didn't even check uh but like i said because i live in island my brain is moving so slow i'm serious"
+  },
+  {
+   "wav": "edacc/japanese/01565.wav",
+   "group": "japanese",
+   "ref": "NO BECAUSE LIKE WE DON'T REALLY HAVE A DIFFICULT CONVERSATION",
+   "none": "No, because we don't really have a difficult conversation.",
+   "trigger": "I know because like we don't really have a difficult conversation"
+  },
+  {
+   "wav": "edacc/japanese/01567.wav",
+   "group": "japanese",
+   "ref": "YOU KNOW WE TALKED ABOUT WEATHER FOOD BUT NOT LIKE POLITICS OR ANYTHING",
+   "none": "You know, we talked about weather, food, but not like politics or anything.",
+   "trigger": "you know we talked about weather food but not like politics or you know anything"
+  },
+  {
+   "wav": "edacc/japanese/01569.wav",
+   "group": "japanese",
+   "ref": "YOU KNOW VERY UH LESS NO STRESS AT ALL",
+   "none": "you know, it's very less, no stress at all.",
+   "trigger": "you know very uh less no stress at all"
+  },
+  {
+   "wav": "edacc/japanese/01571.wav",
+   "group": "japanese",
+   "ref": "SO I THINK MY BRAIN IS NOT TRYING TO WORK FAST NOT MUCH PRESSURE SO HM",
+   "none": "So I think my brain is not trying to work fast, not much pressure.",
+   "trigger": "so i think my brain is not trying to work fast not much pressure so"
+  },
+  {
+   "wav": "edacc/japanese/01573.wav",
+   "group": "japanese",
+   "ref": "WHEN I WAS TALK TALKING WITH YOU YOU WERE LIKE YOU WERE LIKE KH KH KH KH KH MM WHERE ARE YOU NOW AND I HAVE TO READ A SENTENCE AGAIN AGAIN TO COMPREHEND",
+   "none": "When I was talking with you, you're like, you're like, and I have to read the sentence again and again to comprehend.",
+   "trigger": "When I was talking with you, you're like, you're like, and I have to read the sentence again and again to comprehend."
+  },
+  {
+   "wav": "edacc/japanese/01577.wav",
+   "group": "japanese",
+   "ref": "OH BY THE WAY FROM UH TOMORROW THE UH WE WILL ACCEPT TOU TOURISTS",
+   "none": "By the way, from tomorrow, we will accept tool list.",
+   "trigger": "by the way from uh tomorrow that uh we will accept tool list"
+  },
+  {
+   "wav": "edacc/russian/03366.wav",
+   "group": "russian",
+   "ref": "I THINK IT'S RECORDING NOW",
+   "none": "I think it's recording, though. Mm-hmm.",
+   "trigger": "I think it's recording though mhm"
+  },
+  {
+   "wav": "edacc/russian/03368.wav",
+   "group": "russian",
+   "ref": "HI MY PARTICIPANT NUMBER IS C FIFTY ONE P ONE",
+   "none": "Hi, my participant number is C51P1.",
+   "trigger": "hi my participant number is c51p1"
+  },
+  {
+   "wav": "edacc/russian/03370.wav",
+   "group": "russian",
+   "ref": "NICE TO MEET YOU I WILL READ THE PASSAGE NOW",
+   "none": "Nice to meet you, I will read the passage now.",
+   "trigger": "Nice to meet you. I will read the passage now."
+  },
+  {
+   "wav": "edacc/russian/03380.wav",
+   "group": "russian",
+   "ref": "LOOKS LIKE ALL THESE WORDS ARE JUST SELECTED TO TO ACTUALLY TEST SOME SOME <OVERLAP> VOWELS",
+   "none": "It looks like all these words are just selected to actually test some person.",
+   "trigger": "It looks like all these words are just selected to actually test some"
+  },
+  {
+   "wav": "edacc/russian/03390.wav",
+   "group": "russian",
+   "ref": "SO WE NEED TO TALK ABOUT OUR TRIP THAT'S",
+   "none": "So we need to talk about our trip.",
+   "trigger": "so we need to talk about our trip that's"
+  },
+  {
+   "wav": "edacc/russian/03394.wav",
+   "group": "russian",
+   "ref": "I MEAN I THINK SO I THINK UH IT WOULD BE GOOD IF YOU LIKE MAKE SOME YOU KNOW A TINY BIT OF PROGRESS BECAUSE MY FRIEND IS IS JUST SHE LIKES PLANNING THINGS IN ADVANCE AND THEN",
+   "none": "I mean, I think, so I think it would be good if you like make some, you know, a tiny bit of progress because my friend is just, she likes planning things in advance.",
+   "trigger": "I mean I think so I think it would be good if you like make some you know a tiny bit of progress because my friend is is just she likes planning things in advance and then"
+  },
+  {
+   "wav": "edacc/russian/03396.wav",
+   "group": "russian",
+   "ref": "SHE CAN RELAX SO UH SHE'S UNLIKE MANY OTHER PEOPLE UH IN IN TERMS OF PLANNING",
+   "none": "the rex so uh she's unlike many other people uh fair enough planning",
+   "trigger": "so uh she's unlike many other people uh fair enough planning"
+  },
+  {
+   "wav": "edacc/russian/03400.wav",
+   "group": "russian",
+   "ref": "YEAH I THINK WE CAN JUST ASK HER TO DO IT SHE I'M SURE SHE'LL BE FINE WITH THAT UH SO WE JUST NEED TO FIGURE OUT MAYBE WHAT UH HOW MANY DRIVERS YOU WANT TO ADD AND WHAT'S THE PRICE DIFFERENCE BUT I GUESS THE THE THING YOU COULD DO IS JUST TO SEND HER THE LINK AND",
+   "none": "Yeah, I think we can just ask her to do it. I'm sure she'll be fine with that. So we just need to figure out maybe how many drivers she want to add and what's the price difference. But I guess the thing you could do is just to send her the link.",
+   "trigger": "yeah i think we can just ask her to do it i'm sure she'll be fine with that so we just need to figure out maybe what how many drivers she want to add and what's the price difference but i guess the the thing you could do is just to send your the link and"
+  },
+  {
+   "wav": "edacc/russian/03402.wav",
+   "group": "russian",
+   "ref": "MAYBE TO SUGGEST WHICH CAR YOU THINK IS GOOD",
+   "none": "Maybe to suggest which car you think is good.",
+   "trigger": "maybe to suggest which car you think is good"
+  },
+  {
+   "wav": "edacc/russian/03408.wav",
+   "group": "russian",
+   "ref": "YEAH WELL I GUESS FOR FOR ONE DAY OR FOR TWO DAYS IT'S ONE THING BUT I THINK WE'LL PROBABLY HAVE TO",
+   "none": "well i guess for one day or for two days it's one thing but i think we'll probably have to",
+   "trigger": "well i guess for one day or for two days it's one thing but i think we'll probably have to"
+  },
+  {
+   "wav": "edacc/russian/03410.wav",
+   "group": "russian",
+   "ref": "WE'LL PROBABLY HAVE TO DO IT YEAH IT'S UNLIKELY THAT WE'LL GET UPGRADED FOR A WEEK IF WE ACTUALLY DON'T BOOK THAT NOW",
+   "none": "We'll probably have to do it, yeah. It's unlikely that we get upgraded for a week if we actually don't book that now.",
+   "trigger": "we'll probably have to do it yeah it's unlikely that we get upgraded for a week if we actually don't book that"
+  },
+  {
+   "wav": "edacc/russian/03412.wav",
+   "group": "russian",
+   "ref": "YEAH I DON'T KNOW",
+   "none": "Yeah, I don't know.",
+   "trigger": "yeah i don't know"
+  },
+  {
+   "wav": "edacc/russian/03414.wav",
+   "group": "russian",
+   "ref": "OH BUT BUT I GUESS THE QUESTION IS DO YOU DO YOU WANT TO BE A DRIVER OR WOULD YOU RATHER LIKE TWO OF THEM BE DRIVERS OR SOMETHING ELSE I DON'T KNOW OR YOU DON'T CARE ABSOLUTELY",
+   "none": "But I guess the question is, do you want to be a driver or would you rather like two of them be drivers or something else? I don't know. Or you don't care, absolutely.",
+   "trigger": "but i guess the question is do you do you want to be a driver or would you rather like two of them be drivers or something else i don't know or you don't care absolutely"
+  },
+  {
+   "wav": "edacc/russian/03416.wav",
+   "group": "russian",
+   "ref": "MY FRIEND DRIVES PRETTY WELL I THINK SHE GREW SHE SHE GREW UP IN SOME MOUNTAINY AREA WHICH IS UH YEAH",
+   "none": "My friend drives pretty well, I think. She grew up in some mountainy area, which is, yeah.",
+   "trigger": "my friend drives pretty well i think she grew she grew up in some mountain area which is uh yeah"
+  },
+  {
+   "wav": "edacc/russian/03426.wav",
+   "group": "russian",
+   "ref": "OH I DON'T KNOW IF THERE WAS NO LIGHTS",
+   "none": "Oh, I don't know. For my birthday, you know. Yes.",
+   "trigger": "oh i don't know for my birthday uh you know yes"
+  },
+  {
+   "wav": "edacc/russian/03436.wav",
+   "group": "russian",
+   "ref": "OKAY MAYBE JUST ME I MENTIONED ALL THAT IN THE",
+   "none": "Okay, maybe just Mia mentioned all that. Yeah.",
+   "trigger": "okay maybe just me i mentioned all that in yeah"
+  },
+  {
+   "wav": "edacc/russian/03438.wav",
+   "group": "russian",
+   "ref": "SO THAT WOULD BE PROBABLY SET AND UH WE NEED TO TO TO DEVELOP THE ROUTE I MEAN IT'S HONESTLY IT'S MOSTLY JUST ON US RIGHT LIKE BECAUSE THEY THEY DON'T KNOW",
+   "none": "so that will be probably set and uh we need to to to develop the root i mean it's honestly it's mostly just on us right like because they they don't know",
+   "trigger": "so that will be probably set and uh we need to to to develop the root i mean it's honestly it's mostly just on us right like because they they don't know"
+  },
+  {
+   "wav": "edacc/russian/03442.wav",
+   "group": "russian",
+   "ref": "IF YOU HAVE ANY I I I HAVEN'T HAD TIME TO CHECK LIKE WHAT EXACTLY I WANT TO DO BUT I THINK THERE ARE SOME GOOD HIKES IN THE NORTH I THINK YOU KNOW THE MORE WE SPEND TIME IN THE NORTH THE BETTER IT IS FOR ME UH",
+   "none": "If you have any, I haven't had time to check what exactly I want to do, but I think there are some good hikes in the north. I think the more we spend time in the north, the better it is for me.",
+   "trigger": "if you have any i haven't had time to check like what exactly i want to do but i think there are some good hikes in the north i think you know the more we spend time in the north the better it is for me"
+  },
+  {
+   "wav": "edacc/russian/03444.wav",
+   "group": "russian",
+   "ref": "ALL RIGHT YEAH OKAY LET'S DO THAT",
+   "none": "right yeah okay let's do that",
+   "trigger": "right yeah okay let's do that"
+  },
+  {
+   "wav": "edacc/russian/03450.wav",
+   "group": "russian",
+   "ref": "OH OKAY UH ALL RIGHT LET ME SEE IF I CAN IF I CAN SHARE THIS WITH YOU OTHERWISE I'M AFRAID WE'LL HAVE TO ASK OUR FRIENDS",
+   "none": "Oh, okay. Let me see if I can share it with you. Otherwise, I'm afraid we'll have to ask our friends.",
+   "trigger": "oh okay uh let me see if i can if i can share it with you otherwise i'm afraid we'll have to ask our friends"
+  },
+  {
+   "wav": "edacc/russian/03454.wav",
+   "group": "russian",
+   "ref": "SO I THINK THEY'RE ARRIVING ON UH FOURTEEN AUGUST IN THE I DON'T KNOW MID DAY OR EVENING SO THEY WILL SLEEP HERE ONE NIGHT AND THEN WE CAN LEAVE ANYTIME IN THE MORNING UH NEXT DAY IT'S THE",
+   "none": "So I think they're arriving on 14 August in the, I don't know, midday or evening, so they will sleep here one night and then we can leave any time in the morning.",
+   "trigger": "so i think they're arriving on uh 14 august in the i don't know midday or evening so they will sleep here one night and then we can leave anytime in the morning"
+  },
+  {
+   "wav": "edacc/russian/03458.wav",
+   "group": "russian",
+   "ref": "AND SO IT'S IT'S GONNA BE FIFTEEN SIXTEEN SEVENTEEN EIGHTEEN NINETEEN AND THEN TWENTY IT SAYS DRIVE TO EDINBURGH VIA LOCH NESS I'M NOT SURE WHY",
+   "none": "And so it's going to be 15, 16, 17, 18, 19, and then 20 it says drive to Edinburgh via Loch Ness. I'm not sure why.",
+   "trigger": "And so it's going to be 15, 16, 17, 18, 19, and then 20 it says drive to Edinburgh via Loch Ness. I'm not sure why."
+  },
+  {
+   "wav": "edacc/russian/03460.wav",
+   "group": "russian",
+   "ref": "IT SEEMS SO FIVE FULL DAYS AND LIKE I THINK YEAH ONE TWO THREE FOUR FIVE SIX WAIT SIX NIGHTS OR WHAT YEAH I THINK SIX NIGHTS",
+   "none": "It seems so. Five full days and I think, yeah, one, two, three, four, five, wait, six nights or what? Yeah, I think six nights.",
+   "trigger": "it seems so five full days and like i think yeah one two three four five wait six nights or what yeah i think six nights"
+  },
+  {
+   "wav": "edacc/russian/03462.wav",
+   "group": "russian",
+   "ref": "OH YES RIGHT SO IT'S IT'S IT'S FIVE NIGHTS CAMPING SO WE CAN GET BACK IN THE MORNING ON THE LAST DAY WHICH IS AU AUGUST TWENTY THEN",
+   "none": "Oh, yes, right. So it's five nights camping, so we can get back in the morning on the last day, which is August 20th, I think.",
+   "trigger": "oh yes right so it's it's it's five nights camping so we can get back in the morning on the last day which is august 20th i think"
+  },
+  {
+   "wav": "edacc/russian/03466.wav",
+   "group": "russian",
+   "ref": "YEAH THE QUESTION IS LIKE DO YOU HAVE DO YOU ALREADY KNOW OF ANY PLACES THAT YOU WANT TO TO SEE OR WE DO DO WE LIKE START FROM DISTILLERIES",
+   "none": "Yeah, the question is like, do you have, do you already know of any places that you want to see or do we like start from distilleries?",
+   "trigger": "yeah the question is like do you have do you already know of any places that you want to to see or do we like start from distilleries"
+  },
+  {
+   "wav": "edacc/russian/03470.wav",
+   "group": "russian",
+   "ref": "OBAN WAIT BUT IT'S NOT ON THE MAP IS IT",
+   "none": "Oh, wait, but it's not on the map, is it?",
+   "trigger": "boom wait but it's not on the map is it"
+  },
+  {
+   "wav": "edacc/russian/03478.wav",
+   "group": "russian",
+   "ref": "YEAH BUT SO WAIT IF WE IF WE GET TO DRIVE TO OBAN THEN WE DON'T GET TO PASS GLEN COE VALLEY YOU KNOW",
+   "none": "Yeah, but so wait, if we get to drive to Auburn, then we don't get to pass Glenn Covelli, no?",
+   "trigger": "yeah but so wait if we if we get to drive to oban then we don't get to pass glencoveli no"
+  },
+  {
+   "wav": "edacc/russian/03484.wav",
+   "group": "russian",
+   "ref": "UH I GUESS TWO OR THREE I DON'T KNOW UM",
+   "none": "I guess two or three, I don't know.",
+   "trigger": "uh i guess two or three i don't know um"
+  },
+  {
+   "wav": "edacc/russian/03486.wav",
+   "group": "russian",
+   "ref": "I MEAN I'M SURE THEY WILL BE HAPPY TO DO THREE I DON'T THINK I DON'T FEEL LIKE I NEED TO DO THREE BUT I'M I'M OKAY UNLESS THEY'RE SUPER EXPENSIVE",
+   "none": "I mean, I'm sure they would be happy to do three. I don't feel like I need to do three, but I'm okay unless they're super expensive.",
+   "trigger": "i mean i'm sure they would be happy to do three i don't i don't feel like i need to do three but i i'm okay unless they're super expensive"
+  },
+  {
+   "wav": "edacc/russian/03490.wav",
+   "group": "russian",
+   "ref": "WAIT WAIT WAIT SO THERE ARE NO DISTILLERIES WHATSOEVER",
+   "none": "Wait, wait, wait, so there are no distilleries whatsoever?",
+   "trigger": "Wait, wait, wait, so there are no distilleries whatsoever?"
+  },
+  {
+   "wav": "edacc/russian/03492.wav",
+   "group": "russian",
+   "ref": "OR JUST LIKE NO INDEPENDENT ONES OR NO INTERESTING ONES",
+   "none": "Or just like no independent ones or no interesting ones?",
+   "trigger": "or just like no independent ones or no interesting ones"
+  },
+  {
+   "wav": "edacc/russian/03496.wav",
+   "group": "russian",
+   "ref": "SO HOW LONG IS THE DRIVE FROM LIKE SKYE TO ULLAPOOL",
+   "none": "So how long is the drive from Sky to Ullapul?",
+   "trigger": "so how long is the drive from like sky to ulapuul"
+  },
+  {
+   "wav": "edacc/russian/03498.wav",
+   "group": "russian",
+   "ref": "UH SKYE TO ULLAPOOL",
+   "none": "Sky to Ullapool.",
+   "trigger": "sky to ullapool"
+  },
+  {
+   "wav": "edacc/russian/03500.wav",
+   "group": "russian",
+   "ref": "OH IT'S NOT TOO BAD IT'S LIKE SAYS TWO HOURS TWENTY SEVEN MINUTES FROM THE MIDDLE OF SKYE",
+   "none": "Oh, it's not too bad. It's like 2 hours 27 minutes from the middle of sky.",
+   "trigger": "oh it's not too bad it's like say it's two hours 27 minutes from the middle of sky"
+  },
+  {
+   "wav": "edacc/russian/03502.wav",
+   "group": "russian",
+   "ref": "SO YEAH JUST ABOUT TWO HOURS UH FROM FROM THE BRIDGE",
+   "none": "So, yeah, just about two hours from the bridge.",
+   "trigger": "So yeah, just about two hours from the bridge"
+  },
+  {
+   "wav": "edacc/russian/03504.wav",
+   "group": "russian",
+   "ref": "YEAH MAYBE WE CAN JUST LIKE SPEND THERE ONE NIGHT AND EVEN THAT'S GONNA BE FINE FOR YOU KNOW ONE AND A HALF DAYS",
+   "none": "yeah maybe we can just like spend there one night and even that's going to be fine or you know one and a half days",
+   "trigger": "yeah maybe we can just like spend there one night and even that's going to be fine or you know one and a half days"
+  },
+  {
+   "wav": "edacc/russian/03510.wav",
+   "group": "russian",
+   "ref": "YEAH THAT'S THE THE I THINK THAT WOULD BE THE BEST AREA FOR HIKING MAYBE PLUS SKYE OBVIOUSLY UH",
+   "none": "yeah that's the i think that would be the best area for hiking maybe plus sky obviously",
+   "trigger": "yeah that's the i think that would be the best area for hiking maybe plus sky obviously"
+  },
+  {
+   "wav": "edacc/russian/03516.wav",
+   "group": "russian",
+   "ref": "SO I'M NOT SURE CURIOUS WHAT IF WE LIKE DRIVE THERE ON THE MAIN LIKE IF YOU WANT TO GET TO ULLAPOOL PROBABLY THE MOST DIRECT WAY IS JUST TO TO DRIVE YOU KNOW VIA INVERNESS AND IT MIGHT SAVE US",
+   "none": "so i'm actually curious what if you like drive there on the main like if you want to get to ulapu probably the most direct way is just to to drive you know via inverness and it might save us",
+   "trigger": "so i'm actually curious what if you like drive there on the main like if you want to get to ulapul probably the most direct way is just to to drive you know via inverness and it might save us"
+  },
+  {
+   "wav": "edacc/russian/03518.wav",
+   "group": "russian",
+   "ref": "QUITE SOME TIME WOULD IT MAKE SENSE OR NOT WHAT SHOULD WE DO",
+   "none": "quite some time. Would it make sense or not?",
+   "trigger": "quite some time would it make sense or not what should we"
+  },
+  {
+   "wav": "edacc/russian/03522.wav",
+   "group": "russian",
+   "ref": "OH WELL WE DON'T NEED TO LIKE DRIVE DIRECTLY THERE WE CAN LIKE STOP YOU KNOW AFTER INVERNESS FOR EXAMPLE OR I DON'T KNOW WHATEVER IS THERE",
+   "none": "Oh, well, we don't need to drive directly there. We can stop after Inverness, for example, or I don't know, whatever is there.",
+   "trigger": "oh well we don't need to like drive directly there we can like stop you know after Inverness for example or I don't know whatever is there"
+  },
+  {
+   "wav": "edacc/russian/03524.wav",
+   "group": "russian",
+   "ref": "UH OR LIKE CAMP",
+   "none": "or like campers.",
+   "trigger": "or like camp"
+  },
+  {
+   "wav": "edacc/russian/03528.wav",
+   "group": "russian",
+   "ref": "YEAH THEY WANT THEY WANTED TO SEE IT AT LEAST ONCE I THINK",
+   "none": "They wanted to see it at least once, I think.",
+   "trigger": "they wanted to see it at least once i think"
+  },
+  {
+   "wav": "edacc/russian/03532.wav",
+   "group": "russian",
+   "ref": "YEAH SO I GUESS THE QUESTION IS WHAT IS WHAT WOULD BE BETTER TO TO DRIVE BECAUSE IT'S IT'S OBVIOUSLY EASIER TO DRIVE ON THE MAIN ROAD RIGHT SO",
+   "none": "Yeah, so I guess the question is, what would be better to drive? Because it's obviously easier to drive on the main road, right? So...",
+   "trigger": "yeah so i guess the question is what is what would be better to to drive because it's it's obviously easier to drive on the main road right so"
+  },
+  {
+   "wav": "edacc/russian/03534.wav",
+   "group": "russian",
+   "ref": "IT WOULD SAVE US SOME TIME SO DO WE WANT TO SAVE TIME IN THE BEGINNING OR ON THE WAY BACK BECAUSE WE CAN ALSO DO THE REVERSE UH",
+   "none": "It would save us some time. So do we want to save time in the beginning or on the way back? Because we can also do the reverse.",
+   "trigger": "it would save us some time so do we want to save time in the beginning or on the way back because we can also do the reverse"
+  },
+  {
+   "wav": "edacc/russian/03540.wav",
+   "group": "russian",
+   "ref": "OKAY YEAH THAT'S I'M HAPPY TO DO THAT YEAH",
+   "none": "Okay, yeah, I'm happy to do that.",
+   "trigger": "okay yeah that i'm happy to do that"
+  },
+  {
+   "wav": "edacc/russian/03542.wav",
+   "group": "russian",
+   "ref": "OKAY SO HOW LONG WOULD THE DRIVE FROM FROM EDINBURGH TO I DON'T KNOW INVERNESS BE",
+   "none": "Okay, so how long would the drive from Edinburgh to, I don't know, Inverness be?",
+   "trigger": "okay so how long would the drive from from edinburgh to i don't know inverness be"
+  },
+  {
+   "wav": "edacc/russian/03544.wav",
+   "group": "russian",
+   "ref": "UH THAT'S PROBABLY LIKE PRETTY FAST ACTUALLY RIGHT IT'S LIKE THREE HOURS",
+   "none": "That's probably like pretty fast actually, right? It's like three hours.",
+   "trigger": "that's probably like pretty fast actually right it's like three hours"
+  },
+  {
+   "wav": "edacc/russian/03546.wav",
+   "group": "russian",
+   "ref": "SO AND THEN WE CAN TURN YOU KNOW TURN LEFT TO TO LOCH NESS AND LIKE",
+   "none": "so and then we can turn you know turn left to to Loch Ness and like",
+   "trigger": "so and then we can turn you know turn left to to Loch Ness and like"
+  },
+  {
+   "wav": "edacc/russian/03550.wav",
+   "group": "russian",
+   "ref": "YEAH YEAH WE CAN EVEN GET TO THE PLACE YOU KNOW WHERE WE",
+   "none": "Yeah, yeah, we can even get to the place, you know, where we...",
+   "trigger": "yeah yeah we can even get to the place you know where we"
+  },
+  {
+   "wav": "edacc/russian/03568.wav",
+   "group": "russian",
+   "ref": "IN PITLOCHRY OKAY SO SPEYSIDE IS ACTUALLY CLOSED I SEE",
+   "none": "Okay, so space ID is actually closed, I see.",
+   "trigger": "in bit locally okay so space out is actually closed i see"
+  },
+  {
+   "wav": "edacc/russian/03570.wav",
+   "group": "russian",
+   "ref": "MM HMM YEAH I MEAN YOU CAN I MEAN I'M I'M HAPPY TO DO THAT OR WHATEVER YOU SAY",
+   "none": "Yeah, I mean, I'm happy to do whatever you say.",
+   "trigger": "yeah you can i mean i'm happy to do that or whatever you say"
+  },
+  {
+   "wav": "edacc/russian/03584.wav",
+   "group": "russian",
+   "ref": "OKAY CAN WE DO THAT EASILY OR IS IT LIKE A BIG DETOUR",
+   "none": "Okay. Can we do that easily or is it like a big detour?",
+   "trigger": "okay can we do that easily or is it like a big detour"
+  },
+  {
+   "wav": "edacc/russian/03586.wav",
+   "group": "russian",
+   "ref": "YEAH IT ACTUALLY THERE IS ACTUALLY EVEN A A PATH FROM YOU KNOW ARDMORE TO TO THAT PLACE",
+   "none": "Yeah, it actually, there is actually even a path from, you know, Ari Amor to that.",
+   "trigger": "yeah it's actually there is actually even a path from you know aria more to to that"
+  },
+  {
+   "wav": "edacc/russian/03588.wav",
+   "group": "russian",
+   "ref": "SO IN FACT WE ARE JUST LIKE HALF AN HOUR DETOUR",
+   "none": "So in fact, we had just like half an hour on the tour.",
+   "trigger": "so in fact we had just like half an hour on the tour"
+  },
+  {
+   "wav": "edacc/russian/03592.wav",
+   "group": "russian",
+   "ref": "SO WE CAN DO THAT WE CAN JUST LIKE DRIVE TO THE DISTILLERY AND WHICH MEANS WE ARE ALMOST THERE RIGHT SO FROM THERE",
+   "none": "So we can do that, we can just like drive to the distillery, which means we are almost there, right, so from there.",
+   "trigger": "so we can do that we can just like drive to the distillery and which means we are almost there right so from there"
+  },
+  {
+   "wav": "edacc/russian/03594.wav",
+   "group": "russian",
+   "ref": "TO TO INVERNESS INTO THE CAMPING PLACE IS IS REALLY EASY",
+   "none": "to Inverness and to the camping place is really easy.",
+   "trigger": "to Inverness and to the camping place is really easy."
+  },
+  {
+   "wav": "edacc/russian/03596.wav",
+   "group": "russian",
+   "ref": "SO WE CAN SLOWLY GET THERE AND YOU KNOW EVEN IF WE GET A CAR MUCH MUCH LATER THAN WE PLAN FOR WHATEVER CIRCUMSTANCES WE'LL STILL",
+   "none": "So we can slowly get there, even if we get a car much later than we plan for whatever circumstances.",
+   "trigger": "so we can slowly get there and even if we get a car much much later than we plan for whatever circumstances we will still"
+  },
+  {
+   "wav": "edacc/russian/03600.wav",
+   "group": "russian",
+   "ref": "YEAH WELL NOT I DON'T KNOW NOT NECESSARILY MAYBE ENTERING THERE BECAUSE IT'S IF IT'S EACH DAY IS A BIT OF RESCINDING",
+   "none": "I don't know, not necessarily maybe entering there because if it's, which day is it going to be Sunday?",
+   "trigger": "i don't know not necessarily maybe entering there because if it's which day is"
+  },
+  {
+   "wav": "edacc/russian/03602.wav",
+   "group": "russian",
+   "ref": "OKAY YEAH SO SO MAYBE WE CAN LIKE PLAN SOMETHING LIKE THAT AND THEN WE GET TO DISTILLERY AND THEN WE DRIVE TO INVERNESS AND TO LOCH LOMOND AND YEAH JUST JUST CAMP THERE",
+   "none": "yeah so so maybe we can like plan something like that and then we get to distillery and then we drive to Inverness and to Loch Lomond and yeah just just camp there",
+   "trigger": "yeah so so maybe we can like plant something like that and then we get to distillery and then we drive to Inverness and to Loch Lomond and yeah just just camp there"
+  },
+  {
+   "wav": "edacc/russian/03608.wav",
+   "group": "russian",
+   "ref": "IS THERE ONE THAT LASTS LESS AND COSTS LESS",
+   "none": "Everyone that lasts less and costs less.",
+   "trigger": "everyone that lasts less and costs less"
+  },
+  {
+   "wav": "edacc/spanish/04068.wav",
+   "group": "spanish",
+   "ref": "I TRIED TO HAVE IT BECAUSE I HAD IT WITH MY INSTITUTIONAL ACCOUNT BUT EVERY TIME I TRIED TO CHANGE IT THEY SAID THAT I NEED TO CHANGE MY EMAIL OR LINK MY PERSONAL EMAIL TO CHANGE THE ZOOM ACCOUNT AND THIS HAS BEEN GOING FOR AROUND A YEAR SINCE I JOINED THE UNI",
+   "none": "I tried to have it because I had it with my institutional account, but every time I tried to change it, they said that I need to change my email or link my personal email to change the Zoom account. And this has been going for around a year since I joined the uni.",
+   "trigger": "I tried to have it because I had it with my institutional account, but every time I tried to change it, they said that I need to change my email or link my personal email to change the Zoom account. And this has been going for around a year since I joined the uni."
+  },
+  {
+   "wav": "edacc/spanish/04074.wav",
+   "group": "spanish",
+   "ref": "YEAH THAT IT'S NOT THAT EASY TO UNDERSTAND ANYWAY BUT I THINK TEAMS IS NOT THAT GOOD SOMETIMES I GUESS",
+   "none": "yeah that is not that easy to understand anyway but i think teams is not that good sometimes i guess",
+   "trigger": "yeah that is not that easy to understand anyway but i think teams is not that good sometimes i guess"
+  },
+  {
+   "wav": "edacc/spanish/04076.wav",
+   "group": "spanish",
+   "ref": "OH I HAVE SOME OF SOME PEOPLE THAT SAID LIKE NO I CANNOT JOIN TEAMS I DON'T KNOW HOW THAT WORKS LIKE IT'S REALLY YOU JUST HAVE TO CLICK THE LINK",
+   "none": "i have some some people that said like no i kind of joined teams i don't know how that works like literally you just have to click the link",
+   "trigger": "i have some some people that said like no i kind of joined teams i don't know how that works like literally you just have to click the link"
+  },
+  {
+   "wav": "edacc/spanish/04078.wav",
+   "group": "spanish",
+   "ref": "SO WHAT THEY DO <LAUGH>",
+   "none": "So what they do?",
+   "trigger": "so what they do?"
+  },
+  {
+   "wav": "edacc/spanish/04082.wav",
+   "group": "spanish",
+   "ref": "THEY DON'T USE EMAIL <LAUGH>",
+   "none": "Did they use email?",
+   "trigger": "Did they use email?"
+  },
+  {
+   "wav": "edacc/spanish/04084.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> YOU SEND EVERYTHING BY POST <LAUGH>",
+   "none": "you said everything by post",
+   "trigger": "you said everything by post"
+  },
+  {
+   "wav": "edacc/spanish/04086.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> I MEAN YOU CAN STILL HAVE POST HERE SO THAT'S A GOOD THING BUT NO",
+   "none": "i mean you can still have posts here so that's a good thing but no",
+   "trigger": "i mean you can still have posts here so that's a good thing but no"
+  },
+  {
+   "wav": "edacc/spanish/04088.wav",
+   "group": "spanish",
+   "ref": "WHAT SENDING THE REVIEW BY POST <LAUGH>",
+   "none": "What? Sending the review by post?",
+   "trigger": "what sending the review by post"
+  },
+  {
+   "wav": "edacc/spanish/04092.wav",
+   "group": "spanish",
+   "ref": "OH YEAH LIKE PAPER VERSION YOU KNOW LIKE THE REVIEW OF THE MANUSCRIPT THAT YOU'RE WORKING ON SENDING IT CORRECTIONS BY POST HAD WRITING THINGS NO",
+   "none": "Oh, yeah, by paper version, not like the review of the manuscript that you're working on, sending it corrections by post, had writing things, no?",
+   "trigger": "oh yeah by paper version not like the review of the manuscript that you're working on sending it corrections by post had writing things no"
+  },
+  {
+   "wav": "edacc/spanish/04094.wav",
+   "group": "spanish",
+   "ref": "I HOPE NOT BUT I KNOW THAT UM MY PARTNER <LAUGH>",
+   "none": "I hope not, but I know that my partner,",
+   "trigger": "i hope not but i know that um my partner"
+  },
+  {
+   "wav": "edacc/spanish/04096.wav",
+   "group": "spanish",
+   "ref": "NOT IDENTIFIABLE <LAUGH> UM HE HAS HELP SOMEONE IN THE UNI STRUGGLING WITH EXCEL",
+   "none": "He has helped someone at the uni struggling with Excel",
+   "trigger": "he has helped someone at the uni struggling with excel"
+  },
+  {
+   "wav": "edacc/spanish/04098.wav",
+   "group": "spanish",
+   "ref": "AND THEY SEND SOME SORT OF UH RANDOM EMAIL LIKE PLEASE I NEED SOME HELP LIKE JUST FILTER AND STUFF IN EXCEL AND STUFF AND THEN THEY PAY YOU JUST I KNOW THAT IT'S NOT JUST FOR DOING THIS",
+   "none": "They send some sort of random email, like, please, I need some help, like just filtering and stuff in Excel and stuff. And then they pay you. I know that it's not just for doing this.",
+   "trigger": "they send some sort of random email like please i need some help like just filtering and stuff in excel and stuff and then they pay you just i know that it's not just for doing this"
+  },
+  {
+   "wav": "edacc/spanish/04100.wav",
+   "group": "spanish",
+   "ref": "OVER HERE NOT GOOD",
+   "none": "They're not good.",
+   "trigger": "They're not good"
+  },
+  {
+   "wav": "edacc/spanish/04102.wav",
+   "group": "spanish",
+   "ref": "BUT YOU CAN DO FILTERING IN MANY OTHER THINGS INSTEAD OF EXCEL I DON'T KNOW IF YOU RECEIVED SOME SORT OF EXCEL ON THAT KIND OF THINGS IN OFFICE WHEN YOU WERE IN HIGH SCHOOL",
+   "none": "you can do filtering in many other things instead of excel i don't know if you receive some sort of excel on that kind of things in office when you were in high school",
+   "trigger": "you can do filtering in many other things instead of excel i don't know if you receive some sort of excel on that kind of things in office when you were in high school"
+  },
+  {
+   "wav": "edacc/spanish/04108.wav",
+   "group": "spanish",
+   "ref": "I USED TO HAVE A COURSE LITERALLY EVERY EVERY TERM OR EVERY YEAR WHEN I WAS IN HIGH SCHOOL WE GOT THIS COMPUTATIONAL SKILLS COURSE THAT YOU NEED TO PASS AND YOU HAVE LIKE TWO HOURS OF THAT",
+   "none": "I used to have a course literally every term or every year when I was in high school, we got this computational skills course that you need to pass and you have like two hours of that.",
+   "trigger": "i used to have a course literally every every term or every year when i was in high school we got this computational skills course that you need to pass and you have like two hours of that"
+  },
+  {
+   "wav": "edacc/spanish/04110.wav",
+   "group": "spanish",
+   "ref": "NO IT WAS MORE LIKE FILTERING THE",
+   "none": "No, it was more like filtering.",
+   "trigger": "it was more like filtering"
+  },
+  {
+   "wav": "edacc/spanish/04112.wav",
+   "group": "spanish",
+   "ref": "YEAH YEAH BUT THEN I DON'T KNOW IT IT WAS MORE ADVANCE AND NOT THEY TRIED TO TEACH US HOW TO USE MA MACROS OR MACROS IN EXCEL AND HOW TO USE THE",
+   "none": "yeah yeah but then i don't know if it was more advanced or not they tried to teach us how to use macros or macros in excel and how to use it",
+   "trigger": "yeah yeah but then i don't know it was more advanced or not they tried to teach us how to use macros or macros in excel and how to use it"
+  },
+  {
+   "wav": "edacc/spanish/04114.wav",
+   "group": "spanish",
+   "ref": "AND THERE IS ANOTHER ANOTHER STUFF BUT I DON'T REMEMBER THAT IT WAS REALLY USEFUL FOR BIG DATA SETS THAT IS NOT EXCEL BUT IT WAS PURPLE I JUST REMEMBER THE ICON THAT WAS PURPLE I NEVER UNDERSTOOD IT",
+   "none": "And there is another software that I don't remember that was really useful for big data sets that are not Excel, but it was purple. I just remember the icon that was purple. I never understood it.",
+   "trigger": "And there is another software that I don't remember that was really useful for big data sets that are not Excel, but it was purple. I just remember the icon that was purple. I never understood it."
+  },
+  {
+   "wav": "edacc/spanish/04116.wav",
+   "group": "spanish",
+   "ref": "NO NO NO NO ANOTHER ONE FOR REALLY BIG DATA SETS",
+   "none": "no no no another one for really big data sets",
+   "trigger": "no no no another one for really big data sets"
+  },
+  {
+   "wav": "edacc/spanish/04120.wav",
+   "group": "spanish",
+   "ref": "FROM FROM A START WHEN I WAS BORN I WAS USING R <LAUGH>",
+   "none": "From a start, when I was born, I was using R.",
+   "trigger": "From a start, when I was born I was using R"
+  },
+  {
+   "wav": "edacc/spanish/04122.wav",
+   "group": "spanish",
+   "ref": "I THINK I THINK YOU NEED TO UNDERSTAND THAT YOU ALREADY SPEAK TWO HUMAN LANGUAGES",
+   "none": "I think you need to understand that you already speak two human languages.",
+   "trigger": "I think you need to understand that you already speak two human languages"
+  },
+  {
+   "wav": "edacc/spanish/04126.wav",
+   "group": "spanish",
+   "ref": "YEAH HOW MANY LANGUAGES JUST DOES HE SPEAK",
+   "none": "Yeah, how many languages just doesn't eat?",
+   "trigger": "yeah how many languages just doesn't"
+  },
+  {
+   "wav": "edacc/spanish/04128.wav",
+   "group": "spanish",
+   "ref": "I THINK DEPENDS IF YOU QUALIFY AND THEN YOU CATEGORIZE HOW M MUCH YOU KNOW FROM A LANGUAGE BECAUSE NO MATTER HOW MANY LANGUAGES YOU SPEAK IT DOESN'T MATTER NO NOT HOW YOU SPEAK BUT",
+   "none": "I think it depends if you qualify and then you categorize how much you know from a language because no matter how many languages you speak, it doesn't matter, no, not how you speak, but...",
+   "trigger": "I think it depends if you qualify and then you categorize how much do you know from a language because no matter how many languages you speak it doesn't matter no how you speak but"
+  },
+  {
+   "wav": "edacc/spanish/04130.wav",
+   "group": "spanish",
+   "ref": "YES HOW FLUENT YOU ARE",
+   "none": "Yes, how fluent you are.",
+   "trigger": "how fluent you are"
+  },
+  {
+   "wav": "edacc/spanish/04134.wav",
+   "group": "spanish",
+   "ref": "THE SAME WITH PYTHONS AND ALL ALL THE OTHER LANGUAGES I GUESS",
+   "none": "The same with pythons and all the other languages, I guess.",
+   "trigger": "the same with pythons and all the other languages I guess"
+  },
+  {
+   "wav": "edacc/spanish/04138.wav",
+   "group": "spanish",
+   "ref": "'CAUSE YEAH THERE'S MANY OTHERS THAT JUST HAVE EVOLVED OR DISAPPEARED OR YOU KNOW IT BUT IT'S A COMBINATION OF MANY OTHER LANGUAGES",
+   "none": "Because, yeah, there's many others that just have the bold or disappeared, or you know it, but it's a combination of many other languages.",
+   "trigger": "because yeah there's many others that just have the bold or disappeared or you know it but it's a combination of many other languages"
+  },
+  {
+   "wav": "edacc/spanish/04146.wav",
+   "group": "spanish",
+   "ref": "I MEAN YOU COULD <OVERLAP> IF EVERYTHING IS ONLINE <LAUGH>",
+   "none": "I mean, you could if everything is online.",
+   "trigger": "I mean, you could if everything is online"
+  },
+  {
+   "wav": "edacc/spanish/04152.wav",
+   "group": "spanish",
+   "ref": "BUT YOU KNOW KNOW EVERYONE THAT HAS GOT INTO PHD SOMETIMES THEY'RE LIKE YEAH THIS IS KIND OF THE THE THING TRAVEL AND MEET PEOPLE BUT WE'RE NOT EXPERIENCED ANYTHING THROUGHOUT THE PANDEMIC AND I'M LIKE OH OKAY YEAH <LAUGH>",
+   "none": "I know everyone that has got into PhD sometimes I was like yeah this is kind of the the thing travel and meet people but we're not experiencing anything throughout the pandemic and I'm like okay yeah",
+   "trigger": "i know everyone that has got into phd sometimes i was like yeah this is kind of the the thing travel and meet people but we're not experiencing anything throughout the pandemic and i'm like okay yeah"
+  },
+  {
+   "wav": "edacc/spanish/04156.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> I EXPERIENCED THE PANDEMIC ALSO STUDYING",
+   "none": "that you experienced the pandemic also starting.",
+   "trigger": "that you experienced the pandemic also starting"
+  },
+  {
+   "wav": "edacc/spanish/04158.wav",
+   "group": "spanish",
+   "ref": "YEAH YEAH THAT DOESN'T HELP AT ALL",
+   "none": "Yeah, yeah, that doesn't help at all.",
+   "trigger": "yeah yeah that doesn't help at all"
+  },
+  {
+   "wav": "edacc/spanish/04160.wav",
+   "group": "spanish",
+   "ref": "YEAH BUT I MEAN FROM THE EDUCATIONAL EXPERIENCE",
+   "none": "Yeah, but I mean, from the educational experience.",
+   "trigger": "yeah but i mean from the educational experience"
+  },
+  {
+   "wav": "edacc/spanish/04162.wav",
+   "group": "spanish",
+   "ref": "YEAH I'M A A VERY STRONG BELIEVER THAT ANY SOME SORT OF COMMUN COMMUNAL OR COMMUNITY EXPERIENCE BASED ON THE EDUCATION AND EV EVEN THE WORK",
+   "none": "Yeah, I'm a very strong believer that A&E has some sort of community experience based on education and even work.",
+   "trigger": "yeah i'm a very strong believer that any some sort of commune communal or community experience based on the location and even the work"
+  },
+  {
+   "wav": "edacc/spanish/04164.wav",
+   "group": "spanish",
+   "ref": "EVERYTHING IS JUST FOR THE SOCIAL INTERACTION BECAUSE YOU CAN WORK BY YOUR OWN",
+   "none": "Everything is just for the social interaction because you can work by your own.",
+   "trigger": "everything is just for the social interaction because you can work by your own"
+  },
+  {
+   "wav": "edacc/spanish/04166.wav",
+   "group": "spanish",
+   "ref": "NO YET WE HAVE STILL FIVE MINUTES TO GO YES WHAT ELSE WE CAN TALK ABOUT",
+   "none": "No, yet. We have still five minutes to go. Yes. What else we can talk about?",
+   "trigger": "no yet we have still five minutes to go yes what else we can talk about"
+  },
+  {
+   "wav": "edacc/spanish/04168.wav",
+   "group": "spanish",
+   "ref": "BECAUSE THEY HAVE PROBLEMS LIKE THESE THINGS OF WHAT IS THE MEMORY OF YOUR CHILDHOOD AND LIKE",
+   "none": "Because they have problems like these things. What is the memory of your childhood?",
+   "trigger": "because they have problems like these things of what is the memory of your childhood"
+  },
+  {
+   "wav": "edacc/spanish/04170.wav",
+   "group": "spanish",
+   "ref": "I MEAN IT'S THE MEMORIES OF YOUR CHILDHOOD TO BE FAIR WAIT",
+   "none": "I mean, it's not memories of your childhood, to be fair.",
+   "trigger": "I mean it's not memories of your childhood to be fair"
+  },
+  {
+   "wav": "edacc/spanish/04172.wav",
+   "group": "spanish",
+   "ref": "WHEN WHERE WHEN YOU WERE A KID WHAT KINDS OF GAMES DID YOU USE TO PLAY IS THERE ANYONE OR ONE THAT YOU REMEMBER WELL",
+   "none": "when were when you were a kid what kinds of games did you used to play is there any one or one that you remember well",
+   "trigger": "when where when you were a kid what kinds of games did you used to play is there any one or one that you remember well"
+  },
+  {
+   "wav": "edacc/spanish/04174.wav",
+   "group": "spanish",
+   "ref": "YEAH BUT <LAUGH> I <DTMF> TO THAT QUESTION WAS LIKE DID I USED TO PLAY <LAUGH>",
+   "none": "i brought that question was like did i used to play",
+   "trigger": "i brought it to that question like did i used to play"
+  },
+  {
+   "wav": "edacc/spanish/04176.wav",
+   "group": "spanish",
+   "ref": "YOU COUNTED THE STAIRS AND THE STARS <OVERLAP>",
+   "none": "You've gone to the stairs, the stars.",
+   "trigger": "you've gone to the stairs"
+  },
+  {
+   "wav": "edacc/spanish/04178.wav",
+   "group": "spanish",
+   "ref": "PROBABLY YES WE'RE ALWAYS STRANGE IN OUR IN THAT OWN WAY OH ANOTHER ONE DID YOU HAVE A FAVORITE BOOK OF FILM OR TV SHOW OR CARTOON AS A CHILD WHAT WAS",
+   "none": "Probably, yes. We're all estranged in our own way. Oh, another one. Did you have a favorite book or film or TV show or cartoon as a child? What was it?",
+   "trigger": "probably yes we're all strange in our in our own way oh another one did you have a favorite book or film or tv show or cartoon as a child what was"
+  },
+  {
+   "wav": "edacc/spanish/04180.wav",
+   "group": "spanish",
+   "ref": "NICE I DON'T REMEMBER WHAT I USED TO LIKE OH YEAH I USED TO WATCH A LOT OF DRAGON BALL Z",
+   "none": "nice i don't remember what i used to like oh yeah i used to watch a lot of dragon ball set",
+   "trigger": "nice i don't remember what i used to like oh yeah i used to watch a lot of dragon ball set"
+  },
+  {
+   "wav": "edacc/spanish/04182.wav",
+   "group": "spanish",
+   "ref": "BECAUSE IT'S YOUR THAT WAS THE ONLY THING THAT PASSES IN YOUR TV THAT REPEATED OVER AND OVER AND OVER AGAIN LITERALLY",
+   "none": "because that was the only thing that passes in the tv that repeated over and over and over again literally",
+   "trigger": "because that was the only thing that passes in the tv that repeated over and over and over again literally"
+  },
+  {
+   "wav": "edacc/spanish/04184.wav",
+   "group": "spanish",
+   "ref": "UH NO NO NOT AT ALL BECAUSE I DIDN'T",
+   "none": "uh no no not at all because i didn't",
+   "trigger": "uh no no not at all because i didn't"
+  },
+  {
+   "wav": "edacc/spanish/04186.wav",
+   "group": "spanish",
+   "ref": "I DIDN'T KNOW THAT THAT WAS ANIME BUT THAT TIME TO BE HONEST WE WOULD JUST WATCH IT WITH MY BROTHER BECAUSE THAT WAS SOMETHING THAT WAS PLAYING ON THE TV ON A SUNDAY MORNING INSTEAD",
+   "none": "i didn't know that that was anime but that time to be honest we would just watch it with my brother because that was something that was playing on the tv on a sunday morning instead",
+   "trigger": "i didn't know that that was anime but that time to be honest we would just watch it with my brother because that was something that was playing on the tv on a sunday morning instead"
+  },
+  {
+   "wav": "edacc/spanish/04188.wav",
+   "group": "spanish",
+   "ref": "OF WATCHING THE MASS OR PEOPLE TALKING ABOUT MANY OF THE THINGS THAT WE DIDN'T UNDERSTAND SO WE WATCHED THAT CARTOON BECAUSE THAT WAS THE ONLY FREE CARTOON THAT WE CAN WATCH",
+   "none": "watching the mass or people talking about many other things that we didn't understand so we watched that cartoon because that was the only free cartoon that we can watch",
+   "trigger": "of watching the mass or people talking about many of the things that we didn't understand so we watched that cartoon because that was the only free cartoon that we can watch"
+  },
+  {
+   "wav": "edacc/spanish/04192.wav",
+   "group": "spanish",
+   "ref": "UH I THINK THERE IS MANY CULTURAL PERSPECTIVE OF WHY THAT'S POPULAR OR NOT BUT AT LEAST IN LATIN AMERICA NO NO I DON'T KNOW WE DIDN'T KNOW THAT IT WAS ANIME BUT I THINK",
+   "none": "I think there is many cultural perspectives of why that's popular or not, but at least in Latin America, I don't know, we didn't know that it was anime, but I think...",
+   "trigger": "i think there is many cultural perspectives of why that's popular or not but at least in latin america i don't know we didn't know that it was anime but i think"
+  },
+  {
+   "wav": "edacc/spanish/04194.wav",
+   "group": "spanish",
+   "ref": "IT'S A VERY DIFFERENT FORMAT YES AND THEN YOU GOT THIS THIS THIS CARTOONS OF I THINK IS DEXTER OR",
+   "none": "it's a very different format yes and then you got this this this cartoon so i think it's dexter or",
+   "trigger": "it's a very different format yes and then you got this this this cartoon so i think it's dexter or"
+  },
+  {
+   "wav": "edacc/spanish/04196.wav",
+   "group": "spanish",
+   "ref": "THE THE MAGICAL GRAND GRAND SOMETHING",
+   "none": "the magical grand grand something",
+   "trigger": "the magical grand grand something"
+  },
+  {
+   "wav": "edacc/spanish/04198.wav",
+   "group": "spanish",
+   "ref": "NO NO THERE IS ANOTHER ONE THAT'S IN CARTOONS",
+   "none": "No, no, there is another one, I think, cartoon.",
+   "trigger": "no no there is another one"
+  },
+  {
+   "wav": "edacc/spanish/04200.wav",
+   "group": "spanish",
+   "ref": "OR BOB SQUARE BO SQUARE PANTS BUT SPONGE BLAD UH <LAUGH> I KNOW IT WAIT IT'S BOB A SQUARE",
+   "none": "Or Bob Square Pants, Sponge, Blah, Blah, I know, wait, it's Bob Square Pants.",
+   "trigger": "or bob a square but a square pants sponge blah blah I know it anyway it's bob a square"
+  },
+  {
+   "wav": "edacc/spanish/04204.wav",
+   "group": "spanish",
+   "ref": "PANTS YES THAT'S WHAT I MEANT <LAUGH>",
+   "none": "Yes, that's what I meant.",
+   "trigger": "yes that's what I meant"
+  },
+  {
+   "wav": "edacc/spanish/04206.wav",
+   "group": "spanish",
+   "ref": "THAT KIND OF SHOWS THAT THERE WAS THE ONE THAT USED TO SHOW ON TV OR POWER RANGERS BUT THAT'S NOT A CARTOON BUT I THINK THAT WAS PRETTY POPULAR I REMEMBER ME AND MY BROTHER IS SQUEEZING JUST TO SEE POWER RANGERS",
+   "none": "that kind of shows that there was the one that used to show on tv or power rangers but that's not a cartoon but i think that was pretty popular i remember me and my brother squeezing just to see the Power Rangers.",
+   "trigger": "that kind of shows that there was the one that used to show on tv or power rangers but that's not a cartoon but i think that was pretty popular i remember me and my brother squeezing just to see the power rangers"
+  },
+  {
+   "wav": "edacc/spanish/04208.wav",
+   "group": "spanish",
+   "ref": "YES BUT THAT WAS QUITE ANNOYING FOR ME AND I WAS <OVERLAP>",
+   "none": "Yes, but that was quite annoying for me.",
+   "trigger": "yes but that was quite annoying for me and i learned a lot"
+  },
+  {
+   "wav": "edacc/spanish/04212.wav",
+   "group": "spanish",
+   "ref": "LOOK AT THAT NO NO UM PROBABLY I'M I WAS ALREADY LIKE IN MIDDLE SCHOOL WHEN BOB HAPPENED <LAUGH>",
+   "none": "look at that no no and probably i'm i was already like in middle school when bob happened",
+   "trigger": "look at that no no and probably i'm i was already like in middle school when bob happened"
+  },
+  {
+   "wav": "edacc/spanish/04214.wav",
+   "group": "spanish",
+   "ref": "OR PROBABLY I YEAH YEAH YEAH BECAUSE ONLY REMEMBER THE SENSATION OF UH WHY <LAUGH> OH THE SHOWS ABOUT THE TRAINS I DON'T KNOW YOU KNOW LIKE THERE IS A REALLY CREEPY TRAIN",
+   "none": "probably i yeah yeah because i only remember this sensation of why of these shows about the trains i don't know you know like there is a really creepy train",
+   "trigger": "probably i yeah yeah because i only remember this sensation of why of these shows about the trains i don't know you know like there is a really creepy train"
+  },
+  {
+   "wav": "edacc/spanish/04218.wav",
+   "group": "spanish",
+   "ref": "YES FOR SURE <LAUGH> HEY ARNOLD HEY ARNOLD WAS OKAY",
+   "none": "Yes, hey, Arnold. Hey, Arnold was okay.",
+   "trigger": "yes hey arnold hey arnold was okay"
+  },
+  {
+   "wav": "edacc/spanish/04222.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> IDENTIFY YEAH WELL YOU WERE MENTIONING <LAUGH> THAT'S OKAY THAT'S OKAY WELL WE'RE ALMOST DONE WE MAY LIKE THIRTEEN SECONDS AND THEN WE'RE DONE AND HOPEFULLY",
+   "none": "Identify Emily information. That's okay. Wow, we're almost done. We made like 13 seconds. And that will do. And hopefully...",
+   "trigger": "identify Emily information that's okay well we're almost done we made like 13 seconds and that will do and how"
+  },
+  {
+   "wav": "edacc/spanish/04226.wav",
+   "group": "spanish",
+   "ref": "OH NO IT'S NOT TEN YES FIFTEEN FOURTEEN THIRTEEN",
+   "none": "oh no it's not 10 years, it's 15, 14, 13",
+   "trigger": "oh no, it's not 10, it's 15, 14, 13"
+  },
+  {
+   "wav": "edacc/spanish/04230.wav",
+   "group": "spanish",
+   "ref": "AH NO BUT ALREADY IT'S TEN PAST FOUR THREE TWO ONE <DTMF> <LAUGH> THAT'S IT <RING> THAT'S IT LET'S STOP WITH THE RECORDING",
+   "none": "Ah, no, but already this 10 passed, 4, 3, 2, 1, we did it, yay! That's it, let's see, let's stop the recording.",
+   "trigger": "ah no but already we stand past four three two one we did it yay that's it let's see let's stop the recording"
+  },
+  {
+   "wav": "edacc/spanish/08531.wav",
+   "group": "spanish",
+   "ref": "GREAT GREAT OKAY UH I LIKE YOUR ACCENT YOU HAVE A UH A BRITISH ACCENT",
+   "none": "great great okay i like your accent you have a british accent",
+   "trigger": "great great okay uh i like your accent you have a british accent"
+  }
+ ]
+}

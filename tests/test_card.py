@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling helpers
 
 import flow.ui as ui  # noqa: E402
+from flow.session import Event  # noqa: E402
 from test_editor import WORK, MeasuringCanvas  # noqa: E402
 
 WORD = "release notes about the migration on Tuesday with Sameer and the rollback plan "
@@ -602,6 +603,89 @@ class TestTheBubbleStaysShutInConverse(unittest.TestCase):
         p.session = object()
         p.bubble, p.card = mock.Mock(), mock.Mock()
         self.assertIs(p.front, p.bubble)
+
+
+class TestAnAnswerThatLandsAfterTheSwitch(unittest.TestCase):
+    """Reported from a screenshot: a dictate draft with the conversation card behind it.
+
+    The sequence was ask in converse, clear, switch to dictate, start a new draft from
+    the clipboard — and the CLI, still working, answered into a mode that had moved on.
+    `_swap_surfaces` says exactly one window is up afterwards and it was true when it
+    ran; the reply branch then deiconified the card on top of the bubble, several
+    seconds later, with nothing on screen explaining why.
+
+    `Session.send()` cannot ask in dictate mode, and the reply branch was commented
+    "converse only, by construction" on the strength of it. That argument covers the
+    moment a question *leaves*. It says nothing about the moment an answer *arrives*,
+    which is the one this class is about — and the gap between them is the whole 4-20 s
+    the CLI takes.
+    """
+
+    def pill(self, mode):
+        p = ui.Pill.__new__(ui.Pill)
+        p.session = mock.Mock(mode=mode, state=ui.State.IDLE)
+        p.bubble, p.card = mock.Mock(), mock.Mock()
+        p._asked, p._last_draft, p._flash = False, "", 0
+        return p
+
+    def pump(self, p, *events):
+        p.session.events.return_value = [Event(k, t) for k, t in events]
+        p._pump_events()
+
+    def test_in_converse_the_answer_still_comes_up_on_the_card(self):
+        p = self.pill(ui.CONVERSE)
+        self.pump(p, ("reply", "you add it with a migration"))
+        p.card.answer.assert_called_once()
+        self.assertTrue(self.raised(p.card.answer))
+
+    def test_in_dictate_it_does_not_open_the_card_over_the_draft(self):
+        p = self.pill(ui.DICTATE)
+        self.pump(p, ("reply", "you add it with a migration"))
+        self.assertFalse(self.raised(p.card.answer),
+                         "the card came up on top of the bubble")
+
+    def test_but_the_answer_is_not_thrown_away_either(self):
+        # The other way to keep one window up, and it is worse: the CLI spent seconds
+        # on this, the question is spent with it, and there is no second copy anywhere.
+        p = self.pill(ui.DICTATE)
+        self.pump(p, ("reply", "you add it with a migration"))
+        p.card.answer.assert_called_once()
+        self.assertEqual(p.card.answer.call_args.args[0], "you add it with a migration")
+
+    def test_and_the_bubble_says_the_answer_arrived(self):
+        # P2's rule about dropped speech, read across to a dropped *surface*: the answer
+        # may be off screen, it may not be off screen unexplained. `surface` rather than
+        # `note` because the bubble paints a note only when it is already showing, and
+        # the case that needs the line most is the one with no draft up.
+        p = self.pill(ui.DICTATE)
+        self.pump(p, ("reply", "you add it with a migration"))
+        p.bubble.surface.assert_called_once()
+        self.assertIn("converse", p.bubble.surface.call_args.args[0])
+
+    def test_and_the_card_stays_shut_in_dictate(self):
+        p = self.pill(ui.DICTATE)
+        self.pump(p, ("reply", "an answer"))
+        for opened in (p.card.show, p.card.deiconify):
+            opened.assert_not_called()
+
+    def test_switching_back_finds_the_answer_waiting(self):
+        # What the held answer is for. `_swap_surfaces` opens the card and the card
+        # renders what it was given while it was down — so the trip is one mode switch,
+        # not a re-ask.
+        c = card()
+        c._visible = False
+        c.deiconify = mock.Mock()
+        c.attributes = mock.Mock()
+        c.answer("you add it with a migration", surface=False)
+        self.assertEqual(c._answer, "you add it with a migration")
+        c.deiconify.assert_not_called()
+        c.show()
+        c.deiconify.assert_called_once()
+
+    @staticmethod
+    def raised(call) -> bool:
+        """Did the reply branch ask the card to come up, or only to hold the text?"""
+        return call.call_args is not None and call.call_args.kwargs.get("surface", True)
 
 
 if __name__ == "__main__":

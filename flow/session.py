@@ -46,12 +46,13 @@ from .edits import (
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
 from .help import auto_ask_notice, exits_note
+from .notes import Notes, render as render_notes, write as write_notes
 from .phonetic import similarity
 from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
 from .refine import ask, available, refine, tail_sent
-from .thread import Thread
+from .thread import ASK_CONTEXT_CHARS, Thread
 
 #: What every converse ask carries after the question. It used to say the opposite of
 #: this — "help the developer refine the prompt above … do not carry out the task it
@@ -534,6 +535,17 @@ class Session:
         #: it survives both, because "what did I say ten minutes ago" is a question
         #: about the session rather than about the current conversation.
         self._recent: deque[tuple[str, str]] = deque(maxlen=RECENT_MAX)
+        #: P9: what the speaker stopped to keep. A third store rather than a view of the
+        #: other two, and for the reason that separates all three: `thread` is what the
+        #: CLI is told, `_recent` is what happened, and this is what was *chosen* — the
+        #: only one of them entered by a deliberate act, which is what makes it the only
+        #: one that may reach a file (`flow/notes.py`).
+        self.notes = Notes()
+        #: The question the answer on screen came from, so keeping "that exchange" keeps
+        #: both halves of it. `_recent` holds the same string, but reading it back out
+        #: would mean trusting a search through a mixed-role deque to find the right one;
+        #: this is the fact itself, set where the question is known.
+        self._last_question = ""
         #: True when the current draft was opened as a follow-up, which is what lets a
         #: CLI rewrite see the thread tail without every ordinary correction paying for
         #: the extra context.
@@ -571,7 +583,9 @@ class Session:
         self._cli = cli
         self._cli_timeout = cli_timeout
         #: (op, draft revision, result) — see `_next_op`.
-        self._refine_result: tuple[int, int, tuple[str | None, str]] | None = None
+        self._refine_result: (
+            tuple[int, int, tuple[str | None, str], tuple[str, ...]] | None
+        ) = None
         self._refine_lock = threading.Lock()
         #: Identity for CLI calls, and the id of whichever one is in flight. `state`
         #: cannot carry this: routing keeps running while a call is out and used to
@@ -621,7 +635,9 @@ class Session:
         #: never theirs. Caught exactly that way — the first run of this file left 1513
         #: records from the unit suite in a real profile directory.
         self.diag = diag if diag is not None else NullDiag()
-        self._ask_result: tuple[int, tuple[str | None, str]] | None = None
+        self._ask_result: (
+            tuple[int, tuple[str | None, str], tuple[str, ...]] | None
+        ) = None
         self._ask_lock = threading.Lock()
         #: The last answer, kept so the UI can re-render it and so a follow-up has
         #: something to refer to.
@@ -860,32 +876,44 @@ class Session:
             self.state = state
             self._emit("state", state.value)
 
-    def _trace_cli(self, kind: str, op: int, ok: bool, note: str) -> None:
+    @staticmethod
+    def _failure_category(note: str) -> str:
+        """One word for a failure sentence, so the trace can be counted.
+
+        A failure reason is built from the CLI's own stderr, so it is reduced to a
+        category rather than written down. The categories are the ones `refine._invoke`
+        produces.
+        """
+        low = note.lower()
+        for word, category in (("timed out", "timeout"), ("cancelled", "cancelled"),
+                               ("exited", "exit"), ("failed to start", "no-start"),
+                               ("no agent cli", "no-cli"),
+                               ("no time left", "no-time"),
+                               ("commentary", "commentary"),
+                               ("returned nothing", "empty")):
+            if word in low:
+                return category
+        return "other"
+
+    def _trace_cli(self, kind: str, op: int, ok: bool, note: str,
+                   skipped: tuple[str, ...] = ()) -> None:
         """Record how a CLI call ended, without recording what it said.
 
-        `note` is the provider's name on success and a failure reason on the way out,
-        and a failure reason is a sentence built from the CLI's own stderr — so it is
-        reduced to a category here rather than written down. The categories are the
-        ones `refine._invoke` produces.
+        `note` is the provider's name on success and a failure reason on the way out.
+
+        `skipped` is what the walk passed over on the way to an answer, and it is
+        recorded because its absence is what made this defect unreadable from the trace.
+        Every ask failure on the owner's machine — 11 of 11 — read `provider:null,
+        reason:"timeout"`, and every success read one provider and nothing else; there
+        was no third shape, so a fallback that fired and a first choice that answered
+        were the same record. Categories rather than sentences, for the reason above.
         """
-        reason = ""
-        if not ok:
-            low = note.lower()
-            for word, category in (("timed out", "timeout"), ("cancelled", "cancelled"),
-                                   ("exited", "exit"), ("failed to start", "no-start"),
-                                   ("no agent cli", "no-cli"),
-                                   ("commentary", "commentary"),
-                                   ("returned nothing", "empty")):
-                if word in low:
-                    reason = category
-                    break
-            else:
-                reason = "other"
         self.diag.write(
             kind, op=op, ok=ok,
             ms=round((time.perf_counter() - self._cli_started) * 1000),
             provider=note if ok else None,
-            reason=reason or None,
+            reason=None if ok else self._failure_category(note),
+            skipped=[self._failure_category(s) for s in skipped] or None,
         )
 
     def _provider(self) -> str:
@@ -1225,11 +1253,11 @@ class Session:
         # one costs, and an unbounded list of every utterance ever spoken is a recording.
         self._sent.append(record)
         self._last_audio = audio
-        # The decoder is told the word exists, on every final decode, from the live
-        # profile — so a trigger renamed through the menu biases the very next
-        # utterance rather than the next launch. Set here rather than at construction
-        # because `send_words` reads the profile, and the menu writes it.
-        self.asr.trigger_words = self.send_words
+        # The send words are deliberately *not* handed to the decoder. Biasing toward
+        # them made it produce them: 6 of 280 short clips decoded to exactly "boom" —
+        # references "MM HMM", "UM", "YEAH THAT'S COOL" — and a whole-utterance match is
+        # a Send. `flow/asr.py` carries the measurement. `_note_near_miss` below is the
+        # part that survives, because it reads what the decoder said unprompted.
         self.worker.submit_final(audio, record)
         self._utter = []
         self._decoded_sec = 0.0
@@ -1334,6 +1362,16 @@ class Session:
         if thread_plan.kind == "followup":
             trace("followup")
             self._start_followup(thread_plan.payload, record)
+            return
+        if thread_plan.kind == "note":
+            # P9. Meaningful with an empty draft for the same reason `take` is: an answer
+            # arrives into one, and keeping the answer is what the verb is mostly for.
+            trace("note")
+            self.keep_note(thread_plan.payload)
+            return
+        if thread_plan.kind == "wrap":
+            trace("wrap")
+            self.wrap_up()
             return
 
         if not self.draft.text:
@@ -1601,6 +1639,87 @@ class Session:
         self._settle_state()
         self._settled_at = None
         self._emit("draft", self.draft.text)
+        return True
+
+    def keep_note(self, text: str = "") -> bool:
+        """P9: file something worth keeping. True when a note was actually kept.
+
+        Two callers, two meanings, and the argument is which one:
+
+        - **`text` given** — the speaker dictated the note. Kept as it was said, with no
+          question above it, because it stands on its own.
+        - **`text` empty** — the bare verb, which keeps *the exchange on screen*: the
+          answer and the question that produced it. That pairing is the whole value. An
+          answer filed without its question reads a week later as an assertion from
+          nowhere, and the question is the thing somebody scanning the file navigates by.
+
+        Refuses out loud rather than quietly doing nothing, the way `send()` does: a verb
+        that sometimes works and sometimes is silent is one people stop trusting.
+        """
+        text = (text or "").strip()
+        question = ""
+        if not text:
+            if not self.reply:
+                self._emit("note", "nothing to keep yet - ask something first")
+                return False
+            text, question = self.reply, self._last_question
+        dropped = self.notes.add(
+            text, question=question, workspace=self._workspace_leaf()
+        )
+        n = len(self.notes)
+        self.diag.write("note", kept=n, chars=len(text), exchange=bool(question))
+        self._emit("note", f"kept - {n} note" + ("" if n == 1 else "s")
+                   + " so far, say \"wrap up\" for the file")
+        if dropped:
+            # P2's rule, extended from dropped speech to dropped notes: it may happen,
+            # it may not happen unexplained. Said second so the confirmation lands first.
+            self._emit("note", f"the oldest {dropped} fell off - the buffer is full")
+        return True
+
+    def wrap_up(self) -> bool:
+        """P9: the kept notes as one document, on screen and — with a workspace — on disk.
+
+        **On screen always, and through the reply.** The conversation card already draws
+        an answer, already carries Copy and Use this, and `take_reply` already moves one
+        into the draft. Routing the document through the same slot means the notes are
+        copyable and pasteable the moment they exist, with no new surface and no second
+        rendering to keep in step.
+
+        **A file only where the user already pointed Flow.** With no workspace there is
+        no folder this app has any business choosing on somebody's behalf, so the notes
+        stop at the screen and the note says so — which is Lite's answer to the same
+        question (the last inch is the clipboard) rather than a degraded version of it.
+
+        **The buffer is cleared only on success**, and never on a failed write: a full
+        disk must cost a retry, not the notes.
+        """
+        held = self.notes.all
+        if not held:
+            self._emit("note", 'nothing kept yet - say "keep note" after an answer')
+            return False
+        leaf = self._workspace_leaf()
+        doc = render_notes(held, workspace=leaf)
+        where = self._refine_cwd
+        if where:
+            try:
+                path = write_notes(doc, where)
+            except OSError as exc:
+                self.diag.write("wrap", ok=False, kept=len(held))
+                self._emit("error", f"could not write the notes ({exc}) - "
+                                    "they are still kept")
+                return False
+            self._emit("reply", doc)
+            self.reply = doc
+            self._emit("note", f"{len(held)} note"
+                       + ("" if len(held) == 1 else "s") + f" written to {path}")
+        else:
+            self._emit("reply", doc)
+            self.reply = doc
+            self._emit("note", f"{len(held)} note"
+                       + ("" if len(held) == 1 else "s")
+                       + " on screen - Copy takes them (no workspace set, so no file)")
+        self.diag.write("wrap", ok=True, kept=len(held), wrote=bool(where))
+        self.notes.clear()
         return True
 
     def _start_followup(self, rest: str, record: Utterance | None = None) -> None:
@@ -2084,13 +2203,15 @@ class Session:
         context = self.thread.tail() if self.following_up else []
 
         def work() -> None:
+            passed_over: list[str] = []
             result = refine(
                 before, instruction, cwd=self._refine_cwd, polish=polish,
                 context=context, cancel=self._cancel,
                 cli=self._cli, timeout=self._cli_timeout,
+                skipped=passed_over,
             )
             with self._refine_lock:
-                self._refine_result = (op, revision, result)
+                self._refine_result = (op, revision, result, tuple(passed_over))
 
         threading.Thread(target=work, daemon=True, name="refine").start()
 
@@ -2099,13 +2220,13 @@ class Session:
             pending, self._refine_result = self._refine_result, None
         if pending is None:
             return
-        op, revision, (revised, note) = pending
+        op, revision, (revised, note), skipped = pending
         if op != self._refine_op:
             # A result for a call nobody is waiting on any more — the same rule as a
             # rescue nobody asked for: ignore it rather than act on it.
             return
         self._refine_op = None
-        self._trace_cli("refine", op, revised is not None, note)
+        self._trace_cli("refine", op, revised is not None, note, skipped)
         if revised is None:
             self._emit("error", f"refine failed ({note}) — draft unchanged")
         elif revision != self.draft.revision:
@@ -2116,7 +2237,8 @@ class Session:
             self._emit("note", "discarded a stale rewrite — the draft moved on")
         else:
             self.draft.set(revised)
-            self._emit("note", f"refined via {note}")
+            self._emit("note", f"refined via {note}" if not skipped
+                       else f"refined via {note}, after {'; then '.join(skipped)}")
         self._after_draft_change()
 
     # -- actions -----------------------------------------------------------
@@ -2261,7 +2383,16 @@ class Session:
         nothing when pressed reads as broken — which is exactly how it was reported.
         """
         if not self.draft.text.strip():
-            self._emit("note", "nothing to send - the draft is empty")
+            # Named for the button that was pressed and for what is on screen while it
+            # says this. In converse the chip reads **Ask**, and the card behind it is
+            # showing the question, its answer and the turns before them — so "nothing to
+            # send - the draft is empty" was three names for two things, and it read as
+            # Flow denying the conversation it was displaying. Reported that way on
+            # 2026-08-06: "even though there is context". The draft really was empty; the
+            # sentence was talking about the wrong object.
+            self._emit("note",
+                       "nothing to ask - say a question first" if self.mode == CONVERSE
+                       else "nothing to send - the draft is empty")
             return ""
         # The in-flight calls, not `state`: the state is a display of what is happening
         # and routing can move it, while these two are the fact itself.
@@ -2314,6 +2445,10 @@ class Session:
         framed = kept + framing
 
         self._remember_recent(RECENT_ASKED, question)
+        # Recorded from the *user's* words, like the note and the trace above it, and
+        # before the answer exists: this is what a kept exchange is headed with, and a
+        # heading naming the framed string would name a sentence nobody said.
+        self._last_question = question
         self.diag.write("ask", op=op, chars=len(question),
                         sent=len(kept), mode=self.mode, artifact=artifact)
         self._cli_started = time.perf_counter()
@@ -2340,14 +2475,26 @@ class Session:
         # The thread already holds this question (send() added it), so the context is
         # every *earlier* turn — passing the current one would ask the CLI not to
         # answer the thing it was just asked.
-        context = self.thread.tail()[:-1]
+        context = self.thread.tail(ASK_CONTEXT_CHARS)[:-1]
+        # The card is showing all of them; only some of them go. That gap used to be
+        # invisible, and an invisible gap is what makes a CLI look like it has forgotten
+        # a conversation the user can still see — the note is the difference between
+        # amnesia and a bound. Said only when it bites, so the ordinary case stays quiet.
+        behind = len(self.thread.turns) - 1
+        if behind > len(context):
+            self._emit("note", f"the CLI saw the last {len(context)} of {behind} "
+                               f"earlier turns - the older ones did not fit")
 
         def work() -> None:
+            passed_over: list[str] = []
             result = ask(framed, cwd=self._refine_cwd, context=context,
                          cancel=self._cancel, artifact=artifact,
-                         cli=self._cli, timeout=self._cli_timeout)
+                         cli=self._cli, timeout=self._cli_timeout,
+                         skipped=passed_over)
             with self._ask_lock:
-                self._ask_result = (op, result)
+                # Written after `ask` returns and read under this lock, which is what
+                # makes the list safe to hand across: the worker owns it until here.
+                self._ask_result = (op, result, tuple(passed_over))
 
         threading.Thread(target=work, daemon=True, name="ask").start()
 
@@ -2356,11 +2503,11 @@ class Session:
             pending, self._ask_result = self._ask_result, None
         if pending is None:
             return
-        op, (answer, note) = pending
+        op, (answer, note), skipped = pending
         if op != self._ask_op:
             return
         self._ask_op = None
-        self._trace_cli("ask", op, answer is not None, note)
+        self._trace_cli("ask", op, answer is not None, note, skipped)
         if answer is None:
             # Non-destructive by construction: the question is still in the thread, so
             # "say that again" and a retry both still work.
@@ -2382,7 +2529,12 @@ class Session:
                         # The work is on screen in full; the voice only points at it.
                         spoken = f"a {lines}-line answer is on screen"
                 self.speaker.say(spoken)
-            self._emit("note", f"answered via {note}")
+            # One sentence, both facts. A fallback that rescues a call is good news and
+            # still has to be legible: without the tail, a 40 s wait answered by the
+            # third CLI looked exactly like a fast first-choice answer, and the provider
+            # the pill named was not the one that spoke.
+            self._emit("note", f"answered via {note}" if not skipped
+                       else f"answered via {note}, after {'; then '.join(skipped)}")
         # Not IDLE: the microphone was open for the whole wait, so there may be a draft
         # by now — and a rewrite of it may already be out. Reporting nothing held would
         # also stop the countdown that was running on that draft, silently.

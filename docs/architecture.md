@@ -777,6 +777,11 @@ a miss lands in the draft as text with no note, so the user's evidence that the 
 exists is that nothing happened. Recognition had been measured at exactly one
 microphone; the 2026-07 accent audit predicted this by name.
 
+> **Withdrawn 2026-08-05, on measurement. The first mechanism was a safety defect and is
+> gone; the other two stand.** The paragraph below describes what shipped between b7bc6aa
+> and its removal, and is kept because the reasoning was reasonable and the numbers are
+> the only thing that refuted it. See "The send word is never biased toward" below.
+
 `Transcriber._standing_bias` merges the configured send words into the **final** decode's
 bias — merged rather than either/or, which is the difference from the rescue path, where
 a caller-supplied bias replaces everything because a rescue is aimed at one utterance.
@@ -803,6 +808,132 @@ execute**: letting edit distance fire a send is a standing refusal, because a se
 irreversible in dictate mode and the whole grammar rests on a wrong edit costing one undo
 while a wrong send costs a paragraph in a stranger's terminal. Routing is untouched and
 the exact-match rule stands.
+
+### The send word is never biased toward
+
+2026-08-05, and it reverses the first of the three mechanisms above. `hotwords` is not a
+scoring hint. faster-whisper encodes it into the `<|startofprev|>` prompt slot
+(`transcribe.py:get_prompt`) — the same context `condition_on_previous_text=False` exists
+to keep empty, and the one Whisper parrots out of when the audio is short or unsure. The
+bias does not teach the decoder a word. It gives it a word to guess with.
+
+Measured by `scripts/trigger_bias_bench.py`, two arms over the same clips, both through
+`WhisperTranscriber.text(final=True)`:
+
+| slice | model | WER none → bias | send word invented | **whole-utterance false SEND** |
+|---|---|---|---|---|
+| 300 conversational | `small.en` | 0.195 → 0.188 | 0 → 4 | 0 → 0 |
+| 300 conversational | `large-v3-turbo` | 0.179 → **0.157** | 0 → 1 | 0 → 0 |
+| 280 **short** | `small.en` | 0.534 → 0.624 | 0 → 26 | **0 → 6** |
+| 280 **short** | `large-v3-turbo` | 0.458 → 0.501 | 0 → 14 | **0 → 6** |
+
+The six are `UM`, `TOODLES`, `OF AZKABAN`, `I DON'T KNOW`, `TWO MONTHS`, `NO NO NO NO` —
+each decoding to exactly `boom`, which is a whole-utterance match, which is a Send. A
+filler sound while a draft is held pasted it into a terminal and pressed Enter. That is
+not a word-error rate; it is the irreversible action the grammar is built to make rare,
+and the whole-utterance rule was doing its job — the bias was manufacturing whole
+utterances for it to match. **The stronger model is no safer**: `large-v3-turbo` produces
+the same six. Model quality is not the variable; a prompt on a low-information utterance
+is.
+
+**The accuracy column does not point one way, and the row that helps is the honest
+problem with this entry.** On `small.en` the conversational slice moves −0.007 toward the
+bias, inside the sampling noise. On `large-v3-turbo` it moves −0.021, same sign on all
+five groups — a real 12% relative gain, not noise. That is worth knowing and it is not a
+case for biasing toward the *send word*: it says some `<|startofprev|>` content suits long
+conversational audio, and any neutral string would test that without arming a Send. The
+two effects also do not trade against each other — the utterances that gain are long ones,
+which could never have fired a Send however they decoded, and the utterances that lose are
+short ones, which are the only ones that can. A neutral-prompt experiment is the follow-up
+this leaves open.
+
+**A gate on utterance length was tried first and was exactly backwards.** `edits._trigger`
+matches the whole utterance, so an utterance long enough to hold more than "enter <word>"
+can never fire a Send — from which it follows that the bias is only *useful* on short
+ones, and only *harmful* on long ones. The second half is false. Short is where the prompt
+dominates, so gating to short kept the bias precisely where all six false sends were.
+Recorded because the reasoning is tempting and only the numbers catch it.
+
+What stays: the lexicon, which is words the user actually says and whose cost is priced in
+the file's own comments, and `_note_near_miss`, which reads phonetic similarity off text
+the decoder produced unprompted and only ever speaks. `Session._finalise` no longer
+publishes the send words onto the transcriber, and `Transcriber` no longer has a
+`trigger_words` attribute at all.
+
+### The decode runs on the GPU when there is one
+
+2026-08-05. Every tier argument above is a **CPU** argument, and "CPU-only" appears
+throughout this document as an assumption that was never a decision — nothing in
+`docs/decisions.md` ever weighed it. This machine has a GTX 1070 that had never been
+asked.
+
+`asr.cuda_ready()` decides, once, whether a decode can actually run there. Three things
+have to line up and only the first shows in `nvidia-smi`: a device has to exist,
+CTranslate2 has to see it, and the CUDA runtime has to be loadable. The third is the one
+that fails on Windows, and it fails **late** — the model builds happily on `cuda` and the
+first *encode* raises `Library cublas64_12.dll is not found`. The runtime ships as pip
+wheels (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) that drop DLLs under
+`site-packages/nvidia/*/bin`, which nothing puts on the loader path; and
+`os.add_dll_directory` alone is not enough either, because CTranslate2 asks for cuBLAS
+with a plain runtime `LoadLibrary` long after import. So the directories go on `PATH` and
+the libraries are loaded by absolute path up front. Checking this rather than trusting the
+device count is what makes a missing runtime a fallback instead of a broken session.
+
+Measured on the 300-clip EdAcc slice, int8, with the app's own decode options:
+
+| model | WER | RTF | `no_speech_prob` on silence |
+|---|---|---|---|
+| `small.en` (CPU, what shipped) | 0.195 | 0.74 | 0.878 |
+| `small.en` (GPU) | 0.194 | 0.070 | 0.878 |
+| `medium.en` (GPU) | 0.183 | 0.131 | — |
+| `distil-large-v3` (GPU) | 0.181 | 0.111 | — |
+| `large-v3-turbo` (GPU) | 0.178 | 0.116 | **0.000** |
+| `large-v2` (GPU) | 0.170 | 0.211 | — |
+| **`large-v3` (GPU)** | **0.168** | 0.190 | 0.849 |
+| `distil-large-v3.5` (GPU) | **0.160** | 0.104 | **0.130** |
+
+**The lowest word error is not the tier, and the last column is why.** `invented_reason`
+gates on `no_speech_prob` *before* it consults the filler list, so a model that cannot
+report the signal does not get a softer hallucination filter — it gets none. Measured on
+three seconds of digital silence, room noise and fan noise: `large-v3-turbo` and
+`distil-large-v3.5` return `you` / `Thank you.` and **all six were kept**, where
+`small.en` and `large-v3` had all six dropped as `filler`. P2 calls an invented word in
+the user's document a defect; 1.6 fewer word errors per hundred does not buy one.
+
+So the tier is `large-v3`: the best of the models whose signals still work, 13.4%
+relatively better than the `small.en` the CPU ran, and 3.9× faster than it despite being
+the largest thing on the list. `asr.reports_no_speech()` keeps the rest of the list
+usable — a model without the signal now has its `no_speech_prob` passed as `None`, which
+is the path `invented_reason` already documents for a non-Whisper engine, and the narrow
+whole-utterance filler check still fires. Verified: with that in place all three models
+drop all six hallucinations and none of them touches real speech.
+
+On the app's own latency fixtures a final decode goes 2.58 s → 0.63 s (short), 2.92 →
+0.68 (medium), 3.75 → 0.77 (long) — those are turbo's numbers and `large-v3` is roughly
+half again as slow, still far inside anything the draft-held path needs.
+
+**Which collapses the two-tier split.** `small.en` could not drive partials because it
+cost 2.66–3.78 s per prefix against a 1.5 s budget — a CPU fact. On the GPU `large-v3`
+costs 0.75 s at a 1 s prefix rising to 1.30 s at 13 s (median of three), so
+`default_models("cuda")` returns the same model twice. That retires the cost the split
+was paying: the visible partial→final rewrite, where the two tiers disagreed on roughly
+one word in five of accented speech. One model cannot disagree with itself. 1.30 s
+against 1.5 s is the tightest margin on this page and the line to revisit first if
+partials start arriving late under load.
+
+**A note on which corpus decided this.** The 22 volunteer command recordings were run
+too, and they rank the models differently — `large-v3` best at 0.093, `distil-large-v3.5`
+fifth of six at 0.119. That is not a second opinion, it is too small to be one: the set
+holds ~420 reference words, so the whole spread between best and worst is about six word
+errors. EdAcc's 5 155 words put 93 errors between `distil-large-v3.5` and
+`large-v3-turbo`. Route accuracy on the recorded set was **7/22 for all six models**,
+identical — which says the misses there are the router's coverage of free-form phrasing,
+not the decoder, and that no model change will move it.
+
+CPU is unchanged and stays a working configuration: `default_models("cpu")` is still
+`base.en`/`small.en`, the fallback demotes to it if a GPU build fails, and
+`--decode-device cpu` forces it. The startup line names which one was chosen, because the
+two answers are 3.7 s and 0.3 s and there is otherwise no way to tell.
 
 **The recording kit teaches the six words** (item 70). `docs/recording-kit.md`,
 `docs/record.html` and `ingest_recordings.EXPECTED` gained items 12–17 — one per shipped
@@ -1231,6 +1362,22 @@ the reply rendering and the `Use this` chip were removed rather than left unused
 test asserts their absence, because a `show_reply` that came back would be the two
 surfaces becoming one again and it would come back looking like a convenience.
 
+**An answer can outlive the mode that asked for it, and holding it is the third option.**
+`Session.send()` cannot ask in dictate mode, and the reply branch was once written on the
+strength of that — but the constraint is about where a question *leaves*, not where its
+answer *arrives*, and between the two is the whole 4-20 s the CLI takes. Switch mode
+inside that window and the reply used to deiconify the card on top of the draft bubble,
+seconds later, with nothing on screen saying why; it was reported from a screenshot as
+"both modes got activated", which is what two windows look like. Dropping the answer
+would have kept one window and is worse — the CLI spent those seconds and the question is
+spent with them. So `ConversationCard.answer` takes `surface=`: the text is filed either
+way and the window is raised only when the card is the surface this mode owns, with the
+bubble told `ANSWER_HELD` so an answer off screen is never an answer unexplained. Reading
+it costs one mode switch, because `_swap_surfaces` opens the card and the card renders
+what it was given while it was down. `_tick`'s crash handler goes through `front` for the
+same rule, falling back to the bubble rather than trusting a surface that may be the thing
+that just raised.
+
 **Starting again is one act.** `Session.new_conversation()` clears the thread, the reply
 and — through a `conversation` event — the card. Root 4's other half was that `Clear
 draft` cleared the draft and left the other three alive, so "clear prompt did not start
@@ -1288,7 +1435,9 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `ASK_ARTIFACT_MAX_CHARS` | 12 000 | The artifact render bound — a bound, not a brief: truncating a prompt someone asked for in full is worse than a tall bubble. This row has been wrong twice and is worth reading as a record of that. It said "the bubble scrolls", which was measured on 2026-08-02 and was true of no path: 12 000 characters sized the window **4 179 px** on a 672 px desktop and it was placed off the bottom, chips and all. Item 42 fitted the window to the desktop, and the row then said the tail was "clipped rather than off-screen" — true, and still silent, which is the same defect the draft had before it got an elision line. What happens now: the bubble draws the answer's **head** and says `… N more lines` at the foot with N measured off the canvas, the window settles at 643 px on this desktop showing ~1 730 characters, and **Copy and `Use this` carry all 12 000** because they read `session.reply` and never the drawn string. So the ceiling is what the model may produce, the window is what the card shows, and the exits are what gets the rest. The spoken half flips instead: past `ARTIFACT_SAY_MAX_LINES` / `ARTIFACT_SAY_MAX_CHARS` the voice says only "a 12-line answer is on screen", because invariant 6 makes a read-aloud artifact minutes of deafness |
 | `ASK_MAX_CHARS` | 4000 | The bubble has to render it |
 | `Thread.MAX_TURNS` / `MAX_CHARS` | 20 / 20 000 | R8. Measured: 5000 sends of a realistic prompt settle at 20 turns, 1640 chars |
-| `CONTEXT_CHARS` | 1500 | What a CLI rewrite may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |
+| `CONTEXT_CHARS` | 1500 | What a CLI **rewrite** may see — smaller than the store, because context disambiguates a follow-up rather than re-sending the conversation |
+| `ASK_CONTEXT_CHARS` | 8000 | What a CLI **question** may see (item 74). Converse inherited the rewrite's number and it was sized for a different job: a conversation *is* its context, and the card renders every turn of it. Measured — five turns on screen, three of the four prior ones sent, and the CLI reporting it had only "this conversation, which started with a question about a step-by-step plan". Still under half the store, so R8's bound holds; when it does cut, `_start_ask` now says how many turns went |
+| `refine.ABANDON_SEC` | 5.0 | What `_abandon` spends reaping a killed call, counted into the walk's budget rather than assumed free — a candidate that times out costs its wait *and* this |
 | `Lexicon.MAX_TERMS` | 64 | The library truncates its prompt at 223 tokens *silently, mid-term*, which would bias toward a fragment. Terms and corrections share it: one file, one person filling it, and counting them apart would let 64 corrections buy 64 hotwords past the budget |
 | `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern. Two consumers now: it promotes a term to a hotword, and it decides when a pair is worth *offering* in the menu — the same bar for suggesting a substitution as for biasing toward a spelling, though only one of them rewrites what somebody said |
 | `Profile.MAX_WORKSPACES` | 5 | The workspace recents the menu offers (item 36). The same modal-stall budget that caps the offers at three and the presets at six: nothing offered in the menu may grow with usage. Bounded on load as well as save, deduped by `normcase+normpath` so a respelt `--cwd` moves an entry to the front instead of growing the list |
@@ -1602,6 +1751,7 @@ what was true.
 | the real mouse | `scripts/send_check.py --live` | the only layer that can answer *did the words arrive*. Opens a window and a console, clicks Send at the coordinates the chip is drawn at with a real `SendInput` mouse click, and reads back what landed in each. Also reads `WS_EX_NOACTIVATE` off both toplevels, and exercises the right-click menu and a drag, because those are what a non-activating window can lose |
 | looking at it | `scripts/ui_probe.py` | renders the pill and bubble against a fake session that walks every state, so there is something to screenshot without a microphone, a model or a person. `--hold STATE` pins one; `--bare` drops the draft, which is the case the indicator exists for; `--sent` presses Send, which is the only way to see the card that stays behind |
 | a person | `scripts/live_check.py` | the only layer that can answer P1 and P3 *live*: a real room, a real microphone, this speaker, this loop. Needs someone at the desk, so it can never run unattended. The recorded layer beside it — `.bench/recorded/`, two speaker groups so far — covers decoding and routing on real voices, but not this live capture path, and two groups is a smoke check, not accent coverage. **Stage D takes `--takes N`**, and it should be used: three single runs of the eleven-item sheet scored 7/11, 8/11 and 6/11, no two missing the same set, and only items 3 and 11 held across all three. A total from one take is not a measurement — the per-item column is, which is why the harness now reports what held every take and what never worked once |
+| two windows or one | `scripts/surface_probe.py` | the one-window rule, read off **Tk's own `state()`** rather than off the code's claim about it, driven through `Pill._frame`. The only layer that can see a *second window*: the unit tests around it assert which argument the reply branch passed, and item 73 was two windows on a screen. Kept, unlike item 63's throwaway toggle probe — which is why item 73 shipped at all |
 | the editor | `tests/test_editor.py` | the keyboard path into the draft, and the three things it endangers: invariant 10's refusal is asserted *while the editor holds the foreground*, the microphone is proved shut and proved to say so, and the auto-ask countdown is wound past `AUTO_ASK_SEC` with the box open to prove nothing is sent. What it cannot see is a real keystroke — that took a real window, a real click and `SendInput`, and is recorded in section 7 |
 | replay | `tests/test_live_replay.py` | all 33 utterances those three runs produced, routed against the same draft, with what the harness recorded that day beside what the grammar does now. It cannot hear anything; what it can do is make the blast radius of a grammar change a test rather than a claim — a change that moves a row nobody argued for fails here |
 

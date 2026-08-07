@@ -511,6 +511,132 @@ class TestTheAnswerArrivesEvenIfNobodyIsListening(unittest.TestCase):
             self.assertIs(s.state, State.ASKING)
 
 
+class TestTheCliIsToldTheConversationTheCardIsShowing(unittest.TestCase):
+    """Item 74. Converse inherited `refine`'s 1 500-character context budget, which was
+    sized for a different job: a rewrite needs just enough thread to know what "the other
+    endpoint" refers to. A conversation *is* its context, and P9's card renders every
+    turn of it — so the number was quietly deciding how much of a visible conversation
+    the CLI could remember, and replies count against it too and are the longer half.
+
+    Measured on the owner's own session: five turns on the card, three of the four prior
+    ones sent. The CLI answered "I only have this conversation, which started with a
+    question about a step-by-step plan" — accurate about what it was handed, and read as
+    amnesia inside one session.
+    """
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def ask_seeing(self, seen: list):
+        def fake(question, **kw):
+            seen.append(list(kw.get("context") or []))
+            return "an answer", "codex"
+        return fake
+
+    def asked(self, s, turns: list[str]) -> list[str]:
+        for turn in turns:
+            s.thread.add(turn)
+        seen: list[list[str]] = []
+        s.draft.set("and what about the workers")
+        with mock.patch("flow.session.ask", side_effect=self.ask_seeing(seen)):
+            s.send()
+            for _ in range(200):
+                s.pump_results()
+                if s.reply:
+                    break
+                time.sleep(0.01)
+        return seen[0]
+
+    def test_an_ordinary_conversation_now_arrives_whole(self):
+        # The measured shape: four prior turns, question and reply alternating, none of
+        # them short. All four used to be three.
+        s = session()
+        s.toggle_mode()
+        turns = [f"turn {i} " + "x" * 400 for i in range(4)]
+        context = self.asked(s, turns)
+        self.assertEqual(len(context), 4, [t[:12] for t in context])
+
+    def test_and_a_conversation_that_still_outruns_the_bound_says_so(self):
+        """The silence was the worse half. A bound nobody is told about is amnesia."""
+        s = session()
+        s.toggle_mode()
+        turns = [f"turn {i} " + "x" * 3000 for i in range(6)]
+        context = self.asked(s, turns)
+        self.assertLess(len(context), 6)
+        self.assertIn("the CLI saw the last", self.notes(s))
+
+    def test_and_says_nothing_when_nothing_was_dropped(self):
+        s = session()
+        s.toggle_mode()
+        self.asked(s, ["short one", "(reply) short answer"])
+        self.assertNotIn("the CLI saw the last", self.notes(s))
+
+
+class TestAFallbackThatRescuesACallIsNotSilent(unittest.TestCase):
+    """Item 74. `_invoke_any` dropped every earlier failure the moment a later CLI
+    answered, so a codex timeout rescued by kiro-cli left no mark in the note, the trace
+    or anywhere else — indistinguishable from a run where codex was never installed. The
+    owner read a 40 s wait answered by the third CLI as the first one being broken.
+
+    Invariant 5 from the other side: a refusal is not silent because something else
+    eventually said yes.
+    """
+
+    class Recording:
+        """A diag that keeps its records in memory. The default writes nothing at all."""
+
+        path = None
+
+        def __init__(self):
+            self.records: list[dict] = []
+
+        def write(self, kind, /, **fields):
+            self.records.append({"kind": kind, **fields})
+
+    def notes(self, s) -> str:
+        return " | ".join(e.text for e in s.events() if e.kind == "note")
+
+    def answer_after(self, *failures):
+        """An `ask` that fills its `skipped` out-parameter the way `_invoke_any` does."""
+        def fake(question, **kw):
+            kw["skipped"].extend(failures)
+            return "Use ALTER TABLE.", "kiro-cli"
+        return fake
+
+    def run_ask(self, fake):
+        s = session(diag=self.Recording())
+        s.toggle_mode()
+        s.draft.set("how do I widen a column")
+        with mock.patch("flow.session.ask", side_effect=fake):
+            s.send()
+            for _ in range(200):
+                s.pump_results()
+                if s.reply:
+                    break
+                time.sleep(0.01)
+        return s
+
+    def test_the_note_names_the_one_that_answered_and_the_one_that_did_not(self):
+        s = self.run_ask(self.answer_after("codex timed out after 20s"))
+        notes = self.notes(s)
+        self.assertIn("answered via kiro-cli", notes)
+        self.assertIn("codex timed out after 20s", notes)
+
+    def test_a_clean_first_answer_still_reads_as_one_sentence(self):
+        s = self.run_ask(lambda question, **kw: ("Use ALTER TABLE.", "codex"))
+        self.assertIn("answered via codex", self.notes(s))
+        self.assertNotIn("after", self.notes(s))
+
+    def test_the_trace_can_tell_the_two_runs_apart(self):
+        # It could not: every success wrote one provider and nothing else, so a fallback
+        # that fired and a first choice that answered were the same record.
+        s = self.run_ask(self.answer_after("codex timed out after 20s",
+                                           "claude exited 1: not logged in"))
+        written = [r for r in s.diag.records if r.get("kind") == "ask" and r.get("ok")]
+        self.assertEqual(written[-1]["provider"], "kiro-cli")
+        self.assertEqual(written[-1]["skipped"], ["timeout", "exit"])
+
+
 class TestSendSaysWhenItRefuses(unittest.TestCase):
     """A button that does nothing when pressed reads as broken, and was reported as
     exactly that. Every refusal is now spoken aloud in the note line."""
@@ -523,6 +649,24 @@ class TestSendSaysWhenItRefuses(unittest.TestCase):
         s.events()
         self.assertEqual(s.send(), "")
         self.assertIn("nothing to send", self._notes(s))
+
+    def test_and_in_converse_it_talks_about_the_button_that_was_pressed(self):
+        """Item 74, reported as "even though there is context".
+
+        The chip reads **Ask**, and the card behind it is showing the question, its
+        answer and the turns before them — so a refusal naming the *draft* read as Flow
+        denying the conversation it was displaying. The draft really was empty; the
+        sentence was about the wrong object.
+        """
+        s = session()
+        s.toggle_mode()
+        s.thread.add("what is the deploy order")
+        s.thread.add("(reply) migrations first, then the workers")
+        s.events()
+        self.assertEqual(s.send(), "")
+        notes = self._notes(s)
+        self.assertIn("nothing to ask", notes)
+        self.assertNotIn("draft", notes)
 
     def test_a_second_ask_while_one_is_in_flight_says_so(self):
         s = session()

@@ -164,7 +164,7 @@ class TestTheWordsCannotGetIn(Temp):
         s.draft.set(f"{SENTINEL} again")
         with s._refine_lock:
             s._refine_op = 999
-            s._refine_result = (999, -1, (f"{SENTINEL} stale", "codex"))
+            s._refine_result = (999, -1, (f"{SENTINEL} stale", "codex"), ())
         s.pump_results()
 
         s.close()

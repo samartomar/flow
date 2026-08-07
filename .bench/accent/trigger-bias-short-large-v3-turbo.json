@@ -1,0 +1,2135 @@
+{
+ "identity": {
+  "date": "2026-08-05",
+  "faster-whisper": "1.2.1",
+  "ctranslate2": "4.8.1",
+  "device": "cuda",
+  "models": {
+   "large-v3-turbo": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+  }
+ },
+ "model": "large-v3-turbo",
+ "device": "cuda",
+ "manifest": "manifest-edacc-short.jsonl",
+ "clips": 280,
+ "stats": {
+  "none": {
+   "us-control": [
+    100,
+    187
+   ],
+   "indian": [
+    76,
+    147
+   ],
+   "japanese": [
+    59,
+    98
+   ],
+   "russian": [
+    55,
+    153
+   ],
+   "spanish": [
+    51,
+    160
+   ]
+  },
+  "trigger": {
+   "us-control": [
+    109,
+    187
+   ],
+   "indian": [
+    93,
+    147
+   ],
+   "japanese": [
+    58,
+    98
+   ],
+   "russian": [
+    55,
+    153
+   ],
+   "spanish": [
+    58,
+    160
+   ]
+  }
+ },
+ "flags": {
+  "none": {
+   "invented": [],
+   "false_send": []
+  },
+  "trigger": {
+   "invented": [
+    {
+     "wav": "edacc-short/us-control/00145.wav",
+     "ref": "I THINK THAT WAS WHAT HAPPEND",
+     "hyp": "boom boom"
+    },
+    {
+     "wav": "edacc-short/us-control/00167.wav",
+     "ref": "FROM <OVERLAP>",
+     "hyp": "boom enter boom enter boom"
+    },
+    {
+     "wav": "edacc-short/us-control/00171.wav",
+     "ref": "<OVERLAP> TOODLES",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/us-control/00243.wav",
+     "ref": "PICK UP W WOW",
+     "hyp": "boom boom boom"
+    },
+    {
+     "wav": "edacc-short/us-control/00375.wav",
+     "ref": "UM",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/indian/00550.wav",
+     "ref": "LIKE TICKING TIME BOMB <OVERLAP>",
+     "hyp": "ticking time boom exactly"
+    },
+    {
+     "wav": "edacc-short/indian/00558.wav",
+     "ref": "NO NONE OF THEM",
+     "hyp": "boom boom"
+    },
+    {
+     "wav": "edacc-short/indian/00576.wav",
+     "ref": "YEAH",
+     "hyp": "boom boom"
+    },
+    {
+     "wav": "edacc-short/indian/00577.wav",
+     "ref": "OF AZKABAN",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/indian/00585.wav",
+     "ref": "I DON'T KNOW",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/indian/00632.wav",
+     "ref": "<OVERLAP> THIS MUCH EMOTION",
+     "hyp": "Boom enter boom Boom enter boom"
+    },
+    {
+     "wav": "edacc-short/japanese/01514.wav",
+     "ref": "TWO MONTHS",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/japanese/01528.wav",
+     "ref": "NO NO NO NO",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/russian/03378.wav",
+     "ref": "YEAH",
+     "hyp": "boom boom"
+    }
+   ],
+   "false_send": [
+    {
+     "wav": "edacc-short/us-control/00171.wav",
+     "ref": "<OVERLAP> TOODLES",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/us-control/00375.wav",
+     "ref": "UM",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/indian/00577.wav",
+     "ref": "OF AZKABAN",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/indian/00585.wav",
+     "ref": "I DON'T KNOW",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/japanese/01514.wav",
+     "ref": "TWO MONTHS",
+     "hyp": "boom"
+    },
+    {
+     "wav": "edacc-short/japanese/01528.wav",
+     "ref": "NO NO NO NO",
+     "hyp": "boom"
+    }
+   ]
+  }
+ },
+ "detail": [
+  {
+   "wav": "edacc-short/us-control/00031.wav",
+   "group": "us-control",
+   "ref": "ARE THEY NOT",
+   "none": "I don't really know.",
+   "trigger": "I don't know"
+  },
+  {
+   "wav": "edacc-short/us-control/00033.wav",
+   "group": "us-control",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "Yeah."
+  },
+  {
+   "wav": "edacc-short/us-control/00035.wav",
+   "group": "us-control",
+   "ref": "BANANA LEAVES",
+   "none": "And that leaves.",
+   "trigger": "and then at least"
+  },
+  {
+   "wav": "edacc-short/us-control/00037.wav",
+   "group": "us-control",
+   "ref": "THE CABBAGE RIGHT SORT OF",
+   "none": "Cabbage, right? Yeah.",
+   "trigger": "It's like cabbage, right? Yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00039.wav",
+   "group": "us-control",
+   "ref": "OH MY GOD <DTMF>",
+   "none": "I won't tell that actually.",
+   "trigger": "I won't tell that actually"
+  },
+  {
+   "wav": "edacc-short/us-control/00041.wav",
+   "group": "us-control",
+   "ref": "THAT'S <OVERLAP>",
+   "none": "That's funny.",
+   "trigger": "that's funny"
+  },
+  {
+   "wav": "edacc-short/us-control/00047.wav",
+   "group": "us-control",
+   "ref": "WATCHING DIE HARD",
+   "none": "Watching Die Hard.",
+   "trigger": "watching diehard"
+  },
+  {
+   "wav": "edacc-short/us-control/00061.wav",
+   "group": "us-control",
+   "ref": "LIKE HAVE YOU EVER LIKE PEOPLE LIKE",
+   "none": "have you like people like",
+   "trigger": "have you like people like"
+  },
+  {
+   "wav": "edacc-short/us-control/00065.wav",
+   "group": "us-control",
+   "ref": "YEAH THEY WERE TERRIBLE",
+   "none": "And they were terrible.",
+   "trigger": "and they were terrible"
+  },
+  {
+   "wav": "edacc-short/us-control/00067.wav",
+   "group": "us-control",
+   "ref": "THEY HURT THEY WERE",
+   "none": "They were good.",
+   "trigger": "they were you get"
+  },
+  {
+   "wav": "edacc-short/us-control/00073.wav",
+   "group": "us-control",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00093.wav",
+   "group": "us-control",
+   "ref": "VERY VAGUELY",
+   "none": "Very quickly.",
+   "trigger": "very quickly"
+  },
+  {
+   "wav": "edacc-short/us-control/00095.wav",
+   "group": "us-control",
+   "ref": "YEAH",
+   "none": "Yes.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00097.wav",
+   "group": "us-control",
+   "ref": "OF COURSE",
+   "none": "Of course.",
+   "trigger": "of course"
+  },
+  {
+   "wav": "edacc-short/us-control/00107.wav",
+   "group": "us-control",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "Yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00109.wav",
+   "group": "us-control",
+   "ref": "OH THE MASK WAS SO GOOD",
+   "none": "Oh, the mask is so...",
+   "trigger": "oh the mask is so"
+  },
+  {
+   "wav": "edacc-short/us-control/00111.wav",
+   "group": "us-control",
+   "ref": "IT'S AMAZING",
+   "none": "Amazing.",
+   "trigger": "amazing"
+  },
+  {
+   "wav": "edacc-short/us-control/00113.wav",
+   "group": "us-control",
+   "ref": "OH MY GOD YES",
+   "none": "audio.",
+   "trigger": "audio"
+  },
+  {
+   "wav": "edacc-short/us-control/00121.wav",
+   "group": "us-control",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00129.wav",
+   "group": "us-control",
+   "ref": "THEY JUST HAVE TO LIKE KEEP IT",
+   "none": "They just have to keep it.",
+   "trigger": "they just have to keep it."
+  },
+  {
+   "wav": "edacc-short/us-control/00135.wav",
+   "group": "us-control",
+   "ref": "LIKE AMERICANS AMERICANS",
+   "none": "I went to see...",
+   "trigger": "I went to see"
+  },
+  {
+   "wav": "edacc-short/us-control/00141.wav",
+   "group": "us-control",
+   "ref": "YEAH OF COURSE",
+   "none": "Yeah, of course.",
+   "trigger": "yeah of course"
+  },
+  {
+   "wav": "edacc-short/us-control/00143.wav",
+   "group": "us-control",
+   "ref": "NO I THINK",
+   "none": "right",
+   "trigger": "right"
+  },
+  {
+   "wav": "edacc-short/us-control/00145.wav",
+   "group": "us-control",
+   "ref": "I THINK THAT WAS WHAT HAPPEND",
+   "none": "Thank you.",
+   "trigger": "boom boom"
+  },
+  {
+   "wav": "edacc-short/us-control/00147.wav",
+   "group": "us-control",
+   "ref": "THAT'S AWESOME",
+   "none": "Greed.",
+   "trigger": "read"
+  },
+  {
+   "wav": "edacc-short/us-control/00149.wav",
+   "group": "us-control",
+   "ref": "THAT'S SO AWESOME",
+   "none": "And they would just.",
+   "trigger": "and they would just"
+  },
+  {
+   "wav": "edacc-short/us-control/00157.wav",
+   "group": "us-control",
+   "ref": "RIGHT IT'S <OVERLAP> YOU HAVE TO WATCH IT",
+   "none": "You have to watch.",
+   "trigger": "you have to watch"
+  },
+  {
+   "wav": "edacc-short/us-control/00167.wav",
+   "group": "us-control",
+   "ref": "FROM <OVERLAP>",
+   "none": "for money.",
+   "trigger": "boom enter boom enter boom"
+  },
+  {
+   "wav": "edacc-short/us-control/00171.wav",
+   "group": "us-control",
+   "ref": "<OVERLAP> TOODLES",
+   "none": "Thank you.",
+   "trigger": "boom"
+  },
+  {
+   "wav": "edacc-short/us-control/00195.wav",
+   "group": "us-control",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00203.wav",
+   "group": "us-control",
+   "ref": "MM HMM",
+   "none": "Mm-hmm.",
+   "trigger": "mm-hmm mm-hmm mm-hmm"
+  },
+  {
+   "wav": "edacc-short/us-control/00237.wav",
+   "group": "us-control",
+   "ref": "DID YOU DO THAT TOO",
+   "none": "Did you do that, dude?",
+   "trigger": "Did you do that dude?"
+  },
+  {
+   "wav": "edacc-short/us-control/00239.wav",
+   "group": "us-control",
+   "ref": "JESUS I DIDN'T KNOW THAT",
+   "none": "Jesus, I didn't know that.",
+   "trigger": "Jesus I didn't know that"
+  },
+  {
+   "wav": "edacc-short/us-control/00243.wav",
+   "group": "us-control",
+   "ref": "PICK UP W WOW",
+   "none": "I don't know.",
+   "trigger": "boom boom boom"
+  },
+  {
+   "wav": "edacc-short/us-control/00255.wav",
+   "group": "us-control",
+   "ref": "YEAH THAT'S COOL",
+   "none": "Yes.",
+   "trigger": "you"
+  },
+  {
+   "wav": "edacc-short/us-control/00265.wav",
+   "group": "us-control",
+   "ref": "YEAH FAIR ENOUGH",
+   "none": "Yeah, fair enough.",
+   "trigger": "yeah fair enough"
+  },
+  {
+   "wav": "edacc-short/us-control/00275.wav",
+   "group": "us-control",
+   "ref": "I KNOW BUT IT CAN BE A NUISANCE",
+   "none": "to be a nuisance.",
+   "trigger": "it's gonna be a nuisance"
+  },
+  {
+   "wav": "edacc-short/us-control/00283.wav",
+   "group": "us-control",
+   "ref": "MM HMM YEAH",
+   "none": "and",
+   "trigger": "and"
+  },
+  {
+   "wav": "edacc-short/us-control/00291.wav",
+   "group": "us-control",
+   "ref": "AND THEY'RE ALL DIFFERENT SO",
+   "none": "they're all different so",
+   "trigger": "they're all different so"
+  },
+  {
+   "wav": "edacc-short/us-control/00293.wav",
+   "group": "us-control",
+   "ref": "YEAH LET'S SEE HOW THAT IS",
+   "none": "Yeah, that's how that is.",
+   "trigger": "yeah that's how that is"
+  },
+  {
+   "wav": "edacc-short/us-control/00321.wav",
+   "group": "us-control",
+   "ref": "YES SO THERE'S",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00327.wav",
+   "group": "us-control",
+   "ref": "UM",
+   "none": "Um,",
+   "trigger": "um"
+  },
+  {
+   "wav": "edacc-short/us-control/00359.wav",
+   "group": "us-control",
+   "ref": "THEY SEEMED",
+   "none": "Very simple.",
+   "trigger": "very simple"
+  },
+  {
+   "wav": "edacc-short/us-control/00367.wav",
+   "group": "us-control",
+   "ref": "NOTHING BAD THOUGH REALLY",
+   "none": "Nothing bad, though, really.",
+   "trigger": "nothing bad though really"
+  },
+  {
+   "wav": "edacc-short/us-control/00375.wav",
+   "group": "us-control",
+   "ref": "UM",
+   "none": "Um...",
+   "trigger": "boom"
+  },
+  {
+   "wav": "edacc-short/us-control/00381.wav",
+   "group": "us-control",
+   "ref": "DIRTY DANCING",
+   "none": "Yeah.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/us-control/00393.wav",
+   "group": "us-control",
+   "ref": "UM YEAH",
+   "none": "Right.",
+   "trigger": "uh uh uh"
+  },
+  {
+   "wav": "edacc-short/us-control/00395.wav",
+   "group": "us-control",
+   "ref": "WHAT",
+   "none": "What?",
+   "trigger": "What?"
+  },
+  {
+   "wav": "edacc-short/us-control/00401.wav",
+   "group": "us-control",
+   "ref": "NO NO ARE YOU CRAZY NO NO",
+   "none": "No, you graze it. No, no.",
+   "trigger": "no you graze it no no"
+  },
+  {
+   "wav": "edacc-short/us-control/00403.wav",
+   "group": "us-control",
+   "ref": "HOLY SHIT",
+   "none": "Holy shit.",
+   "trigger": "holy shit"
+  },
+  {
+   "wav": "edacc-short/us-control/00413.wav",
+   "group": "us-control",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "and and and"
+  },
+  {
+   "wav": "edacc-short/us-control/00417.wav",
+   "group": "us-control",
+   "ref": "YEAH NOT NOT <OVERLAP>",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/00425.wav",
+   "group": "us-control",
+   "ref": "I HAVE HEARD OF IT YEAH I DON'T",
+   "none": "I have heard of it, yeah, I don't know.",
+   "trigger": "I have heard of it, yeah, I don't know"
+  },
+  {
+   "wav": "edacc-short/us-control/00429.wav",
+   "group": "us-control",
+   "ref": "OBVIOUSLY EVERYONE",
+   "none": "Obviously.",
+   "trigger": "obviously"
+  },
+  {
+   "wav": "edacc-short/indian/00437.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00439.wav",
+   "group": "indian",
+   "ref": "SO WHAT ARE WE TALKING ABOUT",
+   "none": "So what are we talking about?",
+   "trigger": "what are you talking about"
+  },
+  {
+   "wav": "edacc-short/indian/00442.wav",
+   "group": "indian",
+   "ref": "FIRST THE FIRST ONE",
+   "none": "The first one?",
+   "trigger": "the first one"
+  },
+  {
+   "wav": "edacc-short/indian/00454.wav",
+   "group": "indian",
+   "ref": "MM HMM THAT MAKES SENSE",
+   "none": "And this.",
+   "trigger": "and there's"
+  },
+  {
+   "wav": "edacc-short/indian/00457.wav",
+   "group": "indian",
+   "ref": "YEAH EXACTLY",
+   "none": "Yeah, exactly.",
+   "trigger": "yeah exactly"
+  },
+  {
+   "wav": "edacc-short/indian/00458.wav",
+   "group": "indian",
+   "ref": "THAT MAKES SENSE",
+   "none": "That makes sense.",
+   "trigger": "that makes sense"
+  },
+  {
+   "wav": "edacc-short/indian/00463.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "y'all"
+  },
+  {
+   "wav": "edacc-short/indian/00465.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00466.wav",
+   "group": "indian",
+   "ref": "BECAUSE IT'S IT'S",
+   "none": "Because it's so tough.",
+   "trigger": "because it's so tough"
+  },
+  {
+   "wav": "edacc-short/indian/00469.wav",
+   "group": "indian",
+   "ref": "HAVE YOU READ HUNGER GAMES",
+   "none": "Have you read Hunger Games?",
+   "trigger": "have you read hunger game"
+  },
+  {
+   "wav": "edacc-short/indian/00475.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00479.wav",
+   "group": "indian",
+   "ref": "YEAH CINNA",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00480.wav",
+   "group": "indian",
+   "ref": "THOSE CREATIONS",
+   "none": "conditions",
+   "trigger": "conditions"
+  },
+  {
+   "wav": "edacc-short/indian/00483.wav",
+   "group": "indian",
+   "ref": "YEAH YEAH",
+   "none": "Yeah, yeah.",
+   "trigger": "yeah yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00486.wav",
+   "group": "indian",
+   "ref": "MM HMM",
+   "none": "Mm-hmm.",
+   "trigger": "hmm"
+  },
+  {
+   "wav": "edacc-short/indian/00493.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "you know"
+  },
+  {
+   "wav": "edacc-short/indian/00498.wav",
+   "group": "indian",
+   "ref": "MM HMM",
+   "none": "Come on.",
+   "trigger": "come on"
+  },
+  {
+   "wav": "edacc-short/indian/00507.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00509.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00511.wav",
+   "group": "indian",
+   "ref": "YEAH YEAH YEAH",
+   "none": "Yeah, yeah, yeah.",
+   "trigger": "yeah yeah yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00516.wav",
+   "group": "indian",
+   "ref": "UH EFFIE EFFIE TRINKET",
+   "none": "F.E. F.E. Triggered.",
+   "trigger": "F.E. F.E. Triggered"
+  },
+  {
+   "wav": "edacc-short/indian/00518.wav",
+   "group": "indian",
+   "ref": "<LAUGH> HUH",
+   "none": "H\u00f6rnien.",
+   "trigger": "burning"
+  },
+  {
+   "wav": "edacc-short/indian/00520.wav",
+   "group": "indian",
+   "ref": "MM HMM TRUE",
+   "none": "True.",
+   "trigger": "two"
+  },
+  {
+   "wav": "edacc-short/indian/00526.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00527.wav",
+   "group": "indian",
+   "ref": "LIKE YOU KNOW THIS IS THE MESSAGE <OVERLAP>",
+   "none": "You know, this is the method.",
+   "trigger": "you know this is the"
+  },
+  {
+   "wav": "edacc-short/indian/00535.wav",
+   "group": "indian",
+   "ref": "YEAH TRUE TRUE",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00537.wav",
+   "group": "indian",
+   "ref": "OKAY WERE YOU",
+   "none": "Okay, for you.",
+   "trigger": "Okay, for you"
+  },
+  {
+   "wav": "edacc-short/indian/00541.wav",
+   "group": "indian",
+   "ref": "YEAH YEAH YEAH",
+   "none": "Yeah, yeah, yeah.",
+   "trigger": "Yeah, yeah, yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00547.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "Yeah."
+  },
+  {
+   "wav": "edacc-short/indian/00549.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00550.wav",
+   "group": "indian",
+   "ref": "LIKE TICKING TIME BOMB <OVERLAP>",
+   "none": "The King Time Book. Exactly.",
+   "trigger": "ticking time boom exactly"
+  },
+  {
+   "wav": "edacc-short/indian/00552.wav",
+   "group": "indian",
+   "ref": "YEAH THEY",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00553.wav",
+   "group": "indian",
+   "ref": "SOMEONE WHO CAN CALM YOU DOWN",
+   "none": "someone who came down.",
+   "trigger": "it's a one who came down"
+  },
+  {
+   "wav": "edacc-short/indian/00558.wav",
+   "group": "indian",
+   "ref": "NO NONE OF THEM",
+   "none": "No, no, no.",
+   "trigger": "boom boom"
+  },
+  {
+   "wav": "edacc-short/indian/00562.wav",
+   "group": "indian",
+   "ref": "NEITHER",
+   "none": "Nidar.",
+   "trigger": "Nidar"
+  },
+  {
+   "wav": "edacc-short/indian/00566.wav",
+   "group": "indian",
+   "ref": "OH MY GOD THAT'S JUST",
+   "none": "Oh my God.",
+   "trigger": "oh my god shirtless"
+  },
+  {
+   "wav": "edacc-short/indian/00567.wav",
+   "group": "indian",
+   "ref": "SHIRTLESS TAYLOR LAUTNER",
+   "none": "Taylor Lord.",
+   "trigger": "Taylor Lord"
+  },
+  {
+   "wav": "edacc-short/indian/00571.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00576.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "boom boom"
+  },
+  {
+   "wav": "edacc-short/indian/00577.wav",
+   "group": "indian",
+   "ref": "OF AZKABAN",
+   "none": "Amen.",
+   "trigger": "boom"
+  },
+  {
+   "wav": "edacc-short/indian/00583.wav",
+   "group": "indian",
+   "ref": "YES",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00585.wav",
+   "group": "indian",
+   "ref": "I DON'T KNOW",
+   "none": "I don't know.",
+   "trigger": "boom"
+  },
+  {
+   "wav": "edacc-short/indian/00589.wav",
+   "group": "indian",
+   "ref": "CHARACTERS",
+   "none": "Got it.",
+   "trigger": "got it"
+  },
+  {
+   "wav": "edacc-short/indian/00590.wav",
+   "group": "indian",
+   "ref": "UH HUH",
+   "none": "those.",
+   "trigger": "those and"
+  },
+  {
+   "wav": "edacc-short/indian/00593.wav",
+   "group": "indian",
+   "ref": "FRED",
+   "none": "friend",
+   "trigger": "friend"
+  },
+  {
+   "wav": "edacc-short/indian/00601.wav",
+   "group": "indian",
+   "ref": "AH",
+   "none": "Ah.",
+   "trigger": "ah"
+  },
+  {
+   "wav": "edacc-short/indian/00602.wav",
+   "group": "indian",
+   "ref": "MAYBE",
+   "none": "Maybe.",
+   "trigger": "maybe"
+  },
+  {
+   "wav": "edacc-short/indian/00603.wav",
+   "group": "indian",
+   "ref": "MAKES SENSE",
+   "none": "Thank you.",
+   "trigger": "Thank you"
+  },
+  {
+   "wav": "edacc-short/indian/00606.wav",
+   "group": "indian",
+   "ref": "REALLY <LAUGH>",
+   "none": "Lily?",
+   "trigger": "Lily?"
+  },
+  {
+   "wav": "edacc-short/indian/00611.wav",
+   "group": "indian",
+   "ref": "GOBLET OF FIRE",
+   "none": "I'll be those five.",
+   "trigger": "I'll be those five I'll be those five"
+  },
+  {
+   "wav": "edacc-short/indian/00616.wav",
+   "group": "indian",
+   "ref": "YEAH YEAH YEAH CHARACTERS",
+   "none": "Yeah, yeah, I get it.",
+   "trigger": "yeah I get it"
+  },
+  {
+   "wav": "edacc-short/indian/00617.wav",
+   "group": "indian",
+   "ref": "LIKE KNOWING THAT THERE ARE OTHER",
+   "none": "Yeah, there are other...",
+   "trigger": "I think that there are other"
+  },
+  {
+   "wav": "edacc-short/indian/00618.wav",
+   "group": "indian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00621.wav",
+   "group": "indian",
+   "ref": "OH YES",
+   "none": "Oh yeah.",
+   "trigger": "oh yeah"
+  },
+  {
+   "wav": "edacc-short/indian/00631.wav",
+   "group": "indian",
+   "ref": "ANOTHER THING THAT I WILL NEVER",
+   "none": "Another thing that I will...",
+   "trigger": "another thing that I will"
+  },
+  {
+   "wav": "edacc-short/indian/00632.wav",
+   "group": "indian",
+   "ref": "<OVERLAP> THIS MUCH EMOTION",
+   "none": "That's what I'm going to do.",
+   "trigger": "Boom enter boom Boom enter boom"
+  },
+  {
+   "wav": "edacc-short/indian/00633.wav",
+   "group": "indian",
+   "ref": "FORGET IN THESE",
+   "none": "for a game of business.",
+   "trigger": "for a game of business"
+  },
+  {
+   "wav": "edacc-short/indian/00638.wav",
+   "group": "indian",
+   "ref": "OTHER ONE THE MA MARIETTA",
+   "none": "The other one, the Marietta.",
+   "trigger": "The other one, the Marietta"
+  },
+  {
+   "wav": "edacc-short/indian/00640.wav",
+   "group": "indian",
+   "ref": "EDGECOMBE SOMETHING SOMETHING SOMETHING",
+   "none": "something something",
+   "trigger": "something something"
+  },
+  {
+   "wav": "edacc-short/indian/00641.wav",
+   "group": "indian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/us-control/01353.wav",
+   "group": "us-control",
+   "ref": "TWO SIX P TWO",
+   "none": "26P2.",
+   "trigger": "26P2"
+  },
+  {
+   "wav": "edacc-short/us-control/01355.wav",
+   "group": "us-control",
+   "ref": "NICE OKAY",
+   "none": "Nice. Okay.",
+   "trigger": "Nice. Okay."
+  },
+  {
+   "wav": "edacc-short/us-control/01359.wav",
+   "group": "us-control",
+   "ref": "<LAUGH> COOL",
+   "none": "Cool.",
+   "trigger": "cool"
+  },
+  {
+   "wav": "edacc-short/us-control/01361.wav",
+   "group": "us-control",
+   "ref": "YEAH YEAH THAT WAS A GOOD ONE",
+   "none": "Yeah, yeah.",
+   "trigger": "yeah yeah"
+  },
+  {
+   "wav": "edacc-short/us-control/01365.wav",
+   "group": "us-control",
+   "ref": "I KNOW",
+   "none": "All right.",
+   "trigger": "all right"
+  },
+  {
+   "wav": "edacc-short/japanese/01370.wav",
+   "group": "japanese",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "okay"
+  },
+  {
+   "wav": "edacc-short/japanese/01372.wav",
+   "group": "japanese",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "hey"
+  },
+  {
+   "wav": "edacc-short/japanese/01374.wav",
+   "group": "japanese",
+   "ref": "OH YOU'RE ALREADY RECORDING",
+   "none": "Are you already recording?",
+   "trigger": "Are you already recording?"
+  },
+  {
+   "wav": "edacc-short/japanese/01376.wav",
+   "group": "japanese",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "Okay"
+  },
+  {
+   "wav": "edacc-short/us-control/01377.wav",
+   "group": "us-control",
+   "ref": "HAI YES",
+   "none": "Hey.",
+   "trigger": "hey"
+  },
+  {
+   "wav": "edacc-short/japanese/01384.wav",
+   "group": "japanese",
+   "ref": "AND YOU OF COURSE",
+   "none": "Of course.",
+   "trigger": "of course"
+  },
+  {
+   "wav": "edacc-short/japanese/01395.wav",
+   "group": "japanese",
+   "ref": "OKAY OKAY",
+   "none": "Okay. Okay.",
+   "trigger": "okay okay"
+  },
+  {
+   "wav": "edacc-short/japanese/01397.wav",
+   "group": "japanese",
+   "ref": "MM HMM TOMORROW MORNING",
+   "none": "tomorrow morning.",
+   "trigger": "tomorrow morning"
+  },
+  {
+   "wav": "edacc-short/japanese/01399.wav",
+   "group": "japanese",
+   "ref": "UH WHEN W WHEN",
+   "none": "When?",
+   "trigger": "uh when"
+  },
+  {
+   "wav": "edacc-short/japanese/01417.wav",
+   "group": "japanese",
+   "ref": "YOU HARDLY SEE MORE JAPANESE",
+   "none": "Nice. Yeah.",
+   "trigger": "nice yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01423.wav",
+   "group": "japanese",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "Yeah."
+  },
+  {
+   "wav": "edacc-short/japanese/01433.wav",
+   "group": "japanese",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01441.wav",
+   "group": "japanese",
+   "ref": "SO THE THE UM",
+   "none": "um",
+   "trigger": "hey um"
+  },
+  {
+   "wav": "edacc-short/japanese/01455.wav",
+   "group": "japanese",
+   "ref": "OH NICE",
+   "none": "at night.",
+   "trigger": "right right"
+  },
+  {
+   "wav": "edacc-short/japanese/01461.wav",
+   "group": "japanese",
+   "ref": "DAVE WITH THAT DAVE",
+   "none": "Do that day?",
+   "trigger": "do that day"
+  },
+  {
+   "wav": "edacc-short/japanese/01463.wav",
+   "group": "japanese",
+   "ref": "WITH HER",
+   "none": "Huh?",
+   "trigger": "her her"
+  },
+  {
+   "wav": "edacc-short/japanese/01471.wav",
+   "group": "japanese",
+   "ref": "WHOA",
+   "none": "Ooh.",
+   "trigger": "whoa"
+  },
+  {
+   "wav": "edacc-short/japanese/01473.wav",
+   "group": "japanese",
+   "ref": "SO YOU'RE GOING TO NEW YORK",
+   "none": "Are you going to New York?",
+   "trigger": "you're going to new york"
+  },
+  {
+   "wav": "edacc-short/japanese/01475.wav",
+   "group": "japanese",
+   "ref": "FOR A WEDDING",
+   "none": "For weddings?",
+   "trigger": "for wedding for wedding"
+  },
+  {
+   "wav": "edacc-short/japanese/01479.wav",
+   "group": "japanese",
+   "ref": "MM HMM WOW",
+   "none": "Wow.",
+   "trigger": "wow"
+  },
+  {
+   "wav": "edacc-short/japanese/01481.wav",
+   "group": "japanese",
+   "ref": "CONGRATULATIONS",
+   "none": "It's",
+   "trigger": "it's"
+  },
+  {
+   "wav": "edacc-short/japanese/01485.wav",
+   "group": "japanese",
+   "ref": "YEAH YEAH",
+   "none": "Yeah, yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01492.wav",
+   "group": "japanese",
+   "ref": "NICE MM HMM",
+   "none": "at the TV.",
+   "trigger": "in the TV."
+  },
+  {
+   "wav": "edacc-short/japanese/01494.wav",
+   "group": "japanese",
+   "ref": "MM HMM",
+   "none": "Mm-hmm.",
+   "trigger": "mm-hmm"
+  },
+  {
+   "wav": "edacc-short/japanese/01504.wav",
+   "group": "japanese",
+   "ref": "YOU'RE ABOUT TO MAKE IT",
+   "none": "We're about to make it.",
+   "trigger": "about to make it"
+  },
+  {
+   "wav": "edacc-short/japanese/01506.wav",
+   "group": "japanese",
+   "ref": "IT'S A LOT <LAUGH>",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01508.wav",
+   "group": "japanese",
+   "ref": "SO YOU'LL BE BUSY",
+   "none": "so you'll be busy.",
+   "trigger": "so you'll be busy."
+  },
+  {
+   "wav": "edacc-short/japanese/01514.wav",
+   "group": "japanese",
+   "ref": "TWO MONTHS",
+   "none": "Thank you.",
+   "trigger": "boom"
+  },
+  {
+   "wav": "edacc-short/japanese/01522.wav",
+   "group": "japanese",
+   "ref": "MM HMM THAT IS",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01524.wav",
+   "group": "japanese",
+   "ref": "YES YOU TOLD ME AND I WENT",
+   "none": "Yes.",
+   "trigger": "Yes, you"
+  },
+  {
+   "wav": "edacc-short/japanese/01528.wav",
+   "group": "japanese",
+   "ref": "NO NO NO NO",
+   "none": "you",
+   "trigger": "boom"
+  },
+  {
+   "wav": "edacc-short/japanese/01530.wav",
+   "group": "japanese",
+   "ref": "MM NO NO",
+   "none": "No, no.",
+   "trigger": "No, no"
+  },
+  {
+   "wav": "edacc-short/japanese/01545.wav",
+   "group": "japanese",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01561.wav",
+   "group": "japanese",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01575.wav",
+   "group": "japanese",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/japanese/01583.wav",
+   "group": "japanese",
+   "ref": "<LAUGH> PROBABLY",
+   "none": "He, he, he, he.",
+   "trigger": "he he he"
+  },
+  {
+   "wav": "edacc-short/japanese/01585.wav",
+   "group": "japanese",
+   "ref": "SMALL",
+   "none": "Come on.",
+   "trigger": "it's the boy"
+  },
+  {
+   "wav": "edacc-short/japanese/01597.wav",
+   "group": "japanese",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "here"
+  },
+  {
+   "wav": "edacc-short/japanese/01601.wav",
+   "group": "japanese",
+   "ref": "MAYBE I SHOULD",
+   "none": "Sure.",
+   "trigger": "but"
+  },
+  {
+   "wav": "edacc-short/japanese/01607.wav",
+   "group": "japanese",
+   "ref": "NE HAVE YOU DONE IT",
+   "none": "Have you done it?",
+   "trigger": "have you done it"
+  },
+  {
+   "wav": "edacc-short/japanese/01609.wav",
+   "group": "japanese",
+   "ref": "BECAUSE IT'S SO",
+   "none": "because it's",
+   "trigger": "because it's"
+  },
+  {
+   "wav": "edacc-short/russian/03374.wav",
+   "group": "russian",
+   "ref": "PERFECT",
+   "none": "Perfect.",
+   "trigger": "perfect"
+  },
+  {
+   "wav": "edacc-short/russian/03378.wav",
+   "group": "russian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "boom boom"
+  },
+  {
+   "wav": "edacc-short/russian/03382.wav",
+   "group": "russian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03384.wav",
+   "group": "russian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03386.wav",
+   "group": "russian",
+   "ref": "MM HMM",
+   "none": "Mm-hmm.",
+   "trigger": "mm-hmm"
+  },
+  {
+   "wav": "edacc-short/russian/03388.wav",
+   "group": "russian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/russian/03392.wav",
+   "group": "russian",
+   "ref": "WHAT'S UPCOMING",
+   "none": "Upcoming.",
+   "trigger": "upcoming"
+  },
+  {
+   "wav": "edacc-short/russian/03404.wav",
+   "group": "russian",
+   "ref": "YEAH YEAH",
+   "none": "Yeah, yeah.",
+   "trigger": "yeah yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03418.wav",
+   "group": "russian",
+   "ref": "YEAH YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03420.wav",
+   "group": "russian",
+   "ref": "I THINK YOU'RE FINE YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03422.wav",
+   "group": "russian",
+   "ref": "I DON'T KNOW WHAT YOU'RE TALKING ABOUT",
+   "none": "I don't know what you're talking about.",
+   "trigger": "I don't know what you're talking about"
+  },
+  {
+   "wav": "edacc-short/russian/03424.wav",
+   "group": "russian",
+   "ref": "WITH NO WHAT",
+   "none": "You know what?",
+   "trigger": "with no what?"
+  },
+  {
+   "wav": "edacc-short/russian/03428.wav",
+   "group": "russian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "Yes."
+  },
+  {
+   "wav": "edacc-short/russian/03434.wav",
+   "group": "russian",
+   "ref": "MM HMM OKAY",
+   "none": "Okay.",
+   "trigger": "okay"
+  },
+  {
+   "wav": "edacc-short/russian/03440.wav",
+   "group": "russian",
+   "ref": "ALMOST ANYTHING IN SCOTLAND SO WHATEVER",
+   "none": "anything in Scotland.",
+   "trigger": "anything in scotland so yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03446.wav",
+   "group": "russian",
+   "ref": "DID YOU GET ACCESS TO THAT",
+   "none": "I get to access to that.",
+   "trigger": "get access to that"
+  },
+  {
+   "wav": "edacc-short/russian/03448.wav",
+   "group": "russian",
+   "ref": "YOU DO OKAY THAT'S GREAT",
+   "none": "You do? Okay, that's great.",
+   "trigger": "you do okay that's great"
+  },
+  {
+   "wav": "edacc-short/russian/03452.wav",
+   "group": "russian",
+   "ref": "YES UH",
+   "none": "Yes.",
+   "trigger": "yes uh"
+  },
+  {
+   "wav": "edacc-short/russian/03456.wav",
+   "group": "russian",
+   "ref": "FIFTEENTH I THINK",
+   "none": "I think. Okay.",
+   "trigger": "everything okay"
+  },
+  {
+   "wav": "edacc-short/russian/03468.wav",
+   "group": "russian",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "okay"
+  },
+  {
+   "wav": "edacc-short/russian/03482.wav",
+   "group": "russian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/russian/03488.wav",
+   "group": "russian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/russian/03494.wav",
+   "group": "russian",
+   "ref": "OKAY THAT MAKES SENSE",
+   "none": "Okay, that makes sense.",
+   "trigger": "okay that makes sense"
+  },
+  {
+   "wav": "edacc-short/russian/03508.wav",
+   "group": "russian",
+   "ref": "UH",
+   "none": "Uh...",
+   "trigger": "uh"
+  },
+  {
+   "wav": "edacc-short/russian/03512.wav",
+   "group": "russian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03514.wav",
+   "group": "russian",
+   "ref": "RIGHT",
+   "none": "Great.",
+   "trigger": "great"
+  },
+  {
+   "wav": "edacc-short/russian/03520.wav",
+   "group": "russian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/russian/03526.wav",
+   "group": "russian",
+   "ref": "AT LOCH NESS YOU KNOW",
+   "none": "Yes, you know.",
+   "trigger": "yes you know"
+  },
+  {
+   "wav": "edacc-short/russian/03530.wav",
+   "group": "russian",
+   "ref": "SO",
+   "none": "So,",
+   "trigger": "so"
+  },
+  {
+   "wav": "edacc-short/russian/03536.wav",
+   "group": "russian",
+   "ref": "YEAH YEAH",
+   "none": "Thank you.",
+   "trigger": "Thank you"
+  },
+  {
+   "wav": "edacc-short/russian/03556.wav",
+   "group": "russian",
+   "ref": "IT DO YOU KNOW",
+   "none": "It's all right.",
+   "trigger": "it's all"
+  },
+  {
+   "wav": "edacc-short/russian/03558.wav",
+   "group": "russian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/russian/03566.wav",
+   "group": "russian",
+   "ref": "I THINK",
+   "none": "I think...",
+   "trigger": "I think"
+  },
+  {
+   "wav": "edacc-short/russian/03572.wav",
+   "group": "russian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03576.wav",
+   "group": "russian",
+   "ref": "OH ON THE COAST OKAY",
+   "none": "Okay.",
+   "trigger": "okay"
+  },
+  {
+   "wav": "edacc-short/russian/03580.wav",
+   "group": "russian",
+   "ref": "YES I SEE",
+   "none": "Yes, I see.",
+   "trigger": "yes i see"
+  },
+  {
+   "wav": "edacc-short/russian/03590.wav",
+   "group": "russian",
+   "ref": "OKAY SO",
+   "none": "Okay, so...",
+   "trigger": "okay so"
+  },
+  {
+   "wav": "edacc-short/russian/03604.wav",
+   "group": "russian",
+   "ref": "THAT WOULD BE DAY ONE",
+   "none": "That would be day one.",
+   "trigger": "that would be day one"
+  },
+  {
+   "wav": "edacc-short/russian/03612.wav",
+   "group": "russian",
+   "ref": "THEY DON'T DO A TASTING HUH",
+   "none": "They don't do a tasting, huh?",
+   "trigger": "they don't do a tasting huh"
+  },
+  {
+   "wav": "edacc-short/russian/03616.wav",
+   "group": "russian",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "okay"
+  },
+  {
+   "wav": "edacc-short/russian/03618.wav",
+   "group": "russian",
+   "ref": "SO YOU KNOW THE DATE",
+   "none": "So, you know that they-",
+   "trigger": "so you know that they"
+  },
+  {
+   "wav": "edacc-short/russian/03622.wav",
+   "group": "russian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03630.wav",
+   "group": "russian",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "ok"
+  },
+  {
+   "wav": "edacc-short/russian/03634.wav",
+   "group": "russian",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "ok"
+  },
+  {
+   "wav": "edacc-short/russian/03653.wav",
+   "group": "russian",
+   "ref": "UH",
+   "none": "Mm-hmm.",
+   "trigger": "mm-hmm"
+  },
+  {
+   "wav": "edacc-short/russian/03657.wav",
+   "group": "russian",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/russian/03671.wav",
+   "group": "russian",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03677.wav",
+   "group": "russian",
+   "ref": "REALLY",
+   "none": "Really?",
+   "trigger": "Really?"
+  },
+  {
+   "wav": "edacc-short/russian/03687.wav",
+   "group": "russian",
+   "ref": "I SEE",
+   "none": "There we go.",
+   "trigger": "There we go."
+  },
+  {
+   "wav": "edacc-short/russian/03689.wav",
+   "group": "russian",
+   "ref": "YEAH I THINK THEY WANTED TO",
+   "none": "Yeah, I think they will. I guess.",
+   "trigger": "yeah i think that i did"
+  },
+  {
+   "wav": "edacc-short/russian/03691.wav",
+   "group": "russian",
+   "ref": "UH HUH",
+   "none": "Uh-huh.",
+   "trigger": "uh-huh"
+  },
+  {
+   "wav": "edacc-short/russian/03697.wav",
+   "group": "russian",
+   "ref": "BECAUSE ALL THE TOURISTS GOT TO",
+   "none": "Because all the tool is good.",
+   "trigger": "because all the tools and"
+  },
+  {
+   "wav": "edacc-short/russian/03699.wav",
+   "group": "russian",
+   "ref": "YEAH YEAH YEAH I DON'T",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/russian/03703.wav",
+   "group": "russian",
+   "ref": "HAMLETS",
+   "none": "Thank you.",
+   "trigger": "Thank you."
+  },
+  {
+   "wav": "edacc-short/russian/03707.wav",
+   "group": "russian",
+   "ref": "WHAT A SURPRISE",
+   "none": "What a surprise.",
+   "trigger": "What a surprise"
+  },
+  {
+   "wav": "edacc-short/russian/03712.wav",
+   "group": "russian",
+   "ref": "MM NOT SURPRISED",
+   "none": "Not surprised.",
+   "trigger": "not surprised"
+  },
+  {
+   "wav": "edacc-short/russian/03732.wav",
+   "group": "russian",
+   "ref": "WELL I I MEAN CAN WE JUST ACTUALLY",
+   "none": "Well, I mean...",
+   "trigger": "Well, I mean If they have that"
+  },
+  {
+   "wav": "edacc-short/russian/03736.wav",
+   "group": "russian",
+   "ref": "UH HUH",
+   "none": "Mm-hmm.",
+   "trigger": "mm-hmm"
+  },
+  {
+   "wav": "edacc-short/russian/03738.wav",
+   "group": "russian",
+   "ref": "BUT IN ANY SO",
+   "none": "But in the end, yeah, so...",
+   "trigger": "but in the end so"
+  },
+  {
+   "wav": "edacc-short/russian/03746.wav",
+   "group": "russian",
+   "ref": "YEAH THAT MAKES SENSE",
+   "none": "Yeah, that makes sense.",
+   "trigger": "yeah that makes sense"
+  },
+  {
+   "wav": "edacc-short/spanish/04064.wav",
+   "group": "spanish",
+   "ref": "READY",
+   "none": "Ready.",
+   "trigger": "ready"
+  },
+  {
+   "wav": "edacc-short/spanish/04080.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> I THOUGHT YOU WERE SAYING LIKE",
+   "none": "I thought you were saying like...",
+   "trigger": "i thought you were saying like"
+  },
+  {
+   "wav": "edacc-short/spanish/04104.wav",
+   "group": "spanish",
+   "ref": "I DON'T KNOW",
+   "none": "I don't know.",
+   "trigger": "I don't know"
+  },
+  {
+   "wav": "edacc-short/spanish/04106.wav",
+   "group": "spanish",
+   "ref": "NEVER EVER",
+   "none": "Never, ever?",
+   "trigger": "never ever"
+  },
+  {
+   "wav": "edacc-short/spanish/04118.wav",
+   "group": "spanish",
+   "ref": "BUT I DON'T REMEMBER",
+   "none": "Bye now. Bye now.",
+   "trigger": "I know I know"
+  },
+  {
+   "wav": "edacc-short/spanish/04124.wav",
+   "group": "spanish",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "okay"
+  },
+  {
+   "wav": "edacc-short/spanish/04142.wav",
+   "group": "spanish",
+   "ref": "I DON'T KNOW",
+   "none": "I don't know.",
+   "trigger": "I don't know."
+  },
+  {
+   "wav": "edacc-short/spanish/04144.wav",
+   "group": "spanish",
+   "ref": "AND WHAT IS THAT LANGUAGES AGAIN",
+   "none": "What is that language again?",
+   "trigger": "what is that language again?"
+  },
+  {
+   "wav": "edacc-short/spanish/04148.wav",
+   "group": "spanish",
+   "ref": "NO BAD PRACTICE",
+   "none": "bad practice",
+   "trigger": "bad practice"
+  },
+  {
+   "wav": "edacc-short/spanish/04150.wav",
+   "group": "spanish",
+   "ref": "WELL YEAH",
+   "none": "Well, yeah.",
+   "trigger": "Well, yeah."
+  },
+  {
+   "wav": "edacc-short/spanish/04190.wav",
+   "group": "spanish",
+   "ref": "BACK THEN",
+   "none": "Perfect.",
+   "trigger": "like that"
+  },
+  {
+   "wav": "edacc-short/spanish/04202.wav",
+   "group": "spanish",
+   "ref": "BOB SPONGE",
+   "none": "Spongebob.",
+   "trigger": "spongebob"
+  },
+  {
+   "wav": "edacc-short/spanish/04210.wav",
+   "group": "spanish",
+   "ref": "BOB THE <RING>",
+   "none": "Have a good one!",
+   "trigger": "up, come on"
+  },
+  {
+   "wav": "edacc-short/spanish/04216.wav",
+   "group": "spanish",
+   "ref": "YES",
+   "none": "Yes!",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/spanish/04220.wav",
+   "group": "spanish",
+   "ref": "LIKE WHICH ONES",
+   "none": "By which ones?",
+   "trigger": "by which ones?"
+  },
+  {
+   "wav": "edacc-short/spanish/04224.wav",
+   "group": "spanish",
+   "ref": "LIKE WHAT",
+   "none": "The what?",
+   "trigger": "the what?"
+  },
+  {
+   "wav": "edacc-short/spanish/04228.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> LIKE WHAT",
+   "none": "I'm like, what?",
+   "trigger": "like what"
+  },
+  {
+   "wav": "edacc-short/spanish/08527.wav",
+   "group": "spanish",
+   "ref": "YEAH YEAH",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/spanish/08537.wav",
+   "group": "spanish",
+   "ref": "I SEE",
+   "none": "Thank you.",
+   "trigger": "Thank you."
+  },
+  {
+   "wav": "edacc-short/spanish/08541.wav",
+   "group": "spanish",
+   "ref": "FOR HOLIDAYS",
+   "none": "on holidays.",
+   "trigger": "on holiday yes"
+  },
+  {
+   "wav": "edacc-short/spanish/08547.wav",
+   "group": "spanish",
+   "ref": "I THINK THE LAST",
+   "none": "I think last time.",
+   "trigger": "I think last time"
+  },
+  {
+   "wav": "edacc-short/spanish/08561.wav",
+   "group": "spanish",
+   "ref": "THEY ARE TWO SEPARATE THINGS",
+   "none": "They're two separate things.",
+   "trigger": "They're two separate things."
+  },
+  {
+   "wav": "edacc-short/spanish/08569.wav",
+   "group": "spanish",
+   "ref": "IS IT IN SP IS IT IN SPAIN",
+   "none": "Is it in Spain?",
+   "trigger": "Is it in Spain?"
+  },
+  {
+   "wav": "edacc-short/spanish/08573.wav",
+   "group": "spanish",
+   "ref": "WHAT",
+   "none": "What the?",
+   "trigger": "what"
+  },
+  {
+   "wav": "edacc-short/spanish/08605.wav",
+   "group": "spanish",
+   "ref": "I SEE",
+   "none": "I see.",
+   "trigger": "I see"
+  },
+  {
+   "wav": "edacc-short/spanish/08628.wav",
+   "group": "spanish",
+   "ref": "WHAT WHAT DOES IT MEAN",
+   "none": "What does it mean?",
+   "trigger": "What does it mean?"
+  },
+  {
+   "wav": "edacc-short/spanish/08634.wav",
+   "group": "spanish",
+   "ref": "WELL I DON'T LIKE CHEESE",
+   "none": "Well, I don't like cheese.",
+   "trigger": "well I don't like cheese"
+  },
+  {
+   "wav": "edacc-short/spanish/08662.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08672.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08680.wav",
+   "group": "spanish",
+   "ref": "IN MY HOMETOWN YES",
+   "none": "In my hometown, yeah.",
+   "trigger": "in my hometown, yeah."
+  },
+  {
+   "wav": "edacc-short/spanish/08686.wav",
+   "group": "spanish",
+   "ref": "UH YEAH",
+   "none": "Yeah.",
+   "trigger": "Yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08718.wav",
+   "group": "spanish",
+   "ref": "SORRY",
+   "none": "sorry",
+   "trigger": "sorry"
+  },
+  {
+   "wav": "edacc-short/spanish/08726.wav",
+   "group": "spanish",
+   "ref": "YEAH EDINBURGH YEAH",
+   "none": "Edinburgh, yeah.",
+   "trigger": "Edinburgh, yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08732.wav",
+   "group": "spanish",
+   "ref": "WELL I DON'T KNOW",
+   "none": "Well, I don't know.",
+   "trigger": "well I don't know"
+  },
+  {
+   "wav": "edacc-short/spanish/08748.wav",
+   "group": "spanish",
+   "ref": "OKAY",
+   "none": "Okay.",
+   "trigger": "okay"
+  },
+  {
+   "wav": "edacc-short/spanish/08760.wav",
+   "group": "spanish",
+   "ref": "NECESSARY <LAUGH>",
+   "none": "necessary.",
+   "trigger": "necessary um"
+  },
+  {
+   "wav": "edacc-short/spanish/08764.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> YEAH",
+   "none": "Um.",
+   "trigger": "um"
+  },
+  {
+   "wav": "edacc-short/spanish/08774.wav",
+   "group": "spanish",
+   "ref": "WHAT TYPE OF FOOD DO YOU",
+   "none": "What type of food?",
+   "trigger": "what type of food"
+  },
+  {
+   "wav": "edacc-short/spanish/08792.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "you know"
+  },
+  {
+   "wav": "edacc-short/spanish/08804.wav",
+   "group": "spanish",
+   "ref": "OH MY GOD I UNDERSTAND",
+   "none": "Oh, my God.",
+   "trigger": "Oh my God, I thought it did."
+  },
+  {
+   "wav": "edacc-short/spanish/08808.wav",
+   "group": "spanish",
+   "ref": "I DISLIKE",
+   "none": "I dislike.",
+   "trigger": "I dislike"
+  },
+  {
+   "wav": "edacc-short/spanish/08812.wav",
+   "group": "spanish",
+   "ref": "<LAUGH> OH MY GOD YEAH",
+   "none": "Oh my god, yeah.",
+   "trigger": "oh my god yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08816.wav",
+   "group": "spanish",
+   "ref": "IT'S NOT",
+   "none": "Thank you.",
+   "trigger": "I know"
+  },
+  {
+   "wav": "edacc-short/spanish/08818.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08820.wav",
+   "group": "spanish",
+   "ref": "AND DO YOU DO YOU LIKE",
+   "none": "And you, you...",
+   "trigger": "and you"
+  },
+  {
+   "wav": "edacc-short/spanish/08834.wav",
+   "group": "spanish",
+   "ref": "BUT IT IS POSSIBLE",
+   "none": "But it is possible.",
+   "trigger": "but it is possible"
+  },
+  {
+   "wav": "edacc-short/spanish/08836.wav",
+   "group": "spanish",
+   "ref": "WHAT",
+   "none": "What?",
+   "trigger": "one"
+  },
+  {
+   "wav": "edacc-short/spanish/08840.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08842.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08850.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "Yeah."
+  },
+  {
+   "wav": "edacc-short/spanish/08854.wav",
+   "group": "spanish",
+   "ref": "YOU'RE NOT PICKY AT ALL",
+   "none": "You're not picky at all.",
+   "trigger": "you're not picky at all"
+  },
+  {
+   "wav": "edacc-short/spanish/08860.wav",
+   "group": "spanish",
+   "ref": "WHAT",
+   "none": "What?",
+   "trigger": "What?"
+  },
+  {
+   "wav": "edacc-short/spanish/08862.wav",
+   "group": "spanish",
+   "ref": "WELL I DON'T LIKE <OVERLAP>",
+   "none": "Well, I don't actually...",
+   "trigger": "I don't actually"
+  },
+  {
+   "wav": "edacc-short/spanish/08872.wav",
+   "group": "spanish",
+   "ref": "YEAH <LAUGH>",
+   "none": "That's awesome.",
+   "trigger": "so"
+  },
+  {
+   "wav": "edacc-short/spanish/08874.wav",
+   "group": "spanish",
+   "ref": "OH MY GOD THAT'S DELICIOUS",
+   "none": "Oh my God, that's delicious.",
+   "trigger": "Oh my god, that's fallacious"
+  },
+  {
+   "wav": "edacc-short/spanish/08876.wav",
+   "group": "spanish",
+   "ref": "YES",
+   "none": "Yes.",
+   "trigger": "yes"
+  },
+  {
+   "wav": "edacc-short/spanish/08878.wav",
+   "group": "spanish",
+   "ref": "YEAH",
+   "none": "Yeah.",
+   "trigger": "yeah"
+  },
+  {
+   "wav": "edacc-short/spanish/08880.wav",
+   "group": "spanish",
+   "ref": "NO",
+   "none": "No.",
+   "trigger": "aww"
+  },
+  {
+   "wav": "edacc-short/spanish/08882.wav",
+   "group": "spanish",
+   "ref": "YOU DIDN'T LIKE IT",
+   "none": "I didn't mind you.",
+   "trigger": "right"
+  },
+  {
+   "wav": "edacc-short/spanish/08886.wav",
+   "group": "spanish",
+   "ref": "OH THAT'S AMAZING",
+   "none": "Oh, that's amazing.",
+   "trigger": "oh that's amazing"
+  }
+ ]
+}

@@ -8,8 +8,11 @@ than build time.
 
 from __future__ import annotations
 
+import os
+import sys
 import threading
 from collections import deque
+from pathlib import Path
 from typing import NamedTuple, Protocol
 
 import numpy as np
@@ -38,6 +41,76 @@ DROP_HISTORY = 100
 #: same one Wispr makes.
 PARTIAL_MODEL = "base.en"
 FINAL_MODEL = "small.en"
+
+#: One model for both paths, on a machine with a GPU.
+#:
+#: Everything the two tiers above argue is a *CPU* argument, and the GPU answers it
+#: rather than refining it. Measured on this machine (GTX 1070, int8), same 300-clip
+#: EdAcc slice (5 155 reference words) and the same decode options the app uses:
+#:
+#:     small.en            WER 0.194   RTF 0.070   ns 0.84-0.92
+#:     medium.en           WER 0.183   RTF 0.131
+#:     distil-large-v3     WER 0.181   RTF 0.111
+#:     large-v3-turbo      WER 0.178   RTF 0.116   ns 0.000   <- guard dead
+#:     large-v2            WER 0.170   RTF 0.211
+#:     large-v3            WER 0.168   RTF 0.190   ns 0.81-0.85
+#:     distil-large-v3.5   WER 0.160   RTF 0.104   ns 0.13-0.20  <- guard dead
+#:
+#: **The winner on word error is not the choice, and the `ns` column is why.** The
+#: hallucination guard in clean.py gates on `no_speech_prob` before it looks at anything
+#: else, and `distil-large-v3.5` and `large-v3-turbo` do not produce that signal — they
+#: report near-zero on three seconds of digital silence. So the guard never fires for
+#: them and Whisper's silence-hallucination goes into the draft: measured, both models
+#: return "you" / "Thank you." on silence, room noise and fan noise, all three kept,
+#: where `small.en` and `large-v3` have all three dropped as `filler`. P2 calls an
+#: invented word a defect, and 1.6 fewer word errors per hundred does not buy one.
+#:
+#: `large-v3` is therefore the tier: best of the models whose signals still work, 13.4%
+#: relatively better than the `small.en` the CPU ran, and 3.9x faster than it despite
+#: being the largest thing here. `reports_no_speech()` keeps the rest of that list
+#: usable — a model without the signal now falls back rather than losing the guard.
+#:
+#: The partial budget `small.en` could never meet on CPU — 2.66-3.78 s per prefix
+#: against 1.5 s — `large-v3` meets: 0.75 s at a 1 s prefix rising to 1.30 s at 13 s,
+#: median of three. That is inside the budget but it is the tightest number on this
+#: page; if partials start arriving late under load, this is the line to revisit.
+#:
+#: Which means the split itself goes away here, and with it the cost the split was
+#: paying: the visible partial->final rewrite, where the two tiers disagreed on roughly
+#: one word in five of accented speech. One model cannot disagree with itself.
+CUDA_MODEL = "large-v3"
+
+#: Models that do not produce a usable `no_speech_prob`, and therefore cannot be trusted
+#: to gate clean.py's hallucination filter.
+#:
+#: `invented_reason` treats a low `no_speech_prob` as "this is speech" and returns before
+#: it consults the filler list at all, which is right for a model that reports the signal
+#: and catastrophic for one that does not: the guard does not weaken, it switches off.
+#: Measured on three seconds of digital silence — `small.en` 0.878, `large-v3` 0.849,
+#: `large-v3-turbo` **0.000**, `distil-large-v3.5` **0.130**. The distilled and turbo
+#: decoders drop the no-speech token behaviour along with the layers.
+#:
+#: Prefix-matched, because this is a property of a model *family* and the names are
+#: versioned: `distil-large-v3`, `distil-large-v3.5` and `distil-small.en` all behave the
+#: same way, and the next distil release will too.
+_NO_SPEECH_BLIND = ("distil-", "large-v3-turbo", "turbo")
+
+
+def reports_no_speech(name: str) -> bool:
+    """False when this model's `no_speech_prob` must be treated as absent.
+
+    Absent, not zero — `clean.invented_reason` has a documented path for an engine that
+    cannot report it, and falling into that path keeps a narrow whole-utterance filler
+    check. Passing the model's own 0.000 through instead keeps nothing.
+    """
+    base = name.rsplit("/", 1)[-1].lower()
+    return not any(base.startswith(p) or p in base for p in _NO_SPEECH_BLIND)
+
+#: Where a decode runs. "auto" means CUDA when this machine has a working one and CPU
+#: otherwise — see `cuda_ready()` for what "working" has to mean on Windows, and
+#: `CUDA_MODEL` above for what the GPU buys. CPU stays a first-class configuration:
+#: `default_models("cpu")` is unchanged and a failed GPU build demotes to it.
+DEVICE = "auto"
 
 
 #: Partials pay for no retries at all. faster-whisper re-decodes a segment at rising
@@ -87,6 +160,153 @@ NO_SPEECH_THRESHOLD = None
 LOG_PROB_THRESHOLD = None
 
 
+#: **The send word is never biased toward. This is a safety rule, not a tuning choice.**
+#:
+#: `hotwords` is not a scoring hint. faster-whisper encodes it into the
+#: `<|startofprev|>` prompt slot (`transcribe.py:get_prompt`) — the same context
+#: `condition_on_previous_text=False` above exists to keep empty, and the one Whisper
+#: parrots out of when the audio is short or unsure. Putting the trigger there does not
+#: teach the decoder a word; it hands it a word to guess with.
+#:
+#: Measured on EdAcc with "boom"/"enter boom" as the bias against no bias at all:
+#:
+#:   - `small.en`, 300 conversational clips: the send word appears in text nobody said
+#:     4 times against 0. Pooled WER moves -0.007, which is inside the run-to-run noise
+#:     of the temperature fallback and points the other way on two of five groups.
+#:   - `small.en`, 280 **short** clips, which is what a trigger actually looks like: 26
+#:     against 0, WER 0.534 -> 0.624, and **6 decode to exactly "boom"** — a
+#:     whole-utterance match, which is a Send. "MM HMM", "UM", "YEAH THAT'S COOL",
+#:     "MM HMM TRUE", "I THINK THAT WAS WHAT HAPPEND".
+#:   - `large-v3-turbo`, the same 280: **the stronger model is no safer**. 14 against 0,
+#:     WER 0.458 -> 0.501, and the same **6 false sends** — "UM", "TOODLES", "OF
+#:     AZKABAN", "I DON'T KNOW", "TWO MONTHS", "NO NO NO NO". Model quality is not the
+#:     variable; a prompt on a low-information utterance is.
+#:   - `large-v3-turbo`, 300 conversational clips: **the bias helps here**, and not by a
+#:     little — 0.179 -> 0.157 (0.157-0.158 across runs), same sign on all five
+#:     groups, 1 invented and 0 false
+#:     sends. That is a real effect and it is not an argument for this: it is an
+#:     argument that *some* prompt suits long conversational audio, and the send word
+#:     was never the reason. Worth a neutral-prompt experiment; not worth six sends.
+#:
+#: Six filler sounds in 280 pasting a draft into a terminal and pressing Enter is not a
+#: word-error rate, it is the irreversible action this grammar is built to make rare.
+#: A gain on long utterances cannot buy it, because the two do not trade: the utterances
+#: that gain are the ones that could never have fired a Send anyway.
+#: The whole-utterance rule was doing its job; the bias was manufacturing whole
+#: utterances for it to match. `Session._note_near_miss` is the half of that change that
+#: costs nothing and stays: it reads phonetic similarity off text the decoder produced
+#: on its own, and it only ever speaks.
+#:
+#: A first attempt gated the bias to utterances short enough to *be* a trigger, on the
+#: reasoning that a long one can never fire a Send. That is true and it is backwards:
+#: short is where the prompt dominates, so the gate kept the bias exactly where all six
+#: false sends were. Recorded because the reasoning is tempting and the numbers are the
+#: only thing that catches it.
+
+
+#: The CUDA runtime libraries CTranslate2 reaches for, dependencies first.
+#:
+#: These ship as pip wheels (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) that drop their
+#: DLLs under `site-packages/nvidia/*/bin`, and nothing on Windows puts that directory on
+#: the loader path. `os.add_dll_directory` is *not* enough on its own either: it steers
+#: resolution for a Python extension's own imports, and CTranslate2 asks for cuBLAS with
+#: a plain runtime `LoadLibrary` long after import, which searches PATH and the modules
+#: already in the process. So the directory goes on PATH and the libraries are loaded by
+#: absolute path up front — after which the later lookup finds them by name.
+_CUDA_LIBS = ("cublasLt64_12.dll", "cublas64_12.dll", "cudnn_ops64_9.dll")
+
+#: Resolved once and remembered, because probing costs a DLL load and the answer cannot
+#: change inside a session. None means "not asked yet".
+_cuda_ok: bool | None = None
+
+
+def _wheel_dll_dirs() -> list[str]:
+    """Directories inside the venv holding CUDA DLLs, or [] when the wheels are absent.
+
+    Absent is an ordinary case, not a failure: a machine with a system-wide CUDA install
+    needs nothing from here, and a CPU-only machine needs nothing at all.
+    """
+    import importlib.util
+
+    spec = importlib.util.find_spec("nvidia")
+    if spec is None or not spec.submodule_search_locations:
+        return []
+    out = []
+    for root in spec.submodule_search_locations:
+        for sub in sorted(Path(root).iterdir()):
+            for cand in (sub / "bin", sub / "lib"):
+                if cand.is_dir() and any(cand.glob("*.dll")):
+                    out.append(str(cand))
+    return out
+
+
+def cuda_ready() -> bool:
+    """True when a decode can actually run on this machine's GPU.
+
+    Three things have to line up and only the first is visible from `nvidia-smi`: a
+    device has to exist, CTranslate2 has to see it, and the CUDA runtime has to be
+    loadable. The third is the one that fails on Windows, and it fails *late* — the
+    model builds happily on `cuda` and then the first encode raises `Library
+    cublas64_12.dll is not found`. Checking the libraries here rather than trusting the
+    device count is what turns that into a fallback instead of a broken session.
+    """
+    global _cuda_ok
+    if _cuda_ok is not None:
+        return _cuda_ok
+    _cuda_ok = False
+    try:
+        import ctypes
+
+        import ctranslate2
+
+        if ctranslate2.get_cuda_device_count() < 1:
+            return _cuda_ok
+        if sys.platform == "win32":
+            dirs = _wheel_dll_dirs()
+            for d in dirs:
+                os.add_dll_directory(d)
+            if dirs:
+                os.environ["PATH"] = os.pathsep.join(
+                    dirs + [os.environ.get("PATH", "")])
+            for name in _CUDA_LIBS:
+                ctypes.CDLL(name)  # by name: PATH, then what is already loaded
+        _cuda_ok = True
+    except Exception:
+        # Any of it missing means CPU, and CPU is a working configuration rather than a
+        # degraded one — this is a speed and accuracy ceiling, not a dependency.
+        _cuda_ok = False
+    return _cuda_ok
+
+
+def resolve_device(device: str = DEVICE) -> str:
+    """"auto" becomes "cuda" or "cpu"; anything else is taken literally.
+
+    `cuda_ready()` is called for an explicit "cuda" too, and discarded. It is not only a
+    question — it is where the runtime libraries get put on the loader path, and asking
+    for the GPU by name has to work at least as well as being given it by default. This
+    was a real defect first: `--decode-device cuda` skipped the probe and every decode
+    died on `cublas64_12.dll is not found` while `auto` on the same machine was fine.
+    """
+    if device == "cuda":
+        cuda_ready()
+        return "cuda"
+    if device != "auto":
+        return device
+    return "cuda" if cuda_ready() else "cpu"
+
+
+def default_models(device: str) -> tuple[str, str]:
+    """(partial, final) for a resolved device.
+
+    Kept as a function rather than two more constants because the answer is not two
+    independent choices — on a GPU it is deliberately the *same* model twice, and a
+    reader who changes one half of that should have to see the other.
+    """
+    if device == "cuda":
+        return CUDA_MODEL, CUDA_MODEL
+    return PARTIAL_MODEL, FINAL_MODEL
+
+
 def decode_options(final: bool, hotwords: str | None = None) -> dict:
     """The decode parameters, in one place.
 
@@ -130,12 +350,6 @@ class Drop(NamedTuple):
 
 
 class Transcriber(Protocol):
-    #: The configured send words, set by the session before every final decode so a
-    #: trigger renamed through the menu reaches the very next utterance. A class
-    #: attribute as well, because a `Transcriber` built by an embedding or a fixture
-    #: that never sets it must still decode.
-    trigger_words: tuple[str, ...] = ()
-
     def text(
         self, audio: np.ndarray, *, final: bool = False, hotwords: str = ""
     ) -> str:
@@ -162,20 +376,29 @@ class WhisperTranscriber:
 
     def __init__(
         self,
-        partial_model: str = PARTIAL_MODEL,
-        final_model: str = FINAL_MODEL,
+        partial_model: str | None = None,
+        final_model: str | None = None,
         compute_type: str = "int8",
         lexicon: Lexicon | None = None,
         baseline: float | None = None,
+        device: str = DEVICE,
     ) -> None:
         #: P8: this speaker's own clean-speech `avg_logprob`, from calibration. None
         #: keeps the shipped absolute bar. See clean.confidence_floor.
         self.baseline = baseline
-        self._names = {False: partial_model, True: final_model}
+        #: None means "whatever this device should run" — resolved with the device, not
+        #: here, because picking it needs to know whether there is a GPU and asking that
+        #: loads DLLs. An explicit name is always honoured, on either device.
+        self._asked = {False: partial_model, True: final_model}
+        self._names_cache: dict[bool, str] | None = None
         #: The user's own words, biasing both tiers (P4). Re-read when the file
         #: changes, so a name added mid-session lands on the next utterance.
         self.lexicon = lexicon if lexicon is not None else Lexicon()
         self._compute_type = compute_type
+        #: Resolved lazily rather than here, so constructing a Transcriber still costs
+        #: nothing — `cuda_ready()` loads DLLs, and the UI builds one of these at start.
+        self._device = device
+        self._resolved: str | None = None
         self._models: dict[bool, object | None] = {False: None, True: None}
         # Guards the model dict and the drop log — both touched from the decode
         # thread and the UI thread. Never held across a model build.
@@ -229,10 +452,28 @@ class WhisperTranscriber:
                 with self._lock:
                     self._loading.add(tier)
                 try:
-                    model = WhisperModel(
-                        self._names[tier], device="cpu",
-                        compute_type=self._compute_type,
-                    )
+                    name = self.names[tier]
+                    try:
+                        model = WhisperModel(
+                            name, device=self.device,
+                            compute_type=self._compute_type,
+                        )
+                    except Exception:
+                        # A GPU that will not build a model is a GPU this session does
+                        # not have. Demote once, for every tier, rather than retrying
+                        # per load — and never fail the session over it, because CPU is
+                        # a working configuration.
+                        if self.device == "cpu":
+                            raise
+                        self._resolved = "cpu"
+                        # The names go with the device: the GPU tier is a model this CPU
+                        # cannot decode inside any budget, so falling back to it would
+                        # trade a broken session for an unusable one.
+                        self._names_cache = None
+                        model = WhisperModel(
+                            self.names[tier], device="cpu",
+                            compute_type=self._compute_type,
+                        )
                     with self._lock:
                         self._models[tier] = model
                 finally:
@@ -281,43 +522,43 @@ class WhisperTranscriber:
             return bool(self._loading)
 
     @property
-    def names(self) -> tuple[str, str]:
-        """(partial, final) model names, for startup diagnostics."""
-        return self._names[False], self._names[True]
+    def device(self) -> str:
+        """"cuda" or "cpu", decided once and then fixed for the session.
 
-    def _standing_bias(self, final: bool) -> str | None:
-        """The lexicon, with the send words in front of it on a final decode.
-
-        Root 5 of the first-contact verdict: **the decoder was never told the trigger
-        word exists.** `hotwords` has been wired since the lexicon shipped, and nothing
-        ever put the send word in it — so the one word whose recognition decides whether
-        a spoken command works at all was the only word Flow never biased toward.
-        Recognition had been measured at exactly one microphone, the owner's, and the
-        2026-07 accent audit predicted this failure by name.
-
-        Merged rather than either/or, which is the difference from the rescue path above:
-        a rescue is aimed at one utterance and may replace everything, while the trigger
-        is standing and has to ride along with whatever the user has taught. **In front**
-        of the lexicon because the list is capped (`MAX_TERMS`, from a measured 223-token
-        truncation in the library) and a trigger that fell off the end of a full lexicon
-        would be the same silent failure one layer down.
-
-        Final only. A partial is never routed and never matched against a trigger, so
-        biasing one costs prompt tokens for a decision nobody makes.
+        Named rather than assumed, because the startup diagnostic has to be able to say
+        which one the user got: the difference is a 3.7 s final decode against ~0.3 s,
+        and somebody whose GPU silently did not engage deserves to see that rather than
+        wonder why it feels the same.
         """
-        terms = self.lexicon.terms()
-        if final and self.trigger_words:
-            lower = {t.lower() for t in terms}
-            terms = [w for w in self.trigger_words
-                     if w and w.lower() not in lower] + terms
-            terms = terms[:MAX_TERMS]
-        return as_hotwords(terms)
+        if self._resolved is None:
+            self._resolved = resolve_device(self._device)
+        return self._resolved
 
-    #: The configured send words, set by the session before every final decode so a
-    #: trigger renamed through the menu reaches the very next utterance. A class
-    #: attribute as well, because a `Transcriber` built by an embedding or a fixture
-    #: that never sets it must still decode.
-    trigger_words: tuple[str, ...] = ()
+    @property
+    def names(self) -> tuple[str, str]:
+        """(partial, final) model names, for startup diagnostics.
+
+        Resolving these resolves the device, since what a tier should be depends on it.
+        """
+        if self._names_cache is None:
+            partial, final = default_models(self.device)
+            self._names_cache = {
+                False: self._asked[False] or partial,
+                True: self._asked[True] or final,
+            }
+        return self._names_cache[False], self._names_cache[True]
+
+    def _standing_bias(self) -> str | None:
+        """The lexicon, and only ever the lexicon.
+
+        The send words used to ride in front of this on every final decode. They do not
+        any more, and the block above `decode_options` is the measurement that took them
+        out — six of 280 short clips decoded to exactly "boom" and would have sent the
+        draft. What the user has taught Flow is different in kind: those are words they
+        actually say, the file they live in prices the bias in its own comments, and
+        adding one is a thing they chose.
+        """
+        return as_hotwords(self.lexicon.terms()[:MAX_TERMS])
 
     def text(
         self, audio: np.ndarray, *, final: bool = False, hotwords: str = ""
@@ -331,8 +572,9 @@ class WhisperTranscriber:
         # A caller-supplied bias wins over the standing lexicon rather than joining
         # it: a rescue decode is aimed at one utterance, and the lexicon measurement
         # says a longer prompt full of terms that are not being said costs accuracy.
-        bias = hotwords or self._standing_bias(final)
+        bias = hotwords or self._standing_bias()
         segments, _ = model.transcribe(audio, **decode_options(final, bias))
+        trusts_ns = reports_no_speech(self.names[final])
         kept = []
         worst: float | None = None
         for s in segments:
@@ -340,6 +582,11 @@ class WhisperTranscriber:
             # with the evidence used (P2). See flow/clean.py for the measurements
             # behind the thresholds.
             ns = getattr(s, "no_speech_prob", None)
+            # A model that cannot report this must not be read as reporting *zero*:
+            # `invented_reason` gates on it first, so a false 0.000 does not soften the
+            # hallucination filter, it removes it. See `reports_no_speech`.
+            if not trusts_ns:
+                ns = None
             lp = getattr(s, "avg_logprob", None)
             reason = invented_reason(s.text, ns, lp, self.baseline)
             if reason is not None:

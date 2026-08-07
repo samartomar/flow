@@ -39,6 +39,7 @@ from .lexicon import (
     ensure as ensure_lexicon,
     pairs,
 )
+from .notes import Notes
 from .profile import path_key, resolve_workspace
 from .refine import available
 from .session import CONVERSE, DICTATE, Session, State
@@ -388,10 +389,16 @@ HELP_FOOT_BAND = PAD + CHIP_H + PAD
 #: it and anything added past that scrolls rather than growing the window off the bottom
 #: of the screen. Re-measured whenever the sheet grows, which is the maintenance this
 #: number exists to need: 1025 px when the window was built, and **1174 px** since item
-#: 71 added the colour legend permanently — measured with all five hotkeys registered,
-#: which is the tallest the sheet gets, because a machine where every combo was taken
-#: renders fewer rows rather than more.
-HELP_MAX_H = 1190
+#: 71 added the colour legend permanently, and **1212 px** since the two note verbs
+#: joined the command table — measured with all five hotkeys registered, which is the
+#: tallest the sheet gets, because a machine where every combo was taken renders fewer
+#: rows rather than more.
+#:
+#: Raised rather than paid for by trimming the sheet, which is the call item 71 made and
+#: for the same reason: the content is what somebody came for, and a table that dropped a
+#: verb to stay under a number would leave the router holding a command the sheet does
+#: not admit to having.
+HELP_MAX_H = 1228
 #: Air left around the window inside the work area, so it reads as floating rather than
 #: as a panel wedged against the edges.
 HELP_MARGIN = 48
@@ -418,6 +425,14 @@ CARD_TURN_CHARS = 400
 
 #: Air between one history turn and the next, and between the question and its answer.
 CARD_GAP = 8
+
+#: What the draft bubble says when a reply arrives into a mode that has moved on.
+#:
+#: Wide enough for both things that come through the reply slot: an answer from the CLI,
+#: and a wrap-up document. "the answer" would be a lie about the second, and naming the
+#: card is what makes the sentence actionable — it says where the words went and what to
+#: press, rather than only that something happened.
+ANSWER_HELD = "that landed on the conversation card - switch to converse to read it"
 
 #: How long each dot of the indeterminate-wait animation holds.
 #:
@@ -685,6 +700,7 @@ class Pill(tk.Tk):
         # Beside its opposite, because they are one pair: the words out, and the words
         # in. Three outside users looked for the second and found only the first.
         m.add_command(label="New draft from clipboard", command=self._paste_draft)
+        self._notes_menu(m)
         self._recent_menu(m)
         m.add_command(label="Clear draft", command=self._clear)
         m.add_separator()
@@ -1058,6 +1074,41 @@ class Pill(tk.Tk):
                 self._voice_row(inner, v)
             parent.add_cascade(label=f"{heading} — {label}", menu=inner)
 
+    def _notes_menu(self, parent: tk.Menu) -> None:
+        """P9's two note verbs, as taps. The floor under the spoken forms.
+
+        **Why the menu and not a chip**, which is where "Use this" and "Copy" live and
+        where a reader would expect these. Measured rather than argued: the card's chip
+        row already runs to **377 px of `CARD_W`'s 420**, and one more chip at its
+        narrowest ("Keep", 56 px) takes it to 433 — off the card. The row cannot take
+        another member without something leaving it, and nothing there is worth less
+        than this.
+
+        The split that falls out of that is better than the row would have been, so it
+        is written as the design rather than as a consolation. **Keep** is frequent,
+        cheap and in-the-moment, and it is one tap here. **Wrap up** happens once, and
+        it is the act that writes a file — a deliberate two-step is the right cost for
+        the only thing in this app that puts the user's words on disk.
+
+        Both rows are absent rather than inert when they would do nothing, the way
+        `_recent_menu` is on an empty ring: a control that lies about having something
+        behind it is worse than one that is not there. So "Keep this answer" appears
+        only with an answer on screen, and "Wrap up" only with notes to wrap.
+        """
+        session = self.session
+        if getattr(session, "can_take_reply", False):
+            parent.add_command(label="Keep this answer", command=session.keep_note)
+        # Typed, not truthiness — `_recent_menu`'s lesson, and the same trap: every UI
+        # fixture in this suite hands a Mock, and `len()` of one raises rather than
+        # returning nothing.
+        notes = getattr(session, "notes", None)
+        held = len(notes) if isinstance(notes, Notes) else 0
+        if held:
+            parent.add_command(
+                label=f"Wrap up ({held} note" + ("" if held == 1 else "s") + ")",
+                command=session.wrap_up,
+            )
+
     def _recent_menu(self, parent: tk.Menu) -> None:
         """The last ~20 things, truncated to a row and copyable whole.
 
@@ -1402,8 +1453,17 @@ class Pill(tk.Tk):
             self._frame()
         except Exception as exc:
             self._flash = 40
-            self.bubble.surface(f"{type(exc).__name__}: {exc}")
             traceback.print_exc()
+            # On the surface this mode owns, for the reason the reply branch is: opening
+            # the bubble over a card is the same one-window rule broken, and a crash is
+            # the worst moment to hand somebody a second window and no explanation of it.
+            # Falling back rather than trusting it, because the surface is a plausible
+            # thing to have just crashed — and a raise from *here* is what breaks the
+            # `after()` chain this whole handler exists to protect.
+            try:
+                self.front.surface(f"{type(exc).__name__}: {exc}")
+            except Exception:
+                self.bubble.surface(f"{type(exc).__name__}: {exc}")
         finally:
             if self._alive:
                 self.after(30, self._tick)
@@ -1488,6 +1548,26 @@ class Pill(tk.Tk):
             self.levels.append(0.0)
 
         self._pump_warnings()
+        self._pump_events()
+
+        if self.converse:
+            self.card.tick_countdown()
+        else:
+            self.bubble.tick_countdown()
+            self.bubble.tick_activity()
+            self.bubble.tick_sent()
+        if self._flash:
+            self._flash -= 1
+        self._draw()
+
+    def _pump_events(self) -> None:
+        """Draw everything the session said since the last frame onto the right surface.
+
+        Its own method rather than a block inside `_frame` for the reason `_pump_warnings`
+        is: the routing decisions here are the ones with an invariant on them — exactly
+        one surface is up, and each event lands on the one this mode owns — and a rule
+        that can only be exercised by driving a real Tk frame is a rule nothing tests.
+        """
         # Cleared on the frame the ask ends, whether it answered or failed, so the next
         # one puts its question on the card — including the same question asked again.
         # Here rather than inside `_ask_is_new` because it has to run on every frame,
@@ -1523,11 +1603,22 @@ class Pill(tk.Tk):
             elif ev.kind == "note":
                 self.front.note(ev.text)
             elif ev.kind == "reply":
-                # Converse only, by construction: `Session.send()` returns "" in dictate
-                # mode and never asks, so there is no answer to draw on the bubble — and
-                # since 2026-08-03 no method on it that could.
+                # Asked only in converse, by construction — `Session.send()` returns ""
+                # in dictate mode and never asks. That was once read as "so this branch
+                # is converse-only" and it is not: it constrains where a question
+                # *leaves*, and says nothing about where the answer *arrives*, which is
+                # 4-20 s of CLI later. Switch mode inside that window and this branch
+                # used to deiconify the card on top of the draft bubble, breaking
+                # `_swap_surfaces`' one-window rule from behind. Reported as "both modes
+                # got activated", which is exactly what two windows look like.
                 if ev.text:
-                    self.card.answer(ev.text)
+                    self.card.answer(ev.text, surface=self.converse)
+                    if not self.converse:
+                        # `surface` rather than `note`, which paints only on a bubble
+                        # that is already up: the case needing this line most is the one
+                        # with nothing on screen at all, where an answer held off-screen
+                        # and unannounced is the silence P2 forbids.
+                        self.bubble.surface(ANSWER_HELD)
             elif ev.kind == "mode":
                 self._swap_surfaces()
             elif ev.kind == "conversation":
@@ -1546,16 +1637,6 @@ class Pill(tk.Tk):
                 # Shown, not hidden: P2 is that a rejection is never silent. The
                 # recovery affordance itself is Phase 3's rescue chip.
                 self.front.note(ev.text)
-
-        if self.converse:
-            self.card.tick_countdown()
-        else:
-            self.bubble.tick_countdown()
-            self.bubble.tick_activity()
-            self.bubble.tick_sent()
-        if self._flash:
-            self._flash -= 1
-        self._draw()
 
     def _pump_warnings(self) -> None:
         """Surface inject warnings that arrived since the last frame.
@@ -1997,9 +2078,19 @@ class ConversationCard(tk.Toplevel):
         self._top = self._max_top()
         self._show()
 
-    def answer(self, text: str) -> None:
+    def answer(self, text: str, *, surface: bool = True) -> None:
+        """The reply, filed here whether or not this window is the one on screen.
+
+        `surface=False` holds it without raising the card. An ask started in converse
+        can land after the user has switched to dictate — the CLI takes 4-20 s and the
+        mode is one keypress — and the two obvious moves there are both wrong: opening
+        the card puts it over the draft the user is now working in, and dropping the
+        answer throws away the seconds the CLI spent and a question that is spent with
+        it. Holding it costs one mode switch to read, and `show()` renders it.
+        """
         self._answer = text
-        self._show()
+        if surface or self._visible:
+            self._show()
 
     def show_partial(self, text: str) -> None:
         """The words forming now, where the question they are becoming will sit.

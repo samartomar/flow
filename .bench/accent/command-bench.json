@@ -1,6 +1,6 @@
 {
  "identity": {
-  "date": "2026-08-01",
+  "date": "2026-08-05",
   "faster-whisper": "1.2.1",
   "ctranslate2": "4.8.1",
   "models": {}
@@ -40,11 +40,15 @@
  "adversarial": {
   "exact": 5,
   "snapped": 5,
+  "empty": 0,
+  "n_empty": 10,
   "n": 20
  },
  "precision": {
   "exact": 0,
   "snapped": 0,
+  "exact-empty": 0,
+  "snapped-empty": 0,
   "n": 580
  },
  "spans": {

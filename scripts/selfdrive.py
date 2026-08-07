@@ -20,6 +20,7 @@ Usage:  uv run python scripts/selfdrive.py [--only NAME] [--keep]
 from __future__ import annotations
 
 import argparse
+import gc
 import subprocess
 import sys
 import time
@@ -118,12 +119,47 @@ class ScriptedMic:
         return not self._queue
 
 
+#: Every session built this run and not yet released, so `main` can reclaim them between
+#: scenarios.
+#:
+#: **This is a leak fix, and the symptom it fixes looked like something else entirely.**
+#: Each `Driver` loads the decoder onto the GPU and nothing ever released it, so a full
+#: run accumulated models until CUDA ran out — measured 2026-08-05, sixth scenario in.
+#: What that *looked* like was a flaky agent CLI: `speak()` raised `RuntimeError: CUDA
+#: failed with error out of memory`, the draft was therefore never set, `send()` found
+#: nothing to send, and the report read "the CLI answered: ✗" with an empty detail.
+#: Three CLI-shaped failures with no CLI involved, and every one of those scenarios
+#: passed alone — which is exactly what makes a leak read as load-related flake.
+#:
+#: **`close()` alone does not do it, and the first version of this fix wrongly assumed it
+#: would.** `Session.close` gives back what `start()` took — the microphone, the worker,
+#: the speaker, the preload — and deliberately not the models, because on the path it was
+#: written for (quit) the process is about to end, and on the path that *does* release
+#: them (R8's idle unload) the session is still alive. Dropping the last reference does
+#: not help either: CTranslate2 hands nothing back to the driver on `__del__`. Measured
+#: over four create/close cycles, `close()` + `gc.collect()` read **+3870, +5179, +5195,
+#: +5219 MiB** — a plateau rather than a release, which is why the suite went green
+#: without anything having been freed. Adding `asr.unload()` reads **+104, +371, +341,
+#: +357 MiB** over the same four cycles: ~3.8 GB actually returned each time.
+#:
+#: So the harness calls the R8 release path itself, which is the harness's business
+#: rather than the product's: nothing in Flow runs a dozen sessions in one process, and
+#: this does.
+#:
+#: Reclaimed between scenarios rather than at the end of each one: `Session.close` is
+#: idempotent and total (round nine, item 57), and a scenario that asserts on its driver
+#: after speaking must not have had it torn down underneath.
+_LIVE: list = []
+
+
 class Driver:
     """One session, driven by speech, with the real decoder behind it."""
 
-    def __init__(self, converse: bool = False, speaker=None) -> None:
+    def __init__(self, converse: bool = False, speaker=None, cwd=None) -> None:
         self.mic = ScriptedMic()
-        self.session = Session(mic=self.mic, speaker=speaker, profile=None)
+        self.session = Session(mic=self.mic, speaker=speaker, profile=None,
+                               refine_cwd=cwd)
+        _LIVE.append(self.session)
         self.session.start()
         if converse:
             self.session.toggle_mode()
@@ -366,6 +402,63 @@ def scenario_followup(report) -> None:
     report("the follow-up was answered in context",
            any(w in answer for w in ("wer", "word error", "%", "percent")),
            (d.session.reply or "")[:74])
+
+
+def scenario_notes(report) -> None:
+    """P9's notes loop, spoken: keep an exchange, keep a dictated note, wrap up.
+
+    The unit tests route strings and the grammar was priced on written corpora; neither
+    answers the question that decides whether this feature exists for a user, which is
+    **do the two verbs survive being said out loud and decoded**. A command the router
+    handles perfectly and the decoder never delivers is a feature nobody has.
+
+    The file is the assertion rather than the buffer. Everything before it — the gate,
+    the decode, the router, the workspace stamp, the render — is upstream of a document
+    on disk, so a document with the right words in it is the whole chain reported once.
+    """
+    import tempfile
+
+    from flow.notes import NOTES_DIR
+
+    work = Path(tempfile.mkdtemp(prefix="flow-notes-"))
+    d = Driver(converse=True, cwd=str(work))
+
+    d.speak("what does the acronym WER stand for", "ask_wer")
+    d.session.send()
+    deadline = time.perf_counter() + 90.0
+    while time.perf_counter() < deadline and d.session.state is State.ASKING:
+        d.session.tick()
+        time.sleep(0.05)
+    answered = bool(d.session.reply)
+    report("the CLI answered, so there is an exchange to keep", answered,
+           (d.session.reply or "")[:60])
+
+    d.speak("keep note", "keep_note")
+    report("'keep note' was heard and kept the exchange", len(d.session.notes) == 1,
+           f"{len(d.session.notes)} held")
+    if d.session.notes.all:
+        kept = d.session.notes.all[0]
+        # The pairing is the value: an answer filed without its question reads later as
+        # an assertion from nowhere.
+        report("and it kept the question with it", bool(kept.question),
+               kept.question[:60])
+
+    # An empty draft is the state an answer arrives into, which is the state the payload
+    # form is legal in — so this also proves the gate is the right way round.
+    d.speak("note that the release goes out on Tuesday", "note_payload")
+    report("a dictated note was kept too", len(d.session.notes) == 2,
+           f"{len(d.session.notes)} held")
+
+    d.speak("wrap up", "wrap_up")
+    files = sorted((work / NOTES_DIR).glob("*.md"))
+    report("'wrap up' was heard and wrote one file", len(files) == 1,
+           files[0].name if files else "none")
+    if files:
+        body = files[0].read_text(encoding="utf-8")
+        report("the file carries the dictated note", "Tuesday" in body,
+               body.splitlines()[0][:60])
+        report("and the buffer emptied into it", len(d.session.notes) == 0,
+               f"{len(d.session.notes)} left")
 
 
 def scenario_asking_ui(report) -> None:
@@ -890,6 +983,7 @@ SCENARIOS = {
     "send": scenario_send,
     "converse": scenario_converse,
     "followup": scenario_followup,
+    "notes": scenario_notes,
     "asking_ui": scenario_asking_ui,
     "chips": scenario_chips,
     "calibrate": scenario_calibrate,
@@ -946,6 +1040,21 @@ def main() -> None:
             fn(report)
         except Exception as exc:  # a scenario that dies is a failure, not a crash
             report(f"{name} raised", False, f"{type(exc).__name__}: {exc}")
+        finally:
+            # Whatever the scenario did, its models go back. In the `finally` because the
+            # scenario most worth reclaiming from is the one that just died.
+            #
+            # Both calls, in this order: `close()` stops the worker so nothing is mid-
+            # decode when the models vanish, and `unload()` is the one that actually
+            # returns the memory. Either alone is a no-op for this purpose — see `_LIVE`.
+            while _LIVE:
+                session = _LIVE.pop()
+                for step in (session.close, session.asr.unload):
+                    try:
+                        step()
+                    except Exception:  # noqa: BLE001 - a stuck teardown is not this
+                        pass           # run's verdict; the next scenario needs the GPU
+            gc.collect()
 
     bad = [r for r in results if not r[0]]
     print(f"\n{len(results) - len(bad)}/{len(results)} checks passed")

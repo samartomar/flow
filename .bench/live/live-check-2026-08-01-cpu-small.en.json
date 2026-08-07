@@ -1,11 +1,11 @@
 {
  "identity": {
-  "date": "2026-08-05",
+  "date": "2026-08-01",
   "faster-whisper": "1.2.1",
   "ctranslate2": "4.8.1",
-  "device": "cuda",
   "models": {
-   "large-v3-turbo": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+   "base.en": "3d3d5dee26484f91867d81cb899cfcf72b96be6c",
+   "small.en": "d1d751a5f8271d482d14ca55d9e2deeebbae577f"
   }
  },
  "D_commands": {
@@ -13,7 +13,7 @@
   "hit": 29,
   "takes": 3,
   "stable": [
-   2,
+   1,
    4,
    6,
    7,
@@ -23,8 +23,8 @@
   ],
   "never": [],
   "per_item": {
-   "1": 2,
-   "2": 3,
+   "1": 3,
+   "2": 2,
    "3": 2,
    "4": 3,
    "5": 2,
@@ -52,16 +52,16 @@
    {
     "item": 1,
     "take": 1,
-    "hit": false,
-    "text": "change everything you still understand.",
-    "got": "append/",
+    "hit": true,
+    "text": "Change every Tuesday to Wednesday",
+    "got": "local/replace_all",
     "want": "local/replace_all"
    },
    {
     "item": 1,
     "take": 2,
     "hit": true,
-    "text": "change every Tuesday to Wednesday",
+    "text": "Change every Tuesday to Wednesday",
     "got": "local/replace_all",
     "want": "local/replace_all"
    },
@@ -69,7 +69,7 @@
     "item": 1,
     "take": 3,
     "hit": true,
-    "text": "change every Tuesday to understand.",
+    "text": "Change every Tuesday to Wednesday",
     "got": "local/replace_all",
     "want": "local/replace_all"
    },
@@ -77,23 +77,23 @@
     "item": 2,
     "take": 1,
     "hit": true,
-    "text": "Change Samir to Samir.",
+    "text": "Change Samir to Samir",
     "got": "local/replace",
     "want": "local/replace"
    },
    {
     "item": 2,
     "take": 2,
-    "hit": true,
-    "text": "Change Samir to Samir.",
-    "got": "local/replace",
+    "hit": false,
+    "text": "It's time to send me",
+    "got": "append/",
     "want": "local/replace"
    },
    {
     "item": 2,
     "take": 3,
     "hit": true,
-    "text": "Change Sameer to Sameer.",
+    "text": "Change Samir to Samir",
     "got": "local/replace",
     "want": "local/replace"
    },
@@ -101,31 +101,31 @@
     "item": 3,
     "take": 1,
     "hit": true,
-    "text": "Capitalize Samir.",
+    "text": "Capitalize Samir",
     "got": "local/capitalize",
     "want": "local/capitalize"
    },
    {
     "item": 3,
     "take": 2,
-    "hit": true,
-    "text": "Capitalized Samir",
-    "got": "local/capitalize",
+    "hit": false,
+    "text": "capitalized some you",
+    "got": "append/",
     "want": "local/capitalize"
    },
    {
     "item": 3,
     "take": 3,
-    "hit": false,
-    "text": "Capitalist, I mean.",
-    "got": "append/",
+    "hit": true,
+    "text": "capitalized Samir.",
+    "got": "local/capitalize",
     "want": "local/capitalize"
    },
    {
     "item": 4,
     "take": 1,
     "hit": true,
-    "text": "Lowercase release notes",
+    "text": "lowercase release notes",
     "got": "local/lower",
     "want": "local/lower"
    },
@@ -141,7 +141,7 @@
     "item": 4,
     "take": 3,
     "hit": true,
-    "text": "Lowercase release notes.",
+    "text": "lowercase release nodes",
     "got": "local/lower",
     "want": "local/lower"
    },
@@ -156,17 +156,17 @@
    {
     "item": 5,
     "take": 2,
-    "hit": false,
-    "text": "delete the bit about the standard.",
-    "got": "append/",
+    "hit": true,
+    "text": "Delete the bit about the standup",
+    "got": "local/delete",
     "want": "local/delete"
    },
    {
     "item": 5,
     "take": 3,
-    "hit": true,
-    "text": "Delete the bit about the standup.",
-    "got": "local/delete",
+    "hit": false,
+    "text": "Delete the bit about the standard",
+    "got": "append/",
     "want": "local/delete"
    },
    {
@@ -189,7 +189,7 @@
     "item": 6,
     "take": 3,
     "hit": true,
-    "text": "Delete the last sentence.",
+    "text": "Delete the last sentence",
     "got": "local/delete_last",
     "want": "local/delete_last"
    },
@@ -197,7 +197,7 @@
     "item": 7,
     "take": 1,
     "hit": true,
-    "text": "Insert drag before release nodes.",
+    "text": "Insert draft before release notes",
     "got": "local/insert_before",
     "want": "local/insert_before"
    },
@@ -205,7 +205,7 @@
     "item": 7,
     "take": 2,
     "hit": true,
-    "text": "Insert draft before release notes.",
+    "text": "Insert draft before release notes",
     "got": "local/insert_before",
     "want": "local/insert_before"
    },
@@ -213,7 +213,7 @@
     "item": 7,
     "take": 3,
     "hit": true,
-    "text": "Insert clap before release notes.",
+    "text": "Insert draft before release nodes",
     "got": "local/insert_before",
     "want": "local/insert_before"
    },
@@ -221,7 +221,7 @@
     "item": 8,
     "take": 1,
     "hit": true,
-    "text": "And do that.",
+    "text": "and do that",
     "got": "undo/",
     "want": "undo/"
    },
@@ -229,7 +229,7 @@
     "item": 8,
     "take": 2,
     "hit": true,
-    "text": "undo that.",
+    "text": "and do that",
     "got": "undo/",
     "want": "undo/"
    },
@@ -237,7 +237,7 @@
     "item": 8,
     "take": 3,
     "hit": true,
-    "text": "undo that",
+    "text": "and do that",
     "got": "undo/",
     "want": "undo/"
    },
@@ -245,7 +245,7 @@
     "item": 9,
     "take": 1,
     "hit": true,
-    "text": "Make it a proper prompt.",
+    "text": "Make it a proper brown.",
     "got": "semantic/polish",
     "want": "semantic/polish"
    },
@@ -253,7 +253,7 @@
     "item": 9,
     "take": 2,
     "hit": true,
-    "text": "Make it a proper prompt.",
+    "text": "Make it a proper prompt",
     "got": "semantic/polish",
     "want": "semantic/polish"
    },
@@ -261,7 +261,7 @@
     "item": 9,
     "take": 3,
     "hit": false,
-    "text": "Make it a proper ground.",
+    "text": "Make it a proper font.",
     "got": "semantic/",
     "want": "semantic/polish"
    },
@@ -269,7 +269,7 @@
     "item": 10,
     "take": 1,
     "hit": true,
-    "text": "follow up and mention the rollback plan.",
+    "text": "follow up and mention the role back plant.",
     "got": "followup/",
     "want": "followup/"
    },
@@ -277,7 +277,7 @@
     "item": 10,
     "take": 2,
     "hit": true,
-    "text": "follow up and mention the road back plan.",
+    "text": "Follow up and mention the rollback flag.",
     "got": "followup/",
     "want": "followup/"
    },
@@ -285,7 +285,7 @@
     "item": 10,
     "take": 3,
     "hit": true,
-    "text": "Follow up and mention the rollback plant.",
+    "text": "follow up and mention the rollback flag",
     "got": "followup/",
     "want": "followup/"
    },

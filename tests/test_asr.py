@@ -164,5 +164,83 @@ class TestDropLog(unittest.TestCase):
         self.assertEqual(len(asr.take_drops()), DROP_HISTORY)
 
 
+class TestAModelThatCannotSayNoSpeech(unittest.TestCase):
+    """`no_speech_prob` is the hallucination filter's first gate, and some models lie.
+
+    `clean.invented_reason` returns early when `no_speech_prob` is low — before it
+    consults the filler list at all — because a model reporting "this is speech" is
+    trusted about that. The distilled and turbo decoders drop the no-speech token
+    behaviour along with the layers and report near-zero on anything, so for them that
+    early return is not a softer filter, it is no filter.
+
+    Measured on three seconds of digital silence, all decoding to "you"/"Thank you.":
+    `small.en` 0.878 and `large-v3` 0.849, both dropped as `filler`; `large-v3-turbo`
+    **0.000** and `distil-large-v3.5` **0.130**, both kept and pasted into the draft.
+    """
+
+    def test_the_families_are_classified(self):
+        from flow.asr import reports_no_speech
+
+        for name in ("base.en", "small.en", "medium.en", "large-v2", "large-v3"):
+            self.assertTrue(reports_no_speech(name), name)
+        for name in ("large-v3-turbo", "turbo", "distil-large-v3",
+                     "distil-large-v3.5", "distil-small.en"):
+            self.assertFalse(reports_no_speech(name), name)
+
+    def test_an_unknown_model_is_trusted(self):
+        # `--model` takes any CTranslate2 repo. Assuming the signal is broken would
+        # start dropping real short utterances from a model that reports it fine, and
+        # P2 says losing a word the user said is the worse failure.
+        from flow.asr import reports_no_speech
+
+        self.assertTrue(reports_no_speech("org/some-ct2-whisper"))
+
+    def _decode(self, model_name, segment):
+        fake = mock.Mock()
+        fake.transcribe.return_value = (iter([segment]), None)
+        with mock.patch("faster_whisper.WhisperModel", return_value=fake):
+            asr = WhisperTranscriber(model_name, model_name)
+            out = asr.text(AUDIO, final=True)
+        return out, asr
+
+    def test_a_blind_models_zero_does_not_disable_the_filter(self):
+        # The defect, pinned: 0.000 on a hallucination must not read as "speech".
+        out, asr = self._decode("distil-large-v3.5",
+                                FakeSegment("you", no_speech_prob=0.0,
+                                            avg_logprob=-0.30))
+        self.assertEqual(out, "")
+        self.assertEqual([d.reason for d in asr.take_drops()], ["filler"])
+
+    def test_the_same_for_turbo(self):
+        out, asr = self._decode("large-v3-turbo",
+                                FakeSegment("Thank you.", no_speech_prob=0.0,
+                                            avg_logprob=-0.25))
+        self.assertEqual(out, "")
+        self.assertEqual([d.reason for d in asr.take_drops()], ["filler"])
+
+    def test_a_blind_model_still_keeps_real_speech(self):
+        out, _ = self._decode("distil-large-v3.5",
+                              FakeSegment("delete the last sentence",
+                                          no_speech_prob=0.0, avg_logprob=-0.30))
+        self.assertEqual(out, "delete the last sentence")
+
+    def test_a_trusting_model_is_unchanged(self):
+        # The other half of the bargain: a model that *does* report the signal keeps
+        # its existing behaviour exactly, including keeping a confident "you" that it
+        # says is speech. This is the path that was never broken.
+        out, asr = self._decode("large-v3",
+                                FakeSegment("you", no_speech_prob=0.01,
+                                            avg_logprob=-0.20))
+        self.assertEqual(out, "you")
+        self.assertEqual(asr.take_drops(), [])
+
+    def test_and_still_drops_when_it_says_no_speech(self):
+        out, asr = self._decode("large-v3",
+                                FakeSegment("Thank you.", no_speech_prob=0.85,
+                                            avg_logprob=-0.24))
+        self.assertEqual(out, "")
+        self.assertEqual([d.reason for d in asr.take_drops()], ["filler"])
+
+
 if __name__ == "__main__":
     unittest.main()

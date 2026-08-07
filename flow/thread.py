@@ -22,10 +22,34 @@ MAX_TURNS = 20
 #: to hold the whole budget hostage.
 MAX_CHARS = 20_000
 
-#: What a CLI rewrite is allowed to see. Deliberately smaller than the store: context
+#: What a CLI **rewrite** is allowed to see. Deliberately smaller than the store: context
 #: is there to disambiguate a follow-up, not to re-send the conversation, and R11 caps
 #: what reaches a subprocess.
 CONTEXT_CHARS = 1_500
+
+#: What a CLI **question** is allowed to see (P9), and the reason there are two numbers.
+#:
+#: There was one, and converse mode inherited it. The sentence above is the whole
+#: argument for 1 500 and it is an argument about `refine`: a rewrite needs just enough
+#: of the thread to know what "the other endpoint" refers to. Converse is not that job.
+#: Its context *is* the conversation, and P9's card renders every turn of it on screen —
+#: so the number sized for disambiguation was quietly deciding how much of a visible
+#: conversation the CLI was allowed to remember.
+#:
+#: Measured 2026-08-06 on the owner's own session, rebuilt at its real lengths: five
+#: turns on the card, 1 765 characters, of which `tail()` returned **three of the four**
+#: prior turns. The opening question fell off, nothing said so, and the CLI answered "I
+#: only have this conversation, which started with a question about a step-by-step plan"
+#: — an accurate report of what it was handed, read by the owner as amnesia inside a
+#: single session. Replies are stored as turns too and are the longer half, so in
+#: converse every answer evicts a question.
+#:
+#: 8 000 is bounded and stays bounded, which is the property R8 asks for: under half the
+#: 20 000-char store, so a long session still costs a fixed ceiling rather than a growing
+#: one, and the cut still exists for a session that genuinely outruns it. What changed is
+#: which side of the cut an ordinary conversation falls on. When it does cut, `Session`
+#: now says how many turns went — the silence was the worse half of this defect.
+ASK_CONTEXT_CHARS = 8_000
 
 
 class Thread:

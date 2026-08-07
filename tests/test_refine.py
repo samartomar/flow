@@ -346,6 +346,26 @@ KIRO_MERGED = (
     "\x1b[0mPONG\x1b[0m\x1b[0m\n\x1b[m\n ▸ Credits: 0.05 • Time: 1s\n\n\x1b[0m\x1b[1G"
     "\x1b[0m\x1b[0m\x1b[?25h"
 )
+#: What kiro-cli puts on stdout when the question makes it read the workspace, captured
+#: 2026-08-06 in `D:\\dev\\tools\\Proxmox` through the same `Popen` shape. 1 147 characters
+#: of which 473 were the answer, and the rest is above it: this is the shape the owner
+#: photographed rendering on the card.
+#:
+#: The marker is in front of *every* assistant turn, not only the answer — which is why
+#: 2026-08-02's "first line only" reading survived so long. With no tools there is one
+#: turn, so the first marker and the last are the same character, and both rules agree.
+KIRO_TOOLS = (
+    "\x1b[m> \x1b[0mLet me search for \"buzz\" across the docs directory.\n"
+    "Searching for: buzz in D:\\dev\\tools\\Proxmox\\docs (*.md) (using tool: grep)\n"
+    " ✓ Successfully found 89 matches in 3 files under D:\\dev\\tools\\Proxmox\\docs\n"
+    " - Completed in 0.5s\n\n"
+    "Reading file: D:\\dev\\tools\\Proxmox\\docs\\buzz-pilot.md, from line 1 to 30 "
+    "(using tool: read)\n"
+    " ✓ Successfully read 1180 bytes from D:\\dev\\tools\\Proxmox\\docs\\buzz-pilot.md\n"
+    " - Completed in 0.0s\n\n"
+    "\x1b[m> \x1b[0mThree files mention buzz: buzz-pilot.md, buzz-agent-team-plan.md, "
+    "and delivery-architecture.md."
+)
 
 
 class TestKiroCliIsWiredFromAMeasurement(unittest.TestCase):
@@ -473,6 +493,49 @@ class TestTheFurnitureIsStrippedForOneCliAndNoOther(unittest.TestCase):
         self.assertNotIn("Credits", cleaned)
         self.assertNotIn("\x1b", cleaned)
         self.assertIn("PONG", cleaned)
+
+    def test_the_tool_narration_does_not_reach_the_card(self):
+        """Item 74. A grounded Ask is the common case, and it narrates.
+
+        The old strip did fire on this — it took the marker off `Let me search…`, the
+        *preamble*, and handed the card 350 characters of grep receipts with the answer
+        underneath. Reported from a screenshot on 2026-08-06.
+        """
+        cleaned = self.clean(KIRO_TOOLS)
+        self.assertTrue(cleaned.startswith("Three files mention buzz:"), cleaned)
+        for receipt in ("using tool:", "Successfully found", "Completed in",
+                        "Let me search", "Reading file:"):
+            with self.subTest(receipt=receipt):
+                self.assertNotIn(receipt, cleaned)
+
+    def test_narration_and_a_quoted_shell_line_in_the_same_answer(self):
+        """The case that rules out cutting at the last marker.
+
+        Both halves at once: receipts to skip past, and an answer whose own body opens a
+        line with `> `. Cutting at the last marker satisfies the narration test and eats
+        the first line of this one — which is how `test_an_angle_bracket_inside_an_answer
+        _survives` caught it. The receipts are the landmark precisely because they are the
+        only thing here that is not something the assistant said.
+        """
+        out = (
+            "\x1b[m> \x1b[0mLet me check the remote.\n"
+            "Running: git status (using tool: execute_bash)\n"
+            " ✓ Successfully ran in 0.3s\n"
+            " - Completed in 0.31s\n\n"
+            "\x1b[m> \x1b[0mYour branch is behind. Run it as:\n"
+            "> git push --force-with-lease"
+        )
+        self.assertEqual(
+            self.clean(out),
+            "Your branch is behind. Run it as:\n> git push --force-with-lease",
+        )
+
+    def test_and_the_no_tools_shape_is_unchanged_by_that(self):
+        # The 2026-08-02 captures, which is the whole argument for cutting at the last
+        # marker rather than the first: with one turn they are the same marker.
+        self.assertEqual(self.clean(KIRO_ANSWER),
+                         "The deploy failed this morning because of the migration.")
+        self.assertEqual(self.clean(KIRO_MULTILINE), "Apples\nPears\nPlums")
 
     def test_the_word_credits_inside_an_answer_survives(self):
         # The status line is a shape, not a word. An answer about billing is still an
@@ -1132,8 +1195,23 @@ class TestAnOperationHasOneDeadline(unittest.TestCase):
     worse than the naive sum, because each abandoned call also pays `_abandon`'s 5 s
     reap. Measured against three hanging fakes at a 0.6 s budget: **16.8 s**.
 
-    The user set one number and can see it. A fallback chain that multiplies it is not a
-    fallback, it is a different feature with the same name.
+    The fix gave the walk one deadline, and sized it `max(timeout, largest floor)` —
+    the size of a *single* call. This class asserted the consequence and defended it: the
+    first candidate could spend the lot, so a timeout left nothing for the second, and
+    the argument was that a genuine hang is one failure mode out of four while the other
+    three cost milliseconds.
+
+    **Item 74 read the trace and the frequencies were the other way round.** Every ask
+    failure on the owner's machine, 11 of 11 over five weeks, is `reason:"timeout"` at
+    ~20.3 s with `provider:null`. With three working CLIs installed, the fallback had
+    never once fired on a real failure — the rare fourth case was every case, and the
+    feature was dead in exactly the situation it was built for.
+
+    So the budget now covers the candidates it has to walk. The half of AGENT-09 that
+    stands is the half about *division*: the per-call wait is still the user's number and
+    is never shared out, because shortening every call turns a slow but working codex
+    into a failing one. What changed is that the walk is allowed to cost what trying the
+    untried ones costs — see `_invoke_any` for the 110 s bill at the shipped defaults.
     """
 
     def _waits_for(self, floors, budget=30.0):
@@ -1162,30 +1240,28 @@ class TestAnOperationHasOneDeadline(unittest.TestCase):
         return seen
 
     def test_the_total_wait_stays_inside_the_budget(self):
+        # Still one bounded walk, and the bound is still arithmetic anyone can do: the
+        # candidates' own waits, plus the reap each abandoned one costs on the way out.
         waits = self._waits_for([None, None, None], budget=30.0)
-        self.assertLessEqual(sum(waits), 30.0 + 0.01, waits)
+        ceiling = 3 * 30.0 + 2 * refine_mod.ABANDON_SEC
+        self.assertLessEqual(sum(waits), ceiling + 0.01, waits)
 
-    def test_the_first_attempt_gets_the_whole_budget(self):
+    def test_the_first_attempt_gets_the_whole_per_call_wait(self):
         waits = self._waits_for([None, None, None], budget=30.0)
         self.assertAlmostEqual(waits[0], 30.0, places=2)
 
-    def test_a_first_attempt_that_hangs_out_the_budget_leaves_no_fallback(self):
-        """And that is the deliberate answer, not a gap in it.
+    def test_and_so_does_the_last_one(self):
+        """The defect item 74 fixed, stated as the property it broke.
 
-        This class first asserted the opposite — that a fallback still happens — and the
-        arithmetic refused, correctly. Dividing the budget among candidates is the other
-        design, and it is worse: it silently shortens every individual call, so a slow but
-        *working* codex times out where it would have answered, turning a working setup
-        into a failing one to serve a hypothetical second provider.
-
-        The fallback is not lost by this. Three of the four failures `_invoke_any` falls
-        over on — failing to start, exiting non-zero, returning nothing — cost
-        milliseconds, and `TestTheFallbackIsReal` pins all of them. Only the fourth, a
-        genuine hang, spends the budget, and spending it is what the user asked for when
-        they set the number.
+        The old budget was the size of one call, so this list had one entry: the first
+        hang spent everything and the CLI that would have answered was never started.
+        Undivided is the other half — a candidate reached third must still be given the
+        number the user set, or this becomes the design AGENT-09 rejected.
         """
         waits = self._waits_for([None, None, None], budget=30.0)
-        self.assertEqual(len(waits), 1)
+        self.assertEqual(len(waits), 3, waits)
+        for i, given in enumerate(waits):
+            self.assertAlmostEqual(given, 30.0, places=2, msg=f"attempt {i}: {waits}")
 
     def test_and_it_says_why_rather_than_going_quiet(self):
         # "codex timed out" followed by nothing reads as a fallback nobody configured,
@@ -1201,18 +1277,60 @@ class TestAnOperationHasOneDeadline(unittest.TestCase):
                                   side_effect=lambda: clock[0]):
             _out, reason, _who = refine_mod._invoke_any(None, "p", timeout=30.0)
         self.assertIn("codex timed out", reason)
-        self.assertIn("no time left to try claude", reason)
+        self.assertIn("claude timed out", reason)
+
+    def test_a_hang_no_longer_costs_the_next_cli_its_turn(self):
+        """The reported symptom, at the level the user met it.
+
+        `hangs` burns the whole wait; `answers` is installed and working and returns
+        instantly. Before item 74 this returned `None` with "no time left to try
+        answers" — measured on the real functions at a 3 s budget: 3 156 ms, no answer.
+        """
+        clock = [0.0]
+
+        def fake_invoke(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            if cli.name == "hangs":
+                clock[0] += timeout if cap is None else min(timeout, cap)
+                return None, "hangs timed out after 3s"
+            return "the answer", ""
+
+        clis = [refine_mod.Cli("hangs", ("hangs",)), refine_mod.Cli("answers", ("answers",))]
+        skipped: list[str] = []
+        with mock.patch.object(refine_mod, "available", return_value=clis),                 mock.patch.object(refine_mod, "_invoke", side_effect=fake_invoke),                 mock.patch.object(refine_mod.time, "monotonic",
+                                  side_effect=lambda: clock[0]):
+            out, _reason, who = refine_mod._invoke_any(
+                None, "p", timeout=3.0, skipped=skipped)
+        self.assertEqual(out, "the answer")
+        self.assertEqual(who.name, "answers")
+        # And the rescue is not silent, which is the other half of the same report.
+        self.assertEqual(skipped, ["hangs timed out after 3s"])
+
+    def test_a_clean_first_answer_leaves_nothing_to_report(self):
+        skipped: list[str] = []
+        clis = [refine_mod.Cli("codex", ("codex",)), refine_mod.Cli("claude", ("claude",))]
+        with mock.patch.object(refine_mod, "available", return_value=clis),                 mock.patch.object(refine_mod, "_invoke",
+                                  side_effect=lambda c, p, **kw: ("out", "")):
+            refine_mod._invoke_any(None, "p", timeout=30.0, skipped=skipped)
+        self.assertEqual(skipped, [])
 
     def test_the_measured_floor_still_holds_for_the_cli_that_needs_it(self):
         # kiro-cli was measured at 35.8 s and ships a 60 s floor (item 41). A user who
         # lowered the global timeout must still not re-create that incident on the one
-        # CLI known to need the time — so the deadline is the larger of the two.
+        # CLI known to need the time — so the wait is the larger of the two.
         waits = self._waits_for([60.0, None], budget=20.0)
         self.assertAlmostEqual(waits[0], 60.0, places=2)
 
+    def test_the_floor_holds_wherever_that_cli_sits_in_the_order(self):
+        # It used to hold only when the CLI carrying it went first: the budget was one
+        # number for the whole walk, so 60 s reached third meant whatever was left of it.
+        waits = self._waits_for([None, None, 60.0], budget=20.0)
+        self.assertEqual(len(waits), 3, waits)
+        self.assertAlmostEqual(waits[-1], 60.0, places=2)
+
     def test_and_the_chain_still_cannot_exceed_that_deadline(self):
         waits = self._waits_for([60.0, None, None], budget=20.0)
-        self.assertLessEqual(sum(waits), 60.0 + 0.01, waits)
+        ceiling = 60.0 + 20.0 + 20.0 + 2 * refine_mod.ABANDON_SEC
+        self.assertLessEqual(sum(waits), ceiling + 0.01, waits)
 
     def test_a_pinned_cli_is_not_second_guessed(self):
         # `cli=` is a decision, not a preference. One attempt, its own full wait.
