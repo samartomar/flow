@@ -418,6 +418,7 @@ class TestTheMenuOffersIt(unittest.TestCase):
         pill = ui.Pill.__new__(ui.Pill)
         pill.session = mock.Mock(mode=ui.DICTATE, speaker=None, profile=None)
         pill.settings_path = Path(tempfile.mkdtemp()) / "lexicon.txt"
+        pill.armed = False  # the Listen row reads it for its label
         commands: dict = {}
 
         class FakeMenu:

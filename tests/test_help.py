@@ -514,6 +514,7 @@ class TestTheMenuReachesIt(unittest.TestCase):
         pill.bubble.note = self.notes.append
         pill._clis = []
         pill._flash = 0
+        pill.armed = False  # the Listen row reads it for its label
         # None rather than a stand-in, so the lazy construction in `_open_commands` is
         # the path under test — the window is built on first use and kept.
         pill._help = None

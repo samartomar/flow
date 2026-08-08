@@ -86,7 +86,7 @@ class Menu(unittest.TestCase):
 
     def build(self, profile=None, *, speaker=None, converse=False, clis=(),
               workspace=None, voices=(), recent=(), notes=None,
-              can_take_reply=True) -> FakeMenu:
+              can_take_reply=True, armed=False) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -123,6 +123,10 @@ class Menu(unittest.TestCase):
         pill.bubble.surface = self.notes.append
         pill._clis = []
         pill._flash = 0
+        #: The Listen row reads it for its label and `_toggle` flips it on a tap; the
+        #: draw is a mock because the tap repaints a pill this skeleton does not have.
+        pill.armed = armed
+        pill._draw = mock.Mock()
         with mock.patch.object(tk, "Menu", make), \
                 mock.patch.object(tk, "StringVar", FakeVar), \
                 mock.patch.object(ui, "available", return_value=list(clis)), \
@@ -136,7 +140,8 @@ class Menu(unittest.TestCase):
 class TestWhatStaysOneTap(Menu):
     """The split is by how often a tap is the answer, not by category."""
 
-    ESSENTIALS = ("Send", "Converse mode", "Copy draft", "Clear draft", "Quit")
+    ESSENTIALS = ("Listen", "Send", "Converse mode", "Copy draft", "Clear draft",
+                  "Quit")
 
     def test_the_essentials_are_still_at_the_top(self):
         top = self.build(self.profile())
@@ -169,6 +174,52 @@ class TestWhatStaysOneTap(Menu):
         # which first during an incident, and this menu is where an incident ends.
         order = self.build(self.profile()).order
         self.assertLess(order.index("Copy draft"), order.index("Clear draft"))
+
+
+class TestListenIsTheMouseOnlyWayIn(Menu):
+    """The one action the menu did not carry, and the session type that missed it.
+
+    A VM console with the guest's keyboard captured (Hyper-V's viewer was the report)
+    swallows every hotkey before Flow can see it, and the mouse is what remains. The
+    pill click still toggles there, but it is an unlabeled control; this row is the
+    labeled one, and like the mode toggle it names what the tap will do, not the state
+    the app is in.
+    """
+
+    def test_it_is_the_first_row_armed_or_not(self):
+        self.assertEqual(self.build(self.profile()).order[0], "Listen")
+        self.assertEqual(self.build(self.profile(), armed=True).order[0],
+                         "Stop listening")
+
+    def test_the_label_names_the_flip_and_never_shows_both(self):
+        self.assertNotIn("Stop listening", self.build(self.profile()).commands)
+        self.assertNotIn("Listen", self.build(self.profile(), armed=True).commands)
+
+    def test_a_tap_arms_capture_through_the_same_toggle_the_pill_click_uses(self):
+        top = self.build(self.profile())
+        self.pill.session.reset_mock()  # the menu build itself asked the session things
+        top.commands["Listen"]()
+        self.pill.session.start.assert_called_once_with()
+        self.assertTrue(self.pill.armed)
+
+    def test_a_tap_while_armed_pauses_rather_than_restarting(self):
+        top = self.build(self.profile(), armed=True)
+        self.pill.session.reset_mock()
+        top.commands["Stop listening"]()
+        self.pill.session.pause.assert_called_once_with()
+        self.pill.session.start.assert_not_called()
+        self.assertFalse(self.pill.armed)
+
+    def test_a_capture_that_cannot_start_is_said_and_the_pill_stays_disarmed(self):
+        # The pill click's refusal handling, inherited rather than reimplemented: no
+        # microphone means a flash and a sentence, never a green pill hearing nothing.
+        top = self.build(self.profile())
+        self.pill.session.start.side_effect = RuntimeError("no capture device")
+        surfaced: list[str] = []
+        self.pill.bubble.surface = surfaced.append
+        top.commands["Listen"]()
+        self.assertFalse(self.pill.armed)
+        self.assertIn("no capture device", " ".join(surfaced))
 
 
 class TestCopyDraftIsTheExitThatNeedsNothing(Menu):

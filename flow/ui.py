@@ -676,8 +676,8 @@ class Pill(tk.Tk):
 
         Two submenus rather than one flat list, because the list had grown past the point
         where anybody scans it — and it grows again with every setting. The split is by
-        *how often a tap is the answer*, not by category: mode, the correction offers,
-        Send and Clear are things somebody does mid-sentence, so they stay at the top;
+        *how often a tap is the answer*, not by category: Listen, mode, the correction
+        offers, Send and Clear are things somebody does mid-sentence, so they stay at the top;
         Voice, the CLI, the trigger word and the settings folder are things somebody does
         once, so they go under Settings. Whatever is here is still bounded by the modal
         stall the menu costs (§9), which is why the offers cap at three and this does not
@@ -688,6 +688,15 @@ class Pill(tk.Tk):
         second control for one action, in the place least connected to what it acts on.
         """
         m = tk.Menu(self, tearoff=0)
+        # Knowingly a third control for one action — the pill click and the arm hotkey
+        # both run `_toggle` — where "Was a command" below was refused a second. The
+        # difference is what is left when a VM console holds the keyboard for its guest
+        # (Hyper-V was the report): every hotkey dies at the console, the mouse still
+        # reaches Flow, and the pill click works but carries no words saying it will.
+        # This row is the labeled way in, and the label names the flip, as the mode
+        # toggle's does. First, because it starts the cycle the rest of the menu acts on.
+        m.add_command(label="Stop listening" if self.armed else "Listen",
+                      command=self._toggle)
         m.add_command(label="Send", command=self._send)
         m.add_command(
             label="Converse mode" if self.session.mode == DICTATE else "Dictate mode",

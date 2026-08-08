@@ -6,6 +6,23 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-08 — Listen joins the menu: a third control, for consoles that keep the keyboard
+
+Reported from the desk: working inside a Hyper-V console, the guest owns the keyboard,
+so the arm hotkey never reaches Flow — and the mouse still does. The pill click toggles
+capture there already, but it is the one control in the app with no words on it, and
+the welcome card that says what it does is shown once.
+
+Decided: **Listen / Stop listening** is the first row of the right-click menu, running
+the same `_toggle` as the pill click and the hotkey. It is knowingly a third control
+for one action — the argument that kept "Was a command" off this menu — but that
+refusal was about severing a control from the utterance it acts on, and Listen acts on
+the microphone, which is everywhere the menu is. The label names the flip, as the mode
+toggle's does; first row, because it starts the cycle the rest of the menu acts on.
+
+Reopen bar: none. A row costs a row, and the menu's stall budget (§9) is unchanged by
+one entry.
+
 ### 2026-08-06 — Four from one screenshot set, and a fallback that had never once fired
 
 Five observations from one converse session, reported together. Four were real defects and

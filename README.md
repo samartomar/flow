@@ -282,8 +282,11 @@ nothing is worse than no shortcut. It is a global hotkey now, like the rest.
 
 ### The pill and the bubble
 
-Right-click the pill for **Send**, **Converse/Dictate mode**, **Clear draft** and
-**Quit**, plus any corrections Flow is offering. Everything you set once — **Trigger
+Right-click the pill for **Listen / Stop listening**, **Send**, **Converse/Dictate
+mode**, **Clear draft** and **Quit**, plus any corrections Flow is offering. Listen is
+the same toggle as clicking the pill, given a label — and it is the way in when a
+Hyper-V console or an RDP session keeps every hotkey for its guest and the mouse is
+what still reaches Flow. Everything you set once — **Trigger
 word**, **Agent CLI**, **Voice**, **Mute/Speak replies** (only when a speech engine was
 found), the auto-ask toggle and **Open settings folder** — lives under **Settings ▸**, and
 **Help ▸** has the command sheet and this guide. Drag the pill anywhere — it stays inside

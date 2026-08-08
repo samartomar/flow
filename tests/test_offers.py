@@ -237,6 +237,7 @@ class TestTheMenuCarriesTheOffers(Temp):
         pill.bubble = mock.Mock()
         pill.bubble.note = self._notes.append
         pill._clis = []
+        pill.armed = False  # the Listen row reads it for its label
         with mock.patch.object(tk, "Menu", make), \
                 mock.patch.object(tk, "StringVar", mock.Mock()), \
                 mock.patch.object(ui, "available", return_value=[]), \
