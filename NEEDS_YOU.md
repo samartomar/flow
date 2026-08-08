@@ -251,16 +251,16 @@ uninstalled).
   other machine, so it is still yours:
   `uv tool install git+https://github.com/samartomar/flow`, then
   `https://github.com/samartomar/flow/releases`.
-- [ ] **Run the v0.2.0 zip on a machine with no Python** — the one thing no harness here
+- [ ] **Run the v0.3.0 zip on a machine with no Python** — the one thing no harness here
   can prove. CI ran `flow.exe --help` against the bundle it built before zipping it, and
-  the published v0.2.0 asset was downloaded here and ran `--help` at exit 0, but both
+  the published v0.3.0 asset was downloaded here and ran `--help` at exit 0, but both
   machines have Python installed. Take the zip from
   `https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip`
-  (that link always serves the newest release; today it resolves to v0.2.0 — 126 MB
+  (that link always serves the newest release; today it resolves to v0.3.0 — 126 MB
   zipped, 323 MB unpacked), unzip, run `flow.exe`, and expect one-time SmartScreen:
-  **More info → Run anyway**. Re-pointed at v0.2.0 on 2026-08-03: the check was written
-  against v0.1.0, and that binary predates round nine's security fixes, so proving *it*
-  starts would prove the wrong thing.
+  **More info → Run anyway**. Re-pointed at v0.3.0 on 2026-08-08, as at each release
+  before it: the check follows the newest asset, because proving a superseded binary
+  starts proves the wrong thing.
 
 - [ ] **Nothing in the app tells a user which version they hold** — parked by the
   2026-08-03 release decision rather than smuggled into v0.2.0. A `--version` flag and a

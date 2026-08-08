@@ -1984,10 +1984,11 @@ stops, then the full unit suite, then the PyInstaller build from `packaging/flow
 then `flow.exe --help` against the bundle it just made, then the zip is attached to the
 release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
 every commit passes, and a bundle that builds but cannot start does not reach a Releases
-page. Re-measured on the **v0.2.0** asset, downloaded from
-`releases/latest/download/flow-windows-x64.zip` and unzipped (2026-08-03): **338,857,704 B
-unpacked across 1,196 files, 132,471,792 B zipped** — 323 MB and 126 MB, against the first
-build's 323 MB and 125 MB on 2026-08-01. Models excluded; they download to the HF cache on
+page. Re-measured on the **v0.3.0** asset, downloaded from
+`releases/latest/download/flow-windows-x64.zip` and unzipped (2026-08-08): **338,927,052 B
+unpacked across 1,196 files, 132,539,952 B zipped** — 323 MB and 126 MB, unchanged at MB
+scale from v0.2.0's 338,857,704 B / 132,471,792 B on 2026-08-03, against the first build's
+323 MB and 125 MB on 2026-08-01. Models excluded; they download to the HF cache on
 first decode exactly as a dev install does. Re-taken from the published asset rather than
 from a local build, because the first-build numbers stop being true the moment a second
 build exists, and the zip a stranger receives is the one the README's figures are about.

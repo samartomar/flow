@@ -85,7 +85,7 @@ unzip it anywhere, and run `flow.exe`. That URL is version-free on purpose: the 
 never changes, so the link serves whatever release is newest and no cached page can hand
 you a stale zip. [Releases](https://github.com/samartomar/flow/releases) is there to browse
 the notes and older builds. Nothing to install and no Python on the machine. **126 MB zipped, 323 MB
-unpacked** (measured on the v0.2.0 asset itself, downloaded from the link above). The two speech models are *not* in the zip —
+unpacked** (measured on the v0.3.0 asset itself, downloaded from the link above). The two speech models are *not* in the zip —
 they download to your Hugging Face cache on the first decode, exactly as they do for
 every other install, and the startup line names the path. Bundling them would have made
 this a 730 MB download and frozen two files `--model` is meant to swap.
