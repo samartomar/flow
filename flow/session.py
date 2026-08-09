@@ -571,7 +571,7 @@ class Session:
         self._pending_rescue: str | None = None
         #: The last utterance that was appended as dictation, with its audio, so
         #: "that was a command" can re-read it instead of asking the user to repeat.
-        self._last_append: tuple[str, object] | None = None
+        self._last_append: Append | None = None
         #: Set while a post-hoc rescue is in flight, so its re-decode is routed back
         #: here rather than to the escalation path.
         self._post_hoc: str | None = None
@@ -1410,7 +1410,7 @@ class Session:
             # a command the router read as dictation. Recorded before the undo, since
             # undoing is what clears the evidence.
             if self.profile is not None and self._last_append is not None:
-                self.profile.note_misroute(self._last_append[0])
+                self.profile.note_misroute(self._last_append.text)
             if not self.draft.undo():
                 self._emit("note", "nothing to undo")
         elif p.kind == "local":

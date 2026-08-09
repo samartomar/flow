@@ -10,6 +10,7 @@ would be worse than the misroute.
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -20,7 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
 from flow.edits import plan  # noqa: E402
+from flow.profile import Profile  # noqa: E402
 from flow.session import Session  # noqa: E402
+
+
+def tmp_profile() -> Profile:
+    """A real `Profile` on a throwaway path — never the user's own (R9)."""
+    return Profile(Path(tempfile.mkdtemp()) / "profile.json")
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 QUIET = np.zeros(BLOCK, dtype=np.float32)
@@ -67,15 +74,20 @@ class BiasAwareAsr:
         return self.finals.pop(0) if self.finals else ""
 
 
-def session_with(finals, rescued="", force_append_from=None):
+def session_with(finals, rescued="", force_append_from=None, profile=None):
     """Run `finals` through a session, one utterance at a time.
 
     `force_append_from` presses Continue before that index, which is how a misroute is
     staged: the override has to be set *before* the utterance is routed, not after.
+
+    `profile` defaults to None, which is what every other test here wants — and is
+    also exactly what hid the crash `TestUndoReachesTheProfile` now covers: the whole
+    P8 learning branch is behind `if self.profile is not None`, so a suite that never
+    passes one never executes it.
     """
     mic = ScriptedMic()
     asr = BiasAwareAsr(finals, rescued)
-    s = Session(asr=asr, mic=mic)
+    s = Session(asr=asr, mic=mic, profile=profile)
     s.start()
     for i in range(len(finals)):
         if force_append_from is not None and i >= force_append_from:
@@ -108,6 +120,36 @@ class TestTrigger(unittest.TestCase):
         ):
             with self.subTest(utterance=utterance):
                 self.assertNotEqual(plan(utterance, self.DRAFT).kind, "rescue")
+
+
+class TestUndoReachesTheProfile(unittest.TestCase):
+    """An undo landing straight on an append is P8's misroute signal (`_route`).
+
+    Driven through the real router with a real profile, because that pairing is the
+    only thing that runs the branch: `Session` defaults `profile=None`, so every
+    session the suite built skipped it entirely. `9236810` turned `_last_append` from
+    a tuple into an `Append` and converted three call sites; the fourth kept indexing
+    it, and `TypeError: 'Append' object is not subscriptable` then fired *before*
+    `draft.undo()` on the next line. The user got a red flash and kept their words —
+    an undo that reported failure by not happening, for six days, under 1,529 green
+    tests. So the assertion that matters is not that the profile learned something;
+    it is that the draft actually went back.
+    """
+
+    def test_undo_after_an_append_still_undoes(self):
+        s, _asr, _mic = session_with(
+            ["Meeting on Tuesday.", "undo"], profile=tmp_profile()
+        )
+        self.assertEqual(s.draft.text, "")
+        s.close()
+
+    def test_the_undone_utterance_is_recorded_as_a_misroute(self):
+        profile = tmp_profile()
+        s, _asr, _mic = session_with(
+            ["Delete the standup line.", "undo"], profile=profile
+        )
+        self.assertEqual(list(profile.misroutes), ["delete the standup"])
+        s.close()
 
 
 class TestPostHocRescue(unittest.TestCase):
