@@ -31,11 +31,26 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from clipboard_env import sealed_clipboard  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
 from flow.session import AUTO_ASK_SEC, CONVERSE, Session, State  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
+
+#: One class below calls `inject.paste()`, which reads the real clipboard. See
+#: `clipboard_env.py`. It asserts on the return value rather than on the warnings, so it
+#: survived the failure that module documents — by one assertion it does not make.
+_CLIPBOARD = sealed_clipboard()
+
+
+def setUpModule():
+    _CLIPBOARD.start()
+
+
+def tearDownModule():
+    _CLIPBOARD.stop()
 
 
 class FakeMic:

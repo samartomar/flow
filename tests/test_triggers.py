@@ -23,7 +23,9 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from clipboard_env import sealed_clipboard  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
 from flow.edits import (  # noqa: E402
     SEND_ENTER_WORD,
@@ -37,6 +39,18 @@ from flow.session import CONVERSE, Session  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 DRAFT = "Ship the release notes on Tuesday."
+
+#: The trigger presses the same button the Send chip does, so it reaches the real
+#: clipboard the same way. See `clipboard_env.py`.
+_CLIPBOARD = sealed_clipboard()
+
+
+def setUpModule():
+    _CLIPBOARD.start()
+
+
+def tearDownModule():
+    _CLIPBOARD.stop()
 
 
 class FakeMic:

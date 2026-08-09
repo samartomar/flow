@@ -19,6 +19,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from clipboard_env import sealed_clipboard  # noqa: E402
 
 # Windows-only: ctypes.WinDLL, bound at import.
 #
@@ -30,8 +33,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if sys.platform != "win32":  # pragma: no cover - the CI legs that are not Windows
     raise unittest.SkipTest("Windows-only: flow.inject binds user32 at import")
 
+import flow.inject as inject  # noqa: E402
 from flow.inject import (  # noqa: E402
     BRACKETED_PASTE,
+    CF_UNICODETEXT,
     TERMINAL_CLASSES,
     TERMINAL_PROCESSES,
     Target,
@@ -39,7 +44,22 @@ from flow.inject import (  # noqa: E402
     prepare,
     resolve,
     take_warnings,
+    unrestorable,
 )
+
+#: What the clipboard holds is declared, not found. See `clipboard_env.py` — the tests
+#: below mock every other clipboard call and missed this one, so the suite's verdict
+#: depended on what had last been copied on the machine running it.
+_CLIPBOARD = sealed_clipboard()
+
+
+def setUpModule():
+    _CLIPBOARD.start()
+
+
+def tearDownModule():
+    _CLIPBOARD.stop()
+
 
 WT = Target("CASCADIA_HOSTING_WINDOW_CLASS", "WindowsTerminal.exe")
 CMD = Target("ConsoleWindowClass", "cmd.exe")
@@ -1081,3 +1101,24 @@ class TestTheClipboardSurvivesAFailedAllocation(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("free", calls)
         self.assertIn("close", calls, "the clipboard was left open for the process")
+
+
+class TestNoTestHereReadsTheMachinesClipboard(unittest.TestCase):
+    """The seal `clipboard_env.py` installs, asserted rather than assumed.
+
+    Without it this module passes or fails on what was last copied on the machine
+    running it: 28 tests went red together on an unchanged commit because a screenshot
+    had been taken in between. That is worse than a plain failure — it is a red suite
+    with no bug behind it, arriving on a change that did not cause it, which is how a
+    suite stops being read. Asserted here so that removing the seal breaks one test
+    with a name that says why, instead of two dozen that all point somewhere else.
+    """
+
+    def test_the_formats_are_declared_by_the_suite(self):
+        self.assertEqual(inject.clipboard_formats(), [CF_UNICODETEXT])
+
+    def test_and_they_are_formats_a_paste_destroys_nothing_by_overwriting(self):
+        # The half that matters: it is not enough that the answer be fixed, it has to be
+        # an answer that keeps `paste()` quiet, or every test asserting on warnings is
+        # still reading something it did not declare.
+        self.assertEqual(unrestorable(inject.clipboard_formats()), "")
