@@ -36,11 +36,17 @@ spoken command, both modes, and what is stored where.
 
 ## Install
 
-**Windows 10/11 only.** The paste and hotkey layer is 96 Win32 call sites and the timing
-behaviour around them was measured on Windows, so a macOS port means re-taking those
-measurements rather than swapping a few calls — it waits for Mac users asking and Mac
-hardware to measure on. Run Flow on anything else and it says so in one sentence and
-exits, rather than throwing a `ctypes` traceback at you.
+**Full Flow is Windows 10/11.** The paste and hotkey layer is 96 Win32 call sites and the
+timing behaviour around them was measured on Windows, so a native macOS *body* means
+re-taking those measurements rather than swapping a few calls — it waits for Mac users
+asking and Mac hardware to measure on.
+
+**Off Windows, Flow starts in Lite** rather than refusing. Everything that does not need
+hands is there — both decoder tiers, the correction loop, the lexicon, the profile, the
+polish, the thread, converse mode — and Send copies the draft for you to paste. See
+[README](../README.md#flow-lite-macos-and-linux) for the short version and
+[product.md](product.md#flow-lite--the-portable-body) for the definition and the fence.
+`--lite` runs the same code on Windows.
 
 ### With `uv` — nothing to clone
 
@@ -127,7 +133,7 @@ Nothing is lost either way — `uv sync` rebuilds the full venv, and
 
 ## Requirements
 
-- Windows 10/11
+- Windows 10/11 for full Flow; macOS or Linux runs [Lite](#install)
 - [`uv`](https://docs.astral.sh/uv/) (it fetches Python 3.12 and the deps itself)
 - A microphone
 - Optional: `codex` or `claude` on PATH, already signed in. Needed for semantic rewrites,
@@ -212,6 +218,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--partial-model X` | fast model for live partials (default `base.en`) |
 | `--final-model X` | stronger model for the pasted text (default `small.en`) |
 | `--model X` | pin BOTH tiers to one model, for a low-memory machine |
+| `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one) |
 | `--lexicon PATH` | personal terms file (default `~/.flow/lexicon.txt`) |
 | `--no-lexicon` | ignore that file without deleting it |
 | `--device N` | input device index; list them with `scripts/devices.py` |
@@ -227,6 +234,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--cli NAME` | pin the agent CLI (`codex` or `claude`) instead of trying each in turn |
 | `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
 | `--cwd PATH` | the project converse-mode questions are asked from; overrides the stored `workspace` ([P9](#converse-mode-p9)) |
+| `--lite` | clipboard-out mode: Send copies the draft instead of pasting it, and no hotkeys are registered (automatic off Windows — see [Install](#install)) |
 
 If capture cannot start — no microphone, device held exclusively by another app, a bad
 `--device` index — the pill stays slate and the reason appears in a red bubble. It will
@@ -1024,8 +1032,10 @@ tracked at all, and which parts of it are deliberately not.
 - **Spanish read-register accuracy is closed as unmeasurable.** No obtainable corpus
   contains it; the only route left is a volunteer recording. See
   [docs/recording-kit.md](recording-kit.md).
-- **Windows only.** The GUI is tkinter and portable, but hotkeys, paste, DPI awareness and
-  speech are all Win32 via ctypes.
+- **The hands are Windows only.** The GUI is tkinter and portable, but hotkeys, paste,
+  DPI awareness and speech are all Win32 via ctypes. Off Windows that half is absent
+  rather than broken — [Lite](#install) runs the brain and the ear and copies the draft
+  instead of pasting it, so the last inch is your own Ctrl+V.
 
 ## Measured
 

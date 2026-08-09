@@ -11,6 +11,7 @@ the one thing that does not work. So the commands are asserted to be exact, here
 a change to either side has to move both.
 """
 
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LICENSE = ROOT / "LICENSE"
 PYPROJECT = ROOT / "pyproject.toml"
 README = ROOT / "README.md"
+GUIDE = ROOT / "docs" / "guide.md"
 
 
 def pyproject() -> dict:
@@ -101,10 +103,19 @@ class TestTheInstallSection(unittest.TestCase):
         self.assertIn("SmartScreen", self.readme)
         self.assertIn("Run anyway", self.readme)
 
-    def test_windows_only_is_stated_where_someone_deciding_will_read_it(self):
-        install = self.readme.split("## Install", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("Windows", install)
-        self.assertIn("macOS", install)
+    def test_which_platforms_get_what_is_stated_before_the_feature_tour(self):
+        # This asked for "Windows" and "macOS" inside the install section, which was the
+        # right shape while the answer was "Windows, and nothing else runs". It is not:
+        # `__main__.py` starts Flow Lite off Windows rather than refusing, and a README
+        # that omits that turns working software into software a Mac user never tries.
+        #
+        # So the region checked is install through to the feature tour — the part read by
+        # someone deciding whether this runs at all — and both halves of the answer have
+        # to be in it.
+        deciding = self.readme.split("## Install", 1)[1].split("## The loop", 1)[0]
+        self.assertIn("Windows", deciding)
+        self.assertIn("macOS", deciding)
+        self.assertIn("Lite", deciding)
 
     def test_and_that_the_agent_cli_is_optional(self):
         install = self.readme.split("## Install", 1)[1].split("\n## ", 1)[0]
@@ -128,6 +139,40 @@ class TestTheInstallSection(unittest.TestCase):
         guide = (ROOT / "docs" / "guide.md").read_text(encoding="utf-8")
         self.assertLess(guide.index("## Install"), guide.index("### Flags"))
         self.assertLess(guide.index("## Install"), guide.index("## Running it"))
+
+
+class TestTheFlagTableIsTheFlags(unittest.TestCase):
+    """Every flag the parser accepts, in the table that claims to list them.
+
+    The table drifted by two before anyone noticed: `--decode-device` and `--lite` were
+    both parsed and neither was written down, and `--lite` is the whole reason Flow runs
+    on a Mac at all. A reference table missing a row is worse than no table, because it
+    reads as a complete list — so the parser is asked rather than trusted.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import contextlib
+        import importlib
+        import io as _io
+
+        # The parser is built inside `main()`, so `--help` is how it is reached without a
+        # desktop. Its text is the same on every platform: nothing above argparse branches
+        # on `sys.platform` any more.
+        with contextlib.redirect_stdout(_io.StringIO()) as out:
+            with contextlib.suppress(SystemExit):
+                importlib.import_module("flow.__main__").main(["--help"])
+        cls.parsed = set(re.findall(r"^\s+(--[a-z0-9-]+)", out.getvalue(), re.M))
+        cls.parsed.discard("--help")
+        cls.table = set(re.findall(r"^\| `(--[a-z0-9-]+)", GUIDE.read_text(
+            encoding="utf-8"), re.M))
+        assert cls.parsed, "no flags came back from --help"
+
+    def test_every_flag_the_parser_takes_is_written_down(self):
+        self.assertEqual(self.parsed - self.table, set())
+
+    def test_and_the_table_invents_none(self):
+        self.assertEqual(self.table - self.parsed, set())
 
 
 class TestTheReleaseWorkflow(unittest.TestCase):

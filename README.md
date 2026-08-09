@@ -6,7 +6,8 @@ paste the version you settled on.
 
 Speech recognition runs on your machine. No API key.
 
-**Windows 10/11 · English only · three dependencies**
+**English only · three dependencies · Windows in full, macOS and Linux in
+[Lite](#flow-lite-macos-and-linux)**
 
 ![Flow: a message dictated word by word, corrected by voice, sent, then a question asked of the agent](docs/flow.gif)
 
@@ -28,16 +29,43 @@ shows Windows SmartScreen and takes **More info → Run anyway**, once.
 You need [`uv`](https://docs.astral.sh/uv/), which fetches Python 3.12 and the three
 dependencies itself, and a microphone.
 
-**Windows only.** The paste and hotkey layer is Win32 throughout; run Flow on anything
-else and it says so in one sentence and exits. A macOS port means re-taking those
-measurements rather than swapping a few calls, and waits for Mac users asking.
-
 An agent CLI — `codex` or `claude` on PATH, already signed in — is **optional**. It adds
 semantic rewrites, the prompt polish and converse mode. Without one, startup prints
 `refine CLI: NONE` and everything else works.
 
 [The guide](docs/guide.md#install) has the rest: cloning to change it, trimming ~106 MB
 of unreachable dependencies, and why a `.cmd` launcher from `npm -g` is refused.
+
+## Flow Lite (macOS and Linux)
+
+Off Windows, Flow starts in **Lite** without being asked — `--lite` runs the same code on
+Windows if you want to see it. Startup says which one you got:
+
+```
+Flow Lite on darwin: Send copies the draft and you paste it - no injection,
+no global hotkeys, nothing to grant but the microphone.
+```
+
+**Lite is the brain, the ear and the clipboard.** Both decoder tiers, the correction
+loop, the lexicon, the calibrated profile, the prompt polish, the thread and converse
+mode are all there, unchanged. What changes is the last inch: **Send copies the draft and
+you press Ctrl+V yourself.**
+
+Four things it does not do — exclusions, not gaps: no injection into another
+application's window, no global hotkeys (arming is a click on the pill), no auto-paste,
+and no target-window awareness. What that buys is the property full Flow cannot have:
+**nothing to grant but the microphone** — no accessibility permission, no input
+monitoring, no trusted-application prompt.
+
+Two requirements Lite cannot meet, named rather than dropped: P7 (safe paste into a
+terminal) is a promise about a paste Flow performs, and Lite performs none; and P9's loop
+ends on the clipboard, one keystroke short. [docs/product.md](docs/product.md#flow-lite--the-portable-body)
+defines the half and the fence around it — features land in full Flow first and reach
+Lite only if they survive without hands.
+
+There is no Mac or Linux download. `uv tool install` is the way in, and a native macOS
+body is not promised: it is weeks of work plus re-taking every measurement per OS, and
+what would fund it is evidence from Lite.
 
 ## The loop
 
