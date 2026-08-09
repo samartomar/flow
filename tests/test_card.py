@@ -35,6 +35,11 @@ def card(**kw):
     c = ui.ConversationCard.__new__(ui.ConversationCard)
     c.pill = mock.Mock()
     c.pill.accent = "#a78bfa"
+    #: A real bool. The panels ask `pill.flashing` rather than comparing `pill.accent`
+    #: to `ERROR`, because the pill's accent is interpolated now and spends most of a
+    #: flash near red without ever equalling it — and an auto-created Mock is truthy,
+    #: which would leave every card in this file permanently in an error state.
+    c.pill.flashing = False
     #: A real int, not the auto-created Mock the attribute would otherwise be —
     #: `reposition` does arithmetic on it now that the pill's width can dock.
     c.pill.pill_w = ui.PILL_W
@@ -515,7 +520,7 @@ class TestEachWindowHasOneColour(unittest.TestCase):
         # chip is `PRIMARY_FILL`, the loading dot is `WAITING`. Amber is spent once now,
         # on "Put it back" (decisions.md 2026-08-09, "amber means five things").
         b = ui.Bubble.__new__(ui.Bubble)
-        b.pill = mock.Mock(accent=ui.ACCENT[ui.State.LISTENING])
+        b.pill = mock.Mock(accent=ui.ACCENT[ui.State.LISTENING], flashing=False)
         self.assertEqual(b.accent, ui.MUTED)
         self.assertNotEqual(b.accent, ui.RECOVER_ACCENT)
 
@@ -528,11 +533,15 @@ class TestEachWindowHasOneColour(unittest.TestCase):
     def test_but_the_error_flash_still_reaches_both(self):
         # The note the flash belongs to is drawn on one of these windows, so a red pill
         # beside a violet card would be two answers to one question.
+        #
+        # `flashing`, not `accent == ERROR`: §07 gives the pill's own hairline an 80 /
+        # 1200 / 600 envelope, so `pill.accent` is a blend for most of a flash. A panel
+        # ring is "set red once and cleared once" — it wants the fact, not the frame.
         c = card()
-        c.pill.accent = ui.ERROR
+        c.pill.flashing = True
         self.assertEqual(c.accent, ui.ERROR)
         b = ui.Bubble.__new__(ui.Bubble)
-        b.pill = mock.Mock(accent=ui.ERROR)
+        b.pill = mock.Mock(flashing=True)
         self.assertEqual(b.accent, ui.ERROR)
 
     def test_the_pill_keeps_three_colours_and_neither_of_theirs(self):

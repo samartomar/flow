@@ -296,9 +296,13 @@ took the pill off `REFINING` while the rewrite was still in flight. `ASKING` out
 **The pill went from five colours to three on 2026-08-03, and the two it lost became
 windows.** Amber meant "a draft is held" and violet meant "a question is out" — and in
 both cases a whole card was already on screen saying so, which is the colour doing a
-second window's job. `DRAFT_ACCENT` (amber) is the draft bubble's outline for as long as
-it is up, `CARD_ACCENT` (violet) is the conversation card's, and neither changes with the
-session state. `REFINING` and `ASKING` share blue because from the user's side they are
+second window's job. `CARD_ACCENT` (violet) is the conversation card's outline, and it
+does not change with the session state. `DRAFT_ACCENT` was the draft bubble's, and it is
+gone: it was `RECOVER_ACCENT` under a second name, and between them the one amber drew a
+panel outline, a primary chip, an editor ring and a loading dot — "amber means five
+things", which is a colour that emphasises nothing. Each of those went to what actually
+describes it (neutral chrome, `PRIMARY_FILL`, `WAITING`), and amber is now spent once, on
+"Put it back". `REFINING` and `ASKING` share blue because from the user's side they are
 the same wait — something is out and the answer is not here yet — and the surface that is
 showing already names which. The error flash still reaches both windows, because the note
 it belongs to is drawn on one of them.

@@ -6,6 +6,36 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-09 — The idle pill goes 168 → 205, because the bar label is worth more than the mock
+
+§02 of the v2 design gives the pill a status word — `Bar label · Plex Mono 11 · +.1em` —
+and §03 heads its idle mock `168 idle`. Those two do not both fit. At 11 px mono with
+`.1em` tracking, `LISTENING` is 71 px; a 168 px pill has 110 px for the meter and the
+label together, and twelve bars need 70 of it. The spec's own HTML resolves this by
+making the meter `flex:1`, so a longer word simply eats bars: at `LISTENING` there is
+room for six of the twelve.
+
+Decided: **the pill widens, the meter keeps all twelve bars, and the label gets a slot
+reserved at its widest word.** The meter is the instrument that answers *am I being
+heard*; one that halves the moment you start speaking is a worse lie than a wider pill,
+and it fails in exactly the state the meter exists for. Reserving at the widest label —
+rather than fitting the current one — is the rule §07 already states for the Ask chip's
+countdown numeral, and for the same reason: a fitted slot moves the meter's right edge
+on every state change. `PILL_W` is now derived from its parts (`METER_X + METER_W +
+LABEL_GAP + LABEL_SLOT_W + LABEL_PAD`), and `LABEL_SLOT_W` is computed over the label
+strings themselves, so adding a longer one widens the pill instead of silently drawing
+through the twelfth bar.
+
+The cost, stated: the all-day footprint grows 37 px, against a redesign that explicitly
+protected it ("within a few pixels of today's 152×40"). What makes that acceptable is
+where the pixels land — `_sync_dock` pins the right edge, so the pill grows leftward,
+which is the direction it already grows every time a panel docks to it. Nothing moves
+under a hand that was already aiming at something.
+
+**Reopens if** the owner reads 205×40 as too much desk. The fallback is not a narrower
+slot but shorter words — the label set is one dict, and dropping `LISTENING` to `HEAR`
+buys back 35 px without touching the meter.
+
 ### 2026-08-08 — Listen joins the menu: a third control, for consoles that keep the keyboard
 
 Reported from the desk: working inside a Hyper-V console, the guest owns the keyboard,

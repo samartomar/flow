@@ -329,6 +329,19 @@ class RecordingCanvas:
         self.texts.append((x, y, text))
 
 
+def markers(pill) -> list[str]:
+    """Just the marker slot's text, out of everything `_draw` wrote on the canvas.
+
+    The pill has a second piece of text on it now — §02's bar label, drawn one character
+    at a time because Tk has no letter-spacing — and a bare read of `canvas.texts` turns
+    `["codex"]` into `["codex", "I", "D", "L", "E"]`. The two never share a line: the
+    marker sits under the glyph at `PILL_H - 7`, the label on the centre line.
+    """
+    import flow.ui as ui
+
+    return [t for _x, y, t in pill.canvas.texts if y != ui.PILL_H // 2]
+
+
 CODEX = Cli("codex", ("codex", "exec"))
 CLAUDE = Cli("claude", ("claude", "-p"))
 
@@ -361,7 +374,7 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         pill = cls._pill(mode, pinned)
         with mock.patch.object(ui, "available", return_value=list(clis)):
             pill._draw()
-        return [t for _, _, t in pill.canvas.texts]
+        return markers(pill)
 
     def test_the_marker_names_whichever_cli_resolved(self):
         # Both directions, so a constant cannot pass this by matching one of them.
@@ -433,7 +446,7 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
             for _ in range(60):
                 pill._draw()
         self.assertEqual(lookup.call_count, 1)
-        self.assertEqual([t for _, _, t in pill.canvas.texts][-1], "codex")
+        self.assertEqual(markers(pill)[-1], "codex")
 
     def test_opening_the_menu_re_resolves_what_is_installed(self):
         # The one place a CLI can appear mid-session and then be selected is the menu,
@@ -466,7 +479,7 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         pill.bubble = mock.Mock()
         with mock.patch.object(ui, "available", return_value=[]):
             pill._draw()
-        self.assertEqual([t for _, _, t in pill.canvas.texts], ["ASK"])
+        self.assertEqual(markers(pill), ["ASK"])
         with mock.patch.object(ui, "available", return_value=[CODEX, CLAUDE]), \
                 mock.patch.object(tk, "Menu", FakeMenu), \
                 mock.patch.object(tk, "StringVar", mock.Mock()), \
@@ -477,7 +490,7 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
             pill._menu(mock.Mock(x_root=0, y_root=0))
         pill.canvas.texts.clear()
         pill._draw()
-        self.assertEqual([t for _, _, t in pill.canvas.texts], ["codex"])
+        self.assertEqual(markers(pill), ["codex"])
 
 
 class TestTheMarkerMayCarryAShortNameForACliThatDoesNotFit(unittest.TestCase):

@@ -389,8 +389,8 @@ FONT_BODY = (FONT_SANS, -14)  # draft text, the answer, the hand editor
 FONT_NOTE = (FONT_SANS, -11)
 FONT_CHIP = (FONT_SANS_MEDIUM, -12)  # secondary chip label
 FONT_CHIP_PRIMARY = (FONT_SANS_SEMIBOLD, -12)  # Send / Ask / Done / Put it back
-#: Trace/code text and the pill's bar label (§07) — not drawn anywhere yet; declared
-#: here so both land on the same family when they are.
+#: Trace/code text and the pill's bar label (§02, `Bar label · Plex Mono 11 · +.1em`).
+#: The editor's key hints and `Pill._bar_label` are the two things drawn in it.
 FONT_TRACE = (FONT_MONO, -11)
 #: The live partial — muted italic, named so the probe that measures it and the call that
 #: draws it cannot be given different fonts. They were never measured together at all, and
@@ -398,12 +398,6 @@ FONT_TRACE = (FONT_MONO, -11)
 #: the note below it. See `Bubble._partial_slot`.
 FONT_PARTIAL = (*FONT_NOTE, "italic")
 
-#: The pill's own width at rest — with nothing to dock to, it stays close to today's
-#: footprint (152 → 168, a few pixels, not a jump: this sits on top of somebody's
-#: editor all day). `Pill.pill_w` is what actually draws and positions the window; this
-#: is the value it falls back to when no panel is up (decisions.md 2026-08-09, "one
-#: object, three windows").
-PILL_W = 168
 PILL_H = 40
 #: Twelve, down from eighteen (decisions.md 2026-08-09). The meter answers one question —
 #: *am I being heard* — and twelve bars answer it as well as eighteen did, in six bars
@@ -412,6 +406,98 @@ PILL_H = 40
 BARS = 12
 BAR_W, BAR_GAP = 4, 2
 DB_FLOOR, DB_CEIL = -58.0, -12.0  # level range mapped onto bar height
+
+#: Where the meter starts and how wide it ends up — named because the bar label has to
+#: begin after it, and two places computing `BARS * (BAR_W + BAR_GAP)` is how the label
+#: would come to be drawn through the twelfth bar the day one of them changed.
+METER_X = 40
+METER_W = BARS * (BAR_W + BAR_GAP) - BAR_GAP
+
+#: §02's `+.1em`, at an 11 px em, rounded to the pixel Tk can actually place text on.
+#: Tk has no letter-spacing, so `Pill._bar_label` positions each character itself.
+LABEL_TRACK = 1
+#: One character's advance in `FONT_TRACE`. A single number is enough because the family
+#: is monospaced — which is also why the space in `NO INPUT` needs no special case.
+LABEL_ADV = 7
+LABEL_PITCH = LABEL_ADV + LABEL_TRACK
+LABEL_GAP = 12  # between the meter's last bar and the label
+LABEL_PAD = 12  # the mock's own right padding
+
+#: What the label says, per state (§03's mocks: `idle`, `listening`, `held`, `working`,
+#: `no input`, and §04's `speaking`). Upper-cased at 11 px mono with tracking, which is
+#: what makes a nine-character word read as a status line rather than as prose.
+#:
+#: `REFINING` and `ASKING` share `WORKING` for the reason they share `WAITING`: from the
+#: user's side they are one wait, and the panel that is up already names which.
+BAR_LABELS = {
+    State.IDLE: "IDLE",
+    State.LISTENING: "LISTENING",
+    State.DRAFT: "HELD",
+    State.REFINING: "WORKING",
+    State.ASKING: "WORKING",
+}
+LABEL_OFF = "OFF"  # disarmed: not a state of the session, a state of this pill
+LABEL_SPEAKING = "SPEAKING"  # deaf because Flow is talking, not because nothing arrived
+LABEL_EDITING = "EDITING"  # deaf because the draft is being edited by hand
+LABEL_NO_INPUT = "NO INPUT"  # armed, and the device stopped
+
+#: The label's slot, reserved at the widest label rather than fitted to the current one —
+#: the rule §07 states for the Ask chip's countdown numeral, and for the same reason: a
+#: slot that fits the word being shown moves the meter's right edge every time the state
+#: changes. Computed over the labels themselves, so adding a longer one widens the pill
+#: instead of quietly drawing through the twelfth bar. `tests/test_pill.py` measures the
+#: result against the real font, which is the only thing that can tell `LABEL_ADV` it has
+#: stopped being 7.
+LABEL_SLOT_W = LABEL_PITCH * max(
+    len(w) for w in (*BAR_LABELS.values(), LABEL_OFF, LABEL_SPEAKING,
+                     LABEL_EDITING, LABEL_NO_INPUT)
+) - LABEL_TRACK
+
+#: The pill's own width at rest, derived rather than chosen: the glyph, the meter, and a
+#: slot the widest label fits in.
+#:
+#: §03 heads its mock `168 idle`, and 168 is what this was — but 168 assumes the label
+#: slot is `IDLE`-sized (28 px). The same mock draws the meter as `flex:1`, so in the
+#: spec's own HTML a longer word simply eats bars; at `LISTENING` there is room for six
+#: of the twelve. That trade is the wrong way round. The meter is the instrument that
+#: answers *am I being heard*, and one that loses half its bars the moment you start
+#: speaking is a worse lie than a wider pill — so the pill widens instead, which is the
+#: resolution §03 itself reaches when the draft panel's chip row does not fit 380
+#: ("the widest state … is worth more than the mock it came out of").
+#:
+#: The right edge is what `_sync_dock` pins, so the extra width appears on the left, in
+#: the direction this window already grows every time a panel docks to it.
+#:
+#: `Pill.pill_w` is what actually draws and positions the window; this is the value it
+#: falls back to when no panel is up (decisions.md 2026-08-09, "one object, three
+#: windows").
+PILL_W = METER_X + METER_W + LABEL_GAP + LABEL_SLOT_W + LABEL_PAD  # 205
+
+#: The three marching dots that stand in for the meter while a CLI is out (§07): 4 px
+#: across, opacity .25 → 1, staggered 150 ms, over a 1.2 s loop. In frames, because the
+#: pill's own 30 ms tick is the only clock here — 1200/30 and 150/30.
+DOT_R = 2
+DOT_GAP = 6
+DOTS_LOOP = 40
+DOTS_STAGGER = 5
+DOT_DIM = 0.25
+
+#: The error flash's envelope (§07, `80 / 1200 / 600`) in frames of the same 30 ms tick:
+#: the pill's hairline travels to red over 80 ms, holds for 1.2 s, and decays over 600.
+#: One envelope for every call site — the 12/40/60 that used to be scattered across them
+#: were three durations nobody had chosen, and the shortest was under a third of the hold
+#: the spec names, which is how a warning could flash and be missed.
+#:
+#: Only the *pill* interpolates. A panel's ring is set red once and cleared once (§07,
+#: "two repaints, not sixty"), which is why the surfaces test `Pill.flashing` rather than
+#: reading the blended colour back out.
+FLASH_ATTACK, FLASH_HOLD, FLASH_DECAY = 3, 40, 20
+FLASH_FRAMES = FLASH_ATTACK + FLASH_HOLD + FLASH_DECAY
+
+#: How long the glyph, meter and label take to travel between dictate's state colour and
+#: converse's violet (§07, `180ms tint`) — six frames, "and that travel is the whole
+#: continuity" of a mode switch that also takes one window down and puts another up.
+TINT_FRAMES = 6
 
 #: The level meter eases toward its target rather than jumping (§07, decisions.md
 #: 2026-08-09): peaks fall slower than they rise, so a loud spike does not vanish in
@@ -778,6 +864,33 @@ def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
     return c.create_polygon(pts, smooth=True, **kw)
 
 
+def _mix(a: str, b: str, t: float) -> str:
+    """`a` at `t=0`, `b` at `t=1`, a `#rrggbb` blend of the two in between.
+
+    Every §07 animation that changes a colour goes through here, and none of them can
+    use alpha to do it: these windows are binary-transparent (decisions.md 2026-08-09,
+    the reason the whole elevation is opaque hairlines), so "opacity .25" for a waiting
+    dot means 25 % of the way from `SHELL` to the accent, not 25 % alpha over it.
+
+    Clamped rather than asserted: `t` is a frame counter divided by a frame count, and a
+    tick that runs long is not a reason to raise inside a repaint.
+
+    The two ends return their own argument rather than a re-rendered blend of it, and
+    that is not just the cheap path. Round-tripping `HEARING` through here produced
+    `#3ecf8e` — the same colour, a different string — and every `accent == HEARING` in
+    this file and its tests would have started answering False at rest, which is when
+    the pill spends almost all of its life.
+    """
+    if t <= 0.0:
+        return a
+    if t >= 1.0:
+        return b
+    return "#%02X%02X%02X" % tuple(
+        round(int(a[i:i + 2], 16) + (int(b[i:i + 2], 16) - int(a[i:i + 2], 16)) * t)
+        for i in (1, 3, 5)
+    )
+
+
 def _panel_chrome(c: tk.Canvas, w: int, h: int, radius, ring_color: str,
                    tags="body", seam: str | None = None) -> None:
     """The opaque three-hairline elevation every v2 surface shares (decisions.md
@@ -861,6 +974,11 @@ class Pill(tk.Tk):
     _disarmed_since: float | None = None
     _hover_since: float | None = None
     _drawn_alpha = 0.94
+    #: Same reason a third time, for the two §07 animations `_draw` reads: the dots'
+    #: position in their 1.2 s loop, and how far the glyph has travelled toward violet.
+    _dots_frame = 0
+    _tint = 0.0
+    _flash = 0
 
     def __init__(
         self, session: Session, on_send=None, hotkeys=None, arm=False,
@@ -904,7 +1022,13 @@ class Pill(tk.Tk):
         self._hover_since: float | None = None
         self.armed = False
         self._disarmed_since = time.perf_counter()  # starts disarmed, so the clock does too
-        self._flash = 0  # frames remaining of the error flash
+        self._flash = 0  # frames remaining of the error flash, out of `FLASH_FRAMES`
+        #: Where the three waiting dots are in their 1.2 s loop, and how far the pill has
+        #: travelled toward converse's violet (0 = dictate, 1 = converse). Both advance
+        #: in `_frame`, on the repaint it was going to do anyway — §07's rule is that no
+        #: animation here gets a timer of its own.
+        self._dots_frame = 0
+        self._tint = 0.0
         self._clis: list | None = None  # PATH lookup, deferred and then kept (`_resolved`)
         #: Built on first use, then kept — see `_open_commands`.
         self._help: HelpWindow | None = None
@@ -1019,7 +1143,7 @@ class Pill(tk.Tk):
             except Exception as exc:
                 # No microphone, device in exclusive use, driver failure. Stay disarmed
                 # and say so, rather than flipping to a green pill that captures nothing.
-                self._flash = 60
+                self._flash = FLASH_FRAMES
                 self.bubble.surface(f"could not start capture: {exc}")
                 self._draw()
                 return
@@ -1284,7 +1408,7 @@ class Pill(tk.Tk):
             self.bubble.note(f'send: say "{word}"' if self.lite
                              else f'send: say "{word}", or "{enter_word(word)}" to submit')
         else:
-            self._flash = 12
+            self._flash = FLASH_FRAMES
             self.bubble.note(f"could not save {profile.path}")
 
     #: What fits in a menu row. A path is the one label here the user's filesystem
@@ -1672,7 +1796,7 @@ class Pill(tk.Tk):
             # Flashed whether the paste failed outright or merely could not be
             # guaranteed. A terminal that will run each line as it arrives is the
             # loudest thing Flow can cause, so both deserve to be looked at.
-            self._flash = 40
+            self._flash = FLASH_FRAMES
             self.bubble.show_sent(text, problem)
         elif text:
             self.bubble.show_sent(text)
@@ -1760,7 +1884,7 @@ class Pill(tk.Tk):
             # A locked profile directory, or a shell with no handler for a folder. Said
             # on screen: the menu item did nothing visible, and there is no other place
             # a user would look.
-            self._flash = 12
+            self._flash = FLASH_FRAMES
             self.bubble.note(f"could not open {folder}: {exc}")
             return
         if created:
@@ -1845,7 +1969,7 @@ class Pill(tk.Tk):
         try:
             open_guide()
         except OSError as exc:
-            self._flash = 12
+            self._flash = FLASH_FRAMES
             self.bubble.note(f"could not open the guide: {exc}")
 
     def _clear(self) -> None:
@@ -1882,7 +2006,7 @@ class Pill(tk.Tk):
         try:
             self._frame()
         except Exception as exc:
-            self._flash = 40
+            self._flash = FLASH_FRAMES
             traceback.print_exc()
             # On the surface this mode owns, for the reason the reply branch is: opening
             # the bubble over a card is the same one-window rule broken, and a crash is
@@ -1990,6 +2114,7 @@ class Pill(tk.Tk):
             self.bubble.tick_sent()
         if self._flash:
             self._flash -= 1
+        self._advance_motion()
         # Piggybacks on the repaint this frame was already doing (§07's rule) rather
         # than adding a second trigger — the same reason a panel's own `reposition`
         # also calls this, for the frame where a panel opens between two ticks.
@@ -2035,7 +2160,7 @@ class Pill(tk.Tk):
             elif ev.kind == "partial":
                 self.front.show_partial(ev.text)
             elif ev.kind == "error":
-                self._flash = 12
+                self._flash = FLASH_FRAMES
                 self.front.note(ev.text)
             elif ev.kind == "note":
                 self.front.note(ev.text)
@@ -2093,7 +2218,7 @@ class Pill(tk.Tk):
         while the card for its own Send is still on screen.
         """
         for line in take_warnings():
-            self._flash = 12
+            self._flash = FLASH_FRAMES
             self.bubble.note(line)
 
     def _flatten(self) -> None:
@@ -2120,6 +2245,27 @@ class Pill(tk.Tk):
         for i in range(BARS - 1, BARS - 1 - done, -1):
             self.levels[i] = 0.0
 
+    def _advance_motion(self) -> None:
+        """Step the two §07 animations that have to remember where they were.
+
+        Frozen while the pointer is in, for the reason `_eased` and `_flatten` are:
+        "nothing animates while the pointer is inside a window" is one rule, not three.
+        The error flash is deliberately not among them — it decays on its own clock,
+        because an error held indefinitely under a resting hand is the failure this whole
+        surface exists to avoid.
+        """
+        if self._pointer_in:
+            return
+        # Reset rather than paused when the wait ends, so the next CLI call starts its
+        # dots at the beginning of the loop instead of wherever the last one stopped.
+        self._dots_frame = (self._dots_frame + 1) % DOTS_LOOP if self.waiting else 0
+        target = 1.0 if self.converse else 0.0
+        step = 1.0 / TINT_FRAMES
+        self._tint = (
+            min(target, self._tint + step) if self._tint < target
+            else max(target, self._tint - step)
+        )
+
     def _eased(self, target: float) -> float:
         """This frame's drawn level, one step closer to `target` than the last.
 
@@ -2141,12 +2287,56 @@ class Pill(tk.Tk):
     # -- painting ----------------------------------------------------------
 
     @property
-    def accent(self) -> str:
-        if self._flash:
-            return ERROR
+    def flashing(self) -> bool:
+        """Whether an error is on this pill right now.
+
+        The panels ask this rather than comparing `accent` to `ERROR`, and that is not
+        a tidy-up: `accent` is interpolated now, so for most of a flash it is *near*
+        `ERROR` without ever equalling it, and an identity test against it would have
+        turned the panel rings red for a single frame in the middle of the hold.
+        """
+        return self._flash > 0
+
+    @property
+    def flash_t(self) -> float:
+        """How far into red this frame is, 0…1 — §07's `80 / 1200 / 600` envelope.
+
+        Attack, hold and decay are read off the one counter every call site sets to
+        `FLASH_FRAMES`, so there is no second piece of state to get out of step with it.
+        """
+        if not self._flash:
+            return 0.0
+        elapsed = FLASH_FRAMES - self._flash
+        if elapsed < FLASH_ATTACK:
+            return (elapsed + 1) / FLASH_ATTACK
+        if self._flash > FLASH_DECAY:
+            return 1.0
+        return self._flash / FLASH_DECAY
+
+    @property
+    def base_accent(self) -> str:
+        """The state's own colour, before the mode tint and the error flash."""
         if not self.armed:
             return ACCENT[State.IDLE]
         return ACCENT.get(self.session.state, ACCENT[State.IDLE])
+
+    @property
+    def accent(self) -> str:
+        """What the glyph, the meter and the label are painted this frame.
+
+        Three layers, applied in the order they are allowed to override each other: the
+        state's colour, then converse's violet travelling in over `TINT_FRAMES` (§07 —
+        "the pill's glyph and label tint travel green ⇄ violet at frame rate, and that
+        travel is the whole continuity"), then the error flash on top of both, because an
+        error is true regardless of which mode raised it.
+        """
+        base = _mix(self.base_accent, CARD_ACCENT, self._tint)
+        return _mix(base, ERROR, self.flash_t) if self._flash else base
+
+    @property
+    def waiting(self) -> bool:
+        """Whether a CLI is out — the state whose dots stand in for the level meter."""
+        return self.armed and self.session.state in (State.REFINING, State.ASKING)
 
     @property
     def ring_color(self) -> str:
@@ -2157,8 +2347,13 @@ class Pill(tk.Tk):
         what draws them — but the ring is not a fourth place to repeat green, blue or
         violet. Only an error turns it, at the same moment the panel's ring turns too
         (decisions.md 2026-08-09, "BOTH pill and panel ring go red").
+
+        This is the hairline §07 means by "goes red over 80 ms and decays over 600" — it
+        interpolates. The panel's ring is the same red set once and cleared once, which
+        is the whole difference between the surface that redraws every 30 ms and the one
+        that does not.
         """
-        return ERROR if self.accent == ERROR else RING_OUTER
+        return _mix(RING_OUTER, ERROR, self.flash_t) if self._flash else RING_OUTER
 
     @property
     def pill_w(self) -> int:
@@ -2279,15 +2474,97 @@ class Pill(tk.Tk):
                 font=("Segoe UI", 6, "bold"),
             )
 
-        # Level bars (R13). Mirrored around the centre line so quiet reads as a
-        # flat line rather than an empty box.
-        x0 = 40
         mid = PILL_H // 2
-        for i, lvl in enumerate(self.levels):
-            h = max(1.5, lvl * (PILL_H - 16) / 2)
-            x = x0 + i * (BAR_W + BAR_GAP)
-            shade = accent if lvl > 0.04 else MUTED
-            c.create_rectangle(x, mid - h, x + BAR_W, mid + h, fill=shade, outline="")
+        if self.waiting:
+            self._draw_dots(c, mid, accent)
+        else:
+            # Level bars (R13). Mirrored around the centre line so quiet reads as a
+            # flat line rather than an empty box.
+            for i, lvl in enumerate(self.levels):
+                h = max(1.5, lvl * (PILL_H - 16) / 2)
+                x = METER_X + i * (BAR_W + BAR_GAP)
+                shade = accent if lvl > 0.04 else MUTED
+                c.create_rectangle(x, mid - h, x + BAR_W, mid + h, fill=shade, outline="")
+        self._draw_label(c, w, mid, accent)
+
+    def _draw_dots(self, c: tk.Canvas, mid: int, accent: str) -> None:
+        """Three marching dots in the slot the meter vacates (§07).
+
+        The meter is not merely hidden while a CLI is out — left up, it would be lying.
+        Nothing is being captured during a refine, so bars moving there are the same
+        false "hearing you" that `_flatten` exists to kill, one state along.
+
+        "Opacity .25 → 1" is a blend from `SHELL`, not an alpha: these windows are
+        binary-transparent and have nothing to composite against. See `_mix`.
+        """
+        span = 2 * DOT_R
+        x = METER_X + (METER_W - (3 * span + 2 * DOT_GAP)) // 2
+        for i in range(3):
+            dx = x + i * (span + DOT_GAP) + DOT_R
+            c.create_oval(dx - DOT_R, mid - DOT_R, dx + DOT_R, mid + DOT_R,
+                          fill=_mix(SHELL, accent, self._dot_lit(i)), outline="")
+
+    def _dot_lit(self, i: int) -> float:
+        """How lit dot `i` is this frame — §07's "opacity .25 → 1", as a `_mix` weight.
+
+        A triangle: each dot rises to full over half the loop and falls over the other
+        half, `DOTS_STAGGER` frames behind the one to its left, so the bright point
+        travels along the row.
+
+        The first attempt was a sawtooth — snap to full, decay across the loop — chosen
+        to guarantee the three are never the same shade. They are the same shade on two
+        frames in forty, which is not worth what the sawtooth costs: full brightness
+        lasts a *single* frame out of forty, so the peak that makes the row read as
+        marching is invisible 97 % of the time. Two screenshots taken a third of a
+        second apart both came back with the brightest dot at 68 % — a row of grey
+        dots that happened to be at slightly different greys.
+        """
+        phase = ((self._dots_frame - i * DOTS_STAGGER) % DOTS_LOOP) / DOTS_LOOP
+        return DOT_DIM + (1 - DOT_DIM) * (1 - abs(2 * phase - 1))
+
+    def _draw_label(self, c: tk.Canvas, w: int, mid: int, accent: str) -> None:
+        """The bar label, right-aligned in the slot `LABEL_SLOT_W` holds open for it.
+
+        One `create_text` per character, because Tk has no letter-spacing and §02 asks
+        for `+.1em`. That is nine calls in the worst state, on a canvas that already
+        clears and repaints itself thirty times a second.
+
+        Right-aligned against this window's *current* width rather than `PILL_W`, so the
+        word stays at the pill's right edge when it widens to dock — the same edge
+        `_sync_dock` pins, and therefore the one place on this pill where a word can sit
+        still while everything to its left moves.
+        """
+        text = self._bar_label()
+        x = w - LABEL_PAD - (len(text) * LABEL_PITCH - LABEL_TRACK)
+        for i, ch in enumerate(text):
+            c.create_text(x + i * LABEL_PITCH, mid, text=ch, fill=accent,
+                          font=FONT_TRACE, anchor="w")
+
+    def _bar_label(self) -> str:
+        """The word in the pill's right-hand slot: what Flow is doing, in one token.
+
+        Deafness gets three words rather than one, and that is the same distinction
+        `Session.hearing` is careful about: "busy, still listening" and "busy, and deaf"
+        are different promises, and *why* Flow has stopped hearing decides whether the
+        user should keep talking. `SPEAKING` and `EDITING` say it will come back on its
+        own; `NO INPUT` says the device is gone and nothing is coming back.
+
+        Which of the first two it is comes off `editing`, not off `speaker.speaking`,
+        and that is not arbitrary: `hearing` is defined as *neither of those two*, so
+        one of them is enough to tell them apart — and it is the one that is a plain
+        attribute rather than a reach through an object that is `None` whenever speech
+        is switched off. Asking the speaker first labelled a spoken reply `EDITING`,
+        which is the opposite advice.
+        """
+        if not self.armed:
+            return LABEL_OFF
+        mic = getattr(self.session, "mic", None)
+        if mic is not None and not getattr(mic, "active", True):
+            return LABEL_NO_INPUT
+        if not getattr(self.session, "hearing", True):
+            return LABEL_EDITING if getattr(self.session, "editing", False) \
+                else LABEL_SPEAKING
+        return BAR_LABELS.get(self.session.state, BAR_LABELS[State.IDLE])
 
 
 class HelpWindow(tk.Toplevel):
@@ -2840,7 +3117,7 @@ class ConversationCard(tk.Toplevel):
         The error flash still reaches it, because the message the flash belongs to is
         drawn on this card and a red pill beside a violet card would be two answers.
         """
-        return ERROR if self.pill.accent == ERROR else CARD_ACCENT
+        return ERROR if self.pill.flashing else CARD_ACCENT
 
     @property
     def ring_color(self) -> str:
@@ -3572,7 +3849,7 @@ class Bubble(tk.Toplevel):
         `MUTED` rather than a fourth ring colour: "resting, claims no state of its own"
         is exactly the answer, and `ring_color` only asks whether this is `ERROR`.
         """
-        return ERROR if self.pill.accent == ERROR else MUTED
+        return ERROR if self.pill.flashing else MUTED
 
     @property
     def ring_color(self) -> str:

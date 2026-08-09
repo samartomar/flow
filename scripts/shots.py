@@ -94,6 +94,10 @@ user32 = ctypes.windll.user32
 # -- the session stand-in ------------------------------------------------------
 
 class FakeMic:
+    #: Read by `Pill._bar_label`, which says `NO INPUT` when the device has gone —
+    #: distinct from `SPEAKING`/`EDITING`, where the microphone comes back on its own.
+    active = True
+
     def stop(self) -> None: ...
 
 
@@ -449,6 +453,13 @@ def build(pill, sess):
         def fn():
             sess.state, sess.activity, sess.hearing = st, activity, hearing
             pill.armed = armed
+            # What `_toggle` does either side of the same flag, and leaving it out was
+            # quietly costing every shot after the first eight seconds: `_apply_idle_dim`
+            # kept counting from the disarmed pill this walk starts with, so the window
+            # faded to `IDLE_DIM_ALPHA` and stayed there. Sampled off `06-refining`, the
+            # accent came back (83, 106, 155) against `WAITING`'s (122, 162, 247) — 55 %
+            # of the colour, on a page of images whose whole job is to be believed.
+            pill._disarmed_since = None if armed else time.perf_counter()
         return fn
 
     def menu(names, target):
@@ -501,6 +512,10 @@ def build(pill, sess):
         (900, lambda: shot(pill, "05-decoding")),
         (0, state(State.REFINING, Activity("refining", True))),
         (900, lambda: shot(pill, "06-refining")),
+        # The same wait a third of a second later. Two frames, because the meter's slot
+        # is holding three marching dots here and a single still cannot tell a wave
+        # passing along them from three dots that are simply painted at fixed shades.
+        (330, lambda: shot(pill, "06b-refining-later")),
         (0, state(State.DRAFT, Activity("editing - not listening", False),
                   hearing=False)),
         (200, lambda: pill.bubble._edit()),
@@ -510,11 +525,18 @@ def build(pill, sess):
         (400, lambda: pill._send()),
         (900, lambda: shot(pill, "08-sent")),
         (0, lambda: pill.bubble.hide()),
-        (300, lambda: (setattr(pill, "_flash", 60),
+        # §03's own error frame, and the finding it comes with: "deafness is a flat
+        # line, never coloured bars — today's error frame paints eighteen loud red bars
+        # in the one state where nothing is being heard". Photographing that needs the
+        # device actually gone, not just a red flash over a full meter.
+        (300, lambda: (setattr(pill, "_flash", ui.FLASH_FRAMES),
+                       setattr(sess.mic, "active", False),
+                       setattr(sess, "hearing", False),
                        pill.bubble.surface("could not start capture: the input "
                                            "device is already in exclusive use"))),
         (400, lambda: shot(pill, "09-error")),
-        (0, lambda: (setattr(pill, "_flash", 0), pill.bubble.hide())),
+        (0, lambda: (setattr(pill, "_flash", 0), setattr(sess.mic, "active", True),
+                     setattr(sess, "hearing", True), pill.bubble.hide())),
         (0, state(State.IDLE, Activity("loading the model", True))),
         (900, lambda: shot(pill, "10-loading")),
         (0, state(State.IDLE)),
@@ -536,6 +558,16 @@ def build(pill, sess):
         (400, lambda: (setattr(sess, "mode", CONVERSE), sess.push("mode"),
                        sess.push("note", f"workshop: {REPO}"))),
         (0, state(State.LISTENING)),
+        # Caught inside the 180 ms the glyph and the label take to travel from green to
+        # violet — the one thing that is continuous across a switch that takes one
+        # window down and puts another up. The next shot is the same pill arrived.
+        #
+        # Which fraction it catches is a lottery: the frame that swaps two windows runs
+        # long, so during this stretch the 30 ms tick actually lands about 90 ms apart.
+        # 120 ms in has come back at `#65B9B0`, a third of the way. The travel itself is
+        # pinned frame-by-frame in `tests/test_pill.py`; this only has to show that it
+        # is a travel and not a jump.
+        (120, lambda: shot(pill, "19a-converse-mid-tint")),
         (900, lambda: shot(pill, "19-converse")),
         (0, lambda: (setattr(sess, "auto_ask_in", 2.2),
                      pill.card.show_partial(QUESTION))),
