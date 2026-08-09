@@ -51,6 +51,9 @@ class FakeMenu:
     def __init__(self, *a, **kw) -> None:
         self.commands: dict = {}
         self.radios: list[tuple[str, str]] = []
+        #: (label, variable) — a checkbutton's tick is the variable's value, not a
+        #: second label the way a radio's is, so it is recorded separately.
+        self.checks: list[tuple[str, object]] = []
         self.cascades: dict = {}
         self.order: list[str] = []
 
@@ -63,11 +66,18 @@ class FakeMenu:
         self.radios.append((label, value))
         self.order.append(label)
 
+    def add_checkbutton(self, label="", command=None, variable=None, **kw) -> None:
+        self.commands[label] = command
+        self.checks.append((label, variable))
+        self.order.append(label)
+
     def add_separator(self) -> None: ...
 
     def add_cascade(self, label="", menu=None, **kw) -> None:
         self.cascades[label] = menu
         self.order.append(label)
+
+    def configure(self, **kw) -> None: ...
 
     def tk_popup(self, *a) -> None: ...
 
@@ -129,6 +139,7 @@ class Menu(unittest.TestCase):
         pill._draw = mock.Mock()
         with mock.patch.object(tk, "Menu", make), \
                 mock.patch.object(tk, "StringVar", FakeVar), \
+                mock.patch.object(tk, "BooleanVar", FakeVar), \
                 mock.patch.object(ui, "available", return_value=list(clis)), \
                 mock.patch.object(ui, "foreground_hwnd", return_value=0), \
                 mock.patch.object(ui, "toplevel_hwnd", return_value=0), \
@@ -138,42 +149,53 @@ class Menu(unittest.TestCase):
 
 
 class TestWhatStaysOneTap(Menu):
-    """The split is by how often a tap is the answer, not by category."""
+    """Six rows now, not eleven — and the split is state to read, not verbs to act on."""
 
-    ESSENTIALS = ("Listen", "Send", "Converse mode", "Copy draft", "Clear draft",
-                  "Quit")
-
-    def test_the_essentials_are_still_at_the_top(self):
+    def test_the_top_level_is_exactly_six_rows(self):
         top = self.build(self.profile())
-        for label in self.ESSENTIALS:
-            with self.subTest(label=label):
-                self.assertIn(label, top.commands)
+        self.assertEqual(
+            top.order, ["Listening", "Dictate", "Draft", "Settings", "Help", "Quit Flow"]
+        )
 
-    def test_and_the_two_submenus_are_the_only_things_added(self):
+    def test_and_the_four_cascades_are_the_only_things_added(self):
         top = self.build(self.profile())
-        self.assertEqual(sorted(top.cascades), ["Help", "Settings"])
+        self.assertEqual(sorted(top.cascades), ["Dictate", "Draft", "Help", "Settings"])
 
     def test_the_once_only_settings_left_the_top_level(self):
         # The list this replaces carried all of these inline, in one column, above Quit.
         top = self.build(self.profile())
-        for label in ("Open settings folder", "Voice", "Agent CLI", "Trigger word",
-                      "Never offer"):
+        for label in ("Open settings folder", "Voice", "Agent CLI", "Trigger word"):
             with self.subTest(label=label):
                 self.assertNotIn(label, top.commands)
                 self.assertNotIn(label, top.cascades)
 
-    def test_quit_is_last_so_it_is_where_it_has_always_been(self):
-        self.assertEqual(self.build(self.profile()).order[-1], "Quit")
+    def test_never_offer_left_the_menu_entirely(self):
+        # It moved to the draft panel's own right-click menu (`Bubble._context_menu`),
+        # not to a different corner of this one.
+        top = self.build(self.profile())
+        self.assertNotIn("Never offer", top.cascades)
+        self.assertNotIn("Never offer", top.cascades["Settings"].cascades)
 
-    def test_the_mode_toggle_names_the_mode_it_switches_to(self):
-        self.assertIn("Converse mode", self.build(self.profile()).commands)
-        self.assertIn("Dictate mode", self.build(self.profile(), converse=True).commands)
+    def test_send_left_the_menu_entirely(self):
+        # Three other ways in — a chip, a hotkey, a spoken word — and it is the one
+        # irreversible act in the app; a browsing surface is a bad place for a fourth.
+        top = self.build(self.profile())
+        self.assertNotIn("Send", top.commands)
 
-    def test_copy_draft_sits_above_clear_draft(self):
+    def test_quit_is_last_and_named_for_the_app_it_quits(self):
+        self.assertEqual(self.build(self.profile()).order[-1], "Quit Flow")
+
+    def test_the_mode_cascade_names_the_state_it_is_already_in(self):
+        # Not "Converse mode" while in Dictate — a verb about to happen. The row
+        # itself says where you are; what is inside it is the choice.
+        self.assertIn("Dictate", self.build(self.profile()).cascades)
+        self.assertIn("Converse", self.build(self.profile(), converse=True).cascades)
+
+    def test_copy_sits_above_clear_inside_draft(self):
         # One saves the words and one destroys them; the order is which hand reaches
         # which first during an incident, and this menu is where an incident ends.
-        order = self.build(self.profile()).order
-        self.assertLess(order.index("Copy draft"), order.index("Clear draft"))
+        order = self.build(self.profile()).cascades["Draft"].order
+        self.assertLess(order.index("Copy"), order.index("Clear"))
 
 
 class TestListenIsTheMouseOnlyWayIn(Menu):
@@ -182,30 +204,34 @@ class TestListenIsTheMouseOnlyWayIn(Menu):
     A VM console with the guest's keyboard captured (Hyper-V's viewer was the report)
     swallows every hotkey before Flow can see it, and the mouse is what remains. The
     pill click still toggles there, but it is an unlabeled control; this row is the
-    labeled one, and like the mode toggle it names what the tap will do, not the state
-    the app is in.
+    labeled one — a checkbox now rather than a verb that flips, so the label is always
+    "Listening" and the state is the tick, not the text.
     """
 
     def test_it_is_the_first_row_armed_or_not(self):
-        self.assertEqual(self.build(self.profile()).order[0], "Listen")
-        self.assertEqual(self.build(self.profile(), armed=True).order[0],
-                         "Stop listening")
+        self.assertEqual(self.build(self.profile()).order[0], "Listening")
+        self.assertEqual(self.build(self.profile(), armed=True).order[0], "Listening")
 
-    def test_the_label_names_the_flip_and_never_shows_both(self):
-        self.assertNotIn("Stop listening", self.build(self.profile()).commands)
-        self.assertNotIn("Listen", self.build(self.profile(), armed=True).commands)
+    def test_the_tick_is_the_state_and_the_label_never_changes(self):
+        off = self.build(self.profile())
+        on = self.build(self.profile(), armed=True)
+        label_off, var_off = off.checks[0]
+        label_on, var_on = on.checks[0]
+        self.assertEqual((label_off, label_on), ("Listening", "Listening"))
+        self.assertFalse(var_off.get())
+        self.assertTrue(var_on.get())
 
     def test_a_tap_arms_capture_through_the_same_toggle_the_pill_click_uses(self):
         top = self.build(self.profile())
         self.pill.session.reset_mock()  # the menu build itself asked the session things
-        top.commands["Listen"]()
+        top.commands["Listening"]()
         self.pill.session.start.assert_called_once_with()
         self.assertTrue(self.pill.armed)
 
     def test_a_tap_while_armed_pauses_rather_than_restarting(self):
         top = self.build(self.profile(), armed=True)
         self.pill.session.reset_mock()
-        top.commands["Stop listening"]()
+        top.commands["Listening"]()
         self.pill.session.pause.assert_called_once_with()
         self.pill.session.start.assert_not_called()
         self.assertFalse(self.pill.armed)
@@ -217,7 +243,7 @@ class TestListenIsTheMouseOnlyWayIn(Menu):
         self.pill.session.start.side_effect = RuntimeError("no capture device")
         surfaced: list[str] = []
         self.pill.bubble.surface = surfaced.append
-        top.commands["Listen"]()
+        top.commands["Listening"]()
         self.assertFalse(self.pill.armed)
         self.assertIn("no capture device", " ".join(surfaced))
 
@@ -236,7 +262,7 @@ class TestCopyDraftIsTheExitThatNeedsNothing(Menu):
         self.pill.session.draft = mock.Mock(text=draft)
         self.pill.lite = False
         self.pill._copy = copy if copy is not None else mock.Mock(return_value="")
-        top.commands["Copy draft"]()
+        top.cascades["Draft"].commands["Copy"]()
         return self.pill
 
     def test_the_draft_goes_to_the_clipboard_verbatim(self):
@@ -285,11 +311,11 @@ class TestRecentIsAHistoryAndNotAFile(Menu):
     def test_an_empty_ring_offers_no_submenu_at_all(self):
         # Absent rather than inert, the way the trigger submenu is under --no-profile: a
         # submenu that opens onto nothing is a control lying about having something.
-        self.assertNotIn("Recent", self.build(self.profile()).cascades)
+        self.assertNotIn("Recent", self.build(self.profile()).cascades["Draft"].cascades)
 
     def test_the_entries_are_listed_newest_first_with_their_role(self):
         top = self.build(self.profile(), recent=list(reversed(self.SOME)))
-        labels = top.cascades["Recent"].order
+        labels = top.cascades["Draft"].cascades["Recent"].order
         self.assertEqual(len(labels), 3)
         self.assertTrue(labels[0].startswith("answer: "), labels[0])
         self.assertTrue(labels[-1].startswith("said: "), labels[-1])
@@ -298,7 +324,7 @@ class TestRecentIsAHistoryAndNotAFile(Menu):
         # A native menu row the width of the screen is a menu nobody reads down.
         long = "x" * 400
         top = self.build(self.profile(), recent=[("said", long)])
-        label = top.cascades["Recent"].order[0]
+        label = top.cascades["Draft"].cascades["Recent"].order[0]
         self.assertLess(len(label), 80)
         self.assertTrue(label.endswith("…"))
 
@@ -307,10 +333,11 @@ class TestRecentIsAHistoryAndNotAFile(Menu):
 
         long = "y" * 400
         top = self.build(self.profile(), recent=[("said", long)])
+        recent = top.cascades["Draft"].cascades["Recent"]
         copied: list[str] = []
         with mock.patch.object(ui.Pill, "_copy",
                                lambda _s, t: copied.append(t) or ""):
-            top.cascades["Recent"].commands[top.cascades["Recent"].order[0]]()
+            recent.commands[recent.order[0]]()
         self.assertEqual(copied, [long])
         self.assertIn("400", " ".join(self.notes))
 
@@ -318,8 +345,9 @@ class TestRecentIsAHistoryAndNotAFile(Menu):
         import flow.ui as ui
 
         top = self.build(self.profile(), recent=self.SOME)
+        recent = top.cascades["Draft"].cascades["Recent"]
         with mock.patch.object(ui.Pill, "_copy", lambda _s, _t: "could not copy: nope"):
-            top.cascades["Recent"].commands[top.cascades["Recent"].order[0]]()
+            recent.commands[recent.order[0]]()
         self.assertIn("could not copy", " ".join(self.notes))
 
     def test_it_goes_through_the_one_clipboard_borrow_this_app_has(self):
@@ -695,18 +723,17 @@ class TestANewDraftFromTheClipboard(Menu):
     """
 
     def test_it_sits_beside_its_opposite(self):
-        order = self.build(self.profile()).order
-        self.assertEqual(order[order.index("Copy draft") + 1],
-                         "New draft from clipboard")
+        order = self.build(self.profile()).cascades["Draft"].order
+        self.assertEqual(order[order.index("Copy") + 1], "New from clipboard")
 
     def test_clipboard_text_becomes_the_draft(self):
         import flow.ui as ui
 
-        top = self.build(self.profile())
+        draft = self.build(self.profile()).cascades["Draft"]
         self.pill.session.paste_draft.return_value = ""
         with mock.patch.object(ui.Pill, "clipboard_get",
                                lambda _s: "a paragraph from somewhere else"):
-            top.commands["New draft from clipboard"]()
+            draft.commands["New from clipboard"]()
         self.pill.session.paste_draft.assert_called_once_with(
             "a paragraph from somewhere else")
         self.assertEqual(self.notes, [], "a success does not need a note of its own")
@@ -714,10 +741,10 @@ class TestANewDraftFromTheClipboard(Menu):
     def test_an_empty_clipboard_draws_a_note(self):
         import flow.ui as ui
 
-        top = self.build(self.profile())
+        draft = self.build(self.profile()).cascades["Draft"]
         self.pill.session.paste_draft.return_value = "nothing on the clipboard"
         with mock.patch.object(ui.Pill, "clipboard_get", lambda _s: ""):
-            top.commands["New draft from clipboard"]()
+            draft.commands["New from clipboard"]()
         self.assertIn("nothing on the clipboard", " ".join(self.notes))
 
     def test_a_clipboard_holding_something_that_is_not_text_says_the_same_thing(self):
@@ -728,14 +755,14 @@ class TestANewDraftFromTheClipboard(Menu):
 
         import flow.ui as ui
 
-        top = self.build(self.profile())
+        draft = self.build(self.profile()).cascades["Draft"]
         self.pill.session.paste_draft.return_value = "nothing on the clipboard"
 
         def boom(_self):
             raise tk.TclError("CLIPBOARD selection doesn't exist")
 
         with mock.patch.object(ui.Pill, "clipboard_get", boom):
-            top.commands["New draft from clipboard"]()
+            draft.commands["New from clipboard"]()
         self.pill.session.paste_draft.assert_called_once_with("")
         self.assertIn("nothing on the clipboard", " ".join(self.notes))
 
@@ -744,10 +771,10 @@ class TestANewDraftFromTheClipboard(Menu):
         # for — and `note()` only paints on a window that is already showing.
         import flow.ui as ui
 
-        top = self.build(self.profile())
+        draft = self.build(self.profile()).cascades["Draft"]
         self.pill.session.paste_draft.return_value = "no"
         surfaced: list[str] = []
         self.pill.bubble.surface = surfaced.append
         with mock.patch.object(ui.Pill, "clipboard_get", lambda _s: ""):
-            top.commands["New draft from clipboard"]()
+            draft.commands["New from clipboard"]()
         self.assertEqual(surfaced, ["no"])

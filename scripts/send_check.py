@@ -49,7 +49,6 @@ from flow.inject import paste, take_warnings  # noqa: E402
 from flow.session import Session  # noqa: E402
 from flow.ui import (  # noqa: E402
     PILL_H,
-    PILL_W,
     WS_EX_NOACTIVATE,
     Pill,
     toplevel_hwnd,
@@ -503,7 +502,11 @@ def check_pill(fixture: Fixture, report) -> None:
         watcher = threading.Thread(target=watch, daemon=True)
         watcher.start()
         threading.Timer(1.2, lambda: chord(VK_ESCAPE)).start()
-        right_click_at(pill.x + PILL_W // 2, pill.y + PILL_H // 2)
+        # `pill.pill_w`, not the idle `PILL_W`: by the time this runs, the earlier
+        # checks have left a draft on screen, and a pill with something to dock to is
+        # wider than one alone (Phase 5) — the old fixed-width centre point landed
+        # outside a docked pill entirely.
+        right_click_at(pill.x + pill.pill_w // 2, pill.y + PILL_H // 2)
         end = time.perf_counter() + 3.0
         while time.perf_counter() < end:
             pill.update()
@@ -523,8 +526,9 @@ def check_pill(fixture: Fixture, report) -> None:
         # pill is a window whose only handle is dragging it. Checked against where the
         # mouse ended up, not against a distance: the pill has to *track* the cursor.
         was = (pill.x, pill.y)
-        drag(pill.x + PILL_W // 2, pill.y + PILL_H // 2,
-             pill.x + PILL_W // 2 - 90, pill.y + PILL_H // 2 - 40, pump=pill.update)
+        cx = pill.x + pill.pill_w // 2
+        drag(cx, pill.y + PILL_H // 2, cx - 90, pill.y + PILL_H // 2 - 40,
+             pump=pill.update)
         report("the pill still drags", abs(pill.x - (was[0] - 90)) <= 2
                and abs(pill.y - (was[1] - 40)) <= 2,
                f"{was} -> {(pill.x, pill.y)}, wanted {(was[0] - 90, was[1] - 40)}")

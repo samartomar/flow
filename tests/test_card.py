@@ -35,6 +35,9 @@ def card(**kw):
     c = ui.ConversationCard.__new__(ui.ConversationCard)
     c.pill = mock.Mock()
     c.pill.accent = "#a78bfa"
+    #: A real int, not the auto-created Mock the attribute would otherwise be —
+    #: `reposition` does arithmetic on it now that the pill's width can dock.
+    c.pill.pill_w = ui.PILL_W
     c.pill.work = WORK
     c.pill.x, c.pill.y = 900, 560
     c.pill.session = mock.Mock(can_take_reply=True, auto_ask_in=None)
@@ -328,8 +331,13 @@ class TestScrolling(unittest.TestCase):
     """Item 32's viewport, and the reason it has two ways in."""
 
     def loaded(self):
+        # 12 turns overflowed the viewport at Segoe UI's metrics; `FONT_NOTE` fits more
+        # characters a line at the real canvas's measured width, so the row count is
+        # raised rather than the assertions loosened — the same history still has to
+        # scroll, just needs more of it to prove the viewport, not the font, is what's
+        # being tested (decisions.md 2026-08-09, the IBM Plex Sans migration).
         c = card()
-        for i in range(12):
+        for i in range(30):
             c.ask(f"question number {i}")
             c.answer(f"answer number {i}")
         c.ask("the current one")

@@ -46,6 +46,9 @@ def bubble(text: str = "", **kw):
     b = ui.Bubble.__new__(ui.Bubble)
     b.pill = mock.Mock()
     b.pill.accent = "#7dd3fc"
+    #: A real int, not the auto-created Mock the attribute would otherwise be —
+    #: `reposition` does arithmetic on it now that the pill's width can dock.
+    b.pill.pill_w = ui.PILL_W
     b.pill.work = WORK
     b.pill.session = mock.Mock(
         mode="dictate", editing=False, can_rescue=False, can_take_reply=False,
@@ -364,14 +367,15 @@ class TestTheWindowIsInsideTheWorkAreaWhereverThePillIs(unittest.TestCase):
         # fill the desktop: item 45 gave the reply a head window, so nothing renders to
         # exactly `work_h` any more and a check that relied on one would have been pinning a
         # coincidence.
-        _left, top, _right, bottom = WORK
+        _left, top, right, bottom = WORK
         b = bubble()
         b._h = bottom - top  # taller than the fit allows, which is what a clamp is for
         box: list[str] = []
         b.geometry = box.append
         b.pill.x, b.pill.y = corners()["bottom-right"]
         ui.Bubble.reposition(b)
-        self.assertEqual(box[-1].partition("+")[2], f"{892}+{top + ui.EDGE_AIR}")
+        self.assertEqual(box[-1].partition("+")[2],
+                         f"{right - ui.BUBBLE_W - ui.EDGE_AIR}+{top + ui.EDGE_AIR}")
         b._h = bottom - top - 2 * ui.EDGE_AIR  # exactly the fit
         ui.Bubble.reposition(b)
         _size, _, offset = box[-1].partition("+")
@@ -404,13 +408,33 @@ def along_the_top() -> dict[str, tuple[int, int]]:
 #: had sized them 656; item 63 removed the path, because this window no longer draws an
 #: answer. The draft rows below are byte-identical to the day they were captured, which is
 #: the whole point of a table: one that gets quietly re-baselined pins nothing.
+#: Re-baselined 2026-08-09 for the IBM Plex Sans migration: `FONT_BODY` reports an
+#: 18 px line to the real canvas against Segoe UI's 17, so the same capped draft lays
+#: out one pixel taller (414 → 415) and the bottom-anchored placements ride up one
+#: pixel to match (208 → 207, the same bottom edge). Traced to the font swap, not a
+#: silent re-pin.
+#:
+#: Re-baselined again the same day for docking (Phase 5): the pill and this window
+#: meet at one hairline seam now, not the 10 px of air a shadow used to go in, so
+#: every placement that resolved to "above" moves ten pixels closer to the pill —
+#: 207 → 217 here. "mid-left" is unaffected because that placement was already
+#: resolving to a *different* branch of `reposition`'s clamp, one the gap never
+#: reached.
+#:
+#: Re-baselined a third time the same day: `BUBBLE_W` moved to 420 (Phase 6, the
+#: two panels unified at the draft's own widest state). Width and the right-anchored
+#: x shift with it everywhere (380→420, 892→852). The 1 000-character draft's height
+#: drops too (415→398) — wider text wraps to fewer lines for the same character
+#: count — while the 50 000-character one holds at 415, because that row is capped
+#: by `BODY_MAX_H` rather than by how the text wraps, and a cap does not move with
+#: the column it bounds.
 GEOMETRY_BEFORE = {
-    ("1k draft", "bottom-left"): "380x414+8+208",
-    ("1k draft", "bottom-right"): "380x414+892+208",
-    ("1k draft", "mid-left"): "380x414+8+8",
-    ("50k draft", "bottom-left"): "380x414+8+208",
-    ("50k draft", "bottom-right"): "380x414+892+208",
-    ("50k draft", "mid-left"): "380x414+8+8",
+    ("1k draft", "bottom-left"): "420x398+8+234",
+    ("1k draft", "bottom-right"): "420x398+852+234",
+    ("1k draft", "mid-left"): "420x398+8+8",
+    ("50k draft", "bottom-left"): "420x415+8+217",
+    ("50k draft", "bottom-right"): "420x415+852+217",
+    ("50k draft", "mid-left"): "420x415+8+8",
 }
 
 
@@ -605,12 +629,17 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
                                                              "Was a command"))
 
     def test_the_gap_shrinks_only_far_enough_to_fit(self):
-        # The five-chip row: Refine, Continue, Edit, Was a command, Send. 345 px of
-        # chip width, measured on the real canvas; `CHIP_GAP` between all five would
-        # be 377, past the 366 px budget (`BUBBLE_W` less `PAD`) that clipped Send.
+        # The five-chip row that motivated this function — Refine, Continue, Edit,
+        # Was a command, Send, 345 px of chip width against the 366 px budget
+        # `BUBBLE_W` used to leave — fits inside `BUBBLE_W`'s 420 with 57 px of slack
+        # now (`test_five_chips_at_once_stay_inside_the_bubble` pins that directly), so
+        # it no longer demonstrates a shrinking gap. A synthetic row wide enough to
+        # outrun *any* reasonable window is what is left to prove the function still
+        # shrinks rather than clips — "the row nobody has measured yet".
         widths = [ui.chip_w(k, l) for k, l in (
-            ("Refine", "Refine"), ("Continue", "Continue"), ("Edit", "Edit"),
-            ("Was a command", "Was a command"), ("Send", "Send"),
+            ("Refine", "Refine"), ("Continue", "Continue"),
+            ("Was a command", "Was a command"), ("Edit", "Edit"),
+            ("Send", "Send"), ("Done", "Done"),
         )]
         gap = ui.chip_row_gap(widths, ui.BUBBLE_W - ui.PAD)
         self.assertLess(gap, ui.CHIP_GAP, "an overflowing row kept the ordinary gap")

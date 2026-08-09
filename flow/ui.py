@@ -226,50 +226,204 @@ def _dpi_aware() -> float:
     except (AttributeError, OSError):
         return 1.0
 
-TRANSPARENT = "#ff00fe"  # keyed out by -transparentcolor; unlikely in real content
-SHELL = "#12161f"
-TEXT = "#e6e9ef"
-MUTED = "#8b93a5"
-CHIP = "#1f2632"
 
-#: R13: colour encodes state, so the pill reads at a glance without being looked at —
-#: narrowed on 2026-08-03 to what a 40 px capsule can honestly claim on its own.
-#:
-#: It used to carry five colours, two of which were really about a *window*: amber meant
-#: a draft was held and violet meant a question was out, and in both cases a whole card
-#: was already on screen saying so. Those two are window identities now (`DRAFT_ACCENT`,
-#: `CARD_ACCENT`) and the pill keeps three values plus the error flash: resting,
-#: capturing, and waiting on a CLI. `REFINING` and `ASKING` share one because they are
-#: the same wait from the user's side — something is out and the answer is not here yet
-#: — and the surface that is showing already names which.
+#: Bundled rather than system-installed, so a checkout runs the intended type without
+#: asking anyone to install anything. `FR_PRIVATE` (0x10) is what keeps the registration
+#: to this process — no admin prompt, nothing left behind for another app to see, and
+#: nothing to uninstall if the file is just deleted.
+_FONT_DIR = Path(__file__).parent / "assets" / "fonts"
+_FONT_FILES = (
+    "IBMPlexSans-Regular.ttf",
+    "IBMPlexSans-Medium.ttf",
+    "IBMPlexSans-SemiBold.ttf",
+    "IBMPlexMono-Regular.ttf",
+    "IBMPlexMono-Medium.ttf",
+)
+_FR_PRIVATE = 0x10
+
+#: The files actually registered, so `_unload_fonts` removes only what `_load_fonts`
+#: added — never a guess at what might be there, on a machine this never ran on.
+_loaded_fonts: list[str] = []
+
+
+def _load_fonts() -> None:
+    """Register the bundled IBM Plex weights, process-private, before any window exists.
+
+    Each static weight is its own GDI family — measured on this machine, the files
+    above resolve to "IBM Plex Sans", "IBM Plex Sans Medm", "IBM Plex Sans SmBld",
+    "IBM Plex Mono" and "IBM Plex Mono Medm" (GDI's legacy name table truncates
+    "Medium"/"SemiBold" rather than exposing them as a weight on the Regular family),
+    which is why the font tuples below reference a family per weight instead of a
+    "bold" flag. A machine missing a file, or off Windows entirely, still runs — Tk
+    falls back to its platform default for whichever family did not resolve.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        add = ctypes.windll.gdi32.AddFontResourceExW
+    except (AttributeError, OSError):
+        return
+    for name in _FONT_FILES:
+        path = str(_FONT_DIR / name)
+        try:
+            if add(path, _FR_PRIVATE, 0):
+                _loaded_fonts.append(path)
+        except OSError:
+            pass
+
+
+def _unload_fonts() -> None:
+    """The other half of `_load_fonts`, run on the way out.
+
+    `FR_PRIVATE` fonts are unregistered automatically when the process exits, so this
+    is not load-bearing for correctness — but `quit_app` tears down explicitly rather
+    than leaving anything to the OS to notice on its own.
+    """
+    if sys.platform != "win32" or not _loaded_fonts:
+        return
+    try:
+        remove = ctypes.windll.gdi32.RemoveFontResourceExW
+    except (AttributeError, OSError):
+        return
+    for path in _loaded_fonts:
+        try:
+            remove(path, _FR_PRIVATE, 0)
+        except OSError:
+            pass
+    _loaded_fonts.clear()
+
+
+TRANSPARENT = "#ff00fe"  # keyed out by -transparentcolor; unlikely in real content
+
+#: v2 opaque surface palette (decisions.md 2026-08-09, "one object, three windows").
+#: Every pixel here is fully opaque — no shadow, no alpha blend — so `SHELL` is both the
+#: window background and the base fill a hairline ring sits inside.
+SHELL = "#1A1D23"
+TEXT = "#E6E8ED"  # primary text
+MUTED = "#949AA6"  # secondary text — also idle/resting, which claims no state of its own
+CHIP = "#22262E"  # secondary chip fill, and the base fill everything else insets into
+
+#: The three-hairline elevation system that replaces a shadow no keyed-transparent window
+#: could composite anyway. `RING_OUTER` is the toplevel's own 1 px border — the seam
+#: against the desktop; `RING` traces a full inset rect just inside it; `RING_TOP` draws
+#: one segment, the top edge only, as the implied light source. A docked pill and panel
+#: share one `RING`-coloured seam where they meet, with no gap.
+RING_OUTER = "#0B0D10"
+RING = "#2E323B"
+RING_TOP = "#3A404B"
+
+#: Text tiers below `TEXT`/`MUTED`: `DIM` is tertiary text, `CODE` is the mono/code
+#: accent (also the secondary chip's label colour), `PLACEHOLDER` marks held or
+#: not-yet-final text (a draft still being spoken, a bubble past Send), and `DISABLED`
+#: is what a chip's label dims to when the row is waiting rather than clickable.
+DIM = "#656B78"
+CODE = "#C7CBD4"
+PLACEHOLDER = "#7E8590"
+DISABLED = "#5C6270"
+
+#: The primary chip — Send, Ask, Done, Put it back — inverted from everything else on
+#: purpose: everything around it is dark-on-dark, and the one action worth a second
+#: look is the one that reads light-on-dark instead.
+PRIMARY_FILL = "#EAECF1"
+PRIMARY_TEXT = "#15171C"
+
+#: R13: colour encodes state, so the pill reads at a glance without being looked at.
+#: One colour, one job, never reused for two states — `REFINING` and `ASKING` still
+#: share one because they are the same wait from the user's side, and the surface that
+#: is showing already names which.
 ACCENT = {
-    State.IDLE: "#64748b",  # slate - resting, armed or not
-    State.LISTENING: "#22c55e",  # green - capturing speech
-    State.DRAFT: "#64748b",  # slate - the amber window is the signal, not the pill
-    State.REFINING: "#3b82f6",  # blue  - waiting on a CLI
-    State.ASKING: "#3b82f6",  # blue  - the same wait
+    State.IDLE: MUTED,  # resting, armed or not — claims no state of its own
+    State.LISTENING: "#3ECF8E",  # green - capturing speech
+    State.DRAFT: MUTED,  # the held draft is a window, not a pill colour
+    State.REFINING: "#7AA2F7",  # blue  - waiting on a CLI
+    State.ASKING: "#7AA2F7",  # blue  - the same wait
 }
-ERROR = "#ef4444"
+ERROR = "#F2584A"
+
+#: The one place amber appears in the whole app: the "Put it back" undo-after-send
+#: control. Not reused for a panel outline, a chip fill, or a loading dot elsewhere —
+#: see decisions.md 2026-08-09 for why the draft bubble's border gave up amber.
+RECOVER_ACCENT = "#E8A33D"
 
 #: The two windows' identities, and the reason they are constants rather than moods.
-#: One card used to be both, so "amber" meant *this bubble is holding a draft* and
-#: "violet" meant *this same bubble is now a conversation* — which is the colour doing
-#: the work a second window should have been doing. Each window is one colour now, for
-#: as long as it is on screen (decisions.md 2026-08-03, "two surfaces, two jobs").
-DRAFT_ACCENT = "#f59e0b"  # amber  - the draft bubble
-CARD_ACCENT = "#a855f7"  # violet - the conversation card
+#: `DRAFT_ACCENT` no longer draws the bubble's own border (that is now the neutral
+#: hairline system above); what is left of it is the transitional colour a held draft's
+#: primary chip and editor ring still carry until Phase 4 rewires them to neutral.
+DRAFT_ACCENT = RECOVER_ACCENT
+CARD_ACCENT = "#B48EF5"  # violet - the conversation card
 
-#: P9. The answer, distinct from the user's own words. Nothing else in the UI is this
-#: colour, because mistaking the model's words for your own is the one confusion
-#: converse mode can create that dictate mode cannot.
-REPLY = "#7dd3fc"
+#: P9. The answer, distinct from the user's own words. One violet now carries converse
+#: mode's whole identity — the mode-line label, the pill glyph, and this, the answer
+#: text tint — because an outline can't also carry a word (decisions.md 2026-08-09).
+REPLY = CARD_ACCENT
 
-PILL_W, PILL_H = 152, 40
+#: The type scale (decisions.md 2026-08-09). Sizes are negative — Tk pixels, not
+#: points — because this app already thinks in pixels everywhere else (`PILL_W`,
+#: `BUBBLE_W`, `PAD`…) and a point size would drift from the spec's own numbers on a
+#: display at anything but 96 dpi. Weight is a family, not a flag — see `_load_fonts`.
+#: Measured on the real canvas at these sizes: `FONT_BODY` lines at 18 px, ~6.7 px a
+#: character; `FONT_NOTE` at 14 px, ~5.4 px a character — the two numbers
+#: `tests/test_editor.py`'s `MeasuringCanvas` has to agree with.
+FONT_SANS = "IBM Plex Sans"
+FONT_SANS_MEDIUM = "IBM Plex Sans Medm"
+FONT_SANS_SEMIBOLD = "IBM Plex Sans SmBld"
+FONT_MONO = "IBM Plex Mono"
+
+FONT_BODY = (FONT_SANS, -14)  # draft text, the answer, the hand editor
+#: 11.5 px in the spec, floored rather than rounded to 12: a note is meant to read
+#: smaller than a 12 px chip label, and rounding up would erase the one pixel that
+#: says so. Also this file's one size for every muted/secondary line — a question
+#: pinned above an answer, an elided-lines hint, the indicator label — where the old
+#: code spread the same job across two point sizes (8 and 9) that never earned being
+#: different from each other.
+FONT_NOTE = (FONT_SANS, -11)
+FONT_CHIP = (FONT_SANS_MEDIUM, -12)  # secondary chip label
+FONT_CHIP_PRIMARY = (FONT_SANS_SEMIBOLD, -12)  # Send / Ask / Done / Put it back
+#: Trace/code text and the pill's bar label (§07) — not drawn anywhere yet; declared
+#: here so both land on the same family when they are.
+FONT_TRACE = (FONT_MONO, -11)
+
+#: The pill's own width at rest — with nothing to dock to, it stays close to today's
+#: footprint (152 → 168, a few pixels, not a jump: this sits on top of somebody's
+#: editor all day). `Pill.pill_w` is what actually draws and positions the window; this
+#: is the value it falls back to when no panel is up (decisions.md 2026-08-09, "one
+#: object, three windows").
+PILL_W = 168
+PILL_H = 40
 BARS = 18
 BAR_W, BAR_GAP = 4, 2
 DB_FLOOR, DB_CEIL = -58.0, -12.0  # level range mapped onto bar height
 
-BUBBLE_W = 380
+#: The level meter eases toward its target rather than jumping (§07, decisions.md
+#: 2026-08-09): peaks fall slower than they rise, so a loud spike does not vanish in
+#: the same 30 ms frame it arrived in. Both are one-pole exponential smoothing at the
+#: 30 ms tick — `alpha = 1 - exp(-frame_ms / time_constant)` — hardcoded rather than
+#: computed with `math.exp` at every frame for a value that never changes: rise 60 ms
+#: gives 0.3935, fall 160 ms gives 0.1639.
+LEVEL_RISE_ALPHA = 0.3935
+LEVEL_FALL_ALPHA = 0.1639
+
+#: How many frames the "not hearing" flat-line collapse sweeps over, left to right —
+#: four frames at the 30 ms tick is ~120 ms. Short on purpose: the echo-guard defect
+#: this meter was built to fix was an *eighteen*-frame (540 ms) false "hearing you"
+#: while Flow's own voice scrolled off the bars, and this is under a quarter of that.
+DEAF_COLLAPSE_FRAMES = 4
+
+#: Disarmed and untouched this long, the pill fades — it is not capturing anything,
+#: and eight seconds is long enough that "sitting there" and "working" stop looking
+#: the same. Armed cancels it outright; hovering lifts it back (`HOVER_LIFT_SEC`).
+IDLE_DIM_AFTER_SEC = 8.0
+IDLE_DIM_ALPHA = 0.55
+#: How long the lift back to full opacity takes once the pointer arrives.
+HOVER_LIFT_SEC = 0.4
+
+#: Unified with `CARD_W` (decisions.md 2026-08-09, Phase 6): the widest state either
+#: panel reaches is the draft's full rescue row — Refine, Continue, Edit, "Was a
+#: command", Send, 345 px of chip width — and at the old 380 that left `chip_row_gap`
+#: exactly 17 px of slack across four gaps, a rule that held only until a label grew.
+#: At 420 the same row has 57 px, and the two panels that already dock to one pill at
+#: one width (Phase 5) now share the width they draw at, too.
+BUBBLE_W = 420
 PAD = 14
 #: The chip row's height, named because two places need it: `_lay_out` draws the row and
 #: `_render` has to keep the note clear of it. It used to be a 26 in one place and a 52
@@ -408,9 +562,11 @@ HELP_MARGIN = 48
 #: whole thing anyway — the same bargain the answer window strikes.
 RECENT_LABEL_MAX = 56
 
-#: The conversation card. Wider than the draft bubble because its job is an exchange
-#: rather than a sentence — a question, its answer, and the turns behind them — and
-#: narrow enough to still anchor beside a pill in a corner of a 1280-wide work area.
+#: The conversation card. Level with the draft bubble now (`BUBBLE_W`, Phase 6) rather
+#: than wider than it — both are the same window at different moments, docked to the
+#: same pill, and 420 is what the draft's own widest state was already measured to
+#: need. Still narrow enough to anchor beside a pill in a corner of a 1280-wide work
+#: area.
 CARD_W = 420
 
 #: A card with nothing on it yet is still a window somebody has to be able to see and
@@ -476,15 +632,18 @@ def chip_row_gap(widths: list, budget: int) -> int:
 
     Measured on the bubble's five-chip row — Refine, Continue, Edit, Was a command,
     Send, the full set `can_rescue` and a held draft put on screen together in dictate
-    mode — at 345 px of chip width. `CHIP_GAP` between each of the four gaps makes
-    that 377, past `BUBBLE_W`'s 380 less its own `PAD`: 366. That clipped Send at the
-    window's right edge, roughly half the label gone.
+    mode — at 345 px of chip width. That was what forced `BUBBLE_W` from 380 to 420
+    (Phase 6): at 380, `CHIP_GAP` between each of the four gaps made 377, past the
+    366 left once `PAD` came off the window — which clipped Send at the right edge,
+    roughly half the label gone. At 420 the same row has 57 px of slack, `CHIP_GAP`
+    fits everywhere, and this function's real job is the row nobody has measured yet
+    that eventually runs long again.
 
     The gap is what has slack in every row that already fits, so it is what gives:
-    shrunk just enough for a wide row to fit, `CHIP_ROW_RESERVE` included (366 - 4 -
-    345 = 17, over 4 gaps is 4), left at `CHIP_GAP` everywhere else. Floored at 0
-    rather than let a wider row still push past the edge — touching chips are still
-    each their own hit region; chips run off the window are not.
+    shrunk just enough for a wide row to fit, `CHIP_ROW_RESERVE` included, left at
+    `CHIP_GAP` everywhere else. Floored at 0 rather than let a wider row still push
+    past the edge — touching chips are still each their own hit region; chips run off
+    the window are not.
     """
     if len(widths) <= 1:
         return CHIP_GAP
@@ -558,12 +717,62 @@ def head_window(text: str, budget: int) -> str:
 
 
 def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
-    """Rounded rectangle via a smoothed polygon — no image assets, no dependency."""
+    """Rounded rectangle via a smoothed polygon — no image assets, no dependency.
+
+    `r` is one radius for all four corners, or `(top_left, top_right, bottom_right,
+    bottom_left)` for a mix — a docked pill or panel squares off only the corners on
+    the seam it shares, and a smoothed polygon squares a corner cleanly the moment its
+    two control points collapse onto the corner itself (`r=0` there).
+    """
+    tl, tr, br, bl = (r, r, r, r) if isinstance(r, (int, float)) else r
     pts = [
-        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-        x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+        x1 + tl, y1, x2 - tr, y1, x2, y1, x2, y1 + tr, x2, y2 - br, x2, y2,
+        x2 - br, y2, x1 + bl, y2, x1, y2, x1, y2 - bl, x1, y1 + tl, x1, y1,
     ]
     return c.create_polygon(pts, smooth=True, **kw)
+
+
+def _panel_chrome(c: tk.Canvas, w: int, h: int, radius, ring_color: str,
+                   tags="body") -> None:
+    """The opaque three-hairline elevation every v2 surface shares (decisions.md
+    2026-08-09), replacing the single accent-coloured outline this app drew before.
+
+    No shadow and no alpha blend — a colour-keyed window cannot composite either, so
+    "elevated" is three insets instead: `ring_color` traces the outermost pixel (the
+    window's own border — neutral except the one state that still earns a colour, an
+    error), `RING` traces a full inset rect just inside it, and a straight line over
+    that ring's top-left-to-top-right span in the brighter `RING_TOP` is the implied
+    light source. Every pixel drawn is fully opaque.
+
+    `radius` takes the same shapes `_round_rect` does — a scalar for every corner
+    alike, or a `(tl, tr, br, bl)` mix for a docked pill or panel, which squares off
+    only the two corners on the seam it shares with the other (Phase 5).
+    """
+    corners = (radius, radius, radius, radius) if isinstance(radius, (int, float)) \
+        else tuple(radius)
+    inner = tuple(max(0, r - 3) for r in corners)
+    _round_rect(c, 1, 1, w - 1, h - 1, corners, fill=SHELL, outline=ring_color, tags=tags)
+    _round_rect(c, 4, 4, w - 4, h - 4, inner, fill="", outline=RING, tags=tags)
+    c.create_line(4 + inner[0], 4, w - 4 - inner[1], 4, fill=RING_TOP, tags=tags)
+
+
+def _dark_menu(master, **kw) -> tk.Menu:
+    """Every `tk.Menu` in this app, styled once rather than at each of the dozen call
+    sites that build one.
+
+    Cheap because a Tk popup menu here is already a plain `tk.Menu` — `_menu`'s own
+    comment confirms the native `TrackPopupMenu` underneath it, borrowed and handed
+    back rather than replaced — so the whole of "dark theme" is `-background` and
+    `-activebackground` on the widget. No `MF_OWNERDRAW`, and nothing to fall back to
+    if this had not worked, because it does.
+    """
+    return tk.Menu(
+        master, tearoff=0,
+        background=CHIP, foreground=TEXT,
+        activebackground=RING, activeforeground=TEXT,
+        disabledforeground=DISABLED, borderwidth=0,
+        **kw,
+    )
 
 
 class Pill(tk.Tk):
@@ -576,11 +785,24 @@ class Pill(tk.Tk):
     #: exactly this as a `RecursionError`). A class attribute is a real lookup that never
     #: reaches `__getattr__`; `__init__` overrides it per instance.
     lite = False
+    #: Same reason, same fix, for `_draw`'s new docking read: a bare fixture that never
+    #: ran `__init__` — and so never built a `bubble`/`card` to dock to — draws exactly
+    #: the idle pill this default describes, rather than recursing through `front`.
+    _docked_w = PILL_W
+    _docked_above = True
+    #: Same reason again, for `_draw`'s motion state (§07): a bare fixture draws the
+    #: resting frame these describe — not hovered, not mid-collapse, opacity untouched.
+    _pointer_in = False
+    _deaf_frame = 0
+    _disarmed_since: float | None = None
+    _hover_since: float | None = None
+    _drawn_alpha = 0.94
 
     def __init__(
         self, session: Session, on_send=None, hotkeys=None, arm=False,
         settings_path=None, lite=False,
     ) -> None:
+        _load_fonts()  # before the first Tk window exists, or a font object beats it here
         scale = _dpi_aware()  # before the first Tk window exists, or it has no effect
         super().__init__()
         self.scale = scale
@@ -600,7 +822,24 @@ class Pill(tk.Tk):
         )
         self._arm_on_start = arm
         self.levels: deque[float] = deque([0.0] * BARS, maxlen=BARS)
+        #: The level actually drawn, eased toward `session.level_db` rather than
+        #: jumping to it — rise 60 ms, fall 160 ms (§07), so peaks fall slower than
+        #: they rise. Only the newest sample eases; everything already in `levels` is
+        #: a settled historical value the meter has already scrolled past.
+        self._eased_level = 0.0
+        #: How many frames into a "not hearing" run this is, so the flat-line collapse
+        #: sweeps left to right over four frames (~120 ms) instead of every bar
+        #: dropping in the same frame. Reset the moment hearing resumes.
+        self._deaf_frame = 0
+        #: When this pill was last disarmed, for the 8 s idle dim (§07) — `None`
+        #: while armed, since an actively-capturing pill never dims.
+        self._disarmed_since: float | None = None
+        #: When the pointer last entered the pill, for the 400 ms lift back to full
+        #: opacity — read once, not advanced, while `_pointer_in` (nothing animates
+        #: under the hand).
+        self._hover_since: float | None = None
         self.armed = False
+        self._disarmed_since = time.perf_counter()  # starts disarmed, so the clock does too
         self._flash = 0  # frames remaining of the error flash
         self._clis: list | None = None  # PATH lookup, deferred and then kept (`_resolved`)
         #: Built on first use, then kept — see `_open_commands`.
@@ -613,12 +852,25 @@ class Pill(tk.Tk):
 
         self.bg = _shell_window(self, lite, 0.94)
         self.configure(bg=self.bg)
+        #: The opacity last written to the window, so `_apply_idle_dim` only calls
+        #: `attributes("-alpha", …)` when the target has actually changed.
+        self._drawn_alpha = 0.94
 
         self.work = _work_area(self.winfo_screenwidth(), self.winfo_screenheight())
         left, top, right, bottom = self.work
         self.x = right - PILL_W - 28
         self.y = bottom - PILL_H - 24
         self.geometry(f"{PILL_W}x{PILL_H}+{self.x}+{self.y}")
+        #: The width last drawn, so `_sync_dock` can tell whether a panel appeared or
+        #: went away since the last frame — and, holding the right edge fixed, by how
+        #: much the left edge has to move to match. Neither panel exists yet at this
+        #: point in `__init__`, so this starts at the same idle width just drawn above.
+        self._docked_w = PILL_W
+        #: Which side of the pill a docked panel is actually on, so a squared corner
+        #: lands on the shared seam rather than on the free-standing side. Set by
+        #: `Bubble.reposition`/`ConversationCard.reposition`, the one place that
+        #: already decides above-vs-below; read back by `_draw`.
+        self._docked_above = True
 
         self.canvas = tk.Canvas(
             self, width=PILL_W, height=PILL_H, bg=self.bg, highlightthickness=0
@@ -650,6 +902,10 @@ class Pill(tk.Tk):
         # first, every time.
         self.canvas.bind("<Button-1>", self._toggle, add="+")
         self.canvas.bind("<Button-3>", self._menu)
+        # Nothing animates under the hand (§07) — the same rule `Bubble`/
+        # `ConversationCard` already keep, extended to the pill's own motion.
+        self.canvas.bind("<Enter>", self._enter, add="+")
+        self.canvas.bind("<Leave>", self._leave, add="+")
         # No <Escape> binding. It used to be here and it could not work once the windows
         # stopped taking focus — a shortcut that silently does nothing is worse than
         # none — so quit moved to the hotkey table, which does not need focus at all.
@@ -679,9 +935,10 @@ class Pill(tk.Tk):
 
         def drag(e):
             left, top, right, bottom = self.work
-            self.x = max(left, min(e.x_root - self._drag[0], right - PILL_W))
+            w = self.pill_w
+            self.x = max(left, min(e.x_root - self._drag[0], right - w))
             self.y = max(top, min(e.y_root - self._drag[1], bottom - PILL_H))
-            self.geometry(f"{PILL_W}x{PILL_H}+{self.x}+{self.y}")
+            self.geometry(f"{w}x{PILL_H}+{self.x}+{self.y}")
             self.bubble.reposition()
 
         self.canvas.bind("<B1-Motion>", drag)
@@ -690,6 +947,7 @@ class Pill(tk.Tk):
     def _toggle(self, _e=None) -> None:
         if self.armed:
             self.armed = False
+            self._disarmed_since = time.perf_counter()  # starts the 8 s idle dim
             self.session.pause()
         else:
             try:
@@ -702,54 +960,81 @@ class Pill(tk.Tk):
                 self._draw()
                 return
             self.armed = True
+            self._disarmed_since = None  # an actively-capturing pill never dims
         self._draw()
 
-    def _menu(self, e) -> None:
-        """The right-click menu: what is one tap stays one tap, the rest goes inside.
+    def _enter(self, _e=None) -> None:
+        self._pointer_in = True
+        self._hover_since = time.perf_counter()
 
-        Two submenus rather than one flat list, because the list had grown past the point
-        where anybody scans it — and it grows again with every setting. The split is by
-        *how often a tap is the answer*, not by category: Listen, mode, the correction
-        offers, Send and Clear are things somebody does mid-sentence, so they stay at the top;
-        Voice, the CLI, the trigger word and the settings folder are things somebody does
-        once, so they go under Settings. Whatever is here is still bounded by the modal
-        stall the menu costs (§9), which is why the offers cap at three and this does not
-        become a page.
+    def _leave(self, _e=None) -> None:
+        self._pointer_in = False
+        self._hover_since = None
 
-        Not moved and not added: **Was a command**. It is already one tap, as a chip on
-        the bubble where the utterance it rescues is on screen — a menu copy would be a
-        second control for one action, in the place least connected to what it acts on.
+    def _apply_idle_dim(self) -> None:
+        """Fade to `IDLE_DIM_ALPHA` after `IDLE_DIM_AFTER_SEC` disarmed, lift back to
+        full opacity over `HOVER_LIFT_SEC` once the pointer arrives (§07).
+
+        The lift is the one animation this pill runs *because* the pointer is in,
+        rather than one it freezes for that reason — hovering is what a fade-out is
+        for. Armed cancels the dim outright (`_disarmed_since` is `None`) rather than
+        fading a pill that is actively capturing something.
         """
-        m = tk.Menu(self, tearoff=0)
-        # Knowingly a third control for one action — the pill click and the arm hotkey
-        # both run `_toggle` — where "Was a command" below was refused a second. The
-        # difference is what is left when a VM console holds the keyboard for its guest
-        # (Hyper-V was the report): every hotkey dies at the console, the mouse still
-        # reaches Flow, and the pill click works but carries no words saying it will.
-        # This row is the labeled way in, and the label names the flip, as the mode
-        # toggle's does. First, because it starts the cycle the rest of the menu acts on.
-        m.add_command(label="Stop listening" if self.armed else "Listen",
-                      command=self._toggle)
-        m.add_command(label="Send", command=self._send)
-        m.add_command(
-            label="Converse mode" if self.session.mode == DICTATE else "Dictate mode",
-            command=self.session.toggle_mode,
+        now = time.perf_counter()
+        if self._disarmed_since is None or now - self._disarmed_since < IDLE_DIM_AFTER_SEC:
+            target = 1.0
+        elif self._hover_since is not None:
+            lifted = min(1.0, (now - self._hover_since) / HOVER_LIFT_SEC)
+            target = IDLE_DIM_ALPHA + (1.0 - IDLE_DIM_ALPHA) * lifted
+        else:
+            target = IDLE_DIM_ALPHA
+        if target != self._drawn_alpha:
+            self._drawn_alpha = target
+            self.attributes("-alpha", target)
+
+    def _menu(self, e) -> None:
+        """The right-click menu: six rows, each showing its own current value.
+
+        Cut from eleven to six (decisions.md 2026-08-09, the six-row menu). The three
+        that were always one tap — Listen, mode, Clear — are state to *look at* now
+        rather than verbs to read carefully: a checkbox that is either checked or not,
+        a cascade named for the mode it is already in. What used to sit beside them —
+        Copy, New from clipboard, Recent, Clear — collapsed into **Draft**, because they
+        are the verbs that act on the words, and Settings and Help were already exactly
+        this shape.
+
+        **Send left the menu entirely.** It already has three ways in — a chip under
+        the cursor, a global hotkey, a spoken word — and it is the one irreversible act
+        in this app; a browsing surface a hand can slip on is a bad place for a fourth.
+        (An earlier design worried a menu-triggered Send would paste into whatever the
+        menu itself had just focused. Checked and found false: the menu borrows the
+        foreground and hands it back, and `paste_target` only ever records a window
+        that is not Flow's own — so this was never the reason to cut it.)
+
+        **The correction offers left too**, for the panel that shows the words they are
+        about — see `Bubble._context_menu`. Not moved and not added: **Was a command**.
+        It is already one tap, as a chip on the bubble where the utterance it rescues is
+        on screen — a menu copy would be a second control for one action, in the place
+        least connected to what it acts on.
+        """
+        m = _dark_menu(self)
+        # Knowingly a second control for one action — the pill click and the arm
+        # hotkey both run `_toggle`. The difference is what is left when a VM console
+        # holds the keyboard for its guest (Hyper-V was the report): every hotkey dies
+        # at the console, the mouse still reaches Flow, and the pill click works but
+        # carries no words saying it will. A checkbox rather than a verb that flips,
+        # like the mode row below: state to read, not an action about to happen.
+        self._listening_var = tk.BooleanVar(value=self.armed)
+        m.add_checkbutton(
+            label="Listening", variable=self._listening_var,
+            onvalue=True, offvalue=False, command=self._toggle,
         )
-        offered = self._offer_pairs(m)
-        # Above Clear draft, because one of them saves the words and the other destroys
-        # them, and this menu is where the long-draft incident would have ended.
-        m.add_command(label="Copy draft", command=self._copy_draft)
-        # Beside its opposite, because they are one pair: the words out, and the words
-        # in. Three outside users looked for the second and found only the first.
-        m.add_command(label="New draft from clipboard", command=self._paste_draft)
-        self._notes_menu(m)
-        self._recent_menu(m)
-        m.add_command(label="Clear draft", command=self._clear)
-        m.add_separator()
-        self._settings_menu(m, offered)
+        self._mode_menu(m)
+        self._draft_menu(m)
+        self._settings_menu(m)
         self._help_menu(m)
         m.add_separator()
-        m.add_command(label="Quit", command=self.quit_app)
+        m.add_command(label="Quit Flow", command=self.quit_app)
 
         # A Tk popup menu on Windows is a native `TrackPopupMenu`, and that runs a modal
         # loop which only receives input while its owner is the foreground window. With
@@ -763,9 +1048,6 @@ class Pill(tk.Tk):
         # asking without that click is refused, which is exactly what the first attempt
         # at this did. The style itself stays on; it does not need lifting.
         #
-        # Send is unharmed either way. `paste_target` only ever records a window that is
-        # not Flow's own, so a menu passing through the foreground cannot become the
-        # thing a later paste is aimed at.
         # None of which applies in Lite: `_no_activate` cannot take, so the window is in
         # the activation chain like any other and the popup gets its input the ordinary
         # way. Borrowing a foreground there would be a Win32 call with nothing behind it.
@@ -779,7 +1061,56 @@ class Pill(tk.Tk):
             if previous:
                 _user32.SetForegroundWindow(previous)
 
-    def _settings_menu(self, parent: tk.Menu, offered) -> None:
+    def _mode_menu(self, parent: tk.Menu) -> None:
+        """Dictate or Converse, named for the state it is in rather than the flip.
+
+        The row used to say "Converse mode" while in Dictate — a verb suggesting an
+        action about to happen — which is exactly backwards from `Listening`'s new
+        checkbox and just as easy to misread mid-glance. A cascade named for *where
+        you are* and a radio pair inside it reads the same way both do: state first.
+
+        `toggle_mode` is the session's only way to change it, and it unconditionally
+        flips — so each radio calls it only when it would actually change something.
+        Tapping the mode already showing is a no-op, the way selecting an already-
+        ticked radio anywhere else in this app is.
+        """
+        sub = _dark_menu(parent)
+        current = self.session.mode
+        self._mode_var = tk.StringVar(value="Converse" if current != DICTATE else "Dictate")
+
+        def choose(target) -> None:
+            if self.session.mode != target:
+                self.session.toggle_mode()
+
+        for name, target in (("Dictate", DICTATE), ("Converse", CONVERSE)):
+            sub.add_radiobutton(
+                label=name, value=name, variable=self._mode_var,
+                command=lambda t=target: choose(t),
+            )
+        parent.add_cascade(
+            label="Converse" if current != DICTATE else "Dictate", menu=sub)
+
+    def _draft_menu(self, parent: tk.Menu) -> None:
+        """The verbs that act on the words, in one place instead of four rows.
+
+        Copy, New from clipboard, Recent and Clear were all top-level before the six-row
+        menu — one tap each, at the cost of a row each. They collapse into one cascade
+        for the reason Settings already had: what is left at the top is what somebody
+        reaches for mid-sentence, and none of these four is that. `Notes`'s two verbs
+        join them for the same reason they were never really settings — they act on the
+        words too, just the ones already sent to a note.
+        """
+        sub = _dark_menu(parent)
+        # Renamed now that "draft" is the cascade's own name rather than a repeated
+        # suffix on every row inside it.
+        sub.add_command(label="Copy", command=self._copy_draft)
+        sub.add_command(label="New from clipboard", command=self._paste_draft)
+        self._notes_menu(sub)
+        self._recent_menu(sub)
+        sub.add_command(label="Clear", command=self._clear)
+        parent.add_cascade(label="Draft", menu=sub)
+
+    def _settings_menu(self, parent: tk.Menu) -> None:
         """Everything somebody sets once, in one place they can find it twice.
 
         Still not a settings dialog: every entry here writes to `profile.json` or
@@ -787,7 +1118,7 @@ class Pill(tk.Tk):
         way to reach them without an editor. What is refused is a *page* — a surface that
         invites options to be added to it.
         """
-        sub = tk.Menu(parent, tearoff=0)
+        sub = _dark_menu(parent)
         self._trigger_menu(sub)
         # Also the CLI marker's refresh point: a CLI installed mid-session shows up here,
         # where a press is already paying for the PATH walk `_resolved` will not repeat.
@@ -797,7 +1128,7 @@ class Pill(tk.Tk):
             # but a fallback only runs after the first one has failed — which for a
             # timeout means paying the whole wait first. Anyone who already knows which
             # CLI is answering today should be able to say so without restarting.
-            picker = tk.Menu(sub, tearoff=0)
+            picker = _dark_menu(sub)
             current = getattr(self.session, "cli", None)
             here = current.name if current is not None else None
 
@@ -827,14 +1158,6 @@ class Pill(tk.Tk):
                 else AUTO_ASK_ON_LABEL,
                 command=self.session.toggle_auto_ask,
             )
-        if offered:
-            never = tk.Menu(sub, tearoff=0)
-            for wrong, right in offered:
-                never.add_command(
-                    label=f"{wrong} → {right}",
-                    command=lambda w=wrong, r=right: self._dismiss_pair(w, r),
-                )
-            sub.add_cascade(label="Never offer", menu=never)
         sub.add_command(label="Open settings folder", command=self._open_settings)
         parent.add_cascade(label="Settings", menu=sub)
 
@@ -860,7 +1183,7 @@ class Pill(tk.Tk):
         if profile is None:
             return
         current = getattr(profile, "send_word", SEND_WORD)
-        sub = tk.Menu(parent, tearoff=0)
+        sub = _dark_menu(parent)
         # Held on self for the reason `_voice_var` is: a Tk variable that goes out of
         # scope stops driving the indicator, and the tick is the answer to "which one am
         # I using".
@@ -938,7 +1261,7 @@ class Pill(tk.Tk):
             recents.insert(0, current)
         if not recents:
             return
-        sub = tk.Menu(parent, tearoff=0)
+        sub = _dark_menu(parent)
         # Held on self for the reason `_voice_var` is: a Tk variable that goes out of
         # scope stops driving the tick, and the tick is the answer to "which one".
         # The no-workspace value is the label itself, never "": measured on real Tk,
@@ -1023,7 +1346,7 @@ class Pill(tk.Tk):
         voices = self.session.voices()
         if not voices:
             return
-        sub = tk.Menu(parent, tearoff=0)
+        sub = _dark_menu(parent)
         # Read from the engine and rebuilt on every open, so it cannot drift from a
         # voice set by --voice or by a profile written in another session. Held on self
         # because a Tk variable that goes out of scope stops driving the indicator.
@@ -1111,7 +1434,7 @@ class Pill(tk.Tk):
             if not members:
                 continue
             seen.update(v.name for v in members)
-            inner = tk.Menu(parent, tearoff=0)
+            inner = _dark_menu(parent)
             for v in members:
                 self._voice_row(inner, v)
             parent.add_cascade(label=f"{heading} — {label}", menu=inner)
@@ -1173,7 +1496,7 @@ class Pill(tk.Tk):
         items = getattr(self.session, "recent", None)
         if not isinstance(items, list) or not items:
             return
-        sub = tk.Menu(parent, tearoff=0)
+        sub = _dark_menu(parent)
         for role, text in items:
             sub.add_command(
                 label=f"{role}: {fit(text, RECENT_LABEL_MAX)}",
@@ -1390,7 +1713,7 @@ class Pill(tk.Tk):
         one because they answer different questions: what does *this* copy do right now,
         and what is this thing.
         """
-        sub = tk.Menu(parent, tearoff=0)
+        sub = _dark_menu(parent)
         sub.add_command(label="Commands & shortcuts", command=self._open_commands)
         sub.add_command(label="Open the guide", command=self._open_guide)
         parent.add_cascade(label="Help", menu=sub)
@@ -1479,6 +1802,7 @@ class Pill(tk.Tk):
             self.session.close()
         finally:
             self.destroy()
+            _unload_fonts()
 
     # -- the pump ----------------------------------------------------------
 
@@ -1579,7 +1903,8 @@ class Pill(tk.Tk):
         if self.armed:
             self.session.tick()
             if getattr(self.session, "hearing", True):
-                self.levels.append(self._norm(self.session.level_db))
+                self._deaf_frame = 0
+                self.levels.append(self._eased(self._norm(self.session.level_db)))
             else:
                 self._flatten()
         else:
@@ -1587,7 +1912,8 @@ class Pill(tk.Tk):
             # that was already on its way — the pill went quiet and nothing ever
             # arrived, because the code that collects a reply sat behind this check.
             self.session.pump_results()
-            self.levels.append(0.0)
+            self._deaf_frame = 0
+            self.levels.append(self._eased(0.0))
 
         self._pump_warnings()
         self._pump_events()
@@ -1600,6 +1926,11 @@ class Pill(tk.Tk):
             self.bubble.tick_sent()
         if self._flash:
             self._flash -= 1
+        # Piggybacks on the repaint this frame was already doing (§07's rule) rather
+        # than adding a second trigger — the same reason a panel's own `reposition`
+        # also calls this, for the frame where a panel opens between two ticks.
+        self._sync_dock()
+        self._apply_idle_dim()
         self._draw()
 
     def _pump_events(self) -> None:
@@ -1695,15 +2026,42 @@ class Pill(tk.Tk):
             self.bubble.note(line)
 
     def _flatten(self) -> None:
-        """Drop the meter to a flat line in one frame.
+        """Collapse the meter toward a flat line over `DEAF_COLLAPSE_FRAMES` —
+        newest bar first, oldest last.
 
-        `Session.level_db` already reports silence while Flow is talking, so appending
-        it would get here eventually — but "eventually" is eighteen frames, and for over
-        half a second the meter would still be sliding Flow's own voice out to the left
-        while claiming to hear someone. A lie with a decay curve is still a lie.
+        That is a deliberate reversal of §07's literal "left to right": the newest
+        bar (drawn rightmost, the last one `_eased`/`.append` wrote) is the one most
+        recently loud, and this fix exists because a stale loud bar reads as "hearing
+        you" at the exact moment that is false. `Session.level_db` already reports
+        silence while Flow is talking, so appending it would get here eventually —
+        but "eventually" used to be eighteen frames (540 ms) of Flow's own voice
+        sliding off the meter while it still claimed to hear someone. Newest-first
+        means the most convincing bar is gone within a single frame, and the rest of
+        the sweep is the ~120 ms of polish `DEAF_COLLAPSE_FRAMES` describes rather
+        than a defect wearing a decay curve. Frozen while the pointer is in, like
+        `_eased`.
         """
-        for i in range(BARS):
+        if self._pointer_in:
+            return
+        self._deaf_frame = min(self._deaf_frame + 1, DEAF_COLLAPSE_FRAMES)
+        self._eased_level = 0.0
+        done = round(BARS * self._deaf_frame / DEAF_COLLAPSE_FRAMES)
+        for i in range(BARS - 1, BARS - 1 - done, -1):
             self.levels[i] = 0.0
+
+    def _eased(self, target: float) -> float:
+        """This frame's drawn level, one step closer to `target` than the last.
+
+        Rise 60 ms, fall 160 ms (§07, `LEVEL_RISE_ALPHA`/`LEVEL_FALL_ALPHA`) — peaks
+        fall slower than they rise. Frozen while the pointer is in: the meter holds
+        the level it had already eased to rather than continuing to chase a new one,
+        the same rule `Bubble`/`ConversationCard` apply to their own geometry.
+        """
+        if self._pointer_in:
+            return self._eased_level
+        alpha = LEVEL_RISE_ALPHA if target > self._eased_level else LEVEL_FALL_ALPHA
+        self._eased_level += (target - self._eased_level) * alpha
+        return self._eased_level
 
     @staticmethod
     def _norm(db: float) -> float:
@@ -1718,6 +2076,52 @@ class Pill(tk.Tk):
         if not self.armed:
             return ACCENT[State.IDLE]
         return ACCENT.get(self.session.state, ACCENT[State.IDLE])
+
+    @property
+    def ring_color(self) -> str:
+        """The pill's own hairline ring: neutral, except the one state every surface
+        still shares a colour for.
+
+        The glyph and the level meter still travel through every state — `accent` is
+        what draws them — but the ring is not a fourth place to repeat green, blue or
+        violet. Only an error turns it, at the same moment the panel's ring turns too
+        (decisions.md 2026-08-09, "BOTH pill and panel ring go red").
+        """
+        return ERROR if self.accent == ERROR else RING_OUTER
+
+    @property
+    def pill_w(self) -> int:
+        """This pill's actual width right now: idle, or docked to the panel that is up.
+
+        Widens only once there is something to dock to (decisions.md 2026-08-09) —
+        `front` is chosen by mode, but the mode's own surface can still be hidden (an
+        empty draft shows nothing), and an idle pill must not claim a panel's width it
+        is not actually sitting under.
+        """
+        front = self.front
+        return front.width if getattr(front, "_visible", False) else PILL_W
+
+    def _sync_dock(self) -> None:
+        """Resize and reposition for whichever panel is up, right edge held fixed.
+
+        Idempotent and cheap once nothing has changed, so it can run from two places
+        without either caring which ran first: this pill's own frame, *and* a panel's
+        `reposition`, which needs this pill's true — already docked — position before
+        it can put itself directly above or below it. Whichever runs first leaves the
+        other with nothing left to do.
+
+        The right edge is what a bare pill has always anchored near (`right - PILL_W -
+        28` at rest), so growing to dock keeps that edge still and moves the left edge
+        to meet it — the same edge a docked panel's own width now matches exactly.
+        """
+        w = self.pill_w
+        if w == self._docked_w:
+            return
+        left, _top, _right, _bottom = self.work
+        self.x = max(left, self.x + self._docked_w - w)
+        self._docked_w = w
+        self.canvas.configure(width=w)
+        self.geometry(f"{w}x{PILL_H}+{self.x}+{self.y}")
 
     #: What fits beside the level bars. The baseline is at y 33 and the bars run to
     #: y 32 from x 40, so a wider token overlaps them rather than being clipped —
@@ -1762,10 +2166,23 @@ class Pill(tk.Tk):
         return name if len(name) <= self.MARKER_MAX else "ASK"
 
     def _draw(self) -> None:
+        # `self._docked_w`, already resolved by `_sync_dock` (called from `_frame`,
+        # once a frame, before this) — not a fresh `self.pill_w` here, so a bare
+        # fixture that only ever calls `_draw` directly still draws the idle pill its
+        # class defaults describe, rather than reaching for a `bubble`/`card` it never
+        # built (the same `RecursionError` risk `lite`'s class default exists for).
         c = self.canvas
         c.delete("all")
         accent = self.accent
-        _round_rect(c, 1, 1, PILL_W - 1, PILL_H - 1, PILL_H // 2, fill=SHELL, outline=accent)
+        w = self._docked_w
+        if w == PILL_W:
+            radius = PILL_H // 2  # idle: the capsule this pill has always been
+        else:
+            # Docked: squared on the seam it shares with the panel, rounded on the
+            # free-standing side, at the panel's own 8 px — one shape language, not a
+            # capsule with a corner cut off.
+            radius = (0, 0, 8, 8) if self._docked_above else (8, 8, 0, 0)
+        _panel_chrome(c, w, PILL_H, radius, self.ring_color)
 
         # Mic glyph: capsule + stand, drawn rather than fonted so there is no
         # dependency on an emoji font being present and correctly sized.
@@ -2235,14 +2652,29 @@ class ConversationCard(tk.Toplevel):
         _left, top, _right, bottom = self.pill.work
         return bottom - top - 2 * EDGE_AIR
 
+    @property
+    def width(self) -> int:
+        """This window's own width — what a docked pill takes on (`Pill.pill_w`)."""
+        return CARD_W
+
     def reposition(self) -> None:
-        """Item 44's anchor, with this window's width. Above whenever above fits."""
+        """Item 44's anchor, with this window's width. Above whenever above fits.
+
+        No gap now: this window docks to the pill rather than floating near it
+        (Phase 5, decisions.md 2026-08-09) — the two meet at one hairline seam
+        instead of the 10 px of air a shadow used to go in. `_sync_dock` runs first
+        so the pill's own position already reflects the width it is about to share,
+        and `_docked_above` is set here because this is the one place that already
+        decides which side the seam is actually on.
+        """
+        self.pill._sync_dock()
         left, top, right, bottom = self.pill.work
-        x = self.pill.x + PILL_W - CARD_W
-        above = self.pill.y - self._h - 10
-        below = self.pill.y + PILL_H + 10
-        y = below if above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR \
-            else above
+        x = self.pill.x + self.pill.pill_w - CARD_W
+        above = self.pill.y - self._h
+        below = self.pill.y + PILL_H
+        fits_below = above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR
+        self.pill._docked_above = not fits_below
+        y = below if fits_below else above
         x = max(left + EDGE_AIR, min(x, right - CARD_W - EDGE_AIR))
         y = max(top + EDGE_AIR, min(y, bottom - self._h - EDGE_AIR))
         self.geometry(f"{CARD_W}x{self._h}+{x}+{y}")
@@ -2295,7 +2727,7 @@ class ConversationCard(tk.Toplevel):
         would be item 37's 476.7 ms rebuilt on a different surface. The history only
         changes when a turn is added, so that is the only place it is measured.
         """
-        return self._probe_h(self._row_text(row), ("Segoe UI", 9))
+        return self._probe_h(self._row_text(row), FONT_NOTE)
 
     @staticmethod
     def _row_text(row: tuple[str, str]) -> str:
@@ -2309,7 +2741,7 @@ class ConversationCard(tk.Toplevel):
         an answer is laid out once when it arrives, which is what makes an exact count
         affordable here and not in the draft.
         """
-        font = ("Segoe UI", 10)
+        font = FONT_BODY
         full_h = self._probe_h(reply, font)
         if full_h <= cap:
             return reply, 0, full_h
@@ -2331,6 +2763,17 @@ class ConversationCard(tk.Toplevel):
         """
         return ERROR if self.pill.accent == ERROR else CARD_ACCENT
 
+    @property
+    def ring_color(self) -> str:
+        """The card's hairline ring: neutral, not violet.
+
+        Violet's job moved onto the mode-line label, the answer text and the pill
+        glyph — an outline can't also carry a word, so this stopped being where the
+        colour was spent. Still turns red with `accent`, the one state every ring
+        shares (decisions.md 2026-08-09).
+        """
+        return ERROR if self.accent == ERROR else RING_OUTER
+
     def _render(self) -> None:
         c = self.canvas
         accent = self.accent
@@ -2340,8 +2783,8 @@ class ConversationCard(tk.Toplevel):
         c.delete("body")
 
         question = self._partial or self._question
-        q_h = self._probe_h(question, ("Segoe UI", 9)) if question else 0
-        note_h = self._probe_h(self._note, ("Segoe UI", 8)) if self._note else 0
+        q_h = self._probe_h(question, FONT_NOTE) if question else 0
+        note_h = self._probe_h(self._note, FONT_NOTE) if self._note else 0
         # The answer gets what the desktop has left after everything else on the card,
         # which is arithmetic rather than a constant — the same bargain `Bubble._render`
         # strikes, and the reason a 12 000-character artifact cannot size this window
@@ -2370,8 +2813,10 @@ class ConversationCard(tk.Toplevel):
             self.reposition()
 
         c.delete("body")
-        _round_rect(c, 1, 1, CARD_W - 1, self._h - 1, 14, fill=SHELL, outline=accent,
-                    tags="body")
+        # Squared on the seam it shares with the docked pill, rounded on the free
+        # side — `reposition` is what decides above-vs-below, since it already has to.
+        corners = (8, 8, 0, 0) if getattr(self.pill, "_docked_above", True) else (0, 0, 8, 8)
+        _panel_chrome(c, CARD_W, self._h, corners, self.ring_color)
 
         # -- the history, in what is left above the pinned block
         y, floor = PAD, PAD + self._view_h()
@@ -2385,7 +2830,7 @@ class ConversationCard(tk.Toplevel):
             c.create_text(
                 PAD, y, anchor="nw", text=self._row_text(self._history[i]),
                 fill=MUTED if kind == "q" else REPLY,
-                font=("Segoe UI", 9), width=CARD_W - 2 * PAD, tags="body")
+                font=FONT_NOTE, width=CARD_W - 2 * PAD, tags="body")
             y += h + CARD_GAP
             drawn += 1
         self._scrollbar(drawn)
@@ -2398,22 +2843,22 @@ class ConversationCard(tk.Toplevel):
         if question:
             c.create_text(
                 PAD, y, anchor="nw", text=question, fill=MUTED,
-                font=("Segoe UI", 9), width=CARD_W - 2 * PAD, tags="body")
+                font=FONT_NOTE, width=CARD_W - 2 * PAD, tags="body")
             y += q_h + (CARD_GAP if a_h else 0)
         if self._answer:
             c.create_text(
                 PAD, y, anchor="nw", text=shown, fill=REPLY,
-                font=("Segoe UI", 10), width=CARD_W - 2 * PAD, tags="body")
+                font=FONT_BODY, width=CARD_W - 2 * PAD, tags="body")
             y += a_h
             if more:
                 c.create_text(
                     PAD, y - 4, anchor="nw", text=f"… {more} more lines", fill=MUTED,
-                    font=("Segoe UI", 8, "italic"), tags="body")
+                    font=(*FONT_NOTE, "italic"), tags="body")
                 y += BODY_ELIDED_H
         if self._note:
             c.create_text(
                 PAD, y, anchor="nw", text=self._note, fill=MUTED,
-                font=("Segoe UI", 8), width=CARD_W - 2 * PAD, tags="body")
+                font=FONT_NOTE, width=CARD_W - 2 * PAD, tags="body")
 
         self._chips()
         # The row was created before this render's body, and a canvas draws in creation
@@ -2462,11 +2907,12 @@ class ConversationCard(tk.Toplevel):
             primary = key == "Ask"
             tag = chip_tag(key)
             _round_rect(c, x, y1, x + w, y2, 13,
-                        fill=self.accent if primary else CHIP,
+                        fill=PRIMARY_FILL if primary else CHIP,
                         outline="", tags=(tag, "chips"))
             c.create_text(x + w / 2, (y1 + y2) / 2, text=label,
-                          fill=SHELL if primary else TEXT,
-                          font=("Segoe UI", 9, "bold"), tags=(tag, "chips"))
+                          fill=PRIMARY_TEXT if primary else CODE,
+                          font=FONT_CHIP_PRIMARY if primary else FONT_CHIP,
+                          tags=(tag, "chips"))
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
             x += w + 8
 
@@ -2568,9 +3014,45 @@ class Bubble(tk.Toplevel):
         self._pointer_in = False
         self.canvas.bind("<Enter>", self._enter, add="+")
         self.canvas.bind("<Leave>", self._leave, add="+")
+        self.canvas.bind("<Button-3>", self._context_menu)
         self.withdraw()
 
     # -- content -----------------------------------------------------------
+
+    def _context_menu(self, e) -> None:
+        """Corrections, where the words being corrected actually are.
+
+        Moved off the tray menu (decisions.md 2026-08-09, the six-row menu): "Add
+        correction" and "Never offer" both act on the draft, not on Flow generally, and
+        this window is what is showing the draft. `Pill._offer_pairs` and
+        `Pill._dismiss_pair` do the actual reading and writing — this only borrows them,
+        the way `_recent_menu` and `_notes_menu` are borrowed the other direction.
+
+        Absent rather than empty when there is nothing to offer, the same rule every
+        other conditional submenu in this app already follows: a right-click that pops
+        up onto nothing is a control lying about having something behind it.
+        """
+        pill = self.pill
+        m = _dark_menu(self)
+        offered = pill._offer_pairs(m)
+        if not offered:
+            return
+        never = _dark_menu(m)
+        for wrong, right in offered:
+            never.add_command(
+                label=f"{wrong} → {right}",
+                command=lambda w=wrong, r=right: pill._dismiss_pair(w, r),
+            )
+        m.add_cascade(label="Never offer", menu=never)
+        previous = 0 if self.lite else foreground_hwnd()
+        if not self.lite:
+            _user32.SetForegroundWindow(toplevel_hwnd(self))
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+            if previous:
+                _user32.SetForegroundWindow(previous)
 
     @property
     def showing_sent(self) -> bool:
@@ -2678,6 +3160,11 @@ class Bubble(tk.Toplevel):
         _left, top, _right, bottom = self.pill.work
         return bottom - top - 2 * EDGE_AIR
 
+    @property
+    def width(self) -> int:
+        """This window's own width — what a docked pill takes on (`Pill.pill_w`)."""
+        return BUBBLE_W
+
     def reposition(self, lift: int = 0) -> None:
         """Anchor above the pill, clamped inside the work area.
 
@@ -2699,18 +3186,26 @@ class Bubble(tk.Toplevel):
         guarantee and it survives — but an anchor pointing at something it covers is not
         an anchor. Below is the fallback, and only that.
         """
+        # No gap now: this window docks to the pill rather than floating near it
+        # (Phase 5, decisions.md 2026-08-09) — the two meet at one hairline seam
+        # instead of the 10 px of air a shadow used to go in. `_sync_dock` runs
+        # first so the pill's own position already reflects the width it is about
+        # to share, and `_docked_above` is set here because this is the one place
+        # that already decides which side the seam is actually on.
+        self.pill._sync_dock()
         left, top, right, bottom = self.pill.work
-        x = self.pill.x + PILL_W - BUBBLE_W
-        above = self.pill.y - self._h - 10
-        below = self.pill.y + PILL_H + 10
+        x = self.pill.x + self.pill.pill_w - BUBBLE_W
+        above = self.pill.y - self._h
+        below = self.pill.y + PILL_H
         # Above whenever above fits, which is every ordinary placement and is why this
         # reads as one anchor rather than two. Below only when above has no room and below
         # does — a fallback, not a mode. When *neither* fits, `above` goes through and the
         # clamp below does what it has always done: a window as tall as the desktop cannot
         # be placed clear of a pill on either side of it, and inventing a third rule for
         # that would be pretending otherwise.
-        y = below if above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR \
-            else above
+        fits_below = above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR
+        self.pill._docked_above = not fits_below
+        y = below if fits_below else above
         x = max(left + EDGE_AIR, min(x, right - BUBBLE_W - EDGE_AIR))
         y = max(top + EDGE_AIR, min(y + lift, bottom - self._h - EDGE_AIR))
         self.geometry(f"{BUBBLE_W}x{self._h}+{x}+{y}")
@@ -2797,7 +3292,7 @@ class Bubble(tk.Toplevel):
         for _ in range(BODY_PROBES):
             probe = c.create_text(
                 PAD, PAD, anchor="nw", text=shown or " ", fill=TEXT,
-                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD, tags="body")
+                font=FONT_BODY, width=BUBBLE_W - 2 * PAD, tags="body")
             _x1, y1, _x2, y2 = c.bbox(probe)
             text_h = y2 - y1
             if text_h <= BODY_MAX_H:
@@ -2860,8 +3355,27 @@ class Bubble(tk.Toplevel):
             self.canvas.create_text(
                 PAD, hint_y, anchor="nw",
                 text=f"… {hidden} more lines in here — scroll, or drag the bar",
-                fill=MUTED, font=("Segoe UI", 8, "italic"), tags="body")
+                fill=MUTED, font=(*FONT_NOTE, "italic"), tags="body")
+        else:
+            # The slot is reserved either way (`_render`'s height budget does not
+            # know yet whether there will be anything above the fold to report), so
+            # a draft that fits gets the keyboard hints here instead of a blank line
+            # — printed where the hand already is, not only in a Help sheet somebody
+            # has to already know to open (Phase 6, decisions.md 2026-08-09).
+            self._keyboard_hint(hint_y)
         self._edit_bar(box_y, height)
+
+    def _keyboard_hint(self, y: int) -> None:
+        """Esc cancels, Ctrl+Enter keeps — as small mono tokens beside plain words."""
+        c = self.canvas
+        x = PAD
+        for token, word in (("Esc", "cancel"), ("Ctrl+↵", "keep")):
+            c.create_text(x, y, anchor="nw", text=token, fill=CODE,
+                          font=FONT_TRACE, tags="body")
+            x += 8 + 7 * len(token)
+            c.create_text(x, y, anchor="nw", text=word, fill=MUTED,
+                          font=FONT_NOTE, tags="body")
+            x += 18 + 6 * len(word)
 
     def _edit_bar(self, top: int, height: int) -> None:
         """The bar beside the box: where you are, how much there is, and a way to move.
@@ -2915,7 +3429,7 @@ class Bubble(tk.Toplevel):
                                   "units")
         self._render()
 
-    def _probe_h(self, text: str, font=("Segoe UI", 10)) -> int:
+    def _probe_h(self, text: str, font=FONT_BODY) -> int:
         """How tall `text` wraps to in the body column, measured rather than estimated."""
         probe = self.canvas.create_text(
             PAD, PAD, anchor="nw", text=text or " ", fill=TEXT,
@@ -2931,8 +3445,23 @@ class Bubble(tk.Toplevel):
         as the session moved through its states: amber holding a draft, blue mid-rewrite.
         That was the colour doing a second window's job. The error flash still comes
         through, because the note it belongs to is drawn here.
+
+        Transitional: `RECOVER_ACCENT`'s only remaining job in the finished design is
+        the "Put it back" chip after a Send (Phase 6). Until then this still backs the
+        primary chip and the editor's ring, the way it always has.
         """
         return ERROR if self.pill.accent == ERROR else DRAFT_ACCENT
+
+    @property
+    def ring_color(self) -> str:
+        """The bubble's hairline ring: neutral, not amber.
+
+        Amber's only job in the finished design is the "Put it back" undo control —
+        the panel's own border stopped being a mood the moment three windows needed
+        one look (decisions.md 2026-08-09). Still turns red with `accent`, the one
+        state every ring shares.
+        """
+        return ERROR if self.accent == ERROR else RING_OUTER
 
     def _render(self) -> None:
         c = self.canvas
@@ -2960,7 +3489,7 @@ class Bubble(tk.Toplevel):
         if self._note:
             nprobe = c.create_text(
                 PAD, PAD, anchor="nw", text=self._note, fill=MUTED,
-                font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD, tags="body")
+                font=FONT_NOTE, width=BUBBLE_W - 2 * PAD, tags="body")
             nx1, ny1, nx2, ny2 = c.bbox(nprobe)
             note_h = ny2 - ny1
         # The box gets a floor of its own: a one-line draft measures ~18 px, and a
@@ -3014,8 +3543,10 @@ class Bubble(tk.Toplevel):
             self.reposition()
 
         c.delete("body")
-        _round_rect(c, 1, 1, BUBBLE_W - 1, self._h - 1, 14, fill=SHELL, outline=accent,
-                    tags="body")
+        # Squared on the seam it shares with the docked pill, rounded on the free
+        # side — `reposition` is what decides above-vs-below, since it already has to.
+        corners = (8, 8, 0, 0) if getattr(self.pill, "_docked_above", True) else (0, 0, 8, 8)
+        _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color)
         y = PAD
         if self._sent:
             c.create_text(
@@ -3040,7 +3571,7 @@ class Bubble(tk.Toplevel):
                 # whole draft, and somebody would go looking for words that are there.
                 c.create_text(
                     PAD, y, anchor="nw", text=f"… {earlier} earlier lines", fill=MUTED,
-                    font=("Segoe UI", 8, "italic"), tags="body")
+                    font=(*FONT_NOTE, "italic"), tags="body")
                 y += BODY_ELIDED_H
             # Muted once it has gone: these are no longer the words being worked on.
             #
@@ -3053,7 +3584,7 @@ class Bubble(tk.Toplevel):
             # back` is the action.
             c.create_text(
                 PAD, y, anchor="nw", text=shown, fill=MUTED if self._sent else TEXT,
-                font=("Segoe UI", 10), width=BUBBLE_W - 2 * PAD,
+                font=FONT_BODY, width=BUBBLE_W - 2 * PAD,
                 tags="body" if self._sent else ("body", "draft"))
             if not self._sent:
                 c.tag_bind("draft", "<Button-1>", lambda _e: self._edit())
@@ -3061,7 +3592,7 @@ class Bubble(tk.Toplevel):
         if self._partial:
             c.create_text(
                 PAD, y, anchor="nw", text=self._partial, fill=MUTED,
-                font=("Segoe UI", 9, "italic"), width=BUBBLE_W - 2 * PAD, tags="body")
+                font=(*FONT_NOTE, "italic"), width=BUBBLE_W - 2 * PAD, tags="body")
             y += 28
         if self._act is not None:
             # In the flow of the text rather than pinned to the foot: it belongs to what
@@ -3076,7 +3607,7 @@ class Bubble(tk.Toplevel):
             # measurement above just reserved, instead of down onto the chips.
             c.create_text(
                 PAD, self._h - PAD - CHIP_H - 4, anchor="sw", text=self._note,
-                fill=MUTED, font=("Segoe UI", 8), width=BUBBLE_W - 2 * PAD, tags="body")
+                fill=MUTED, font=FONT_NOTE, width=BUBBLE_W - 2 * PAD, tags="body")
 
         if self._editor is not None:
             self._edit_hint(hint_y, box_y, edit_h)
@@ -3104,10 +3635,13 @@ class Bubble(tk.Toplevel):
         if getattr(self.pill.session, "editing", False):
             # The whole row, because every other chip acts on a draft that is currently
             # two things at once — what the session holds and what is in the box. One
-            # decision to make, so one pair of chips to make it with.
+            # decision to make, so one pair of chips to make it with. Cancel sits to
+            # the left of Done — further from the thumb, and not the chip styled to
+            # draw the eye — because Done is the safe, committing action and Cancel is
+            # the one more easily mis-clicked right beside it (Phase 6).
             self._lay_out([
-                ("Done", "Done", self._commit_edit),
                 ("Cancel", "Cancel", self._cancel_edit),
+                ("Done", "Done", self._commit_edit),
             ])
             return
         specs = [
@@ -3135,6 +3669,12 @@ class Bubble(tk.Toplevel):
             specs.append(("Send", "Send", self.pill._send))
         self._lay_out(specs)
 
+    #: Every key that draws as the primary chip — light fill, dark text — rather than
+    #: window-accent fill the way it used to (Phase 6, decisions.md 2026-08-09): the
+    #: one action worth a second look reads the same on every surface now, instead of
+    #: inheriting whichever mood the bubble happened to be drawing in.
+    PRIMARY_KEYS = ("Send", "Ask", "Put it back", "Done")
+
     def _lay_out(self, specs) -> None:
         """Draw a row of chips left to right, tagged by key rather than by label.
 
@@ -3142,11 +3682,14 @@ class Bubble(tk.Toplevel):
         every partial, every countdown second and every activity frame; the chips are
         not, because a chip that is destroyed and rebuilt under a hand reaching for it
         is the click three users reported losing. `_render` deletes the `body` tag now,
-        so this row survives a redraw and is torn down only when its keys, its labels or
-        the height it hangs off have moved.
+        so this row survives a redraw and is torn down only when its keys, its labels,
+        the height it hangs off, or whether it is waiting on a CLI have moved.
         """
         c = self.canvas
-        key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent)
+        # Waiting on the CLI dims the row rather than hiding it — same geometry, same
+        # hit regions, just not the thing to reach for while nothing here can act yet.
+        dim = bool(self._act is not None and self._act.waiting)
+        key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent, dim)
         if key_now == self._chips_drawn or (self._frozen() and self._chips_drawn):
             return
         self._chips_drawn = key_now
@@ -3157,17 +3700,18 @@ class Bubble(tk.Toplevel):
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
         for (key, label, cmd), w in zip(specs, widths):
-            primary = key in ("Send", "Ask", "Put it back")
+            primary = key in self.PRIMARY_KEYS and not dim
             tag = chip_tag(key)
             _round_rect(
                 c, x, y1, x + w, y2, 13,
-                fill=self.accent if primary else CHIP, outline="",
+                fill=PRIMARY_FILL if primary else CHIP, outline="",
                 tags=(tag, "chips"),
             )
             c.create_text(
                 x + w / 2, (y1 + y2) / 2, text=label,
-                fill=SHELL if primary else TEXT,
-                font=("Segoe UI", 9, "bold"), tags=(tag, "chips"),
+                fill=DISABLED if dim else (PRIMARY_TEXT if primary else CODE),
+                font=FONT_CHIP_PRIMARY if primary else FONT_CHIP,
+                tags=(tag, "chips"),
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
             x += w + gap
@@ -3277,7 +3821,7 @@ class Bubble(tk.Toplevel):
             # outlived every redraw and stacked up — found by the selfdrive harness,
             # which reads the *oldest* matching item and so quietly reported a state
             # that had been gone for seconds.
-            font=("Segoe UI", 9), tags=("body", "indicator"),
+            font=FONT_NOTE, tags=("body", "indicator"),
         )
 
     def _put_back(self) -> None:
@@ -3316,11 +3860,13 @@ class Bubble(tk.Toplevel):
         # editor and report that "Windows kept the focus" on a machine with no Windows.
         lite = self.lite
         self._previous_focus = 0 if lite else foreground_hwnd()
+        # Neutral, not `self.accent`: amber's only remaining job is the "Put it back"
+        # chip, and an editing box is not that (Phase 6, decisions.md 2026-08-09).
         box = self._editor = tk.Text(
             self, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
-            highlightthickness=1, highlightbackground=self.accent,
-            highlightcolor=self.accent, wrap="word",
-            font=("Segoe UI", 10), undo=True, padx=6, pady=4,
+            highlightthickness=1, highlightbackground=RING,
+            highlightcolor=RING, wrap="word",
+            font=FONT_BODY, undo=True, padx=6, pady=4,
         )
         box.insert("1.0", text)
         # Escape cancels and Ctrl+Enter commits; a bare Enter is a newline, because a

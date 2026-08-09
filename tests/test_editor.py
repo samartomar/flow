@@ -435,13 +435,16 @@ class MeasuringCanvas:
     `RecordingCanvas` in test_indicator.py records what `_draw` puts on the pill and
     never measures anything, because the pill's geometry is fixed. The bubble's is not:
     it sizes itself to wrapped text, so a fake that cannot wrap cannot catch a bug about
-    wrapping. Line height and character width are the Segoe UI values the real canvas
-    reports for the two fonts this draws in; the exact numbers do not matter, only that
-    more text means more lines.
+    wrapping. Line height and character width are the real canvas's values for the
+    fonts this draws in — Segoe UI at the point sizes item 61 shipped with, IBM Plex
+    Sans at the pixel sizes `FONT_BODY`/`FONT_NOTE` moved to (decisions.md 2026-08-09,
+    measured live: `IBM Plex Sans` at -14 reports an 18 px line and a 6.7 px average
+    character, at -11 a 14 px line and a 5.4 px average) — the exact numbers do not
+    matter, only that more text means more lines.
     """
 
-    LINE_H = {8: 13, 10: 17}
-    CHAR_W = {8: 6, 10: 7}
+    LINE_H = {8: 13, 10: 17, -14: 18, -11: 14}
+    CHAR_W = {8: 6, 10: 7, -14: 7, -11: 5}
 
     def __init__(self) -> None:
         self.items: list[dict] = []

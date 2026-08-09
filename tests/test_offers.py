@@ -208,12 +208,19 @@ class FakeMenu:
     def add_cascade(self, label="", menu=None, **kw) -> None:
         self.cascades[label] = menu
 
+    def configure(self, **kw) -> None: ...
+
     def tk_popup(self, *a) -> None: ...
 
     def grab_release(self) -> None: ...
 
 
 class TestTheMenuCarriesTheOffers(Temp):
+    """The offers, and "Never offer" with them, live on the draft panel's own
+    right-click menu (decisions.md 2026-08-09, the six-row menu) rather than on the
+    pill's — they act on the draft, and the draft is what this window is showing.
+    """
+
     def _menu(self, profile):
         import tkinter as tk
 
@@ -236,15 +243,16 @@ class TestTheMenuCarriesTheOffers(Temp):
         self._notes: list[str] = []
         pill.bubble = mock.Mock()
         pill.bubble.note = self._notes.append
-        pill._clis = []
-        pill.armed = False  # the Listen row reads it for its label
+        pill.lite = False
+
+        bubble = ui.Bubble.__new__(ui.Bubble)
+        bubble.pill = pill
+        bubble.lite = False
         with mock.patch.object(tk, "Menu", make), \
-                mock.patch.object(tk, "StringVar", mock.Mock()), \
-                mock.patch.object(ui, "available", return_value=[]), \
                 mock.patch.object(ui, "foreground_hwnd", return_value=0), \
                 mock.patch.object(ui, "toplevel_hwnd", return_value=0), \
                 mock.patch.object(ui, "_user32"):
-            pill._menu(mock.Mock(x_root=0, y_root=0))
+            bubble._context_menu(mock.Mock(x_root=0, y_root=0))
         return built
 
     @staticmethod
@@ -259,6 +267,9 @@ class TestTheMenuCarriesTheOffers(Temp):
         self.assertTrue(any("semir" in lbl and "Samir" in lbl for lbl in labels), labels)
 
     def test_nothing_learned_means_nothing_added(self):
+        # `_context_menu` still builds the (empty) menu object to hand `_offer_pairs`
+        # somewhere to write into, but never pops it up — the visible absence is what
+        # "a right-click onto nothing is a lie" is actually about.
         self.assertEqual(self._offer_labels(self._menu(tmp_profile())), [])
 
     def test_no_profile_at_all_is_not_a_crash(self):
@@ -293,10 +304,10 @@ class TestTheMenuCarriesTheOffers(Temp):
         p = tmp_profile()
         for _ in range(PROMOTE_AFTER):
             p.learn_pair("semir", "Samir")
-        # "Never offer" moved under Settings when the menu was split: the tap that
-        # matters is the one that says yes, and that one is still top-level.
-        settings = self._menu(p)[0].cascades["Settings"]
-        never = settings.cascades["Never offer"]
+        # "Never offer" sits directly on this menu now, beside the offer it dismisses
+        # rather than a hop away under Settings.
+        top = self._menu(p)[0]
+        never = top.cascades["Never offer"]
         self._command(never, "semir")()
         self.assertEqual(p.offered_pairs(), [])
         self.assertEqual(Profile(p.path).offered_pairs(), [], "not written to disk")

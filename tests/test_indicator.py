@@ -448,6 +448,10 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
 
             def add_command(self, **kw): ...
 
+            def add_checkbutton(self, **kw): ...
+
+            def add_radiobutton(self, **kw): ...
+
             def add_separator(self): ...
 
             def add_cascade(self, **kw): ...
@@ -465,6 +469,8 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         self.assertEqual([t for _, _, t in pill.canvas.texts], ["ASK"])
         with mock.patch.object(ui, "available", return_value=[CODEX, CLAUDE]), \
                 mock.patch.object(tk, "Menu", FakeMenu), \
+                mock.patch.object(tk, "StringVar", mock.Mock()), \
+                mock.patch.object(tk, "BooleanVar", mock.Mock()), \
                 mock.patch.object(ui, "foreground_hwnd", return_value=0), \
                 mock.patch.object(ui, "toplevel_hwnd", return_value=0), \
                 mock.patch.object(ui, "_user32"):

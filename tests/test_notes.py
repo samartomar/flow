@@ -424,26 +424,28 @@ class TestTheMenuIsTheFloor(unittest.TestCase):
         return fixture.build(fixture.profile(), **kw)
 
     def test_keeping_is_one_tap_when_there_is_an_answer(self):
-        self.assertIn("Keep this answer", self.menu().commands)
+        # Notes joined Draft in the six-row menu (decisions.md 2026-08-09): they act on
+        # the words too, just the ones already sent to a note.
+        self.assertIn("Keep this answer", self.menu().cascades["Draft"].commands)
 
     def test_and_absent_when_there_is_not(self):
         # A row that lies about having something behind it is worse than no row.
         self.assertNotIn("Keep this answer",
-                         self.menu(can_take_reply=False).commands)
+                         self.menu(can_take_reply=False).cascades["Draft"].commands)
 
     def test_wrapping_up_appears_only_with_notes_and_counts_them(self):
         held = Notes()
         held.add("one")
         held.add("two")
-        self.assertIn("Wrap up (2 notes)", self.menu(notes=held).commands)
+        self.assertIn("Wrap up (2 notes)", self.menu(notes=held).cascades["Draft"].commands)
 
     def test_one_note_is_not_pluralised_there_either(self):
         held = Notes()
         held.add("only one")
-        self.assertIn("Wrap up (1 note)", self.menu(notes=held).commands)
+        self.assertIn("Wrap up (1 note)", self.menu(notes=held).cascades["Draft"].commands)
 
     def test_no_notes_means_no_row(self):
-        labels = self.menu(notes=Notes()).commands
+        labels = self.menu(notes=Notes()).cascades["Draft"].commands
         self.assertEqual([k for k in labels if k.startswith("Wrap up")], [])
 
 

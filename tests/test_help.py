@@ -468,6 +468,9 @@ class FakeMenu:
     def add_radiobutton(self, label="", command=None, **kw) -> None:
         self.commands[label] = command
 
+    def add_checkbutton(self, label="", command=None, **kw) -> None:
+        self.commands[label] = command
+
     def add_separator(self) -> None: ...
 
     def add_cascade(self, label="", menu=None, **kw) -> None:
@@ -522,6 +525,7 @@ class TestTheMenuReachesIt(unittest.TestCase):
         self.window.show = self.shown.append
         with mock.patch.object(tk, "Menu", make), \
                 mock.patch.object(tk, "StringVar", mock.Mock()), \
+                mock.patch.object(tk, "BooleanVar", mock.Mock()), \
                 mock.patch.object(ui, "available", return_value=[]), \
                 mock.patch.object(ui, "foreground_hwnd", return_value=0), \
                 mock.patch.object(ui, "toplevel_hwnd", return_value=0), \
