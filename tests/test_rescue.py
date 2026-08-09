@@ -120,9 +120,15 @@ class TestRescue(unittest.TestCase):
             ["Meeting on Tuesday.", "change Blarg to Friday"],
             rescued="change Tuesday to Friday",
         )
-        notes = [e.text for e in s.events() if e.kind == "note"]
+        # Both kinds: a rescue says two things, and they no longer come through the same
+        # door. "re-listening" is a plain note; what the re-read *did* is an "edit",
+        # which is the kind that earns an Undo beside it on the panel.
+        notes = [e.text for e in s.events() if e.kind in ("note", "edit")]
         self.assertTrue(any("re-listening" in n for n in notes), notes)
-        self.assertTrue(any("re-heard as" in n for n in notes), notes)
+        # "re-heard —", not "re-heard as": the note now finishes in a sentence rather
+        # than in `replace('Tuesday' -> 'Friday')`, and "as changed X to Y" is not one.
+        self.assertTrue(any("re-heard —" in n for n in notes), notes)
+        self.assertTrue(any("Friday" in n for n in notes), notes)
         s.close()
 
     def test_a_rescue_that_finds_nothing_still_reaches_the_cli(self):

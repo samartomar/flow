@@ -1436,7 +1436,7 @@ class Session:
                     gone = removed_text(before, new).split(" … ")[0]
                     got = added_text(before, new).split(" … ")[0]
                     self.profile.learn_pair(gone, got or p.payload)
-                self._emit("note", f"local: {describe_change(p, before, new)}")
+                self._emit("edit", describe_change(p, before, new))
             else:
                 # Asked for something we could not do locally — escalate rather than
                 # silently no-op, which would read as the app ignoring the user.
@@ -1454,6 +1454,30 @@ class Session:
             return
 
         self._after_draft_change()
+
+    def undo_edit(self) -> bool:
+        """Take back the edit the note above the draft is describing.
+
+        The way back, beside the fact — the design pass asked for both in the same
+        breath (decisions.md 2026-08-09): *the user needs the fact and the way back*. A
+        note saying `changed “thursday” to “Tuesday”` is only half an answer if the only
+        way to disagree with it is to say "undo" and hope the router hears that one
+        correctly, which is precisely the situation somebody is in when a correction has
+        just gone wrong.
+
+        Not `_route`'s undo branch, deliberately, and the difference is what P8 learns.
+        A *spoken* undo landing on an append is evidence the router read a command as
+        dictation, so that path records a misroute. This is a button on a note about an
+        edit Flow already made — there is no misreading to learn from, and counting one
+        would teach the profile to distrust an opening the user never spoke.
+        """
+        if not self.draft.undo():
+            self._emit("note", "nothing to undo")
+            return False
+        # The note described an edit that no longer stands.
+        self._emit("note", "")
+        self._after_draft_change()
+        return True
 
     def recall(self) -> None:
         """P6: put the last sent prompt back, by button rather than by voice.
@@ -1823,7 +1847,7 @@ class Session:
             new, applied = apply_local(before, p)
             if applied:
                 self.draft.set(new)
-                self._emit("note", f"re-read as {describe_change(p, before, new)}")
+                self._emit("edit", f"re-read — {describe_change(p, before, new)}")
                 self._after_draft_change()
                 return True
 
@@ -1923,8 +1947,8 @@ class Session:
                 new, applied = apply_local(before, p)
                 if applied:
                     self.draft.set(new)
-                    self._emit("note",
-                               f"re-read as {describe_change(p, before, new)}")
+                    self._emit("edit",
+                               f"re-read — {describe_change(p, before, new)}")
                     self._after_draft_change()
                     return
             self._give_back(pending.payload, "could not re-read that as a command",
@@ -1947,7 +1971,7 @@ class Session:
             new, applied = apply_local(before, p)
             if applied:
                 self.draft.set(new)
-                self._emit("note", f"re-heard as {describe_change(p, before, new)}")
+                self._emit("edit", f"re-heard — {describe_change(p, before, new)}")
                 self._after_draft_change()
                 return
         # The second read did not find a command either. The CLI was always the

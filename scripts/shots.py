@@ -266,7 +266,25 @@ def _visible(pill):
     return out
 
 
+def _front(pill) -> None:
+    """Put Flow's own windows back on top of the backdrop before a capture.
+
+    The backdrop has to be `-topmost` to cover the desktop at all, which puts it in the
+    same z-band as every window Flow draws — and the ordering inside that band is not
+    stable across a run. Left alone it silently swallowed the pill: the panel above it
+    still captured, so the shots looked plausible and were missing the one window the
+    set is named after. It took the right-click with it, which is why the menu walk
+    reported no menu on the same run.
+    """
+    for w in _visible(pill):
+        try:
+            w.lift()
+        except tk.TclError:  # withdrawn between the check and the lift
+            pass
+
+
 def shot(pill, name: str, margin: int = 26) -> None:
+    _front(pill)
     pill.update_idletasks()
     boxes = [(w.winfo_rootx(), w.winfo_rooty(),
               w.winfo_rootx() + w.winfo_width(),
@@ -436,6 +454,8 @@ def build(pill, sess):
     def menu(names, target):
         def fn():
             w = target()
+            _front(pill)          # the click has to reach Flow, not the backdrop
+            pill.update_idletasks()
             x, y = w.winfo_rootx(), w.winfo_rooty()
             rect = (x, y, x + w.winfo_width(), y + w.winfo_height())
             done = threading.Event()
@@ -451,7 +471,9 @@ def build(pill, sess):
     held = lambda: (setattr(sess.draft, "text", DRAFT),          # noqa: E731
                     setattr(sess, "can_rescue", True),
                     sess.push("draft", DRAFT),
-                    sess.push("note", "local: replace('thursday' -> 'Tuesday')"))
+                    # An "edit" event, not a "note": it is what the router emits after a
+                    # local correction, and the kind that earns an Undo beside it.
+                    sess.push("edit", "changed “thursday” to “Tuesday”"))
 
     return [
         # -- dictate ----------------------------------------------------------
@@ -468,7 +490,7 @@ def build(pill, sess):
         # given, and the two meet in the middle. This is the shape that was reported.
         (0, lambda: (setattr(sess.draft, "text", SHORT_DRAFT),
                      sess.push("draft", SHORT_DRAFT),
-                     sess.push("note", "local: replace('thursday' -> 'Tuesday')"),
+                     sess.push("edit", "changed “thursday” to “Tuesday”"),
                      sess.push("partial", LONG_PARTIAL))),
         (900, lambda: shot(pill, "03b-partial-long")),
         (0, lambda: setattr(pill.bubble, "_partial", "")),

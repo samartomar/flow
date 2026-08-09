@@ -780,18 +780,47 @@ def added_text(before: str, after: str, limit: int = 60) -> str:
     return joined if len(joined) <= limit else joined[: limit - 1] + "…"
 
 
-def describe_change(p: Plan, before: str, after: str) -> str:
-    """What to tell the user an edit just did.
+def _collapse(joined: str) -> str:
+    """`"Tuesday … Tuesday"` is one word changed twice, not two facts."""
+    parts = joined.split(" … ")
+    return parts[0] if len(set(parts)) == 1 else joined
 
-    For everything that adds or reshapes text, the plan says it: `insert_before`,
-    `capitalize`, `break`. For anything in DESTRUCTIVE it does not — `delete_last`
-    names a unit and a count, never the sentence, so "delete_last('sentence')" is
-    precisely the message that lets words disappear unnoticed. Those get the words.
+
+def describe_change(p: Plan, before: str, after: str) -> str:
+    """What to tell the user an edit just did, in words rather than in syntax.
+
+    This used to hand `Plan.describe()` to the screen, so the note above a draft read
+    `local: replace('thursday' -> 'Tuesday')` — a trace line, printed at somebody who
+    wanted to know what happened to their sentence. The design pass called it out
+    directly (decisions.md 2026-08-09): *the user needs the fact and the way back, not
+    the operation name*. `Plan.describe()` still exists and is still the trace form; it
+    is simply no longer what a person is shown.
+
+    Read off the diff rather than off the plan, for the reason `removed_text` gives at
+    length and which applies to every op rather than only the destructive ones: the plan
+    knows what was *asked for*, and only the two texts know what landed. `delete_last`
+    counts trailing sentences without ever naming one; a phonetic `replace` matches a
+    span the draft spells differently from the way the user said it; a case operation
+    carries no payload at all, so the corrected spelling exists nowhere but the result.
+    A diff answers all three the same way and needs no branch per op.
+
+    The plan is consulted for two things the texts cannot show: whether the change was
+    made everywhere rather than once, and a line break, which moves no words at all.
     """
-    if p.op not in DESTRUCTIVE:
-        return p.describe()
-    gone = removed_text(before, after)
-    return f"{p.describe()} — removed {gone!r}" if gone else p.describe()
+    gone = _collapse(removed_text(before, after))
+    got = _collapse(added_text(before, after))
+    every = " every" if p.op == "replace_all" else ""
+    if gone and got:
+        return f"changed{every} “{gone}” to “{got}”"
+    if gone:
+        return f"removed{every} “{gone}”"
+    if got:
+        return f"added “{got}”"
+    if p.op == "break":
+        return "split the line"
+    # Nothing a word diff can see — a punctuation-only tidy, say. The trace form is a
+    # poor thing to show somebody, and it beats showing them nothing at all.
+    return p.describe()
 
 
 def _is_alias(utterance: str) -> bool:

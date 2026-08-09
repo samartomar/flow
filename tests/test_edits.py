@@ -484,9 +484,33 @@ class TestDestructiveEditsAreNamed(unittest.TestCase):
         p, new = self._apply("change every Tuesday to Wednesday")
         self.assertEqual(removed_text(self.DRAFT, new), "Tuesday … Tuesday")
 
-    def test_non_destructive_edits_are_left_alone(self):
+    def test_a_case_fix_names_both_spellings(self):
+        # The op this used to be exempt from naming, and the one where the plan is least
+        # able to: "capitalize sameer" carries a target and no payload, so the corrected
+        # spelling exists nowhere except in the resulting draft.
         p, new = self._apply("capitalize sameer")
-        self.assertEqual(describe_change(p, self.DRAFT, new), p.describe())
+        self.assertEqual(describe_change(p, self.DRAFT, new),
+                         "changed “sameer” to “Sameer”")
+
+    def test_the_note_is_a_sentence_and_not_a_trace_line(self):
+        # The defect the copy rewrite was for: `local: replace('thursday' -> 'Tuesday')`
+        # printed at somebody who wanted to know what happened to their words.
+        p, new = self._apply("change priya to Ruchi")
+        said = describe_change(p, self.DRAFT, new)
+        self.assertEqual(said, "changed “priya,” to “Ruchi,”")
+        for syntax in ("replace(", "->", "_", "'"):
+            self.assertNotIn(syntax, said)
+
+    def test_one_word_changed_twice_is_reported_once(self):
+        # `removed_text` reports the span per occurrence — "Tuesday … Tuesday" — which is
+        # the right answer to "what went" and the wrong one to show a person.
+        p, new = self._apply("change every Tuesday to Wednesday")
+        self.assertEqual(describe_change(p, self.DRAFT, new),
+                         "changed every “Tuesday” to “Wednesday”")
+
+    def test_a_deletion_says_removed_rather_than_changed(self):
+        p, new = self._apply("delete the last sentence")
+        self.assertTrue(describe_change(p, self.DRAFT, new).startswith("removed “"))
 
     def test_the_note_is_bounded(self):
         long_draft = " ".join(f"word{i}" for i in range(400)) + "."

@@ -331,12 +331,18 @@ PRIMARY_TEXT = "#15171C"
 #: One colour, one job, never reused for two states — `REFINING` and `ASKING` still
 #: share one because they are the same wait from the user's side, and the surface that
 #: is showing already names which.
+HEARING = "#3ECF8E"  # green  - capturing speech
+#: Every indeterminate wait, wherever it is drawn: the pill's glyph and meter while a CLI
+#: is out, and the panel's three marching dots for the same wait. Named rather than
+#: written twice, because the dot used to be amber — one of the five unrelated jobs the
+#: one amber was doing, which is why none of them read as emphasis.
+WAITING = "#7AA2F7"  # blue   - waiting on a CLI
 ACCENT = {
     State.IDLE: MUTED,  # resting, armed or not — claims no state of its own
-    State.LISTENING: "#3ECF8E",  # green - capturing speech
+    State.LISTENING: HEARING,
     State.DRAFT: MUTED,  # the held draft is a window, not a pill colour
-    State.REFINING: "#7AA2F7",  # blue  - waiting on a CLI
-    State.ASKING: "#7AA2F7",  # blue  - the same wait
+    State.REFINING: WAITING,
+    State.ASKING: WAITING,  # the same wait
 }
 ERROR = "#F2584A"
 
@@ -345,11 +351,15 @@ ERROR = "#F2584A"
 #: see decisions.md 2026-08-09 for why the draft bubble's border gave up amber.
 RECOVER_ACCENT = "#E8A33D"
 
-#: The two windows' identities, and the reason they are constants rather than moods.
-#: `DRAFT_ACCENT` no longer draws the bubble's own border (that is now the neutral
-#: hairline system above); what is left of it is the transitional colour a held draft's
-#: primary chip and editor ring still carry until Phase 4 rewires them to neutral.
-DRAFT_ACCENT = RECOVER_ACCENT
+#: The conversation card's identity, and the reason it is a constant rather than a mood.
+#:
+#: The draft bubble no longer has one. `DRAFT_ACCENT` was `RECOVER_ACCENT` under a second
+#: name, and between them they drew the panel outline, the primary chip, the editor ring
+#: and the loading dot — the "amber means five things" finding, where a colour spent
+#: everywhere emphasises nothing. Each of those went to the thing that actually describes
+#: it: neutral chrome for the outline, `PRIMARY_FILL` for the chip, `WAITING` for the dot.
+#: Amber is now spent once, on "Put it back", the one control that undoes something
+#: irreversible (decisions.md 2026-08-09).
 CARD_ACCENT = "#B48EF5"  # violet - the conversation card
 
 #: P9. The answer, distinct from the user's own words. One violet now carries converse
@@ -395,7 +405,11 @@ FONT_PARTIAL = (*FONT_NOTE, "italic")
 #: object, three windows").
 PILL_W = 168
 PILL_H = 40
-BARS = 18
+#: Twelve, down from eighteen (decisions.md 2026-08-09). The meter answers one question —
+#: *am I being heard* — and twelve bars answer it as well as eighteen did, in six bars
+#: less of a widget that sits over somebody's editor all day. Six of the eighteen were
+#: paying rent on a number nobody had chosen.
+BARS = 12
 BAR_W, BAR_GAP = 4, 2
 DB_FLOOR, DB_CEIL = -58.0, -12.0  # level range mapped onto bar height
 
@@ -484,6 +498,16 @@ BODY_MAX_H = 340
 #: as body text anyway. Past this, `_partial_slot` keeps the **tail** — the newest words,
 #: which are the ones being spoken and the only ones worth watching arrive.
 PARTIAL_MAX_H = 70
+
+#: The way back, beside the fact — the design pass asked for both in one breath. It sits
+#: on the note's own row rather than in the chip row: the chips act on the draft as a
+#: whole, and this acts on the one edit the sentence beside it is describing.
+UNDO_LABEL = "Undo"
+#: Its drawn width — 5.4 px a character at `FONT_NOTE`, the figure measured for the type
+#: scale, plus two so a wrapped note never quite touches it. Arithmetic rather than a
+#: canvas probe for the reason `chip_w` is: this is read while deciding a layout, and the
+#: measuring fake the layout tests use answers `bbox` for height and not for width.
+UNDO_W = int(len(UNDO_LABEL) * 5.4) + 2
 
 #: Air below the partial, before the indicator or the note. Six, the same as the draft
 #: body's — the two used to be a 34 px reservation against a 28 px advance, two numbers
@@ -755,7 +779,7 @@ def _round_rect(c: tk.Canvas, x1, y1, x2, y2, r, **kw):
 
 
 def _panel_chrome(c: tk.Canvas, w: int, h: int, radius, ring_color: str,
-                   tags="body") -> None:
+                   tags="body", seam: str | None = None) -> None:
     """The opaque three-hairline elevation every v2 surface shares (decisions.md
     2026-08-09), replacing the single accent-coloured outline this app drew before.
 
@@ -769,13 +793,31 @@ def _panel_chrome(c: tk.Canvas, w: int, h: int, radius, ring_color: str,
     `radius` takes the same shapes `_round_rect` does — a scalar for every corner
     alike, or a `(tl, tr, br, bl)` mix for a docked pill or panel, which squares off
     only the two corners on the seam it shares with the other (Phase 5).
+
+    `seam` says which edge, if any, this surface shares with a docked neighbour, and it
+    is what makes the join read as an internal divider rather than as two windows that
+    happen to touch. Squaring the corners was only half of it: both surfaces still drew
+    their full chrome, so the 1 px join was actually **five** stacked lines — this
+    panel's outer ring and inner ring, the neighbour's outer ring and inner ring, and
+    whichever of them drew a `RING_TOP` highlight into the middle of it. The rings are
+    closed outlines and cannot omit one side, so the seam edge is overpainted back to
+    `SHELL` afterwards, and exactly one `RING` line is drawn by the surface *above* the
+    join. The one below draws nothing there at all.
     """
     corners = (radius, radius, radius, radius) if isinstance(radius, (int, float)) \
         else tuple(radius)
     inner = tuple(max(0, r - 3) for r in corners)
     _round_rect(c, 1, 1, w - 1, h - 1, corners, fill=SHELL, outline=ring_color, tags=tags)
     _round_rect(c, 4, 4, w - 4, h - 4, inner, fill="", outline=RING, tags=tags)
-    c.create_line(4 + inner[0], 4, w - 4 - inner[1], 4, fill=RING_TOP, tags=tags)
+    if seam != "top":
+        # The light source, and never into a seam: a bright line down the middle of the
+        # join is the one mark that makes two surfaces unmistakably two.
+        c.create_line(4 + inner[0], 4, w - 4 - inner[1], 4, fill=RING_TOP, tags=tags)
+    if seam == "top":
+        c.create_rectangle(0, 0, w, 4, fill=SHELL, outline="", tags=tags)
+    elif seam == "bottom":
+        c.create_rectangle(0, h - 4, w, h, fill=SHELL, outline="", tags=tags)
+        c.create_line(0, h - 1, w, h - 1, fill=RING, tags=tags)
 
 
 def _dark_menu(master, **kw) -> tk.Menu:
@@ -1997,6 +2039,13 @@ class Pill(tk.Tk):
                 self.front.note(ev.text)
             elif ev.kind == "note":
                 self.front.note(ev.text)
+            elif ev.kind == "edit":
+                # A note that came from an edit Flow made to the draft, which is the one
+                # kind with a way back to offer. Its own event rather than a flag on
+                # `note`, because the surfaces that show notes show a dozen other things
+                # through the same door — an error, a workshop path, the exits list —
+                # and none of them is undoable.
+                self.front.note(ev.text, undoable=True)
             elif ev.kind == "reply":
                 # Asked only in converse, by construction — `Session.send()` returns ""
                 # in dictate mode and never asks. That was once read as "so this branch
@@ -2197,6 +2246,7 @@ class Pill(tk.Tk):
         c.delete("all")
         accent = self.accent
         w = self._docked_w
+        seam = None
         if w == PILL_W:
             radius = PILL_H // 2  # idle: the capsule this pill has always been
         else:
@@ -2204,7 +2254,10 @@ class Pill(tk.Tk):
             # free-standing side, at the panel's own 8 px — one shape language, not a
             # capsule with a corner cut off.
             radius = (0, 0, 8, 8) if self._docked_above else (8, 8, 0, 0)
-        _panel_chrome(c, w, PILL_H, radius, self.ring_color)
+            # The pill is the lower surface when the panel is above it, so it is the one
+            # that draws nothing on the join — the panel's bottom carries the single line.
+            seam = "top" if self._docked_above else "bottom"
+        _panel_chrome(c, w, PILL_H, radius, self.ring_color, seam=seam)
 
         # Mic glyph: capsule + stand, drawn rather than fonted so there is no
         # dependency on an emoji font being present and correctly sized.
@@ -2583,7 +2636,11 @@ class ConversationCard(tk.Toplevel):
         self._partial = text
         self._show()
 
-    def note(self, msg: str) -> None:
+    def note(self, msg: str, undoable: bool = False) -> None:
+        """`undoable` is accepted and ignored: the Undo affordance belongs beside the
+        draft it would restore, and this window is not showing one. Taking the argument
+        anyway keeps `front.note(...)` a single call site rather than a branch on which
+        surface happens to be up."""
         self._note = msg
         self._show()
 
@@ -2837,8 +2894,10 @@ class ConversationCard(tk.Toplevel):
         c.delete("body")
         # Squared on the seam it shares with the docked pill, rounded on the free
         # side — `reposition` is what decides above-vs-below, since it already has to.
-        corners = (8, 8, 0, 0) if getattr(self.pill, "_docked_above", True) else (0, 0, 8, 8)
-        _panel_chrome(c, CARD_W, self._h, corners, self.ring_color)
+        above = getattr(self.pill, "_docked_above", True)
+        corners = (8, 8, 0, 0) if above else (0, 0, 8, 8)
+        _panel_chrome(c, CARD_W, self._h, corners, self.ring_color,
+                      seam="bottom" if above else "top")
 
         # -- the history, in what is left above the pinned block
         y, floor = PAD, PAD + self._view_h()
@@ -2984,10 +3043,11 @@ class Bubble(tk.Toplevel):
     #: instance built with `__new__` — which is how every UI fixture in this suite builds
     #: one — a missing name recurses until the stack ends instead of defaulting. Item 32
     #: found that as a `RecursionError`; item 66 found it again the moment `_render`
-    #: started reading two new fields.
+    #: started reading two new fields, and the Undo beside an edit note made it three.
     _visible = False
     _pointer_in = False
     _chips_drawn: tuple | None = None
+    _note_undo = False
 
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
@@ -3000,6 +3060,9 @@ class Bubble(tk.Toplevel):
         self._visible = False
         self._text = ""
         self._note = ""
+        #: Whether the note above the chips came from an edit, and so has a way back to
+        #: offer beside it. Only the "edit" event sets it — see `Pill._frame`.
+        self._note_undo = False
         self._partial = ""
         #: What Send just handed over, and when. Held for `SENT_LINGER_SEC` so the words
         #: are still on screen — and still recoverable — when a Send goes wrong.
@@ -3105,6 +3168,9 @@ class Bubble(tk.Toplevel):
         self._sent, self._sent_at, self._sent_left = text, time.perf_counter(), None
         self._text = self._partial = ""
         self._for_activity = False
+        # Whatever edit the last note was about, its Undo would restore a draft this Send
+        # has already taken away — and "Put it back" is the chip for that now.
+        self._note_undo = False
         if problem:
             self._note = problem
         if not self._visible:
@@ -3142,14 +3208,17 @@ class Bubble(tk.Toplevel):
             self._float_up()
         self._render()
 
-    def note(self, msg: str) -> None:
+    def note(self, msg: str, undoable: bool = False) -> None:
         self._note = msg
+        self._note_undo = bool(msg) and undoable
         if self._visible:
             self._render()
 
     def surface(self, msg: str) -> None:
         """Show a note even with no draft — used for errors, which must be seen."""
         self._note = msg
+        # Errors and warnings are this door's traffic; neither is an edit to take back.
+        self._note_undo = False
         self._for_activity = False
         if not self._visible:
             self._visible = True
@@ -3166,6 +3235,7 @@ class Bubble(tk.Toplevel):
             self._cancel_edit()
         self._visible = False
         self._text = self._partial = self._note = self._sent = ""
+        self._note_undo = False
         self._for_activity = False
         self.withdraw()
 
@@ -3475,28 +3545,34 @@ class Bubble(tk.Toplevel):
                                   "units")
         self._render()
 
-    def _probe_h(self, text: str, font=FONT_BODY) -> int:
-        """How tall `text` wraps to in the body column, measured rather than estimated."""
+    def _probe_h(self, text: str, font=FONT_BODY, width: int | None = None) -> int:
+        """How tall `text` wraps to, measured rather than estimated.
+
+        `width` defaults to the full body column. The note passes a narrower one when it
+        is sharing its row with an Undo, because a height measured at a width the text
+        will not be drawn at is not a measurement.
+        """
         probe = self.canvas.create_text(
-            PAD, PAD, anchor="nw", text=text or " ", fill=TEXT,
-            font=font, width=BUBBLE_W - 2 * PAD, tags="body")
+            PAD, PAD, anchor="nw", text=text or " ", fill=TEXT, font=font,
+            width=BUBBLE_W - 2 * PAD if width is None else width, tags="body")
         _x1, y1, _x2, y2 = self.canvas.bbox(probe)
         return y2 - y1
 
     @property
     def accent(self) -> str:
-        """Amber, always — this window's identity rather than a mood (item 63).
+        """Error, or nothing of its own.
 
-        It used to be `pill.accent`, so the outline changed colour under the same words
-        as the session moved through its states: amber holding a draft, blue mid-rewrite.
-        That was the colour doing a second window's job. The error flash still comes
-        through, because the note it belongs to is drawn here.
+        This was amber — the window's identity, back when the identity was drawn as an
+        outline. Nothing reads it as a colour any more: the chrome is neutral, the
+        primary chip is `PRIMARY_FILL`, and the indicator's dot takes `WAITING`, which
+        is the colour of the thing it is actually reporting. What is left is the one
+        state every surface still shares, and the error flash has to keep coming through
+        here because the note it belongs to is drawn on this window.
 
-        Transitional: `RECOVER_ACCENT`'s only remaining job in the finished design is
-        the "Put it back" chip after a Send (Phase 6). Until then this still backs the
-        primary chip and the editor's ring, the way it always has.
+        `MUTED` rather than a fourth ring colour: "resting, claims no state of its own"
+        is exactly the answer, and `ring_color` only asks whether this is `ERROR`.
         """
-        return ERROR if self.pill.accent == ERROR else DRAFT_ACCENT
+        return ERROR if self.pill.accent == ERROR else MUTED
 
     @property
     def ring_color(self) -> str:
@@ -3521,6 +3597,14 @@ class Bubble(tk.Toplevel):
         # Measure first: the window has to be sized to the wrapped text. Only the tail of
         # it, though, and that is the whole of the long-draft fix — see `_body_slot`.
         shown, earlier, text_h = self._body_slot(body)
+        if not body:
+            # `_body_slot` probes `shown or " "` so `bbox` always has something to answer
+            # about, and that space measures a full line. Nothing draws it — the body is
+            # behind `elif body:` — so it was a line's worth of height reserved for text
+            # that does not exist, which is most of the "empty air where text will be"
+            # the design pass found in the error and loading frames. The body sizes to
+            # what it holds, and an empty one holds nothing (decisions.md 2026-08-09).
+            text_h = 0
         # The note gets measured too, and did not until 2026-08-02. It reserved a flat
         # 18 px — one line — and drew at a fixed offset from the foot with `anchor="nw"`,
         # so every line past the first grew *downward* into the chip row. An Ask that
@@ -3531,7 +3615,12 @@ class Bubble(tk.Toplevel):
         # Measured *before* the reply now, which is the whole of the reordering: the reply's
         # slot is what is left over rather than a constant of its own, so it has to be told
         # how much of the card everything else has taken.
-        note_h = self._probe_h(self._note, FONT_NOTE) if self._note else 0
+        # The note gives up the Undo's width when there is one, rather than wrapping
+        # under it: two items sharing a row have to agree who owns which half, and the
+        # one that can wrap is the one that should be told.
+        undo_w = UNDO_W if self._note_undo else 0
+        note_w = BUBBLE_W - 2 * PAD - (undo_w + 8 if undo_w else 0)
+        note_h = self._probe_h(self._note, FONT_NOTE, note_w) if self._note else 0
         # Measured for the same reason and never was — see `_partial_slot`. `shown_partial`
         # is what gets drawn below, so the number the window is sized by and the text it is
         # sized for cannot disagree.
@@ -3578,8 +3667,10 @@ class Bubble(tk.Toplevel):
         c.delete("body")
         # Squared on the seam it shares with the docked pill, rounded on the free
         # side — `reposition` is what decides above-vs-below, since it already has to.
-        corners = (8, 8, 0, 0) if getattr(self.pill, "_docked_above", True) else (0, 0, 8, 8)
-        _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color)
+        above = getattr(self.pill, "_docked_above", True)
+        corners = (8, 8, 0, 0) if above else (0, 0, 8, 8)
+        _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color,
+                      seam="bottom" if above else "top")
         y = PAD
         if self._sent:
             c.create_text(
@@ -3638,9 +3729,20 @@ class Bubble(tk.Toplevel):
             # `_lay_out`'s `PAD + CHIP_H` were two numbers that had to agree and nothing
             # made them. `sw` is what makes a second line grow up into the space the
             # measurement above just reserved, instead of down onto the chips.
+            note_baseline = self._h - PAD - CHIP_H - 4
             c.create_text(
-                PAD, self._h - PAD - CHIP_H - 4, anchor="sw", text=self._note,
-                fill=MUTED, font=FONT_NOTE, width=BUBBLE_W - 2 * PAD, tags="body")
+                PAD, note_baseline, anchor="sw", text=self._note,
+                fill=MUTED, font=FONT_NOTE, width=note_w, tags="body")
+            if self._note_undo:
+                # Right-aligned on the note's own last line, in `CODE` so it reads as
+                # something to press against the muted sentence it belongs to. Its own
+                # tag: `chip_tag` exists because a Tcl tag list splits on spaces, and
+                # this one has none, but going through it keeps one rule for one job.
+                tag = chip_tag(UNDO_LABEL)
+                c.create_text(
+                    BUBBLE_W - PAD, note_baseline, anchor="se", text=UNDO_LABEL,
+                    fill=CODE, font=FONT_NOTE, tags=(tag, "body"))
+                c.tag_bind(tag, "<Button-1>", lambda _e: self._undo_edit())
 
         if self._editor is not None:
             self._edit_hint(hint_y, box_y, edit_h)
@@ -3709,7 +3811,15 @@ class Bubble(tk.Toplevel):
     PRIMARY_KEYS = ("Send", "Ask", "Put it back", "Done")
 
     def _lay_out(self, specs) -> None:
-        """Draw a row of chips left to right, tagged by key rather than by label.
+        """Draw the chip row: secondaries packed from the left, the primary pinned right.
+
+        **The primary's right edge is a fixed address.** It used to be wherever the row
+        happened to end, so it moved whenever the chip set did — "Was a command" appears
+        and Send slides; the clipping fix shrank the gaps and Send slid 342 → 326. The
+        one control in this app you cannot take back was the one with no reliable
+        position, under a hand already travelling toward where it was a moment ago. So
+        the slack lives in the gap *before* the primary and the secondaries absorb every
+        change (decisions.md 2026-08-09).
 
         **Only when the row has actually changed.** The body is deleted and redrawn on
         every partial, every countdown second and every activity frame; the chips are
@@ -3728,26 +3838,46 @@ class Bubble(tk.Toplevel):
         self._chips_drawn = key_now
         c.delete("chips")
         widths = [chip_w(key, label) for key, label, _c in specs]
-        gap = chip_row_gap(widths, BUBBLE_W - PAD)
-        x = PAD
+        # The *last* primary, so a row is still laid out sensibly if one ever carries two.
+        pinned = max((i for i, (k, _l, _c) in enumerate(specs)
+                      if k in self.PRIMARY_KEYS), default=None)
+        # Dimming greys the primary's fill but must not move it: a row that reflowed
+        # every time a CLI call started would undo the whole point of a fixed address.
+        heads = [i for i in range(len(specs)) if i != pinned]
+        gap = chip_row_gap(
+            [widths[i] for i in heads],
+            BUBBLE_W - PAD - (widths[pinned] + CHIP_GAP if pinned is not None else 0),
+        )
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
-        for (key, label, cmd), w in zip(specs, widths):
+
+        def draw(i: int, x: float) -> None:
+            key, label, cmd = specs[i]
             primary = key in self.PRIMARY_KEYS and not dim
             tag = chip_tag(key)
             _round_rect(
-                c, x, y1, x + w, y2, 13,
+                c, x, y1, x + widths[i], y2, 13,
                 fill=PRIMARY_FILL if primary else CHIP, outline="",
                 tags=(tag, "chips"),
             )
             c.create_text(
-                x + w / 2, (y1 + y2) / 2, text=label,
+                x + widths[i] / 2, (y1 + y2) / 2, text=label,
                 fill=DISABLED if dim else (PRIMARY_TEXT if primary else CODE),
                 font=FONT_CHIP_PRIMARY if primary else FONT_CHIP,
                 tags=(tag, "chips"),
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
-            x += w + gap
+
+        x = PAD
+        for i in heads:
+            draw(i, x)
+            x += widths[i] + gap
+        if pinned is not None:
+            # Never left of where the secondaries actually ended: with a row too wide to
+            # fit, honouring the pin would draw the primary *over* them. Overlapping
+            # chips are two hit regions in one place, which is worse than a row that
+            # ends early — and `chip_row_gap` has already floored the gap at 0 by then.
+            draw(pinned, max(x, BUBBLE_W - PAD - widths[pinned]))
 
     def tick_countdown(self) -> None:
         """Repaint when the auto-ask number changes, and only then.
@@ -3841,7 +3971,11 @@ class Bubble(tk.Toplevel):
                 cx, cy = x + 4 + i * 10, y + 8
                 c.create_oval(
                     cx - r, cy - r, cx + r, cy + r,
-                    fill=self.accent if lit else CHIP, outline="",
+                    # `WAITING`, not this window's accent: the dot reports the same wait
+                    # the pill's glyph is reporting, and one state gets one colour. It
+                    # was amber, which said "draft bubble" about a fact that has nothing
+                    # to do with which window is drawing it.
+                    fill=WAITING if lit else CHIP, outline="",
                     tags=("body", "waiting"),
                 )
         else:
@@ -3869,6 +4003,16 @@ class Bubble(tk.Toplevel):
         # Reaching for any chip means the user is still working on this draft.
         self.pill.session.hold_auto_ask()
         self.pill.session.rescue_last_append()
+
+    def _undo_edit(self) -> None:
+        """Take back the edit the note is describing.
+
+        Holds the auto-ask clock for the same reason every chip does: somebody
+        disagreeing with a correction is still working on this draft, and having it sent
+        out from under them mid-disagreement is the worst possible moment for it.
+        """
+        self.pill.session.hold_auto_ask()
+        self.pill.session.undo_edit()
 
     # -- repairing the text by hand ----------------------------------------
 

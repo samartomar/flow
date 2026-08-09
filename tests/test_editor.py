@@ -597,6 +597,161 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         self.assertLessEqual(bottom, b._h - 14 - 26)
 
 
+class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
+    """Send does not move when the chip set beside it does.
+
+    The reported shape: "Send moves when the chip set does". `can_rescue` flips and "Was
+    a command" appears, so Send slides; the clip fix shrank the gaps and Send slid
+    342 → 326. The most irreversible control in the app was the one with no reliable
+    position, under a hand already travelling toward where it had been a moment earlier.
+
+    The fix puts the slack in the gap *before* the primary rather than spreading it, so
+    the secondaries absorb every change and the right edge is arithmetic:
+    `BUBBLE_W - PAD`.
+    """
+
+    def _bubble(self, **session):
+        import flow.ui as ui
+
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock()
+        fields = dict(mode="dictate", can_rescue=False, editing=False,
+                      auto_ask_in=None, can_take_reply=False)
+        fields.update(session)
+        b.pill.session = mock.Mock(**fields)
+        b.pill.accent = "#000000"
+        b.pill.work = WORK
+        b.canvas = MeasuringCanvas()
+        b._text = "Meeting on Tuesday afternoon."
+        b._sent = b._partial = b._note = ""
+        b._editor = None
+        b._act = None
+        b._h = 120
+        b.reposition = lambda *a, **kw: None
+        return b
+
+    def _right_edge(self, b, label):
+        import flow.ui as ui
+
+        it = next(i for i in b.canvas.items if i["text"] == label)
+        return it["x"] + ui.chip_w(label, label) / 2
+
+    def test_send_lands_on_the_same_pixel_whatever_is_beside_it(self):
+        import flow.ui as ui
+
+        edges = set()
+        for rescue in (False, True):
+            b = self._bubble(can_rescue=rescue)
+            b._render()
+            edges.add(self._right_edge(b, "Send"))
+        self.assertEqual(len(edges), 1, f"Send moved: {edges}")
+        self.assertAlmostEqual(edges.pop(), ui.BUBBLE_W - ui.PAD, delta=1)
+
+    def test_a_waiting_row_does_not_reflow_it_either(self):
+        # Dimming greys the fill; a row that also reflowed would undo the whole point.
+        import flow.ui as ui
+
+        from flow.session import Activity
+
+        b = self._bubble()
+        b._render()
+        settled = self._right_edge(b, "Send")
+        b._act = Activity("refining", True)
+        b._dot = 0  # the marching-dot phase, normally advanced by the frame pump
+        b._chips_drawn = None
+        b._render()
+        self.assertAlmostEqual(self._right_edge(b, "Send"), settled, delta=1)
+
+    def test_the_secondaries_still_start_at_the_left_pad(self):
+        # Pinned right is not centred or spread: the row still reads left to right.
+        import flow.ui as ui
+
+        b = self._bubble()
+        b._render()
+        it = next(i for i in b.canvas.items if i["text"] == "Refine")
+        self.assertAlmostEqual(it["x"] - ui.chip_w("Refine", "Refine") / 2,
+                               ui.PAD, delta=1)
+
+
+class TestTheWayBackSitsBesideTheFact(unittest.TestCase):
+    """An edit note carries an Undo; every other kind of note does not.
+
+    The design pass asked for the fact and the way back together (decisions.md
+    2026-08-09). The fact arrived as a sentence — `changed “thursday” to “Tuesday”` in
+    place of `local: replace('thursday' -> 'Tuesday')` — and this is the other half.
+
+    Which notes get one is the part worth pinning. Notes are how this window says a
+    dozen unrelated things: an error, a workshop path, the exits list, "nothing sent
+    yet". An Undo beside any of those is a button that would either do nothing or undo
+    something the sentence above it is not about, so the *event kind* decides, not the
+    presence of text.
+    """
+
+    def _bubble(self):
+        import flow.ui as ui
+
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock()
+        b.pill.session = mock.Mock(
+            mode="dictate", can_rescue=False, editing=False, auto_ask_in=None,
+            can_take_reply=False,
+        )
+        b.pill.accent = "#000000"
+        b.pill.work = WORK
+        b.canvas = MeasuringCanvas()
+        b._text = "Meeting on Tuesday afternoon."
+        b._sent = b._partial = b._note = ""
+        b._note_undo = False
+        b._editor = None
+        b._act = None
+        b._h = 120
+        b._visible = True
+        b.reposition = lambda *a, **kw: None
+        b._render = ui.Bubble._render.__get__(b)
+        return b
+
+    def _labels(self, b):
+        return [i["text"] for i in b.canvas.items]
+
+    def test_an_edit_note_offers_a_way_back(self):
+        import flow.ui as ui
+
+        b = self._bubble()
+        ui.Bubble.note(b, "changed “thursday” to “Tuesday”", undoable=True)
+        self.assertIn(ui.UNDO_LABEL, self._labels(b))
+
+    def test_an_error_does_not(self):
+        import flow.ui as ui
+
+        b = self._bubble()
+        ui.Bubble.note(b, "could not start capture: the device is in exclusive use")
+        self.assertNotIn(ui.UNDO_LABEL, self._labels(b))
+
+    def test_pressing_it_goes_through_the_session(self):
+        # Through `Session.undo_edit`, not `draft.undo()` — the button and the spoken
+        # word are one behaviour, and a second implementation is the one that rots.
+        import flow.ui as ui
+
+        b = self._bubble()
+        ui.Bubble.note(b, "removed “the standup line”", undoable=True)
+        tag = ui.chip_tag(ui.UNDO_LABEL)
+        pressed = [cb for t, seq, cb in b.canvas.bindings
+                   if t == tag and seq == "<Button-1>"]
+        self.assertEqual(len(pressed), 1, b.canvas.bindings)
+        pressed[0](None)
+        b.pill.session.undo_edit.assert_called_once_with()
+
+    def test_the_note_gives_up_the_width_rather_than_wrapping_under_it(self):
+        import flow.ui as ui
+
+        long_note = "changed “" + "thursday " * 12 + "” to “Tuesday”"
+        wide = self._bubble()
+        ui.Bubble.note(wide, long_note)
+        narrow = self._bubble()
+        ui.Bubble.note(narrow, long_note, undoable=True)
+        self.assertGreaterEqual(narrow._h, wide._h)
+
+
 class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
     """The same defect as the class above, on the element beside it.
 

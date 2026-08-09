@@ -506,13 +506,18 @@ class TestEachWindowHasOneColour(unittest.TestCase):
     session moved through its states — the colour doing a second window's job.
     """
 
-    def test_the_card_is_violet_and_the_bubble_is_amber(self):
+    def test_the_card_is_violet_and_the_bubble_claims_nothing(self):
         c = card()
         c.pill.accent = ui.ACCENT[ui.State.LISTENING]
         self.assertEqual(c.accent, ui.CARD_ACCENT)
+        # The bubble's amber is gone. It was `RECOVER_ACCENT` under a second name, and
+        # nothing reads this as a colour any more — the chrome is neutral, the primary
+        # chip is `PRIMARY_FILL`, the loading dot is `WAITING`. Amber is spent once now,
+        # on "Put it back" (decisions.md 2026-08-09, "amber means five things").
         b = ui.Bubble.__new__(ui.Bubble)
         b.pill = mock.Mock(accent=ui.ACCENT[ui.State.LISTENING])
-        self.assertEqual(b.accent, ui.DRAFT_ACCENT)
+        self.assertEqual(b.accent, ui.MUTED)
+        self.assertNotEqual(b.accent, ui.RECOVER_ACCENT)
 
     def test_neither_changes_with_the_session_state(self):
         c = card()
@@ -533,8 +538,19 @@ class TestEachWindowHasOneColour(unittest.TestCase):
     def test_the_pill_keeps_three_colours_and_neither_of_theirs(self):
         values = set(ui.ACCENT.values())
         self.assertEqual(len(values), 3)
-        self.assertNotIn(ui.DRAFT_ACCENT, values)
+        self.assertNotIn(ui.RECOVER_ACCENT, values)
         self.assertNotIn(ui.CARD_ACCENT, values)
+
+    def test_amber_is_spent_exactly_once(self):
+        # The finding this whole palette pass came from: panel outline, primary chip,
+        # loading dot and "Put it back" were one amber, so none of them was emphasis.
+        # `RECOVER_ACCENT` is now the only name it has, and undo-after-send is the only
+        # thing that reads it.
+        self.assertFalse(hasattr(ui, "DRAFT_ACCENT"))
+        self.assertNotIn(ui.RECOVER_ACCENT, set(ui.ACCENT.values()))
+        self.assertNotEqual(ui.PRIMARY_FILL, ui.RECOVER_ACCENT)
+        self.assertNotEqual(ui.RING, ui.RECOVER_ACCENT)
+        self.assertNotEqual(ui.WAITING, ui.RECOVER_ACCENT)
 
     def test_a_held_draft_and_a_question_out_are_no_longer_pill_moods(self):
         self.assertEqual(ui.ACCENT[ui.State.DRAFT], ui.ACCENT[ui.State.IDLE])
