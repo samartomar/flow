@@ -25,6 +25,7 @@ correct it, keep talking to add more, type into it when that is faster, then **S
 > Flow is built for developers who speak English as a second language, with a strong
 > accent — Spanish, Indian, Russian and Japanese L1 speakers anchor the design and the
 > benchmarks. [docs/product.md](docs/product.md) states why, and what that changes.
+web application/stitch/projects/14236618443721667674/screens/15716e5ca5894e09840d1c1f03dc311f<img width="1376" height="768" alt="image" src="https://github.com/user-attachments/assets/13dd1385-c5c9-4352-bfc9-4390349dd032" />
 
 ---
 
