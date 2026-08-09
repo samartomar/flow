@@ -26,7 +26,7 @@ correct it, keep talking to add more, type into it when that is faster, then **S
 > accent — Spanish, Indian, Russian and Japanese L1 speakers anchor the design and the
 > benchmarks. [docs/product.md](docs/product.md) states why, and what that changes.
 
-web application/stitch/projects/14236618443721667674/screens/7282a6804b4549ca85d062ea8e010bc6<img width="600" height="600" alt="image" src="https://github.com/user-attachments/assets/f4b95748-74e8-4ef1-a282-345865ea12b2" />
+<img width="600" height="600" alt="Flow's pill, draft bubble and conversation card" src="https://github.com/user-attachments/assets/f4b95748-74e8-4ef1-a282-345865ea12b2" />
 
 ---
 
@@ -362,14 +362,14 @@ The chips:
 | **Done** / **Cancel** | keep what you typed, or throw it away — the only two chips while the editor is open |
 | **Use this** | make the answer on screen the draft (converse mode, once there is a reply) |
 | **Send** / **Ask** | hand the draft off — pasted in dictate mode, put to the CLI in converse mode |
-| **Put it back** | return the words a Send just took (shown on the sent card, for 4 s) |
+| **Bring it back** | return the words a Send just took (shown on the sent card, for 4 s) |
 
 Refine and Continue are the escape hatch for when the router guesses wrong. They apply to
 the **next** utterance and expire after 30 seconds, so a chip pressed and then forgotten
 cannot silently reroute an unrelated sentence a minute later.
 
 After a Send in dictate mode the bubble does not vanish. It holds what was just sent for
-four seconds, dimmed, under a **sent** label, with a **Put it back** chip counting down —
+four seconds, dimmed, under a **sent** label, with a **Bring it back** chip counting down —
 so a Send that went somewhere unexpected costs one click rather than the whole utterance.
 The words are in the thread either way and *"bring back my last prompt"* still works long
 afterwards; the chip is there because a mis-aimed Send and a good one used to leave

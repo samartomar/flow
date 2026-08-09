@@ -619,8 +619,8 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         # region every second the countdown ran.
         widths = {ui.chip_w("Ask", label) for label in ("Ask", "Ask 1s", "Ask 10s")}
         self.assertEqual(len(widths), 1)
-        self.assertEqual(ui.chip_w("Put it back", "Put it back"),
-                         ui.chip_w("Put it back", "Put it back 4s"))
+        self.assertEqual(ui.chip_w("Bring it back", "Bring it back"),
+                         ui.chip_w("Bring it back", "Bring it back 4s"))
 
     def test_an_ordinary_chip_is_still_sized_by_its_label(self):
         # The reserve is per key, not a flat minimum: a row of chips all as wide as the

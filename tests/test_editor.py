@@ -1057,7 +1057,7 @@ class TestClickingTheDraftOpensEdit(unittest.TestCase):
         self.assertIn("click the draft to edit", exits_note(None))
 
     def test_the_sent_card_is_not_a_hit_region(self):
-        # Those words have already gone, and `Put it back` is the action there.
+        # Those words have already gone, and `Bring it back` is the action there.
         b = self.bubble(text="", sent="already gone")
         b._render()
         self.assertEqual(self.tagged(b), [])

@@ -302,7 +302,7 @@ gone: it was `RECOVER_ACCENT` under a second name, and between them the one ambe
 panel outline, a primary chip, an editor ring and a loading dot — "amber means five
 things", which is a colour that emphasises nothing. Each of those went to what actually
 describes it (neutral chrome, `PRIMARY_FILL`, `WAITING`), and amber is now spent once, on
-"Put it back". `REFINING` and `ASKING` share blue because from the user's side they are
+"Bring it back". `REFINING` and `ASKING` share blue because from the user's side they are
 the same wait — something is out and the answer is not here yet — and the surface that is
 showing already names which. The error flash still reaches both windows, because the note
 it belongs to is drawn on one of them.
@@ -1038,7 +1038,7 @@ nothing at all.
 The live body text carries a second tag, `draft`, and `<Button-1>` on it calls the same
 `_edit` the chip does. Only the text: the chips keep their own clicks (they are raised
 above the body, so an overlap goes to the chip), the empty card is not a hit region, and
-the **sent** card carries no such tag — those words have already gone and `Put it back`
+the **sent** card carries no such tag — those words have already gone and `Bring it back`
 is the action there. Measured on real Tk: one tagged item at (13, 14)–(363, 31), a click
 in it opens the editor, a click on `Send` does not, and the sent card has none.
 
@@ -1145,7 +1145,7 @@ it safe is worse than telling them. Those reports had never been shown to anyone
 
 The bubble used to be withdrawn on the same line that sent the draft, so a paste that
 landed and a paste that went nowhere left the same empty screen. It now holds the sent text
-for `ui.SENT_LINGER_SEC` under a `sent` label with a **Put it back** chip, which calls
+for `ui.SENT_LINGER_SEC` under a `sent` label with a **Bring it back** chip, which calls
 `Session.recall()` — the same path the spoken *"bring back my last prompt"* takes. Dictate
 mode only: in converse mode the bubble is already staying up for the answer.
 

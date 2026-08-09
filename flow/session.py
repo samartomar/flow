@@ -1482,7 +1482,7 @@ class Session:
     def recall(self) -> None:
         """P6: put the last sent prompt back, by button rather than by voice.
 
-        The bubble's "Put it back" chip after a Send, and the spoken "bring back my last
+        The bubble's "Bring it back" chip after a Send, and the spoken "bring back my last
         prompt", are the same act and go down the same path deliberately — the second
         implementation is the one that would rot.
         """

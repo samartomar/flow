@@ -518,7 +518,7 @@ class TestEachWindowHasOneColour(unittest.TestCase):
         # The bubble's amber is gone. It was `RECOVER_ACCENT` under a second name, and
         # nothing reads this as a colour any more — the chrome is neutral, the primary
         # chip is `PRIMARY_FILL`, the loading dot is `WAITING`. Amber is spent once now,
-        # on "Put it back" (decisions.md 2026-08-09, "amber means five things").
+        # on "Bring it back" (decisions.md 2026-08-09, "amber means five things").
         b = ui.Bubble.__new__(ui.Bubble)
         b.pill = mock.Mock(accent=ui.ACCENT[ui.State.LISTENING], flashing=False)
         self.assertEqual(b.accent, ui.MUTED)
@@ -552,7 +552,7 @@ class TestEachWindowHasOneColour(unittest.TestCase):
 
     def test_amber_is_spent_exactly_once(self):
         # The finding this whole palette pass came from: panel outline, primary chip,
-        # loading dot and "Put it back" were one amber, so none of them was emphasis.
+        # loading dot and "Bring it back" were one amber, so none of them was emphasis.
         # `RECOVER_ACCENT` is now the only name it has, and undo-after-send is the only
         # thing that reads it.
         self.assertFalse(hasattr(ui, "DRAFT_ACCENT"))

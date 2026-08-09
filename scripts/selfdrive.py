@@ -876,12 +876,12 @@ def scenario_chips(report) -> None:
                f"sent={pill.bubble._sent!r}")
         report("it still shows what was sent", pill.bubble._sent == "some words",
                pill.bubble._sent)
-        found = pill.bubble.canvas.find_withtag(chip_tag("Put it back"))
-        report("and offers a way back to the draft", bool(found), chip_tag("Put it back"))
+        found = pill.bubble.canvas.find_withtag(chip_tag("Bring it back"))
+        report("and offers a way back to the draft", bool(found), chip_tag("Bring it back"))
         label = pill.bubble.canvas.itemcget(found[1], "text") if found else ""
         report("whose countdown does not rename its tag",
-               label.startswith("Put it back ") and label.endswith("s"), label)
-        click(pill, "Put it back")
+               label.startswith("Bring it back ") and label.endswith("s"), label)
+        click(pill, "Bring it back")
         pill._frame()
         report("pressing it puts the words back in the draft",
                session.draft.text == "some words", session.draft.text)

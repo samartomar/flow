@@ -187,11 +187,11 @@ class TestSessionThread(unittest.TestCase):
         s.close()
 
     def test_recall_by_button_is_the_same_act_as_saying_it(self):
-        """The bubble's "Put it back" chip after a Send calls `Session.recall()`.
+        """The bubble's "Bring it back" chip after a Send calls `Session.recall()`.
 
         Down the same path as the spoken form on purpose: the chip exists because a
         Send that lands in the wrong window used to cost the whole utterance, and a
-        second implementation of "put it back" would be a second thing to keep working.
+        second implementation of "bring it back" would be a second thing to keep working.
         """
         s, mic = run(["write the migration"])
         mic.utterance()

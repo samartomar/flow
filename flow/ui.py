@@ -321,7 +321,7 @@ CODE = "#C7CBD4"
 PLACEHOLDER = "#7E8590"
 DISABLED = "#5C6270"
 
-#: The primary chip — Send, Ask, Done, Put it back — inverted from everything else on
+#: The primary chip — Send, Ask, Done, Bring it back — inverted from everything else on
 #: purpose: everything around it is dark-on-dark, and the one action worth a second
 #: look is the one that reads light-on-dark instead.
 PRIMARY_FILL = "#EAECF1"
@@ -346,7 +346,7 @@ ACCENT = {
 }
 ERROR = "#F2584A"
 
-#: The one place amber appears in the whole app: the "Put it back" undo-after-send
+#: The one place amber appears in the whole app: the "Bring it back" undo-after-send
 #: control. Not reused for a panel outline, a chip fill, or a loading dot elsewhere —
 #: see decisions.md 2026-08-09 for why the draft bubble's border gave up amber.
 RECOVER_ACCENT = "#E8A33D"
@@ -358,7 +358,7 @@ RECOVER_ACCENT = "#E8A33D"
 #: and the loading dot — the "amber means five things" finding, where a colour spent
 #: everywhere emphasises nothing. Each of those went to the thing that actually describes
 #: it: neutral chrome for the outline, `PRIMARY_FILL` for the chip, `WAITING` for the dot.
-#: Amber is now spent once, on "Put it back", the one control that undoes something
+#: Amber is now spent once, on "Bring it back", the one control that undoes something
 #: irreversible (decisions.md 2026-08-09).
 CARD_ACCENT = "#B48EF5"  # violet - the conversation card
 
@@ -388,7 +388,7 @@ FONT_BODY = (FONT_SANS, -14)  # draft text, the answer, the hand editor
 #: different from each other.
 FONT_NOTE = (FONT_SANS, -11)
 FONT_CHIP = (FONT_SANS_MEDIUM, -12)  # secondary chip label
-FONT_CHIP_PRIMARY = (FONT_SANS_SEMIBOLD, -12)  # Send / Ask / Done / Put it back
+FONT_CHIP_PRIMARY = (FONT_SANS_SEMIBOLD, -12)  # Send / Ask / Done / Bring it back
 #: Trace/code text and the pill's bar label (§02, `Bar label · Plex Mono 11 · +.1em`).
 #: The editor's key hints and `Pill._bar_label` are the two things drawn in it.
 FONT_TRACE = (FONT_MONO, -11)
@@ -739,7 +739,7 @@ DOT_SEC = 0.4
 #: region stable for the whole life of the chip, at the cost of a few pixels of air on
 #: the chip that is not counting — which nobody has ever complained about, and a hit
 #: region that moves is what three users did complain about.
-COUNTDOWN_WIDEST = {"Ask": "Ask 00s", "Put it back": "Put it back 00s"}
+COUNTDOWN_WIDEST = {"Ask": "Ask 00s", "Bring it back": "Bring it back 00s"}
 
 
 def chip_w(key: str, label: str) -> int:
@@ -787,7 +787,7 @@ def chip_tag(key: str) -> str:
     """The canvas tag for a chip, from its key.
 
     Spaces are removed rather than tolerated. Tk parses a `tags` string as a Tcl *list*,
-    so `tags="chip-Put it back"` does not tag one item with one name — it tags it with
+    so `tags="chip-Bring it back"` does not tag one item with one name — it tags it with
     three, `chip-Put`, `it` and `back`, and every later `find_withtag` and `tag_bind`
     for the whole name then matches nothing. That is not hypothetical: it is why the
     "Was a command" chip could be drawn and could not be clicked.
@@ -3446,7 +3446,7 @@ class Bubble(tk.Toplevel):
         self._text = self._partial = ""
         self._for_activity = False
         # Whatever edit the last note was about, its Undo would restore a draft this Send
-        # has already taken away — and "Put it back" is the chip for that now.
+        # has already taken away — and "Bring it back" is the chip for that now.
         self._note_undo = False
         if problem:
             self._note = problem
@@ -3855,7 +3855,7 @@ class Bubble(tk.Toplevel):
     def ring_color(self) -> str:
         """The bubble's hairline ring: neutral, not amber.
 
-        Amber's only job in the finished design is the "Put it back" undo control —
+        Amber's only job in the finished design is the "Bring it back" undo control —
         the panel's own border stopped being a mood the moment three windows needed
         one look (decisions.md 2026-08-09). Still turns red with `accent`, the one
         state every ring shares.
@@ -4040,7 +4040,7 @@ class Bubble(tk.Toplevel):
             # One thing to offer, because there is one thing left to decide: whether
             # those words needed to come back. Refine and Continue have nothing to act
             # on — the draft is empty — and Send has already happened.
-            specs = [("Put it back", f"Put it back {self._linger_left()}s",
+            specs = [("Bring it back", f"Bring it back {self._linger_left()}s",
                       self._put_back)]
             self._lay_out(specs)
             return
@@ -4085,7 +4085,7 @@ class Bubble(tk.Toplevel):
     #: window-accent fill the way it used to (Phase 6, decisions.md 2026-08-09): the
     #: one action worth a second look reads the same on every surface now, instead of
     #: inheriting whichever mood the bubble happened to be drawing in.
-    PRIMARY_KEYS = ("Send", "Ask", "Put it back", "Done")
+    PRIMARY_KEYS = ("Send", "Ask", "Bring it back", "Done")
 
     def _lay_out(self, specs) -> None:
         """Draw the chip row: secondaries packed from the left, the primary pinned right.
@@ -4314,7 +4314,7 @@ class Bubble(tk.Toplevel):
         # editor and report that "Windows kept the focus" on a machine with no Windows.
         lite = self.lite
         self._previous_focus = 0 if lite else foreground_hwnd()
-        # Neutral, not `self.accent`: amber's only remaining job is the "Put it back"
+        # Neutral, not `self.accent`: amber's only remaining job is the "Bring it back"
         # chip, and an editing box is not that (Phase 6, decisions.md 2026-08-09).
         box = self._editor = tk.Text(
             self, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",

@@ -89,7 +89,7 @@ class FakeSession:
         return self.draft.clear()
 
     def recall(self) -> None:
-        """What the "Put it back" chip calls. P6, by button."""
+        """What the "Bring it back" chip calls. P6, by button."""
         self.draft.text = DRAFT
         self._events.append(Event("draft", DRAFT))
 
