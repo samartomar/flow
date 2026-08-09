@@ -26,7 +26,11 @@ correct it, keep talking to add more, type into it when that is faster, then **S
 > accent — Spanish, Indian, Russian and Japanese L1 speakers anchor the design and the
 > benchmarks. [docs/product.md](docs/product.md) states why, and what that changes.
 
-<img width="600" height="600" alt="Flow's pill, draft bubble and conversation card" src="https://github.com/user-attachments/assets/f4b95748-74e8-4ef1-a282-345865ea12b2" />
+![Flow: a message dictated word by word, corrected by voice, sent, then a question asked of the agent](docs/flow.gif)
+
+*Recorded by [`scripts/reel.py`](scripts/reel.py) against the real windows — same
+harness as [`scripts/shots.py`](scripts/shots.py), no microphone, no model, nothing
+pasted.*
 
 ---
 
