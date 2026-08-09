@@ -26,7 +26,7 @@ correct it, keep talking to add more, type into it when that is faster, then **S
 > accent — Spanish, Indian, Russian and Japanese L1 speakers anchor the design and the
 > benchmarks. [docs/product.md](docs/product.md) states why, and what that changes.
 
-web application/stitch/projects/14236618443721667674/screens/7282a6804b4549ca85d062ea8e010bc6<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/f4b95748-74e8-4ef1-a282-345865ea12b2" />
+web application/stitch/projects/14236618443721667674/screens/7282a6804b4549ca85d062ea8e010bc6<img width="600" height="600" alt="image" src="https://github.com/user-attachments/assets/f4b95748-74e8-4ef1-a282-345865ea12b2" />
 
 ---
 
