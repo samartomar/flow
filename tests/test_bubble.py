@@ -59,6 +59,10 @@ def bubble(text: str = "", **kw):
     b._editor = None
     b._act = None
     b._h = 120
+    #: Real bools, not whatever `tk.Misc.__getattr__` would answer for a missing
+    #: attribute: `_frozen` is `_pointer_in and _visible`, and a test that wants to
+    #: freeze this window has to be able to.
+    b._visible, b._pointer_in = True, False
     b.reposition = lambda *a, **kw: None
     for name, value in kw.items():
         setattr(b, name, value)
@@ -155,6 +159,35 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
         b._render()
         _top, note_bottom = b.canvas.band("WinError 2")
         self.assertLessEqual(note_bottom, b._h - ui.PAD - ui.CHIP_H)
+
+    def test_the_body_cannot_outgrow_a_window_frozen_under_the_hand(self):
+        # Reported from a real session, with a picture: the draft drawn straight
+        # through the note and the chip row. `_frozen` holds the geometry while the
+        # pointer is inside — right, so nothing moves under a hand reaching for a
+        # chip — and nothing held the *content*, so a body measured for `BODY_MAX_H`
+        # went into whatever height the window had when the hand arrived. Measured on
+        # the real canvas: entered at 182 px, the body reached 355.
+        b = bubble(draft(300))
+        b._render()
+        entered_at = b._h
+        b._pointer_in = True
+        b._text = draft(30_000)
+        b._render()
+        self.assertEqual(b._h, entered_at, "the window resized under the hand")
+        self.assertLessEqual(
+            b.canvas.band(b._text[-40:])[1], b._h - ui.PAD - ui.CHIP_H,
+            f"the body runs past the chip row of a {b._h} px window")
+
+    def test_and_takes_the_room_back_when_the_hand_leaves(self):
+        b = bubble(draft(300))
+        b._render()
+        b._pointer_in = True
+        b._text = draft(30_000)
+        b._render()
+        frozen_h = b._h
+        b._pointer_in = False
+        b._render()
+        self.assertGreater(b._h, frozen_h)
 
     def test_five_chips_at_once_stay_inside_the_bubble(self):
         # Draft held, `can_rescue` true, dictate mode: Refine, Continue, Edit, Was a

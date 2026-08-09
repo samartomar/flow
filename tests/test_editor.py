@@ -845,11 +845,15 @@ class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
 class FakeBox:
     """A `tk.Text` that answers the two questions the viewport asks it, and no others."""
 
-    def __init__(self, first=0.0, last=1.0, lines=60) -> None:
+    def __init__(self, first=0.0, last=1.0, lines=60, height=200) -> None:
         self._view = (first, last)
         self._lines = lines
+        self._height = height
         self.scrolled: list = []
         self.moved: list = []
+        #: Every range `count` was asked about, so a test can assert which. Asking
+        #: for the whole document is the defect, not an implementation detail.
+        self.counted: list[tuple] = []
 
     def yview(self):
         return self._view
@@ -860,8 +864,16 @@ class FakeBox:
     def yview_moveto(self, fraction):
         self.moved.append(fraction)
 
-    def count(self, *a):
-        return (self._lines,)
+    def winfo_height(self):
+        return self._height
+
+    def count(self, start, end, what):
+        self.counted.append((start, end, what))
+        if (start, end) == ("1.0", "end-1c"):
+            return (self._lines,)  # the whole document: what Tk lays out quadratically
+        first, last = self._view
+        shown = max(0.0, min(1.0, last - first))
+        return (max(1, round(self._lines * shown)),)
 
     def update_idletasks(self):
         ...
@@ -875,12 +887,13 @@ class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
     about nothing". That was right about the words and wrong about the person: nothing
     on screen said there was more, and there was no bar to see it in.
 
-    The numbers come off the widget rather than from an estimate, which is the one place
-    this differs from the draft's `… N earlier lines` — a `tk.Text` has already laid the
-    text out, so asking it costs one call and the answer is exact.
+    The number comes off the widget, but off its *viewport* — scaled up by how much of
+    the draft that is, exactly the bargain the draft's own `… N earlier lines` makes.
+    Counting the whole document was tried and is what froze Flow for a minute on a
+    30 000-character draft; see `_hidden_lines` for the curve.
     """
 
-    def bubble(self, first=0.0, last=0.3, lines=60):
+    def bubble(self, first=0.0, last=0.3, lines=60, height=200):
         import flow.ui as ui
 
         b = ui.Bubble.__new__(ui.Bubble)
@@ -892,7 +905,7 @@ class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
         b.canvas = MeasuringCanvas()
         b._text, b._sent, b._partial, b._note = "a draft", "", "", ""
         b._act, b._h, b._bar_y = None, 200, 0
-        b._editor = FakeBox(first, last, lines)
+        b._editor = FakeBox(first, last, lines, height)
         b.reposition = lambda *a, **kw: None
         b.after = lambda *a, **kw: None
         return b
@@ -908,6 +921,28 @@ class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
         b = self.bubble()
         b._editor = object()
         self.assertEqual(b._hidden_lines(), 0)
+
+    def test_it_never_asks_the_widget_to_lay_out_the_whole_draft(self):
+        # The hang, reported from a real session with a transcript in the draft.
+        # `count -displaylines` over the whole document is not linear: 8.5 ms at
+        # 1 000 characters, 1.1 s at 8 000, 54.8 s at 32 000 — on the UI thread,
+        # inside `_render`, and again on every keystroke via `<KeyRelease>`.
+        # Windows offered to end the process. The viewport is a dozen lines
+        # whatever the draft is, so that is what may be counted.
+        b = self.bubble(0.0, 0.3, 60)
+        b._hidden_lines()
+        b._render()
+        self.assertNotIn(("1.0", "end-1c", "displaylines"), b._editor.counted)
+        self.assertTrue(b._editor.counted, "it should still be measuring something")
+        for start, end, _what in b._editor.counted:
+            self.assertTrue(start.startswith("@") and end.startswith("@"),
+                            f"counted {start}..{end}, which is not a viewport")
+
+    def test_a_box_with_no_height_yet_claims_nothing(self):
+        # Pre-layout, the whole draft is inside a one-pixel viewport and scaling up
+        # from it invents a number. This is the render `_edit` fires before Tk has
+        # sized the widget; the one it schedules 20 ms later is the real answer.
+        self.assertEqual(self.bubble(0.0, 0.3, 60, height=1)._hidden_lines(), 0)
 
     def test_the_hint_is_drawn_while_editing(self):
         b = self.bubble(0.0, 0.3, 60)

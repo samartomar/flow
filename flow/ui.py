@@ -3660,15 +3660,19 @@ class Bubble(tk.Toplevel):
 
     # -- painting ----------------------------------------------------------
 
-    def _body_slot(self, body: str) -> tuple[str, int, int]:
+    def _body_slot(self, body: str, max_h: int = BODY_MAX_H) -> tuple[str, int, int]:
         """What of the draft is drawn, how many lines are above it, and how tall it is.
 
         The two halves of the long-draft fix are one measurement, which is why they are
-        one function. The bubble may not grow past `BODY_MAX_H` — the chip row is drawn
+        one function. The bubble may not grow past `max_h` — the chip row is drawn
         from `self._h`, so an unbounded height is an unreachable Send — and the canvas may
         not be asked to lay out more than `BODY_TAIL_CHARS`, because that layout is what
         costs: 476.7 ms for a 50 000-character draft on this machine, on every partial,
         which is a stalled UI thread and then an overflowing microphone.
+
+        `max_h` is `BODY_MAX_H` whenever the window is free to size itself to the
+        answer, and the room actually left in it when it is not — see `_render`, where
+        a frozen window used to be handed a body measured for a taller one.
 
         A window that overshoots the cap is shrunk in proportion and measured again,
         deliberately not a line at a time: the loop has to end in a fixed number of probes
@@ -3687,10 +3691,10 @@ class Bubble(tk.Toplevel):
                 font=FONT_BODY, width=BUBBLE_W - 2 * PAD, tags="body")
             _x1, y1, _x2, y2 = c.bbox(probe)
             text_h = y2 - y1
-            if text_h <= BODY_MAX_H:
+            if text_h <= max_h:
                 break
             shown, earlier = body_window(
-                body, max(1, int(len(shown) * BODY_MAX_H * 0.95 / text_h))
+                body, max(1, int(len(shown) * max_h * 0.95 / text_h))
             )
         return shown, earlier, text_h
 
@@ -3731,20 +3735,45 @@ class Bubble(tk.Toplevel):
     def _hidden_lines(self) -> int:
         """How many display lines of the draft are outside the box right now.
 
-        Measured off the widget — it is the thing that laid the text out, and asking it
-        costs one call. The `… N earlier lines` above a bubble is an estimate because
-        counting exactly means laying the text out on every partial; there is no such
-        bargain here, because the box has already done the layout.
+        Counted over the *viewport* and scaled up by how much of the draft that is,
+        rather than counted over the whole document (2026-08-09). "The box has already
+        laid the text out, so asking it costs one call" was the reasoning here and it
+        was wrong: `count -displaylines` over `1.0 … end-1c` makes Tk lay out every
+        display line in the widget, and it does not do that in linear time.
+
+            1 000 chars     8.5 ms          8 000     1 097 ms
+            2 000          35.5 ms         16 000     7 458 ms
+            4 000         187.9 ms         32 000    54 824 ms
+
+        Every doubling costs about six times as much, on the UI thread, inside
+        `_render` — so opening a 30 000-character draft in the editor froze Flow for
+        the best part of a minute and Windows offered to kill it. Reported from a real
+        session, where the draft was a transcript. Worse than the open: `_edit` binds
+        `<KeyRelease>` to `_render`, so the whole cost was paid again on every key.
+
+        The viewport is a dozen lines whatever the draft is, which is the bound. What
+        it buys back costs accuracy — `yview` fractions are coarse — and that is the
+        same bargain the bubble's `… N earlier lines` already makes one window up. A
+        hint that is a few lines out is worth a minute of frozen UI.
+
+        Nothing is claimed before the box has a height: an unmapped widget would put
+        the whole draft inside a one-pixel viewport and report a number with no
+        relation to anything. `_edit` renders again on a timer once Tk has laid the
+        box out, which is the render this answers.
         """
         first, last = self._view()
         shown = max(0.0, min(1.0, last - first))
-        if shown >= 1.0:
+        if shown >= 1.0 or shown <= 0.0:
             return 0
         try:
-            total = int(self._editor.count("1.0", "end-1c", "displaylines")[0])
-        except (AttributeError, TypeError, IndexError, tk.TclError):
+            height = int(self._editor.winfo_height())
+            if height <= 1:
+                return 0
+            visible = int(self._editor.count(
+                "@0,0", f"@0,{height}", "displaylines")[0])
+        except (AttributeError, TypeError, IndexError, ValueError, tk.TclError):
             return 0
-        return max(0, round(total * (1.0 - shown)))
+        return max(0, round(visible * (1.0 - shown) / shown))
 
     def _edit_hint(self, hint_y: int, box_y: int, height: int) -> None:
         """Say how much of the draft is outside the box, and draw the bar beside it.
@@ -3894,17 +3923,15 @@ class Bubble(tk.Toplevel):
         # `body`, not `all` — see `_lay_out`. The chip row outlives a redraw now.
         c.delete("body")
 
-        # Measure first: the window has to be sized to the wrapped text. Only the tail of
-        # it, though, and that is the whole of the long-draft fix — see `_body_slot`.
-        shown, earlier, text_h = self._body_slot(body)
-        if not body:
-            # `_body_slot` probes `shown or " "` so `bbox` always has something to answer
-            # about, and that space measures a full line. Nothing draws it — the body is
-            # behind `elif body:` — so it was a line's worth of height reserved for text
-            # that does not exist, which is most of the "empty air where text will be"
-            # the design pass found in the error and loading frames. The body sizes to
-            # what it holds, and an empty one holds nothing (decisions.md 2026-08-09).
-            text_h = 0
+        # Everything that is not the body, measured first — because the body's budget is
+        # what is left after them, and while the pointer is inside this window that
+        # budget is a hard number rather than a preference. `_frozen` stops the window
+        # growing, and until now nothing stopped the *content*: a body sized to
+        # `BODY_MAX_H` was drawn into whatever height the window happened to have when
+        # the hand arrived. Measured from the reported session — entered with the window
+        # 182 px tall, the draft grew underneath and the body reached 355, straight
+        # through the note and the chip row, which is the picture that came with it.
+        #
         # The note gets measured too, and did not until 2026-08-02. It reserved a flat
         # 18 px — one line — and drew at a fixed offset from the foot with `anchor="nw"`,
         # so every line past the first grew *downward* into the chip row. An Ask that
@@ -3912,9 +3939,6 @@ class Bubble(tk.Toplevel):
         # owner could read neither. Errors are the longest strings this ever shows and
         # the ones it is least acceptable to hide.
         #
-        # Measured *before* the reply now, which is the whole of the reordering: the reply's
-        # slot is what is left over rather than a constant of its own, so it has to be told
-        # how much of the card everything else has taken.
         # The note gives up the Undo's width when there is one, rather than wrapping
         # under it: two items sharing a row have to agree who owns which half, and the
         # one that can wrap is the one that should be told.
@@ -3927,6 +3951,32 @@ class Bubble(tk.Toplevel):
         shown_partial, partial_h = ("", 0)
         if self._partial:
             shown_partial, partial_h = self._partial_slot(self._partial)
+
+        # Only the tail of the draft is laid out, and that is the whole of the long-draft
+        # fix — see `_body_slot`. The cap is `BODY_MAX_H` while the window is free to
+        # size itself to the answer, and the room actually left in it while it is not.
+        # `BODY_ELIDED_H` is counted in unconditionally here: a capped body always has
+        # something above it to report, and guessing the other way is how a line lands
+        # on a control.
+        body_cap = BODY_MAX_H
+        if self._frozen():
+            around = 74 + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
+            if partial_h:
+                around += partial_h + PARTIAL_GAP
+            if self._sent:
+                around += 16
+            if self._act is not None:
+                around += 20
+            body_cap = max(BODY_ELIDED_H, min(BODY_MAX_H, self._h - around))
+        shown, earlier, text_h = self._body_slot(body, body_cap)
+        if not body:
+            # `_body_slot` probes `shown or " "` so `bbox` always has something to answer
+            # about, and that space measures a full line. Nothing draws it — the body is
+            # behind `elif body:` — so it was a line's worth of height reserved for text
+            # that does not exist, which is most of the "empty air where text will be"
+            # the design pass found in the error and loading frames. The body sizes to
+            # what it holds, and an empty one holds nothing (decisions.md 2026-08-09).
+            text_h = 0
         # The box gets a floor of its own: a one-line draft measures ~18 px, and a
         # text box that size is a slot to squint into rather than something to work in.
         edit_h = max(text_h + 8, 44) if self._editor is not None else 0
