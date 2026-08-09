@@ -40,8 +40,12 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
 
+    # Both actions below are pinned to a commit SHA, not a tag. A tag is a mutable
+    # pointer the action's owner can repoint at any time, which is how the trivy-action
+    # and kics-github-action compromises reached everyone using them at once. The
+    # trailing comment is the human-readable half: bump the SHA and the version together.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Pinned, and the pin is the point. The first run of this workflow used whatever
       # each runner happened to have: **CPython 3.12.3 from `/usr/bin/python3` on Ubuntu
@@ -50,7 +54,7 @@ jobs:
       # It also cost 137 of the 153 errors: Debian splits `tkinter` into `python3-tk`,
       # and the suite reaches `flow.ui` in six modules. uv's own build is the same
       # interpreter everywhere, which is the only way the matrix answers a question.
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           python-version: "3.12"

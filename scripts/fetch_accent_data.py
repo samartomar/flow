@@ -125,6 +125,13 @@ BENCH = Path(__file__).resolve().parent.parent / ".bench" / "accent"
 
 
 def _get(url: str, *, binary: bool = False, tries: int = 6):
+    # Not every URL that reaches here was written in this file: the audio fetch passes a
+    # `src` straight out of the API's JSON response. `urlopen` honours `file://`, so a
+    # response that named a local path would have this script read the disk and write
+    # what it found into `.bench/`. Constrained to the two schemes a dataset is served
+    # over, which is the whole of what this script is for.
+    if urllib.parse.urlparse(url).scheme not in ("https", "http"):
+        raise ValueError(f"refusing a non-HTTP URL: {url[:120]}")
     last: Exception | None = None
     for attempt in range(tries):
         try:

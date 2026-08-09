@@ -115,6 +115,12 @@ exclude = [
 ]
 
 [tool.uv]
+# A newly published version is the one most likely to be a compromised maintainer account
+# rather than a release, and the window between the upload and its removal is measured in
+# hours. This is a resolution-time rule, so it bites on the next `uv lock` and not on the
+# tree anyone is running today — adding it re-locked and moved no package version, only
+# the two `[options]` lines uv writes to record the span.
+exclude-newer = "7 days"
 # Installed, and editable — so `uv run flow` works while an edit to flow/*.py still takes
 # effect on the next run with no reinstall. This was `package = false`, which meant the
 # `flow` console script did not exist and `uv run flow` died on the relative imports in
