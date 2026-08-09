@@ -623,9 +623,22 @@ def main() -> None:
     # are never rebuilt under a hand reaching for one. A cursor left parked over
     # the panel freezes every chip row mid-walk — so move it away, and put it
     # back at the end.
+    #
+    # Away means the bottom-left, not the top-left this used to use. A panel that
+    # has been deiconified but not yet positioned sits at 0,0, so 60,60 is *inside*
+    # it — and the freeze is what stops `_render` calling `reposition`, so a panel
+    # parked under the cursor at the origin never leaves it. `scripts/reel.py`,
+    # sampling every 40 ms rather than after a settle, held the conversation card
+    # at 0,0 for 31 frames of 223 that way. This walk has been lucky rather than
+    # safe: each shot follows a pause long enough for the placement to have already
+    # happened before the pointer could matter.
+    #
+    # Inside the *work area*, so it lands above the taskbar rather than on it — a
+    # hover there raises a preview flyout, and this script spends its whole life
+    # photographing whatever is on top.
     home = wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(home))
-    user32.SetCursorPos(60, 60)
+    user32.SetCursorPos(pill.work[0] + 8, pill.work[3] - 8)
 
     steps = build(pill, sess)
     print(f"walking {len(steps)} steps -> {OUT}", flush=True)

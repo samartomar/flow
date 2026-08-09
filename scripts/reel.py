@@ -450,9 +450,12 @@ def main() -> None:
     # never been placed. The conversation card stayed at the origin for 31 frames
     # of 223 because of it, and the reel's canvas is a union of window boxes, so
     # those 31 stretched the other 192 onto a canvas three times too wide.
+    #
+    # Inside the *work area*, so it lands above the taskbar rather than on it — a
+    # hover there raises a preview flyout over the backdrop, and into the reel.
     home = wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(home))
-    user32.SetCursorPos(8, pill.winfo_screenheight() - 8)
+    user32.SetCursorPos(pill.work[0] + 8, pill.work[3] - 8)
 
     rec = Recorder(pill, args.scale)
     steps = timeline(pill, sess)

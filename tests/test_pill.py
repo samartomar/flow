@@ -414,5 +414,71 @@ class TestMix(unittest.TestCase):
         self.assertEqual(ui._mix("#000000", "#ffffff", 0.5), "#808080")
 
 
+def docker(*, showing=True, panel_w=ui.BUBBLE_W, window=None, x=1047, docked_w=ui.PILL_W):
+    """A pill with just enough of one to run `_sync_dock`, and a window it can lie about.
+
+    `window` is what the window manager is pretending to hold — pass a (w, x, y) that
+    disagrees with the pill's own state to stage the defect this class is about.
+    """
+    p = ui.Pill.__new__(ui.Pill)
+    p.canvas = mock.Mock()
+    p.session = mock.Mock(mode=DICTATE)
+    p.bubble = mock.Mock(width=panel_w, _visible=showing)
+    p.card = mock.Mock(width=panel_w, _visible=False)
+    p.work = (0, 0, 1280, 720)
+    p.x, p.y = x, 608
+    p._docked_w = docked_w
+    p.geometry = mock.Mock()
+    p.window_geometry = mock.Mock(
+        return_value=window if window is not None else (docked_w, x, 608))
+    return p
+
+
+class TestTheDockIsCheckedRatherThanAssumed(unittest.TestCase):
+    """The pill and the panel above it share one column, and stay sharing it.
+
+    `scripts/reel.py` found them not sharing it: the pill 420 px wide at the x a
+    205 px pill sits at, hanging 215 px off the screen and unjoined from the panel it
+    is docked to, held there for five seconds because the width already matched and
+    nothing looked again.
+    """
+
+    def test_a_panel_appearing_moves_the_left_edge_and_holds_the_right(self):
+        p = docker()
+        p._sync_dock()
+        p.geometry.assert_called_once_with(f"{ui.BUBBLE_W}x{ui.PILL_H}+832+608")
+        self.assertEqual(p.x + ui.BUBBLE_W, 1047 + ui.PILL_W)  # the right edge did not move
+
+    def test_nothing_is_asked_for_twice_when_the_window_already_agrees(self):
+        p = docker(docked_w=ui.BUBBLE_W, x=832, window=(ui.BUBBLE_W, 832, 608))
+        p._sync_dock()
+        p.geometry.assert_not_called()
+
+    def test_a_move_that_did_not_land_is_asked_for_again(self):
+        # The reel's finding, staged: the resize took and the move did not, so the
+        # window is at the bare-pill x while the pill's own state says it docked.
+        # Before this was checked, `w == self._docked_w` returned here and the pill
+        # stayed off the screen edge for as long as the panel was up.
+        p = docker(docked_w=ui.BUBBLE_W, x=832, window=(ui.BUBBLE_W, 1047, 608))
+        p._sync_dock()
+        p.geometry.assert_called_once_with(f"{ui.BUBBLE_W}x{ui.PILL_H}+832+608")
+
+    def test_the_recovery_does_not_move_the_pill_a_second_time(self):
+        # Re-asking must re-send the *same* geometry, never re-run the relative
+        # arithmetic — that would walk the pill one panel-width left per frame.
+        p = docker(docked_w=ui.BUBBLE_W, x=832, window=(ui.BUBBLE_W, 1047, 608))
+        for _ in range(5):
+            p._sync_dock()
+        self.assertEqual(p.x, 832)
+        self.assertEqual({c.args for c in p.geometry.call_args_list},
+                         {(f"{ui.BUBBLE_W}x{ui.PILL_H}+832+608",)})
+
+    def test_the_panel_going_away_takes_the_width_back(self):
+        p = docker(showing=False, docked_w=ui.BUBBLE_W, x=832)
+        p._sync_dock()
+        self.assertEqual(p.x, 1047)
+        p.geometry.assert_called_once_with(f"{ui.PILL_W}x{ui.PILL_H}+1047+608")
+
+
 if __name__ == "__main__":
     unittest.main()

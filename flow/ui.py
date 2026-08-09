@@ -2379,15 +2379,38 @@ class Pill(tk.Tk):
         The right edge is what a bare pill has always anchored near (`right - PILL_W -
         28` at rest), so growing to dock keeps that edge still and moves the left edge
         to meet it — the same edge a docked panel's own width now matches exactly.
+
+        **The move is checked, not assumed** (2026-08-09). The width change used to be
+        the only trigger, so one `geometry` call carried the whole dock and there was
+        no second chance at it: `scripts/reel.py` caught the pill 420 px wide at its
+        *bare* x, hanging 215 px past the screen edge and visibly unjoined from the
+        panel above it, for five seconds at a stretch. The pill's own state was never
+        wrong — only ever (832, 420, 420) or (1047, 205, 205) — so the resize landed
+        and the move did not, and `w == self._docked_w` then answered "nothing to do"
+        on every frame after. Comparing against the window instead of against a
+        remembered width means the next frame fixes it, whatever dropped it.
+
+        The position asked for is clamped into the work area, so a window manager has
+        no reason to refuse it; one that did would be re-asked every frame.
         """
         w = self.pill_w
-        if w == self._docked_w:
-            return
-        left, _top, _right, _bottom = self.work
-        self.x = max(left, self.x + self._docked_w - w)
-        self._docked_w = w
-        self.canvas.configure(width=w)
-        self.geometry(f"{w}x{PILL_H}+{self.x}+{self.y}")
+        if w != self._docked_w:
+            left, _top, _right, _bottom = self.work
+            self.x = max(left, self.x + self._docked_w - w)
+            self._docked_w = w
+            self.canvas.configure(width=w)
+        if self.window_geometry() != (w, self.x, self.y):
+            self.geometry(f"{w}x{PILL_H}+{self.x}+{self.y}")
+
+    def window_geometry(self) -> tuple[int, int, int]:
+        """Where this window actually is, as (width, x, y).
+
+        Its own method so `_sync_dock` has one thing to compare against and a test has
+        one thing to lie about. `winfo_*` lags the window manager by a frame or two
+        after a move, which costs at worst one redundant `geometry` call with the
+        values already asked for.
+        """
+        return (self.winfo_width(), self.winfo_rootx(), self.winfo_rooty())
 
     #: What fits beside the level bars. The baseline is at y 33 and the bars run to
     #: y 32 from x 40, so a wider token overlaps them rather than being clipped —
