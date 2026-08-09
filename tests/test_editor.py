@@ -597,6 +597,96 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         self.assertLessEqual(bottom, b._h - 14 - 26)
 
 
+class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
+    """The same defect as the class above, on the element beside it.
+
+    The note was measured on 2026-08-02 and the partial was not. It reserved a flat 34 px
+    and advanced the cursor 28 — one line — while being drawn wrapped to the full body
+    column, so a partial past three lines was height the window had never been sized for.
+    Reported live on 2026-08-09 against a one-line draft: the note was printed straight
+    through the partial's last two lines and the fifth ran into the chips.
+
+    The one-line draft is load-bearing in the fixture, not incidental. The note is
+    anchored to the panel's foot, so a *long* draft makes the window tall enough to
+    absorb the overrun and the bug disappears — which is why the state that reproduces it
+    is a short draft under a long partial, and why `scripts/shots.py` captures exactly
+    that pair.
+    """
+
+    #: Five lines at this width. Four is enough to reach the note; five also reaches the
+    #: chips, so one fixture covers both edges.
+    PARTIAL = ("part key towel control sipped space voice the ask button puts the drop "
+               "to the agency ally and the reply goes on so pause up the four second "
+               "the question no auto ask found open code not just yet verified see "
+               "nest you voice natural yes and the workshop is not set so ask runs "
+               "without a project mode dictate send pastes into the focused window")
+
+    def _bubble(self, partial: str, note: str = "local: replace('x' -> 'y')"):
+        import flow.ui as ui
+
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock()
+        b.pill.session = mock.Mock(
+            mode="dictate", can_rescue=False, editing=False, auto_ask_in=None,
+            can_take_reply=False,
+        )
+        b.pill.accent = "#000000"
+        b.pill.work = WORK
+        b.canvas = MeasuringCanvas()
+        b._text = "seconds, send the question. No auto-ask to press it yourself."
+        b._sent, b._partial, b._note = "", partial, note
+        b._editor = None
+        b._act = None
+        b._h = 120
+        b.reposition = lambda *a, **kw: None
+        return b
+
+    def test_the_partial_clears_the_note(self):
+        b = self._bubble(self.PARTIAL)
+        b._render()
+        _p_top, p_bottom = b.canvas.band("part key towel")
+        n_top, _n_bottom = b.canvas.band("local: replace")
+        self.assertLessEqual(
+            p_bottom, n_top,
+            f"the partial runs to y={p_bottom} and the note starts at y={n_top}",
+        )
+
+    def test_the_partial_clears_the_chip_row(self):
+        b = self._bubble(self.PARTIAL, note="")
+        b._render()
+        _top, bottom = b.canvas.band("part key towel")
+        chips_top = b._h - 14 - 26  # `_lay_out`: y2 = _h - PAD, y1 = y2 - 26
+        self.assertLessEqual(
+            bottom, chips_top,
+            f"the partial runs to y={bottom} and the chips start at y={chips_top}",
+        )
+
+    def test_the_bubble_grew_rather_than_clipping(self):
+        one = self._bubble("part key towel control")
+        one._render()
+        many = self._bubble(self.PARTIAL)
+        many._render()
+        self.assertGreater(many._h, one._h)
+
+    def test_a_partial_past_the_cap_keeps_its_tail(self):
+        # Bounded like the draft is, and windowed the same way round: this is the
+        # sentence still being spoken, so the words that just arrived are the ones worth
+        # the room. A head-first window would freeze the display at the utterance's
+        # opening and never show what is being said now.
+        import flow.ui as ui
+
+        b = self._bubble(self.PARTIAL * 6)
+        b._render()
+        # The probes are `create_text` calls too, so the last item carrying partial text
+        # is the one that reached the screen — the same rule `test_bubble.drawn_body` uses.
+        shown = [i["text"] for i in b.canvas.items
+                 if i["text"] and i["text"] in b._partial][-1]
+        self.assertTrue(b._partial.endswith(shown), "the tail must be what survives")
+        self.assertLess(len(shown), len(b._partial))
+        top, bottom = b.canvas.band(shown)
+        self.assertLessEqual(bottom - top, ui.PARTIAL_MAX_H)
+
+
 class FakeBox:
     """A `tk.Text` that answers the two questions the viewport asks it, and no others."""
 

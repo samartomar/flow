@@ -382,6 +382,11 @@ FONT_CHIP_PRIMARY = (FONT_SANS_SEMIBOLD, -12)  # Send / Ask / Done / Put it back
 #: Trace/code text and the pill's bar label (§07) — not drawn anywhere yet; declared
 #: here so both land on the same family when they are.
 FONT_TRACE = (FONT_MONO, -11)
+#: The live partial — muted italic, named so the probe that measures it and the call that
+#: draws it cannot be given different fonts. They were never measured together at all, and
+#: the flat 34 px that stood in for the measurement is what put a four-line partial through
+#: the note below it. See `Bubble._partial_slot`.
+FONT_PARTIAL = (*FONT_NOTE, "italic")
 
 #: The pill's own width at rest — with nothing to dock to, it stays close to today's
 #: footprint (152 → 168, a few pixels, not a jump: this sits on top of somebody's
@@ -467,6 +472,23 @@ SENT_LINGER_SEC = 4.0
 #: the chips, the whole window comes to ~500 px on the 1280×672 desktop this was measured
 #: on, which leaves the pill its own room underneath.
 BODY_MAX_H = 340
+
+#: The live partial's own ceiling, and it needs one for the same reason the draft does:
+#: it is wrapped to the full body column, so it is a multi-line block whose length nobody
+#: chose. Five lines at the 14 px `FONT_NOTE` measures.
+#:
+#: Smaller than `BODY_MAX_H` because the two are not the same kind of text. The draft is
+#: what you are working on; the partial is the sentence still arriving, and it becomes the
+#: draft the moment it lands. Letting it grow to twenty lines would push the words already
+#: settled off the top of the panel to make room for words that are about to be re-drawn
+#: as body text anyway. Past this, `_partial_slot` keeps the **tail** — the newest words,
+#: which are the ones being spoken and the only ones worth watching arrive.
+PARTIAL_MAX_H = 70
+
+#: Air below the partial, before the indicator or the note. Six, the same as the draft
+#: body's — the two used to be a 34 px reservation against a 28 px advance, two numbers
+#: for one gap that nothing made agree.
+PARTIAL_GAP = 6
 
 #: Characters a line of body text holds, measured on the real canvas at the body font and
 #: `BUBBLE_W - 2 * PAD` = 352 px: 3 160 characters of ordinary prose wrapped to 56 lines,
@@ -3302,6 +3324,30 @@ class Bubble(tk.Toplevel):
             )
         return shown, earlier, text_h
 
+    def _partial_slot(self, text: str) -> tuple[str, int]:
+        """What of the live partial is drawn, and how tall it actually wraps.
+
+        The partial had no measurement at all. It reserved a flat 34 px and advanced the
+        cursor 28 — one line — while being drawn wrapped to the full body column, so the
+        second line onward was height the window was never sized for. A long utterance
+        put its tail straight through the note, the indicator and the chip row: the exact
+        defect fixed for the note on 2026-08-02, on the one element beside it that never
+        got the same treatment.
+
+        The tail is kept rather than the head, and that is the behaviour rather than an
+        implementation detail: this is the sentence still being spoken, so the words worth
+        having on screen are the ones that just arrived. Bounded by `PARTIAL_MAX_H`, in a
+        fixed number of probes, for the reasons `_body_slot` gives at length.
+        """
+        shown, height = text, 0
+        for _ in range(BODY_PROBES):
+            height = self._probe_h(shown, FONT_PARTIAL)
+            if height <= PARTIAL_MAX_H:
+                break
+            shown, _earlier = body_window(
+                text, max(1, int(len(shown) * PARTIAL_MAX_H * 0.95 / height)))
+        return shown, height
+
     # -- the editor's viewport ---------------------------------------------
 
     def _view(self) -> tuple[float, float]:
@@ -3485,20 +3531,20 @@ class Bubble(tk.Toplevel):
         # Measured *before* the reply now, which is the whole of the reordering: the reply's
         # slot is what is left over rather than a constant of its own, so it has to be told
         # how much of the card everything else has taken.
-        note_h = 0
-        if self._note:
-            nprobe = c.create_text(
-                PAD, PAD, anchor="nw", text=self._note, fill=MUTED,
-                font=FONT_NOTE, width=BUBBLE_W - 2 * PAD, tags="body")
-            nx1, ny1, nx2, ny2 = c.bbox(nprobe)
-            note_h = ny2 - ny1
+        note_h = self._probe_h(self._note, FONT_NOTE) if self._note else 0
+        # Measured for the same reason and never was — see `_partial_slot`. `shown_partial`
+        # is what gets drawn below, so the number the window is sized by and the text it is
+        # sized for cannot disagree.
+        shown_partial, partial_h = ("", 0)
+        if self._partial:
+            shown_partial, partial_h = self._partial_slot(self._partial)
         # The box gets a floor of its own: a one-line draft measures ~18 px, and a
         # text box that size is a slot to squint into rather than something to work in.
         edit_h = max(text_h + 8, 44) if self._editor is not None else 0
-        # Everything on the card except the answer, so the answer can be given the rest.
-        # `BODY_MAX_H` is a taste number for the draft; this is arithmetic — the desktop,
-        # minus the chrome, minus whatever else is being drawn.
-        others = 0
+        # What the window needs beyond the body itself. One block, counted once: there
+        # were two of these, identical, and only the second was read — so the first was a
+        # copy that could rot silently against the one that mattered.
+        extra = 0
         if edit_h:
             # The hint's slot is reserved whether or not there is anything to say in it.
             # It has to be: the hint sits *above* the box and can only be measured once
@@ -3506,19 +3552,6 @@ class Bubble(tk.Toplevel):
             # would be deciding the box's position from the box's position. Measured
             # first, it read `… 2484 more lines` for a 60-line draft and drew a bar on a
             # draft that fitted — both on the render before the widget existed.
-            others += edit_h - text_h + 8 + BODY_ELIDED_H
-        elif earlier:
-            others += BODY_ELIDED_H
-        if self._sent:
-            others += 16
-        if self._partial:
-            others += 34
-        if self._act is not None:
-            others += 20
-        if self._note:
-            others += note_h + 4
-        extra = 0
-        if edit_h:
             extra += edit_h - text_h + 8 + BODY_ELIDED_H
         elif earlier:
             # Outside the editor this counts what the *window* left out; inside it, the
@@ -3526,8 +3559,8 @@ class Bubble(tk.Toplevel):
             extra += BODY_ELIDED_H
         if self._sent:
             extra += 16  # the "sent" label above the words
-        if self._partial:
-            extra += 34
+        if partial_h:
+            extra += partial_h + PARTIAL_GAP
         if self._act is not None:
             extra += 20
         if self._note:
@@ -3589,11 +3622,11 @@ class Bubble(tk.Toplevel):
             if not self._sent:
                 c.tag_bind("draft", "<Button-1>", lambda _e: self._edit())
             y += text_h + 6
-        if self._partial:
+        if partial_h:
             c.create_text(
-                PAD, y, anchor="nw", text=self._partial, fill=MUTED,
-                font=(*FONT_NOTE, "italic"), width=BUBBLE_W - 2 * PAD, tags="body")
-            y += 28
+                PAD, y, anchor="nw", text=shown_partial, fill=MUTED,
+                font=FONT_PARTIAL, width=BUBBLE_W - 2 * PAD, tags="body")
+            y += partial_h + PARTIAL_GAP
         if self._act is not None:
             # In the flow of the text rather than pinned to the foot: it belongs to what
             # is being waited on, and the note below is about what already happened.
