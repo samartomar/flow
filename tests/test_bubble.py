@@ -153,6 +153,23 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
         _top, note_bottom = b.canvas.band("WinError 2")
         self.assertLessEqual(note_bottom, b._h - ui.PAD - ui.CHIP_H)
 
+    def test_five_chips_at_once_stay_inside_the_bubble(self):
+        # Draft held, `can_rescue` true, dictate mode: Refine, Continue, Edit, Was a
+        # command and Send all on screen together. Measured on the real canvas before
+        # the fix at 377 px of chip width against a 366 px budget (`BUBBLE_W` less
+        # `PAD`), which put Send's box at x=392 — 12 px past the window's right edge,
+        # roughly half the label clipped.
+        b = bubble(draft(400))
+        b.pill.session.can_rescue = True
+        b._render()
+        sends = [i for i in b.canvas.items if i["text"] == "Send"]
+        self.assertTrue(sends, "the Send chip was not drawn")
+        right_edge = sends[0]["x"] + ui.chip_w("Send", "Send") / 2
+        self.assertLessEqual(
+            right_edge, ui.BUBBLE_W,
+            f"Send's right edge sits at {right_edge}, past BUBBLE_W ({ui.BUBBLE_W})",
+        )
+
 
 class TestWhatWasLeftOutIsSaidSoFar(unittest.TestCase):
     """A window with nothing above it reads as the whole draft, which would be a lie."""
@@ -586,6 +603,27 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         # widest countdown would be a row nobody can tell apart.
         self.assertLess(ui.chip_w("Edit", "Edit"), ui.chip_w("Was a command",
                                                              "Was a command"))
+
+    def test_the_gap_shrinks_only_far_enough_to_fit(self):
+        # The five-chip row: Refine, Continue, Edit, Was a command, Send. 345 px of
+        # chip width, measured on the real canvas; `CHIP_GAP` between all five would
+        # be 377, past the 366 px budget (`BUBBLE_W` less `PAD`) that clipped Send.
+        widths = [ui.chip_w(k, l) for k, l in (
+            ("Refine", "Refine"), ("Continue", "Continue"), ("Edit", "Edit"),
+            ("Was a command", "Was a command"), ("Send", "Send"),
+        )]
+        gap = ui.chip_row_gap(widths, ui.BUBBLE_W - ui.PAD)
+        self.assertLess(gap, ui.CHIP_GAP, "an overflowing row kept the ordinary gap")
+        row_w = sum(widths) + gap * (len(widths) - 1)
+        self.assertLessEqual(row_w, ui.BUBBLE_W - ui.PAD - ui.CHIP_ROW_RESERVE)
+
+    def test_a_row_with_room_keeps_the_ordinary_gap(self):
+        # Nothing about a row that already fits should change — three chips, as in
+        # dictate mode with no rescue on offer, has plenty of the 366 px budget spare.
+        widths = [ui.chip_w(k, l) for k, l in (
+            ("Refine", "Refine"), ("Continue", "Continue"), ("Send", "Send"),
+        )]
+        self.assertEqual(ui.chip_row_gap(widths, ui.BUBBLE_W - ui.PAD), ui.CHIP_GAP)
 
     def test_the_row_is_drawn_above_the_body_it_outlived(self):
         # A canvas draws in creation order, so a row created before this render's body

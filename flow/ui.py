@@ -459,6 +459,39 @@ def chip_w(key: str, label: str) -> int:
     return 20 + 7 * max(len(label), len(COUNTDOWN_WIDEST.get(key, "")))
 
 
+#: The gap between chips, when the row has room to spare — which is every row the
+#: card ever draws and most the bubble does too.
+CHIP_GAP = 8
+
+#: `_round_rect` draws a chip's box as a *smoothed* polygon, and the smoothing curves
+#: past its own corner points — measured on the real canvas at ~1 px a side, 2 px a
+#: chip. Read back with `canvas.bbox()` after the fix below, the last chip's box in a
+#: tight row lands exactly on `BUBBLE_W` with the reserve folded in and one pixel
+#: further without it — a margin of zero is not a margin. This is that pixel back.
+CHIP_ROW_RESERVE = 4
+
+
+def chip_row_gap(widths: list, budget: int) -> int:
+    """The widest gap `widths` can take and still fit `budget`, capped at `CHIP_GAP`.
+
+    Measured on the bubble's five-chip row — Refine, Continue, Edit, Was a command,
+    Send, the full set `can_rescue` and a held draft put on screen together in dictate
+    mode — at 345 px of chip width. `CHIP_GAP` between each of the four gaps makes
+    that 377, past `BUBBLE_W`'s 380 less its own `PAD`: 366. That clipped Send at the
+    window's right edge, roughly half the label gone.
+
+    The gap is what has slack in every row that already fits, so it is what gives:
+    shrunk just enough for a wide row to fit, `CHIP_ROW_RESERVE` included (366 - 4 -
+    345 = 17, over 4 gaps is 4), left at `CHIP_GAP` everywhere else. Floored at 0
+    rather than let a wider row still push past the edge — touching chips are still
+    each their own hit region; chips run off the window are not.
+    """
+    if len(widths) <= 1:
+        return CHIP_GAP
+    return max(0, min(CHIP_GAP,
+                       (budget - CHIP_ROW_RESERVE - sum(widths)) // (len(widths) - 1)))
+
+
 def chip_tag(key: str) -> str:
     """The canvas tag for a chip, from its key.
 
@@ -3118,11 +3151,12 @@ class Bubble(tk.Toplevel):
             return
         self._chips_drawn = key_now
         c.delete("chips")
+        widths = [chip_w(key, label) for key, label, _c in specs]
+        gap = chip_row_gap(widths, BUBBLE_W - PAD)
         x = PAD
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
-        for key, label, cmd in specs:
-            w = chip_w(key, label)
+        for (key, label, cmd), w in zip(specs, widths):
             primary = key in ("Send", "Ask", "Put it back")
             tag = chip_tag(key)
             _round_rect(
@@ -3136,7 +3170,7 @@ class Bubble(tk.Toplevel):
                 font=("Segoe UI", 9, "bold"), tags=(tag, "chips"),
             )
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
-            x += w + 8
+            x += w + gap
 
     def tick_countdown(self) -> None:
         """Repaint when the auto-ask number changes, and only then.

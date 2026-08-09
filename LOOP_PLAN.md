@@ -3468,6 +3468,37 @@ of them share a shape: the app had the fact and did not say it.
     confirmation that reading them as environmental was right.
 - Status: **done**
 
+### 75. The five-chip row, clipped at the bubble's own edge
+Reported live: hold a draft and rescue a command in dictate mode and the bubble offers
+Refine, Continue, Edit, Was a command and Send at once — five chips, where the row was
+only ever measured for fewer. Item 32's card got the same measurement (`_notes_menu`'s
+377-of-420) and moved the overflow to a menu; item 32's *bubble* row never got the
+measurement at all, and `Was a command` is ratified to stay a chip with no menu
+duplicate (decisions.md, 2026-08-03), so the fix has to live inside the row.
+- Files: `flow/ui.py`, `tests/test_bubble.py`.
+- **Measured, on the real canvas via `canvas.bbox()` — not `chip_w()`'s own estimate.**
+  345 px of chip width at the ordinary 8 px gap is 377 px of row, and the bubble has 366
+  (`BUBBLE_W` 380 less `PAD` 14) to give it: Send's box landed at x=392, 12 px past the
+  window's right edge — the report's "roughly half the label" was, pixel for pixel,
+  about half of Send's 48 px chip gone.
+- Shape of the fix: `chip_row_gap(widths, budget)` measures the row before it is drawn
+  and shrinks the gap — the thing every fitting row already has slack in — just enough
+  to fit, floored at 0. A row that already fits is untouched: the card's row and the
+  bubble's smaller ones all keep `CHIP_GAP` exactly. `CHIP_ROW_RESERVE` (4 px) exists
+  because `_round_rect`'s smoothed corners measured ~1 px of overshoot a side on the
+  real canvas — without it the fitted row's own last pixel landed exactly on `BUBBLE_W`,
+  which is a margin of zero rather than a margin.
+- Evidence:
+  - **Before/after, read back from a real `tk.Canvas` via `canvas.bbox()`** (a script
+    canvas, not `MeasuringCanvas`, since only real Tk reports the smoothing overshoot):
+    Send's rectangle at x=(342, 392) before, past `BUBBLE_W`; at x=(326, 376) after, 4 px
+    inside it. Rendered to PNG both ways and looked at, not just measured — the before
+    image shows Send's label cut by the frame; the after does not.
+  - Suite **1524 → 1527**, OK. The 28 `test_inject_target` failures on this machine are
+    item 74's environmental clipboard-image flake, not this change — reproduced
+    identically on a clean stash of this diff.
+- Status: **done**
+
 ## Backlog — "prepare" tier
 
 (empty — the round-one proposals P1–P4 were all decided or parked; see
