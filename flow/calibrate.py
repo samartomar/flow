@@ -34,7 +34,7 @@ PASSAGE = (
     "started. I checked the logs and the connection pool was exhausted, so every "
     "request after the first hundred timed out. The fix is probably to raise the pool "
     "size, but I would like to understand why it only happens in staging and never in "
-    "production before we change anything. I have asked Priya to look at the traffic "
+    "production before we change anything. I have asked Ruchi to look at the traffic "
     "shape, and Samir is going to check whether the migration itself is holding "
     "connections open longer than it needs to."
 )

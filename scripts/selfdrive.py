@@ -41,7 +41,7 @@ CACHE = Path(__file__).resolve().parent.parent / ".bench" / "selfdrive"
 
 #: The message every correction scenario starts from, dictated rather than pasted in,
 #: so the draft under test is one this pipeline actually produced.
-OPENING = ("hi Priya, the deploy is scheduled for Tuesday afternoon. "
+OPENING = ("hi Ruchi, the deploy is scheduled for Tuesday afternoon. "
            "Sameer is writing the release notes.")
 
 

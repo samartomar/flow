@@ -32,3 +32,8 @@ __pycache__/
 .bench/recorded/
 # Editor state, not project content: pane layout and local UI preferences.
 .obsidian/
+# `scripts/shots.py` output. Regenerated in about a minute by the script that writes it,
+# and a full walk is ~24 PNGs at desktop resolution — the kind of thing that is worth
+# looking at once and never worth carrying in every clone forever. Point it at a tracked
+# directory with --out when a particular set is worth keeping.
+.shots/
