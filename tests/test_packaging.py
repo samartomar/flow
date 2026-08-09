@@ -114,9 +114,20 @@ class TestTheInstallSection(unittest.TestCase):
     def test_install_comes_before_the_reference_material(self):
         # "At the top" as a check rather than a hope: someone who arrived to try it
         # should not have to scroll past the flag table to find out how.
-        self.assertLess(self.readme.index("## Install"), self.readme.index("### Flags"))
-        self.assertLess(self.readme.index("## Install"),
-                        self.readme.index("## Running it"))
+        #
+        # The flag table used to be further down this same file. On 2026-08-09 the README
+        # went from 1,266 lines to a landing page and the reference material moved to
+        # `docs/guide.md`, which is a stronger version of what this test wanted — so what
+        # it checks now is that the README stayed a landing page: install above, and the
+        # depth reached by a link rather than by scrolling.
+        self.assertLess(self.readme.index("## Install"), self.readme.index("## Docs"))
+        self.assertIn("docs/guide.md", self.readme)
+        self.assertNotIn("### Flags", self.readme)
+
+    def test_and_the_guide_still_leads_with_install_too(self):
+        guide = (ROOT / "docs" / "guide.md").read_text(encoding="utf-8")
+        self.assertLess(guide.index("## Install"), guide.index("### Flags"))
+        self.assertLess(guide.index("## Install"), guide.index("## Running it"))
 
 
 class TestTheReleaseWorkflow(unittest.TestCase):

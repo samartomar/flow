@@ -31,11 +31,15 @@ import sys
 
 from .edits import SEND_ENTER_WORD, SEND_WORD, TAKE_VERBS
 
-#: The public README, which is the one page that outlives any one machine. Still opened
+#: The public guide, which is the one page that outlives any one machine. Still opened
 #: with the shell: a long-form guide belongs where links work, and a browser is the right
 #: application for a browser's content — which is the same argument that took the command
 #: sheet out of Notepad.
-GUIDE_URL = "https://github.com/samartomar/flow#readme"
+#:
+#: `docs/guide.md` rather than the README since 2026-08-09. The README used to be the
+#: guide, at 1,266 lines; it is now a landing page that links here. A menu item called
+#: "Open the guide" has to land on the guide, not on the page that mentions it.
+GUIDE_URL = "https://github.com/samartomar/flow/blob/main/docs/guide.md"
 
 TITLE = "Commands & shortcuts"
 
@@ -378,5 +382,5 @@ def open_path(target: str) -> None:
 
 
 def open_guide() -> None:
-    """Hand the README to the browser. Raises OSError, which the caller reports."""
+    """Hand the guide to the browser. Raises OSError, which the caller reports."""
     open_path(GUIDE_URL)

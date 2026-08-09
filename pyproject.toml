@@ -1,6 +1,6 @@
 [project]
 name = "flow"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local English dictation with a talk-to-it refine loop"
 requires-python = ">=3.12"
 # A public repo with no licence is all-rights-reserved: nobody may legally use what

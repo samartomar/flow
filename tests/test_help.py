@@ -590,12 +590,22 @@ class TestTheMenuReachesIt(unittest.TestCase):
         self.assertEqual(built.call_count, 1)
         self.assertEqual(len(self.shown), 2, "the second open showed nothing")
 
-    def test_the_guide_still_shells_out_to_the_readme(self):
+    def test_the_guide_still_shells_out_to_the_browser(self):
         # Deliberately not moved. A long-form guide belongs where links work, and a
         # browser is the right application for a browser's content - which is the same
         # argument that took the command sheet out of Notepad.
         self._tap("Open the guide")
         self.assertEqual(self.started, [helpfile.GUIDE_URL])
+
+    def test_and_it_lands_on_the_guide_rather_than_the_page_that_mentions_one(self):
+        # This pointed at the README until 2026-08-09, when the README stopped being the
+        # guide: 1,266 lines became a landing page, and the manual moved to
+        # `docs/guide.md`. A menu item called "Open the guide" that opens a page of links
+        # is the kind of wrong nobody re-reads, so the target is asserted rather than
+        # assumed.
+        self.assertTrue(helpfile.GUIDE_URL.startswith("https://github.com/samartomar/flow"),
+                        helpfile.GUIDE_URL)
+        self.assertTrue(helpfile.GUIDE_URL.endswith("docs/guide.md"), helpfile.GUIDE_URL)
 
     def test_a_shell_that_refuses_the_guide_says_so_instead_of_raising(self):
         # The menu is how somebody reaches Quit. An exception out of a menu command takes
