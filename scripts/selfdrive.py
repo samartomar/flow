@@ -41,7 +41,13 @@ CACHE = Path(__file__).resolve().parent.parent / ".bench" / "selfdrive"
 
 #: The message every correction scenario starts from, dictated rather than pasted in,
 #: so the draft under test is one this pipeline actually produced.
-OPENING = ("hi Ruchi, the deploy is scheduled for Tuesday afternoon. "
+#:
+#: The names are the corpus's and stay that way. This string is synthesised and put
+#: through the real decoder, `scenario_undo` records how it comes back (3/3 each way,
+#: 2026-08-04), and "Sameer" already arrives as "Samir" — a second name a phoneme away
+#: from either would be a new variable in the one harness whose only known flake is a
+#: name check. Display copy uses the owner's name; anything a decoder hears does not.
+OPENING = ("hi Priya, the deploy is scheduled for Tuesday afternoon. "
            "Sameer is writing the release notes.")
 
 

@@ -495,9 +495,9 @@ class TestDestructiveEditsAreNamed(unittest.TestCase):
     def test_the_note_is_a_sentence_and_not_a_trace_line(self):
         # The defect the copy rewrite was for: `local: replace('thursday' -> 'Tuesday')`
         # printed at somebody who wanted to know what happened to their words.
-        p, new = self._apply("change priya to Ruchi")
+        p, new = self._apply("change priya to Samar")
         said = describe_change(p, self.DRAFT, new)
-        self.assertEqual(said, "changed “priya,” to “Ruchi,”")
+        self.assertEqual(said, "changed “priya,” to “Samar,”")
         for syntax in ("replace(", "->", "_", "'"):
             self.assertNotIn(syntax, said)
 

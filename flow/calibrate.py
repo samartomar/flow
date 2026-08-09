@@ -29,12 +29,16 @@ from .audio import BLOCK, FLOOR_MAX_DB, FLOOR_MIN_DB, Mic, SpeechGate, rms_db
 #: The passage. Chosen to be ordinary developer speech rather than a pangram: it has to
 #: elicit the delivery the gate and the model will actually meet. About 45–60 s read at
 #: a natural pace.
+#:
+#: The two names are the corpus's, and this is one of the places that keeps them: it is
+#: read aloud into the mic, and "Samir" is already a name the decoder mangles. A second
+#: one a letter away from it would measure the passage rather than the room.
 PASSAGE = (
     "The deploy failed again this morning, about ten minutes after the migration "
     "started. I checked the logs and the connection pool was exhausted, so every "
     "request after the first hundred timed out. The fix is probably to raise the pool "
     "size, but I would like to understand why it only happens in staging and never in "
-    "production before we change anything. I have asked Ruchi to look at the traffic "
+    "production before we change anything. I have asked Priya to look at the traffic "
     "shape, and Samir is going to check whether the migration itself is holding "
     "connections open longer than it needs to."
 )

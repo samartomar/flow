@@ -61,7 +61,7 @@ from flow.session import CONVERSE, DICTATE, Activity, Event, State  # noqa: E402
 from flow.ui import Pill  # noqa: E402
 
 DRAFT = (
-    "Hey Ruchi, I wanted to check whether we are still good for the review on Tuesday "
+    "Hey Samar, I wanted to check whether we are still good for the review on Tuesday "
     "afternoon, and whether you had a chance to look at the updated figures."
 )
 #: One line at the body width, so the window it sizes is short enough for a long partial
@@ -157,7 +157,7 @@ class FakeSession:
         self.workspace = str(REPO)
         self.send_words = ("boom", "enter boom")
         self.recent = [
-            ("sent", "hi Ruchi, the deploy is scheduled for Tuesday afternoon."),
+            ("sent", "hi Samar, the deploy is scheduled for Tuesday afternoon."),
             ("asked", QUESTION),
         ]
         self.speaker = SimpleNamespace(voice="Microsoft Susan")
