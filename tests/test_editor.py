@@ -22,6 +22,7 @@ draft and guaranteed silence — and would ask a half-typed question with no pre
 """
 
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -35,7 +36,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from clipboard_env import sealed_clipboard  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
-from flow.session import AUTO_ASK_SEC, CONVERSE, Session, State  # noqa: E402
+from flow.diag import FIELDS  # noqa: E402
+from flow.lexicon import NUL_PATH, Lexicon  # noqa: E402
+from flow.profile import MAX_PAIRS, Profile  # noqa: E402
+from flow.session import (  # noqa: E402
+    AUTO_ASK_SEC,
+    CONVERSE,
+    Session,
+    State,
+    typed_pairs,
+)
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 
@@ -102,6 +112,26 @@ class Held:
 
 def session(**kw) -> Session:
     return Session(asr=kw.pop("asr", None) or FakeAsr(), mic=FakeMic(), **kw)
+
+
+def tmp_profile() -> Profile:
+    """A profile on a scratch path. `test_profile.py`'s helper, borrowed verbatim so the
+    learning tests here and there are looking at the same object."""
+    return Profile(Path(tempfile.mkdtemp()) / "profile.json")
+
+
+class RecordingDiag:
+    """`NullDiag`'s shape, keeping what it was handed. In memory rather than through
+    `Diag` and a temporary file, because what is being asserted is what the *session*
+    wrote — the file format has `test_diag.py`."""
+
+    path = None
+
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    def write(self, kind: str, /, **fields) -> None:
+        self.records.append({"kind": kind, **fields})
 
 
 def notes(s) -> str:
@@ -1130,3 +1160,387 @@ class TestClickingTheDraftOpensEdit(unittest.TestCase):
             self.assertTrue(bound, "nothing was bound to the draft")
             bound[-1][2](None)
         edit.assert_called_once()
+
+
+class TestOnlyAMishearingIsExtractedFromTheDiff(unittest.TestCase):
+    """`typed_pairs` — the evidence bar between "the decoder got this wrong" and "I
+    changed my mind".
+
+    A spoken correction is labelled: the user named the operation, the target and the
+    replacement out loud. A typed edit is a diff, and a diff will happily report a pair
+    for any two words `difflib` happened to align. So the refusals below are the feature,
+    and each one is a way of asking the same question — is this the decoder's mistake, or
+    the author's second thought.
+    """
+
+    def pairs(self, before, after):
+        return typed_pairs(before, after)
+
+    def test_a_one_word_fix_yields_its_pair(self):
+        self.assertEqual(
+            self.pairs("deploy the roleback plan", "deploy the rollback plan"),
+            [("roleback", "rollback")],
+        )
+
+    def test_a_two_token_span_is_kept_when_the_counts_match(self):
+        # One term misheard as two words is the shape "kubectl" arrives in, and both
+        # sides having the same count is what makes the alignment a fact rather than a
+        # guess about which half was wrong.
+        self.assertEqual(
+            self.pairs("run the cube cuttle command now please",
+                       "run the kube ctl command now please"),
+            [("cube cuttle", "kube ctl")],
+        )
+
+    def test_an_unequal_span_is_left_alone(self):
+        # "some ear" -> "Sameer" is a real mishearing and it still teaches nothing here.
+        # Two tokens against one means difflib chose the boundary, and a pair built on a
+        # chosen boundary is a guess wearing evidence's clothes. The spoken route still
+        # learns this one, which is the point of keeping both.
+        self.assertEqual(
+            self.pairs("tell some ear about it now please",
+                       "tell Sameer about it now please"),
+            [],
+        )
+
+    def test_a_case_only_change_teaches_nothing(self):
+        # Deliberate, and the one place the typed path is stricter than the spoken one.
+        # `learn_pair` keeps "priya" -> "Priya" because "capitalize priya" *names* the
+        # word; typed, the identical diff is produced by a capital that a newly typed
+        # full stop forced, and nothing distinguishes them. See `typed_pairs`.
+        self.assertEqual(self.pairs("hi priya is here now ok",
+                                    "hi Priya is here now ok"), [])
+        self.assertEqual(self.pairs("the RELEASE NOTES are done now",
+                                    "the release notes are done now"), [])
+
+    def test_a_punctuation_only_change_teaches_nothing(self):
+        self.assertEqual(self.pairs("deploy the plan now please ok",
+                                    "deploy the plan, now please ok"), [])
+
+    def test_pure_insertions_and_deletions_teach_nothing(self):
+        # Words added were never a correction of anything, and words taken away were not
+        # corrected *to* anything.
+        self.assertEqual(self.pairs("deploy the plan", "deploy the rollback plan"), [])
+        self.assertEqual(self.pairs("deploy the rollback plan", "deploy the plan"), [])
+
+    def test_numbers_are_not_vocabulary(self):
+        self.assertEqual(self.pairs("the release is in 2024 for sure",
+                                    "the release is in 2025 for sure"), [])
+
+    def test_addresses_are_not_vocabulary(self):
+        # A URL, a path and an email are things nobody dictates and hopes. Each would
+        # otherwise pass every other test here, being long and phonetically near itself.
+        for before, after in (
+            ("see example.com for the full details",
+             "see exampel.com for the full details"),
+            ("open flow/sesion.py and read it now",
+             "open flow/session.py and read it now"),
+            ("mail semir@corp.com about the plan now",
+             "mail samir@corp.com about the plan now"),
+        ):
+            with self.subTest(before=before):
+                self.assertEqual(self.pairs(before, after), [])
+
+    def test_short_tokens_teach_nothing(self):
+        # "ot" -> "to" is a typo being fixed, not a word being learned, and two-letter
+        # tokens sit within any phonetic bar worth having of each other.
+        self.assertEqual(self.pairs("give it ot me now please ok",
+                                    "give it to me now please ok"), [])
+
+    def test_a_swap_that_sounds_like_nothing_teaches_nothing(self):
+        # The single most important refusal: an edit is not evidence about the decoder
+        # unless the two words could plausibly have been confused by ear.
+        self.assertEqual(self.pairs("the cat sat on the mat today",
+                                    "the meeting sat on the mat today"), [])
+
+    def test_a_rewrite_teaches_nothing_even_when_it_contains_a_real_pair(self):
+        # "roleback" -> "rollback" is in here and would be kept on its own. Past the
+        # threshold the whole edit is dropped rather than mined, because in a rewrite the
+        # surviving alignment is an artefact of difflib rather than a fact about speech.
+        self.assertEqual(
+            self.pairs("we should ship the roleback plan on friday morning",
+                       "lets postpone the rollback until every reviewer signs it off"),
+            [],
+        )
+
+    def test_a_small_fix_in_a_long_draft_still_counts(self):
+        # The other side of the same threshold: the budget must not make ordinary
+        # repairs unreachable, so two independent one-word fixes in a long sentence are
+        # both kept.
+        self.assertEqual(
+            self.pairs(
+                "semir and priya reviewed the roleback plan on friday last week ok",
+                "Samir and priya reviewed the rollback plan on friday last week ok"),
+            [("semir", "Samir"), ("roleback", "rollback")],
+        )
+
+    def test_composing_into_an_empty_draft_is_not_a_repair(self):
+        self.assertEqual(self.pairs("", "a brand new sentence here"), [])
+        self.assertEqual(self.pairs("deploy the rollback plan", ""), [])
+
+
+class TestTypingAFixTeachesTheSameWaySayingItDoes(unittest.TestCase):
+    """The seam, and the whole reason it exists.
+
+    Flow's recorded worst defect is the register gap: a correction phrased as a
+    description rather than a command does not route, the first Indian-L1 volunteer went
+    0/10, and the guide's own answer to that is "use the Edit box". Until now that box
+    taught nothing, so the profile learned fastest for the speakers who needed it least
+    and not at all for the ones the feature exists for.
+    """
+
+    def session_with_profile(self):
+        s = session(profile=tmp_profile())
+        s.draft.set("deploy the roleback plan")
+        return s, s.profile
+
+    def typed(self, s, text):
+        s.begin_edit()
+        s.commit_edit(text)
+
+    def test_committing_a_change_feeds_the_candidates(self):
+        s, p = self.session_with_profile()
+        self.typed(s, "deploy the rollback plan")
+        self.assertEqual(dict(p.pairs), {"roleback -> rollback": 1})
+
+    def test_cancelling_feeds_nothing(self):
+        # The typed text is discarded on Esc, so there is nothing to have learned from —
+        # and a repair the user took back is not a repair.
+        s, p = self.session_with_profile()
+        s.begin_edit()
+        s.cancel_edit()
+        self.assertFalse(p.pairs)
+
+    def test_an_unchanged_commit_feeds_nothing(self):
+        s, p = self.session_with_profile()
+        self.typed(s, "deploy the roleback plan")
+        self.assertFalse(p.pairs)
+
+    def test_two_typed_sightings_promote_exactly_like_two_spoken_ones(self):
+        s, p = self.session_with_profile()
+        self.typed(s, "deploy the rollback plan")
+        self.assertEqual(p.learned_terms(), [], "one sighting is not a pattern")
+        s.draft.set("the roleback is staged")
+        self.typed(s, "the rollback is staged")
+        self.assertEqual(p.learned_terms(), ["rollback"])
+
+    def test_a_spoken_sighting_and_a_typed_one_pool_into_a_promotion(self):
+        """Deliberate: the two routes share one counter, so a mixed pair reaches two.
+
+        This is the case that decides whether the feature helps the person it is for. A
+        speaker the router half-understands fixes a word by voice sometimes and by hand
+        the rest of the time, and separate counters would mean neither tally ever
+        reaches `PROMOTE_AFTER` — the one user whose corrections are split between the
+        routes would be the one who learns nothing. Two sightings of the same word going
+        wrong in front of the same person is the pattern being counted, and how they
+        reported it is not part of it.
+        """
+        s, p = self.session_with_profile()
+        s.draft.set("tell semir about the plan")
+        s._route("change semir to Samir")
+        self.assertEqual(p.learned_terms(), [], "one sighting is not a pattern")
+        s.draft.set("tell semir about the plan")
+        self.typed(s, "tell Samir about the plan")
+        self.assertEqual(p.learned_terms(), ["Samir"])
+
+    def test_the_cap_on_pairs_holds_against_typing(self):
+        # R8: a profile is a summary, not a log. The editor is a much faster way to
+        # produce pairs than speech is, so the bound has to hold on this route too.
+        s, p = self.session_with_profile()
+        for n in range(MAX_PAIRS + 20):
+            s.draft.set(f"the servic{n} is down")
+            self.typed(s, f"the service{n} is down")
+        self.assertLessEqual(len(p.pairs), MAX_PAIRS)
+
+    def test_a_dismissed_pair_is_never_learned_again_by_typing(self):
+        """"Never offer" is an answer, and typing the same fix must not re-ask it.
+
+        Honoured on this route and not on the spoken one, and the line is how strong the
+        evidence is. Dismissing replies to a *guess* the menu made from a word-level
+        diff; a typed edit is another guess of exactly that kind, so the answer covers
+        it. A spoken "change X to Y" is not a guess — the user named both halves — and
+        discarding an instruction over an inference declined last week would be Flow
+        overruling the sentence it was just given.
+        """
+        s, p = self.session_with_profile()
+        p.dismiss_pair("roleback", "rollback")
+        self.typed(s, "deploy the rollback plan")
+        s.draft.set("the roleback is staged")
+        self.typed(s, "the rollback is staged")
+        self.assertFalse(p.pairs, "a dismissed pair came back through the editor")
+        self.assertEqual(p.offered_pairs(), [])
+
+    def test_nothing_is_applied_to_the_draft_that_was_just_typed(self):
+        # Learning biases the next decode and never rewrites text. The user has already
+        # fixed this draft by hand; a correction correcting itself would be Flow arguing
+        # with the person who just typed.
+        s, p = self.session_with_profile()
+        for _ in range(3):
+            s.draft.set("deploy the roleback plan")
+            self.typed(s, "deploy the rollback plan")
+        s.draft.set("deploy the roleback plan again")
+        s.begin_edit()
+        self.assertEqual(s.commit_edit("deploy the roleback plan again"), None)
+        self.assertEqual(s.draft.text, "deploy the roleback plan again")
+
+    def test_it_learns_from_what_the_box_opened_on_not_from_the_live_draft(self):
+        """An utterance landing behind the editor must not become a rewrite.
+
+        The user typed against the text on screen. Diffing against the draft as it stands
+        at commit would read their untouched sentences as deletions and the arrived words
+        as new writing — which trips the rewrite threshold and throws away the very fix
+        they opened the box to make.
+        """
+        s, p = self.session_with_profile()
+        s.begin_edit()
+        # Something lands behind the box while they type.
+        s.draft.set("deploy the roleback plan and then tell everybody it is done")
+        s.commit_edit("deploy the rollback plan")
+        self.assertEqual(dict(p.pairs), {"roleback -> rollback": 1})
+
+    def test_learning_is_skipped_when_there_is_no_profile(self):
+        s = session()
+        s.draft.set("deploy the roleback plan")
+        self.typed(s, "deploy the rollback plan")
+        self.assertEqual(s.draft.text, "deploy the rollback plan")
+
+    def test_the_trace_counts_the_pairs_without_carrying_them(self):
+        """How many, never which. The 2026-08-01 decision shipped inferred pairs with
+        their own accuracy recorded as unmeasured, and a count is what makes "how often
+        does a hand repair look like a mishearing" answerable — while staying an integer,
+        which cannot be read back into a word. `n` is already on `diag.FIELDS`; nothing
+        new was named to carry this."""
+        diag = RecordingDiag()
+        s = session(profile=tmp_profile(), diag=diag)
+        s.draft.set("deploy the roleback plan")
+        self.typed(s, "deploy the rollback plan")
+        commits = [r for r in diag.records if r.get("route") == "commit"]
+        self.assertEqual([r["n"] for r in commits], [1])
+        self.assertNotIn("roleback", str(diag.records))
+        self.assertTrue(FIELDS.issuperset(commits[0]), "a field is not on the allow-list")
+
+    def test_an_edit_that_teaches_nothing_says_so_in_the_trace(self):
+        diag = RecordingDiag()
+        s = session(profile=tmp_profile(), diag=diag)
+        s.draft.set("the cat sat on the mat today")
+        self.typed(s, "the meeting sat on the mat today")
+        commits = [r for r in diag.records if r.get("route") == "commit"]
+        self.assertEqual([r["n"] for r in commits], [0])
+
+
+class TestTheTypedRouteReachesTheSameOfferMenu(unittest.TestCase):
+    """P2: a typed pair is not a second kind of pair.
+
+    It lands in the same `Profile.pairs` counter, so it is promoted by the same rule,
+    bounded by the same cap and offered by the same `offered_pairs` the right-click menu
+    reads. There is deliberately no new surface and no new announcement: crossing the
+    threshold has been silent since decisions.md 2026-08-01 ("Inferred pairs: never
+    silent - offered for one-tap declaration instead"), where "never silent" scopes to
+    the *substitution* — a hotword biases toward a spelling and rewrites nothing, so it
+    was never the half that needed telling. Matching that precedent is the requirement;
+    announcing typed pairs alone would say the two routes are different things.
+    """
+
+    def test_a_typed_pair_is_offered_in_the_menu_like_a_spoken_one(self):
+        s = session(profile=tmp_profile())
+        for draft, fixed in (("tell semir today", "tell Samir today"),
+                             ("semir is here now", "Samir is here now")):
+            s.draft.set(draft)
+            s.begin_edit()
+            s.commit_edit(fixed)
+        self.assertEqual(s.profile.offered_pairs(), [("semir", "Samir")])
+
+    def test_a_pair_already_in_the_lexicon_stops_being_offered(self):
+        s = session(profile=tmp_profile())
+        for draft, fixed in (("tell semir today", "tell Samir today"),
+                             ("semir is here now", "Samir is here now")):
+            s.draft.set(draft)
+            s.begin_edit()
+            s.commit_edit(fixed)
+        self.assertEqual(
+            s.profile.offered_pairs(declared=[("semir", "Samir")]), [])
+
+    def test_the_term_reaches_the_decode_bias(self):
+        # The end of the whole chain: what a learned pair is actually *for*.
+        s = session(profile=tmp_profile())
+        for draft, fixed in (("tell semir today", "tell Samir today"),
+                             ("semir is here now", "Samir is here now")):
+            s.draft.set(draft)
+            s.begin_edit()
+            s.commit_edit(fixed)
+        lx = Lexicon(NUL_PATH, learned=s.profile.learned_terms)
+        self.assertIn("Samir", lx.terms())
+
+
+class TestTypingAFixTeachesInLiteToo(unittest.TestCase):
+    """Lite has the editor, so Lite has the learning.
+
+    The fence says a feature reaches Lite only if it survives without hands, and this one
+    never needed them: the seam is `commit_edit`, the same call on both builds. What Lite
+    changes is the foreground dance around it, which is the part a Mac has no
+    `SetForegroundWindow` for — so this drives the box the way Lite really does, with the
+    verification skipped, rather than proving something about a code path Lite never runs.
+    """
+
+    def _typed(self, session_, typed_text):
+        import flow.ui as ui
+
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock(session=session_, accent="#000000")
+        b.canvas = mock.Mock()
+        b.lite = True
+        b._text, b._sent, b._partial, b._note = session_.draft.text, "", "", ""
+        b._editor, b._previous_focus, b._h, b._visible = None, 0, 120, True
+        b._sent_at = time.perf_counter()
+        b.after = lambda *a, **kw: None
+        box = mock.MagicMock()
+        box.get.return_value = typed_text
+        fake_tk = mock.MagicMock()
+        fake_tk.Text.return_value = box
+        with mock.patch.object(ui, "tk", fake_tk), \
+                mock.patch.object(ui.Bubble, "_render"):
+            b._edit()
+            b._commit_edit()
+        return b
+
+    def test_the_editor_opens_without_asking_windows_for_anything(self):
+        import flow.ui as ui
+
+        s = session(profile=tmp_profile())
+        s.draft.set("deploy the roleback plan")
+        with mock.patch.object(ui, "foreground_hwnd") as fg, \
+                mock.patch.object(ui, "toplevel_hwnd") as top:
+            self._typed(s, "deploy the rollback plan")
+        fg.assert_not_called()
+        top.assert_not_called()
+
+    def test_a_fix_typed_in_lite_teaches_the_same_pair(self):
+        s = session(profile=tmp_profile())
+        s.draft.set("deploy the roleback plan")
+        self._typed(s, "deploy the rollback plan")
+        self.assertEqual(s.draft.text, "deploy the rollback plan")
+        self.assertEqual(dict(s.profile.pairs), {"roleback -> rollback": 1})
+        self.assertFalse(s.editing, "the editor was left open")
+
+    def test_escape_in_lite_teaches_nothing(self):
+        import flow.ui as ui
+
+        s = session(profile=tmp_profile())
+        s.draft.set("deploy the roleback plan")
+        b = ui.Bubble.__new__(ui.Bubble)
+        b.pill = mock.Mock(session=s, accent="#000000")
+        b.canvas, b.lite = mock.Mock(), True
+        b._text, b._sent, b._partial, b._note = s.draft.text, "", "", ""
+        b._editor, b._previous_focus, b._h, b._visible = None, 0, 120, True
+        b._sent_at = time.perf_counter()
+        b.after = lambda *a, **kw: None
+        box = mock.MagicMock()
+        box.get.return_value = "deploy the rollback plan"
+        fake_tk = mock.MagicMock()
+        fake_tk.Text.return_value = box
+        with mock.patch.object(ui, "tk", fake_tk), \
+                mock.patch.object(ui.Bubble, "_render"):
+            b._edit()
+            b._cancel_edit()
+        self.assertEqual(s.draft.text, "deploy the roleback plan")
+        self.assertFalse(s.profile.pairs)

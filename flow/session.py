@@ -15,6 +15,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
@@ -47,12 +48,168 @@ from .edits import (
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
 from .help import auto_ask_notice, exits_note
 from .notes import Notes, render as render_notes, write as write_notes
-from .phonetic import similarity
+from .phonetic import MATCH_THRESHOLD, similarity
 from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
 from .refine import ask, available, refine, tail_sent
 from .thread import ASK_CONTEXT_CHARS, Thread
+
+# -- P4/P8: what a repair typed by hand teaches -------------------------------
+#
+# The spoken half of this has worked since P8: "change sameer to Samir" is applied
+# locally and the diff either side of it is kept as a labelled confusion pair. The typed
+# half taught nothing at all, and that is the gap that matters most — because the people
+# who type their fixes are precisely the people the spoken path fails. Flow's recorded
+# worst defect is the register gap: a correction phrased as a description rather than as
+# a command does not route, the first Indian-L1 volunteer went 0/10 on it, and those
+# users stop saying corrections and start typing them into the Edit box. Every repair
+# they made was thrown away, so the profile learned fastest for the speakers who needed
+# it least.
+#
+# What follows is the evidence bar, and it is deliberately higher than the spoken one.
+# A spoken correction is *labelled*: the user named the operation, the target and the
+# replacement out loud. A typed edit is a text diff, and a diff cannot tell a repair from
+# a rewrite, a name from a sentence-initial capital, or a mishearing from a change of
+# mind. So everything below is a way of asking "is this the decoder's mistake, or the
+# author's second thought", and refusing when the answer is not clearly the first.
+#
+# The cost of being wrong is why. A learned pair becomes a decode hotword, and hotwords
+# are measured double-edged in flow/lexicon.py: biasing recovers 27-34% of rare words
+# and worsens WER 14-38% relative on speech that does not contain them. A pair harvested
+# from a rewrite does not just fail to help, it spends that second number on nothing.
+
+#: How much of the draft may change before an edit stops being a correction.
+#:
+#: A quarter, because a fix and a rewrite are not close together and nothing needs to
+#: split hairs between them: repairing a misheard name touches one word in a sentence,
+#: while rewriting a paragraph touches most of it. Past this the whole edit yields
+#: nothing — not "the plausible-looking pairs out of it", nothing — because a rewrite
+#: that happens to contain a phonetically close pair is the exact case where the pair is
+#: an artefact of how `difflib` chose to align two different texts rather than evidence
+#: about the decoder.
+#:
+#: Insertions and deletions count against this budget even though neither can ever
+#: produce a pair on its own. An edit that fixes one word and composes two new sentences
+#: is composition, and composition is not supervision; the fix is not lost, only
+#: unlearned *this time*, and `PROMOTE_AFTER` means one sighting was never going to
+#: teach anything by itself anyway.
+REWRITE_SHARE = 0.25
+
+#: Below this a token is not vocabulary. "a", "an", "to", "of", "I" — the words a typed
+#: repair shuffles most and a decoder needs biasing toward least, and short enough that
+#: they sit within any phonetic bar worth having of each other.
+MIN_LEARNABLE_CHARS = 3
+
+#: Sentence punctuation, stripped from both ends of every candidate before anything is
+#: compared. `learn_pair` does this too and says why: the same name arrives as "priya,"
+#: in one sentence and "priya" in the next, and two keys at one sighting each never
+#: reach `PROMOTE_AFTER`. Done here as well so the *rejections* below agree with it —
+#: "plan," -> "plan" has to be recognised as the punctuation-only change it is.
+_PAIR_EDGE = ".,!?;:\"'"
+
+#: What marks a token as an address rather than a word: a path, a URL, an email, a file
+#: name. Tested after the sentence punctuation above is stripped, so an ordinary word
+#: ending a sentence is not mistaken for a domain. None of these belong in a decode
+#: bias — nobody dictates a URL and hopes, and a hotword shaped like `flow/session.py`
+#: would be spent teaching the decoder a spelling it can only ever get wrong.
+_ADDRESS_MARKS = frozenset("/\\@:.")
+
+
+def _learnable_token(token: str) -> str | None:
+    """One side of a candidate pair, cleaned — or None if it is not vocabulary.
+
+    Applied to every token of a span independently rather than to the joined phrase, so
+    a two-word span cannot smuggle a number or a path in beside a real word.
+    """
+    token = token.strip().strip(_PAIR_EDGE)
+    if len(token) < MIN_LEARNABLE_CHARS:
+        return None
+    # Numbers are dictation, never vocabulary. "2024" -> "2025" is the author correcting
+    # a fact, and no amount of repetition makes a digit string worth biasing toward.
+    if any(ch.isdigit() for ch in token):
+        return None
+    if any(ch in _ADDRESS_MARKS for ch in token):
+        return None
+    return token
+
+
+def typed_pairs(before: str, after: str) -> list[tuple[str, str]]:
+    """The confusion pairs a hand edit is evidence *for* — never the ones it implies.
+
+    Word-level `difflib` either side of the Edit box, keeping only the changes shaped
+    like a mishearing being repaired. A replacement qualifies when it swaps one token
+    for one token, or a two-token span for a two-token span — an equal count on both
+    sides, because that is the shape of a word misheard as a word. An unequal span
+    ("some ear" -> "Sameer") is left alone on purpose: the alignment is a guess, and a
+    guess about which half of "some ear" was the mistake is not evidence.
+
+    Then the pair has to sound alike, at `phonetic.MATCH_THRESHOLD` — the same 0.82 the
+    router uses to decide a span is the word the user just named. Sharing the number is
+    the argument: that threshold was swept against ten real mis-transcription pairs and
+    354 real utterances, and the question here is the same question in the other
+    direction. "roleback" -> "rollback" scores 0.938 and is a mishearing; "cat" ->
+    "meeting" scores 0.200 and is somebody changing their mind about what to write.
+
+    **Case-only changes are refused here and accepted by `learn_pair`, and the asymmetry
+    is the point.** Spoken, a case fix is an explicit act: "capitalize sameer" names the
+    word, which is why `learn_pair` keeps it and calls it the most common vocabulary
+    correction there is. Typed, the same two strings are ambiguous in a way speech never
+    is — "priya" -> "Priya" marks a name, but "the" -> "The" is a capital forced by a
+    full stop the user just added, and nothing in the diff tells them apart. Learning the
+    second kind would feed common function words into the hotword list, which is the
+    precise direction lexicon.py measures as harmful. So the typed path gives up
+    "priya" -> "Priya" rather than buy it with "The", "And" and "But" — and gives up
+    little, since the spoken route still teaches it and the wrong-word mishearings that
+    dominate real decoder failures change letters, not just their case.
+
+    Returns pairs in draft order, and returns them *unlearned*: the caller decides what
+    to do with them, which is what keeps `dismissed` honoured in one place.
+    """
+    old, new = before.split(), after.split()
+    if not old or not new:
+        # Nothing to correct, or nothing left of it. An empty draft typed into is
+        # composition and an emptied one is a discard; neither is a repair.
+        return []
+
+    ops = SequenceMatcher(None, old, new).get_opcodes()
+    # Measured against the draft as it was, since that is the thing being repaired, and
+    # by the wider side of each change so that neither growing nor shrinking a span can
+    # hide under the budget.
+    touched = sum(max(i2 - i1, j2 - j1) for tag, i1, i2, j1, j2 in ops if tag != "equal")
+    # The floor is two words, and it is two rather than one because two is the largest
+    # correction this function will ever emit — the equal two-token span below. A
+    # percentage alone would make that shape unreachable in any draft under eight words,
+    # so the rule would allow something the budget silently forbade. Below the floor the
+    # share means nothing anyway: a share is a claim about a sentence, and a three-word
+    # draft is not one.
+    if touched > max(2, REWRITE_SHARE * len(old)):
+        return []
+
+    out: list[tuple[str, str]] = []
+    for tag, i1, i2, j1, j2 in ops:
+        # Insertions and deletions are skipped outright: neither names a pair. Words
+        # added were never a correction of anything, and words taken away were not
+        # corrected *to* anything.
+        if tag != "replace":
+            continue
+        gone, got = old[i1:i2], new[j1:j2]
+        if len(gone) != len(got) or not 1 <= len(gone) <= 2:
+            continue
+        cleaned = [_learnable_token(t) for t in (*gone, *got)]
+        if any(t is None for t in cleaned):
+            continue
+        wrong = " ".join(cleaned[:len(gone)])
+        right = " ".join(cleaned[len(gone):])
+        # One test for three refusals: identical tokens, a punctuation-only change that
+        # the edge strip has already collapsed to identical, and a case-only change.
+        if wrong.lower() == right.lower():
+            continue
+        if similarity(wrong, right) < MATCH_THRESHOLD:
+            continue
+        out.append((wrong, right))
+    return out
+
 
 #: What every converse ask carries after the question. It used to say the opposite of
 #: this — "help the developer refine the prompt above … do not carry out the task it
@@ -654,6 +811,13 @@ class Session:
         #: The draft revision the editor opened on, so a commit can say whether
         #: anything landed behind it while the user typed.
         self._edit_revision = 0
+        #: The text the editor opened on, which is what a hand repair is a repair *of*.
+        #: Deliberately not `draft.text` at commit time: if an utterance landed behind
+        #: the box while somebody typed, the live draft is not the text they were
+        #: correcting, and diffing against it would read their untouched sentences as
+        #: deletions and the arrived words as a rewrite. The baseline has to be what was
+        #: on screen under their cursor.
+        self._edit_opened = ""
         self._last_activity = time.perf_counter()
         self._last_mic_check = time.perf_counter()
         self._mic_started = False
@@ -2147,29 +2311,75 @@ class Session:
             self._finalise()
         self.editing = True
         self._edit_revision = self.draft.revision
+        self._edit_opened = self.draft.text
         self.diag.write("edit", ok=True, chars=len(self.draft.text))
         self._emit("note", "editing - the microphone is off while you type")
         return self.draft.text
 
     def commit_edit(self, text: str) -> None:
-        """Close the editor, writing `text` into the draft."""
+        """Close the editor, writing `text` into the draft — and learning from it."""
         if not self.editing:
             return
         self.editing = False
         moved = self.draft.revision != self._edit_revision
+        learned = 0
         if text != self.draft.text:
             # Through `Draft.set()`, which is what makes this an ordinary draft change:
             # the revision moves, so a rewrite in flight across the edit is discarded by
             # the invariant-11 check rather than overwriting what was typed, and the
             # previous text goes on the undo stack for free.
             self.draft.set(text)
+            # Against what the box opened on, not against the draft: see `_edit_opened`.
+            # Nothing is applied to the text — the user has already fixed it by hand, and
+            # a correction that corrected itself would be Flow arguing with the person
+            # who just typed. Only the *next* decode is biased, exactly as a spoken pair
+            # biases it.
+            learned = self._learn_typed(self._edit_opened, text)
             self._emit("note", "edited by hand - listening again"
                        + (" (what arrived while you typed is one undo back)"
                           if moved else ""))
             self._after_draft_change()
         else:
             self._emit("note", "listening again - nothing was changed")
-        self.diag.write("edit", ok=True, chars=len(text), route="commit")
+        # `n` is how many pairs the edit taught, and it is here because the 2026-08-01
+        # decision shipped inferred pairs with their own quality recorded as *unmeasured*
+        # — `profile.json` read `"pairs": {}` at the time, so nothing said how often the
+        # inference is right. A count answers "how often does a hand repair look like a
+        # mishearing" without storing a word: an integer cannot be read back into a pair,
+        # which is the same argument `words` is on the allow-list under.
+        self.diag.write("edit", ok=True, chars=len(text), route="commit", n=learned)
+
+    def _learn_typed(self, before: str, after: str) -> int:
+        """A repair typed by hand, fed to the machinery a spoken one feeds.
+
+        The same `learn_pair`, so the same two-sighting rule, the same `MAX_PAIRS` cap,
+        the same offer in the same menu, and one story to tell about all of it: Flow
+        learns a word when it has watched you fix it twice, whichever way you fixed it.
+        Sightings pool across the two routes on purpose — saying "change semir to Samir"
+        once and typing the same fix once is the model getting the same word wrong twice
+        in front of the same person, which is the pattern `PROMOTE_AFTER` is counting.
+        Splitting the counters would make the mixed case, which is the *ordinary* case
+        for somebody the spoken path half-works for, the one that never learns anything.
+
+        `dismissed` is honoured here and not inside `learn_pair`, and the line is the
+        strength of the evidence. Dismissing answers a guess: "Never offer" is a reply to
+        an inferred pair the menu asked about. A typed diff is another guess of exactly
+        that kind, so a "no" already given covers it. A spoken "change X to Y" is not a
+        guess at all — the user named both halves out loud — and quietly discarding an
+        instruction because an inference was once declined would be the app deciding it
+        knows better than the sentence it was just given.
+
+        Returns how many pairs it took, for the trace.
+        """
+        if self.profile is None:
+            return 0
+        learned = 0
+        for wrong, right in typed_pairs(before, after):
+            if f"{wrong.lower()} -> {right}" in self.profile.dismissed:
+                continue
+            self.profile.learn_pair(wrong, right)
+            learned += 1
+        return learned
 
     def paste_draft(self, text: str) -> str:
         """Start from something already written: the clipboard becomes the draft.

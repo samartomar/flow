@@ -1466,6 +1466,7 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `refine.ABANDON_SEC` | 5.0 | What `_abandon` spends reaping a killed call, counted into the walk's budget rather than assumed free — a candidate that times out costs its wait *and* this |
 | `Lexicon.MAX_TERMS` | 64 | The library truncates its prompt at 223 tokens *silently, mid-term*, which would bias toward a fragment. Terms and corrections share it: one file, one person filling it, and counting them apart would let 64 corrections buy 64 hotwords past the budget |
 | `Profile.PROMOTE_AFTER` | 2 | One "change X to Y" is as likely to be the user changing their mind as the model mishearing; twice is a pattern. Two consumers now: it promotes a term to a hotword, and it decides when a pair is worth *offering* in the menu — the same bar for suggesting a substitution as for biasing toward a spelling, though only one of them rewrites what somebody said |
+| `session.REWRITE_SHARE` / `MIN_LEARNABLE_CHARS` | 0.25 / 3 | The bar a *typed* repair has to clear before it teaches anything. Past a quarter of the draft changed, the whole edit yields nothing rather than its plausible-looking half: in a rewrite the surviving alignment is an artefact of `difflib`, and a wrong hotword does not merely fail to help — it spends the measured 14-38% relative WER cost of biasing and buys nothing. The floor under it is two words, not one, because the largest pair the extractor emits is a two-token span and a bare percentage would make that shape unreachable in any draft under eight words. Three characters is where a token stops being vocabulary and starts being *a*, *an*, *to* — the words a typed repair shuffles most and a decoder needs biased toward least |
 | `Profile.MAX_WORKSPACES` | 5 | The workspace recents the menu offers (item 36). The same modal-stall budget that caps the offers at three and the presets at six: nothing offered in the menu may grow with usage. Bounded on load as well as save, deduped by `normcase+normpath` so a respelt `--cwd` moves an entry to the front instead of growing the list |
 | `session.WORKSPACE_LEAF_MAX` | 24 | The workspace's own name in the egress notes (`asking codex · acme…`), cut with `help._fit`'s idiom — it is the one word in that note the user's filesystem wrote, and the note is glanced at as the question leaves |
 | `Draft.MAX_HISTORY` / `MAX_HISTORY_CHARS` | 30 / 200 000 | 30 snapshots of a very long draft is where undo quietly becomes megabytes |
@@ -1517,7 +1518,29 @@ empty radiobutton `-value` is read as *unset* and falls back to the label, so th
 no-workspace row's value is the literal `(not set)` — a var holding `""` would match no
 row and the tick would silently never draw. Offering is as far as it goes — an inferred
 pair is a guess from a word-level diff, and nothing turns one into a substitution without
-being told to. The template's
+being told to. **Two routes fill that counter, and for a long time only one of them was
+wired.** A spoken correction has fed `learn_pair` since P8; a fix *typed* into the Edit
+box fed nothing — which put the learning exactly where it was needed least, because the
+register gap means a correction phrased as a description does not route at all (0 of 10
+for the first Indian-L1 speaker) and the guide's own answer to that is the Edit box.
+`session.typed_pairs` closes it: word-level `difflib` between what the box opened on and
+what was committed, keeping only equal-count replacements of one or two tokens that are
+phonetically near at `phonetic.MATCH_THRESHOLD` — the same 0.82 the router uses to find a
+named span, shared because it is the same question asked backwards — and only when less
+than `REWRITE_SHARE` of the draft moved. It feeds the same `learn_pair`, so the promotion
+rule, the `MAX_PAIRS` cap, the offer and `dismissed` stay one mechanism rather than two,
+and the sightings *pool*: a word going wrong twice in front of one person is the pattern
+being counted, not which way they reported it — splitting the tallies would starve
+precisely the speaker whose corrections are split between the two routes. The typed route
+is stricter in one place and looser in another, both deliberate. Stricter: case-only
+changes are refused, because typed there is nothing to separate `priya` ▸ `Priya` from a
+capital that a newly typed full stop forced, while spoken `capitalize priya` names the
+word out loud. Looser is the wrong word for the second — `dismissed` is honoured on the
+typed route and not the spoken one, on the grounds that "Never offer" answers a *guess*,
+a typed diff is another guess of the same kind, and a spoken instruction is not a guess
+at all. Nothing announces any of this when the count reaches two, which matches the
+spoken route rather than adding a surface: the 2026-08-01 decision's "never silent"
+scopes to the substitution, and the hotword half rewrites no text. The template's
 comments are the documentation for both files, including the measured cost of biasing, on
 the grounds that the person about to add forty terms is the one who needs that number.
 

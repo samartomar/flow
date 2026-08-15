@@ -1001,10 +1001,46 @@ formatting rather than vocabulary, and biasing a decoder toward a common phrase 
 measured harm below, not the benefit. And **one correction is not enough** — once is as
 likely to be you changing your mind as the model mishearing; twice is a pattern.
 
-The catch is that this rides on the correction grammar, so it only fires when a
-correction is *recognised*. If you phrase corrections descriptively rather than as
-commands, nothing is learned either — see the register limitation in
-[Known limitations](#known-limitations).
+**Typing a fix teaches the same way saying it does.** Open **Edit**, repair a word by
+hand, commit with `Ctrl+Enter`, and Flow compares what the box opened on against what you
+committed. A word swapped for one that sounds like it is the same confusion pair
+`change X to Y` would have taught — same counter, same **twice**, same 64-pair cap, same
+one-tap offer in the same menu. Nothing is applied to the draft you just fixed; only the
+next decode is biased.
+
+This matters most exactly where saying it fails. If corrections phrased as descriptions
+do not route for you — the register limitation in
+[Known limitations](#known-limitations) — the **Edit** chip was already the way out, and
+it now teaches as well. The two routes share one tally, so saying a fix once and typing
+the same fix once is the **twice**: it is the same word going wrong twice in front of
+you, and how you reported it is not the part being counted.
+
+A typed edit is a diff rather than something you said out loud, so it is read more
+strictly. Beyond the two rules above, it deliberately teaches nothing from:
+
+- **A rewrite.** Past about a quarter of the draft changed, the whole edit is dropped —
+  not mined for the good-looking half. Reworking a sentence is writing, not correcting,
+  and the word pairs left lying around in a rewrite are an artefact of how the diff
+  lined the two texts up.
+- **Case-only changes**, and this is the one place typing is stricter than speaking.
+  `priya` to `Priya` and `the` to `The` are the same diff, and the second is a capital
+  that a full stop you just typed forced. Said out loud, `capitalize priya` names the
+  word and is learned; typed, Flow gives that up rather than feed common words like
+  *The*, *And* and *But* into the bias — which is the direction the measurement below
+  says hurts.
+- **Punctuation alone, and words purely added or removed.** Nothing was corrected *to*
+  anything.
+- **Numbers, URLs, paths and email addresses.** `2024` to `2025` is a fact you changed,
+  not a word Flow misheard, and nobody dictates an address and hopes.
+- **Words under three letters.** `ot` to `to` is a typo being fixed.
+- **Anything that does not sound alike.** `cat` to `meeting` is you changing your mind.
+  The pair has to be phonetically close, at the same bar the correction router uses to
+  find the word you just named.
+
+Every one of those refusals is the same trade as the file itself: a learned word biases
+the decoder, and biasing is measured to cut both ways
+([Known limitations](#known-limitations)). A pair harvested from a rewrite would not
+just fail to help — it would spend the cost and buy nothing.
 
 **And it will offer to write the arrow line for you.** A pair you have corrected twice is
 also a candidate for a `wrong -> right` substitution, but a guess from a word-level diff
@@ -1131,7 +1167,9 @@ tracked at all, and which parts of it are deliberately not.
   recognised — against 7 of 12 local edits for a speaker who read the prompts as written.
   The cause is register rather than accent, and it is unfixed. Until it is, **Refine**
   forces the next utterance to be treated as an instruction, and the **Edit** chip lets
-  you type the fix instead of saying it. See
+  you type the fix instead of saying it — and typing it teaches Flow the word, exactly as
+  saying it would have, so the route that works for you is also the one that improves
+  ([Vocabulary](#vocabulary-p4)). See
   [docs/roadmap.md](roadmap.md#the-first-anchor-group-recording-and-what-it-found-2026-08-01).
 - **A personal lexicon cuts both ways.** `~/.flow/lexicon.txt` biases decoding toward your
   names and jargon. Measured on EdAcc with `small.en`: it recovers **27-34%** of the rare
