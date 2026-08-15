@@ -44,6 +44,7 @@ from .profile import path_key, resolve_workspace
 from .refine import available
 from .session import CONVERSE, DICTATE, Session, State
 from .thread import MAX_TURNS as THREAD_MAX_TURNS
+from .version import version
 
 
 class _RECT(ctypes.Structure):
@@ -1929,14 +1930,23 @@ class Pill(tk.Tk):
         # this; a straight read is both correct and the one that fails legibly.
         if self._help is None:
             self._help = HelpWindow(self)
-        self._help.show(help_rows(
-            hotkeys=self.hotkeys,
-            send_words=self.session.send_words,
-            workspace_note=resolve_workspace(
-                getattr(self.session, "workspace", None), None
-            )[1],
-            lite=self.lite,
-        ))
+        self._help.show([
+            *help_rows(
+                hotkeys=self.hotkeys,
+                send_words=self.session.send_words,
+                workspace_note=resolve_workspace(
+                    getattr(self.session, "workspace", None), None
+                )[1],
+                lite=self.lite,
+            ),
+            # Last and quiet: the one row on the sheet that is not about this machine.
+            # Startup names the version too, into a console a GUI user does not have
+            # open — this window is the surface that is always reachable, which is the
+            # whole argument for the sheet existing. Short by construction, so it clears
+            # `help.MAX_NOTE` without being fitted; `test_version.py` keeps that true.
+            ("gap", "", ""),
+            ("note", f"Flow {version()}", ""),
+        ])
 
     def _welcome(self) -> None:
         """The first minute, once (item 71).

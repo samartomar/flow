@@ -264,6 +264,16 @@ class TestTheReleaseWorkflow(unittest.TestCase):
         self.assertIn("exclude_binaries=True", spec)
         self.assertNotIn("upx=True", spec)
 
+    def test_the_bundle_carries_the_metadata_the_version_flag_reads(self):
+        # `flow --version` is `importlib.metadata.version("flow")`, and PyInstaller
+        # collects modules rather than distributions — so without `copy_metadata` the exe
+        # answers "no package metadata". That is the worst copy to leave unable to name
+        # itself: the zip is what a stranger downloads, the link always serves the newest
+        # one, and the exe is the only thing that can tell them which they got.
+        spec = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn("copy_metadata", spec)
+        self.assertIn('copy_metadata("flow")', spec)
+
     def test_and_the_models_are_not_in_it(self):
         # 605 MiB of weights that every other install downloads on first use. If a
         # future spec starts bundling them, the README's "not in the zip" paragraph is

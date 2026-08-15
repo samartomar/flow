@@ -78,6 +78,17 @@ boundary is this:
   client or a codebase. Set no workspace and nothing of the kind is sent.
 - **Network, but never user content.** The first decode of each tier downloads its
   model from Hugging Face.
+- **Sent to GitHub, once, when you type `flow --check-update`.** An anonymous GET of
+  `api.github.com/repos/samartomar/flow/releases/latest`, whose answer is a tag Flow
+  compares to its own version *here* before printing one line. The request carries
+  nothing but the request: no version number, no query string, no token, no account —
+  the User-Agent names the product and not the copy, and it is there because GitHub's
+  API refuses a request without one. **Nothing calls it on its own**: no timer, no
+  startup check, no first-run prompt. The code that can make the request lives in
+  `flow/version.py`, the only thing that calls it is the flag in `flow/__main__.py`, and
+  `tests/test_version.py` counts those call sites so a third one cannot appear quietly.
+  That is what keeps this list a complete enumeration rather than a description of the
+  common case, which is the only form in which a privacy claim is worth anything.
 - **The desktop boundary.** Send places the draft on the Windows clipboard, where any
   clipboard manager or cloud-clipboard sync the user runs will also see it.
 

@@ -30,6 +30,7 @@ from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, available, named, unverified, unverified_note
 from .session import AUTO_ASK_SEC, Session
+from .version import check_update, version
 
 # `.hotkey`, `.inject` and `.ui` are imported inside main() rather than up here, and the
 # placement still matters: `hotkey` and `inject` call `ctypes.WinDLL("user32")` at import
@@ -180,7 +181,30 @@ def main(argv: list[str] | None = None) -> int:
         help="clipboard-out mode: Send copies the draft instead of pasting it, and no "
              "hotkeys are registered (automatic off Windows)",
     )
+    # Last, because neither is a way to run Flow: both answer a question about the copy
+    # and exit. `--version` is argparse's own action, so it prints and leaves where
+    # `--help` does, ahead of every flag above it — which is the right order for a
+    # question the answer to which cannot depend on any of them.
+    ap.add_argument(
+        "--version", action="version", version=f"flow {version()}",
+        help="print the version and exit",
+    )
+    ap.add_argument(
+        "--check-update", action="store_true",
+        help="ask GitHub once whether there is a newer release, print one line and exit "
+             "(nothing else ever asks)",
+    )
     args = ap.parse_args(argv)
+
+    # Above the body choice and everything under it, because this is a question about
+    # the download rather than a launch: one line out, and no pill, no microphone, no
+    # profile, not even the Lite banner. The exit code carries what the line cannot - 1
+    # when the check could not run at all, so a script wrapping this can tell "nothing
+    # newer" from "no answer" without reading English.
+    if args.check_update:
+        line, ran = check_update()
+        say(line)
+        return 0 if ran else 1
 
     # The platform is read once, here, and only to choose a body. Everything downstream
     # reads `lite`, which is why `--lite` on Windows runs the same code a Mac runs rather
@@ -197,6 +221,14 @@ def main(argv: list[str] | None = None) -> int:
             # Accepted rather than refused: a launcher shared between two machines should
             # not fail on a flag that has simply run out of things to suppress.
             say("  (--no-paste has nothing to suppress here - the copy is the send)")
+    # First of the block that follows, because it is the fact the rest of the block are
+    # facts *about*: a report naming a hotkey, a model or a decode time has to say which
+    # copy produced them, and the download link always serves the newest zip, so the
+    # copy on disk is the only thing that knows which one arrived. That nothing checks
+    # on its own is said out loud for the reason the trace line names itself unprompted -
+    # a promise nobody is told about is one they have no way to believe.
+    say(f"version: {version()} (nothing checks for updates on its own; "
+        "--check-update asks GitHub)")
     if not lite:
         from .hotkey import DEFAULT_BINDINGS, Hotkeys
         from .inject import paste, take_warnings

@@ -188,11 +188,13 @@ uv run python -m flow        # identical, and works without installing anything
 Both are supported and do the same thing. `uv sync` installs the project into the venv in
 editable mode, so an edit to `flow/*.py` takes effect on the next run with no reinstall.
 
-Startup prints exactly what it found — which agent CLI, which models, whether a profile
-and lexicon exist, which mode Send is in, and which hotkeys actually registered. Those
-lines are the first thing to read when something is not working:
+Startup prints exactly what it found — which version this is, which agent CLI, which
+models, whether a profile and lexicon exist, which mode Send is in, and which hotkeys
+actually registered. Those lines are the first thing to read when something is not
+working:
 
 ```
+version: 0.5.1 (nothing checks for updates on its own; --check-update asks GitHub)
 refine CLI: codex
   (falls back to claude if it fails)
 CLI timeout: 20s per call
@@ -235,6 +237,8 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
 | `--cwd PATH` | the project converse-mode questions are asked from; overrides the stored `workspace` ([P9](#converse-mode-p9)) |
 | `--lite` | clipboard-out mode: Send copies the draft instead of pasting it, and no hotkeys are registered (automatic off Windows — see [Install](#install)) |
+| `--version` | print `flow X.Y.Z` and exit. The same number the startup block names, and the one Help shows at the bottom of the sheet |
+| `--check-update` | ask GitHub once whether a newer release exists, print one line, and exit. Manual only: nothing in Flow ever checks on its own, and the request carries no version, no identifier and no account — see [What leaves the machine](architecture.md#what-leaves-the-machine) |
 
 If capture cannot start — no microphone, device held exclusively by another app, a bad
 `--device` index — the pill stays slate and the reason appears in a red bubble. It will

@@ -141,6 +141,40 @@ class TestNonWindowsRunsLite(unittest.TestCase):
         self.assertIn("unrecognized arguments", err.getvalue())
 
 
+class TestTheStartupBlockNamesTheCopy(unittest.TestCase):
+    """The version among the diagnostics, and the check that must not run itself.
+
+    Every other line in that block is a fact *about* a copy — which hotkeys registered,
+    which models, which CLI — and the download link always serves the newest zip, so
+    nothing on disk says which one arrived. A report quoting a hotkey or a decode time
+    is a report about a version nobody wrote down.
+
+    The second half is the one that would fail silently. `--check-update` reaching GitHub
+    when somebody types it is the feature; anything reaching GitHub on its own would make
+    `docs/architecture.md` § "What leaves the machine" an approximation, and no other
+    test in this suite would notice. `test_version.py` counts the call sites; this runs
+    a launch with the opener booby-trapped.
+    """
+
+    def test_the_block_names_the_version_this_copy_carries(self):
+        from flow.version import version
+
+        _code, out, _pill, _session = launch("darwin")
+        self.assertIn(f"version: {version()}", out)
+
+    def test_and_says_out_loud_that_nothing_checks_for_updates(self):
+        # Unprompted, like the trace line: a check somebody has to go looking for the
+        # absence of is a claim they have no way to believe.
+        _code, out, _pill, _session = launch("darwin")
+        self.assertIn("nothing checks for updates on its own", out)
+
+    def test_and_a_launch_opens_no_connection_of_its_own(self):
+        with mock.patch("urllib.request.urlopen",
+                        side_effect=AssertionError("a launch asked GitHub something")):
+            code, _out, _pill, _session = launch("darwin")
+        self.assertEqual(code, 0)
+
+
 @unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 class TestWindowsStillGetsHands(unittest.TestCase):
     """The full body is the default here, and `--lite` is the way to ask for the other."""
