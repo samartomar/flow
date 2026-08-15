@@ -19,6 +19,7 @@ It no longer models a Mac launch: `ui` is one of the three, and Lite draws a pil
 import contextlib
 import importlib
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -362,6 +363,97 @@ class TestACwdLaunchFeedsTheRecents(unittest.TestCase):
         self.assertEqual(self.launch([]), 0)
         self.assertEqual(self.launch(["--cwd", str(self.dir / "typo")]), 0)
         self.assertEqual(self.profile_on_disk().workspaces, [str(self.ws)])
+
+
+class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
+    """A profile can now rebind the five combos. Two bodies never ask for one.
+
+    Lite registers nothing with the OS — that is the only property it has that full Flow
+    does not, and the whole reason it can run on a Mac — and `--no-hotkeys` is the flag
+    for asking Windows for nothing. So a `hotkeys` block is not "applied and then
+    suppressed" in either: it is never read, because there is no registration for it to
+    be the front of.
+
+    Which leaves two ways to get this wrong, and this is where both would show. The block
+    could be *reported* — a launch announcing a rebinding that did not happen is worse
+    than one that says nothing, and Lite's own banner already promises "no global
+    hotkeys". Or the reading itself could be what breaks: `flow.hotkey` binds `user32` at
+    import and is not importable off Windows at all, so a profile field that reached for
+    it on the way past would turn a hand-edited shortcut into a Mac that will not start.
+
+    The profile is real and lives in a temp dir, and the trace is patched out, so a test
+    launch cannot write to the real `~/.flow` (Rule 5).
+    """
+
+    #: One of each: a combo that would have worked, an action that does not exist, and a
+    #: value that is not even a string. Every one of them has something to say — and none
+    #: of it may be said here.
+    OVERRIDES = {"toggle": "ctrl+shift+1", "togle": "nonsense", "send": 5}
+
+    def setUp(self) -> None:
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name)
+
+    def launch(self, hotkeys, argv=(), platform="win32") -> tuple[int, str]:
+        import flow.asr
+        import flow.diag
+        import flow.profile
+        import flow.ui
+
+        import flow.__main__ as mod
+
+        path = self.dir / "profile.json"
+        path.write_text(json.dumps({"schema": 1, "hotkeys": hotkeys}), encoding="utf-8")
+        out = io.StringIO()
+        with mock.patch.object(sys, "platform", platform), \
+                mock.patch.object(flow.profile, "DEFAULT_PATH", path), \
+                mock.patch.object(flow.diag, "Diag"), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill") as pill, \
+                contextlib.redirect_stdout(out):
+            code = mod.main(["--no-speak", "--no-lexicon", *argv])
+        self.assertIsNone(pill.call_args.kwargs["hotkeys"])
+        return code, out.getvalue()
+
+    def said(self, out: str) -> list[str]:
+        """The registration report, matched on the line rather than on the word.
+
+        Lite's banner says "no global hotkeys" in prose, so an assertion that cannot tell
+        that apart from a `hotkey` line is asserting nothing.
+        """
+        return [ln for ln in out.splitlines() if ln.startswith("hotkey")]
+
+    def test_a_lite_launch_with_overrides_starts_and_says_nothing_about_them(self):
+        code, out = self.launch(self.OVERRIDES, ["--lite"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.said(out), [])
+
+    def test_and_an_unusable_block_does_not_stop_a_lite_launch_either(self):
+        code, out = self.launch("ctrl+alt+space", ["--lite"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.said(out), [])
+
+    def test_a_mac_launch_reads_the_field_without_reaching_for_win32(self):
+        # The import that is not there: `flow.hotkey` cannot be loaded on darwin, so a
+        # profile field that needed it to be understood would be a hand-edited shortcut
+        # that stops Flow from starting on the platform Lite exists for.
+        code, out = self.launch(self.OVERRIDES, ["--lite"], platform="darwin")
+        self.assertEqual(code, 0)
+        self.assertIn("Flow Lite on darwin", out)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
+    def test_no_hotkeys_reads_no_override_because_it_registers_none(self):
+        code, out = self.launch(self.OVERRIDES, ["--no-hotkeys"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.said(out), [])
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
+    def test_and_an_unusable_block_is_not_named_under_that_flag_either(self):
+        code, out = self.launch("ctrl+alt+space", ["--no-hotkeys"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.said(out), [])
 
 
 if __name__ == "__main__":

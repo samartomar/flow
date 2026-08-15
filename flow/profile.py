@@ -112,6 +112,27 @@ def _text_set(value) -> set[str]:
     return {t for t in (_text(v) for v in value) if t}
 
 
+def _hotkeys(value) -> dict:
+    """The hotkey overrides as written: a table, or nothing.
+
+    The one validator here that stops at the shape and does not read the contents, and
+    the reason is a line this file cannot cross. Which names are actions and which
+    strings are combos is `flow/hotkey.py`'s knowledge — and `flow/hotkey.py` calls
+    `ctypes.WinDLL("user32")` at import, so it cannot be imported on a Mac, while this
+    module is loaded on every launch including Lite's. Answering "is this usable" here
+    would mean a second copy of the key table living on this side of that line, and two
+    tables of key names that could disagree is exactly the drift the validators above
+    exist to prevent.
+
+    So the entries are carried through untouched — including a value that is not a
+    string, which registration refuses by name rather than this dropping it silently.
+    That also leaves a typo'd action where its author can see it: Flow declines to use
+    the entry and says so, and the file still says what they meant to say, which is the
+    same bargain `lexicon.txt` strikes with every line it never reformats.
+    """
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _counter(value) -> Counter:
     """`{phrase: positive count}`. Entries that are not that shape are dropped.
 
@@ -288,6 +309,25 @@ class Profile:
         #: first ran" rather than showing somebody a lifetime of nothing.
         self.words_dictated: int = 0
         self.dictated_ms: int = 0
+        #: `{action: combo}` — the five global shortcuts, rebound by hand. Absent for
+        #: almost everybody, and that is the shape of the feature rather than a shortfall:
+        #: the shipped combos work, and this exists for the person one of them collides
+        #: with. A settings dialog for it stays refused, so the file somebody already owns
+        #: is the surface.
+        #:
+        #: Only ever the *first* thing tried. Each action keeps its shipped fallbacks
+        #: behind whatever is written here, because a chosen combo can be owned by another
+        #: program exactly as `ctrl+alt+space` already was on the machine this was built
+        #: on — and a rebind that could leave an action with no working combo at all would
+        #: be a worse deal than not offering one.
+        #:
+        #: Additive, schema stays 1: an older profile loads with an empty table and an
+        #: older Flow ignores a key it does not know.
+        #:
+        #: Annotated as the shape a *valid* file holds, and the one caller reads it as
+        #: less than that: `_hotkeys` carries an entry whose value is not a string rather
+        #: than dropping it, so that registration can refuse it by name.
+        self.hotkeys: dict[str, str] = {}
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -348,6 +388,11 @@ class Profile:
         # is unusable instead of printing a zero it made up.
         self.words_dictated = take("words_dictated", _count, 0)
         self.dictated_ms = take("dictated_ms", _count, 0)
+        # A `hotkeys` that is not a table degrades to none and is named, like any other
+        # wrong type. What is *in* the table is judged at registration, where the key
+        # names live — see `_hotkeys`, and `hotkey.overridden` for what it says about
+        # each entry it refuses.
+        self.hotkeys = take("hotkeys", lambda v, _d: _hotkeys(v), {})
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
         self.dismissed = take("dismissed", lambda v, _d: _text_set(v), set())
@@ -371,6 +416,11 @@ class Profile:
             "workspaces": list(self.workspaces[:MAX_WORKSPACES]),
             "words_dictated": self.words_dictated,
             "dictated_ms": self.dictated_ms,
+            # Written back exactly as it was read, so a hand-edit survives every save
+            # Flow makes on its own — and an empty table lands in every profile, which is
+            # the only advertisement this feature gets in a project with no settings
+            # dialog to put it in.
+            "hotkeys": dict(self.hotkeys),
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's

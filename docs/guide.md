@@ -271,6 +271,62 @@ keyboard focus any more — that is what makes Send land in the window you were 
 — so that binding could never fire again, and a documented shortcut that silently does
 nothing is worse than no shortcut. It is a global hotkey now, like the rest.
 
+#### Changing them
+
+There is no shortcut editor and there is not going to be one — the same reason there is
+no settings dialog for anything else here. The combos are a field in the profile, so you
+change them the way you change anything else Flow keeps: by editing
+`~/.flow/profile.json` and relaunching. **Right-click ▸ Settings ▸ Open settings folder**
+is the quickest way to it; the file is written the first time Flow saves anything, and the
+`"hotkeys": {}` already sitting in it is the empty version of this.
+
+```json
+{
+  "schema": 1,
+  "hotkeys": {
+    "toggle": "ctrl+shift+space",
+    "quit": "win+alt+Q"
+  }
+}
+```
+
+The five action names are `toggle`, `send`, `cancel`, `mode` and `quit` — the rows of the
+table above, in that order. They are also what the startup block prints beside each combo
+(`hotkey  toggle   ctrl+alt+space`), so you never have to look them up. List only the ones
+you want to move; anything absent keeps its shipped combo.
+
+A combo is one or more of `ctrl`, `alt`, `shift` and `win`, then one key: a letter, a
+digit, or `space`, `enter`, `esc` and `backslash` (`\` works too, and in JSON has to be
+written `\\`). Case and spaces do not matter, so `CTRL + Alt + Space` is the same thing.
+That is deliberately the same small set the shipped table already uses — this rearranges
+what Flow ships rather than opening every key on the keyboard, because a binding nobody
+has ever pressed fails silently and a shortcut that fails silently is the thing this
+whole section exists to avoid. At least one modifier is required: a bare `space` would
+have Flow own the space bar in every application on the machine.
+
+**Your combo is tried first, and the fallbacks in the table above are still behind it.**
+So if the one you picked is already owned by another program, that action falls back
+exactly as it does today and Flow still works — the startup block and **Help ▸ Commands
+& shortcuts** name the combo that actually registered, which may not be the one you
+asked for.
+
+**Anything unusable is named and ignored, one line per entry**, and then Flow launches
+with the shipped combo for that action:
+
+```
+hotkey  'toggle' in profile.json ignored: 'ctrl+alt+f13' - 'f13' is not a key Flow can bind
+hotkey  toggle   ctrl+alt+space
+```
+
+A misspelled action name, a modifier that does not exist, two keys in one combo, no
+modifier at all, no key at all, or a value that is not a string all read the same way:
+the line says which entry and what is wrong with it, and the lines under it say what Flow
+is actually listening for. Nothing is rewritten — the entry stays in your file, wrong,
+for you to fix.
+
+`--no-hotkeys` and [Lite](#install) register nothing with the OS, so a `hotkeys` block is
+not read on those launches and nothing is said about it.
+
 ### The pill and the bubble
 
 Right-click the pill for **Listen / Stop listening**, **Send**, **Converse/Dictate
@@ -1040,7 +1096,7 @@ figure — along with everything else in there.
 | Path | Written by | Contents |
 |---|---|---|
 | `~/.flow/lexicon.txt` | you, by hand — and by Flow in exactly two cases: creating it from a template of comments if the menu's **Open settings folder** finds it missing, and appending one `wrong -> right` line when you tap an offered correction | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders, removes or reformats a line — what you wrote comes back byte for byte |
-| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks |
+| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the five global combos ([Changing them](#changing-them)), and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
 | `~/.cache/huggingface/hub/` | first decode | the models. `base.en` 141 MiB, `small.en` 464 MiB |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call and device event, unless `--no-profile` | a content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, error *categories*, on each route a `confidence` — how well the decoder heard the utterance being routed, or `null` when that is unknown — and on each utterance that reached the draft, how many words it was and how long it took to say ([The numbers](#the-numbers)). **No words.** A count of words is a number; the words are never written Field names are an allow-list checked against a deny-list at import, so a draft cannot get in by being short. Bounded with one rotation: two files, a known ceiling. Startup names the path out loud |
 | `.bench/` | `scripts/` | benchmark audio, results and manifests. **Tracked**, except the downloadable corpora and the volunteer recordings — a recording is a person, so those live outside the repo and out of its history; `.bench/README.md` says where. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the model revisions that run loaded |

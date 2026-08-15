@@ -960,3 +960,89 @@ class TestAValidProfileIsUnmoved(unittest.TestCase):
         # would break the byte-identical round trip above for anyone who hand-wrote one.
         self.assertEqual(written(floor_db=-60).floor_db, -60)
         self.assertIsInstance(written(floor_db=-60).floor_db, int)
+
+
+class TestTheHotkeyOverridesAreCarriedRatherThanJudged(unittest.TestCase):
+    """`hotkeys` in `profile.json`: the one field this file checks the shape of and no
+    more.
+
+    The five global combos are rebindable by hand, because a shipped combo can be owned by
+    another program — `ctrl+alt+space` already was, on the machine Flow was built on — and
+    a settings dialog to change them in is refused and is going to stay refused. So the
+    file somebody already owns is the surface.
+
+    What an action is called and what a combo means belong to `flow/hotkey.py`, which
+    binds `user32` at import and therefore cannot be reached from a Lite launch at all,
+    while this module loads on every launch there is. A second copy of its key table on
+    this side of that line is exactly the drift the validators above exist to prevent, so
+    the entries travel through untouched and are judged where they are used — which is
+    also where the refusal can be printed beside the combos that did register.
+    """
+
+    def test_a_block_of_overrides_survives_a_load(self):
+        p = written(hotkeys={"toggle": "ctrl+shift+space", "quit": "win+alt+Q"})
+        self.assertEqual(p.hotkeys,
+                         {"toggle": "ctrl+shift+space", "quit": "win+alt+Q"})
+        self.assertEqual(p.faults, [])
+
+    def test_a_profile_written_before_this_existed_loads_with_none(self):
+        # Every profile in the world, on the day this ships. Additive, schema stays 1.
+        p = written()
+        self.assertEqual(p.hotkeys, {})
+        self.assertEqual(p.faults, [])
+
+    def test_odd_whitespace_and_case_reach_registration_as_they_were_written(self):
+        # Normalised where the action names are known, and not a moment earlier. Trimming
+        # here would mean this file deciding what a name is, which is the one thing it
+        # deliberately does not know.
+        block = {"  ToGGle ": "  CTRL + Alt + Space  ", "SEND": "ctrl+shift+ENTER"}
+        p = written(hotkeys=block)
+        self.assertEqual(p.hotkeys, block)
+        self.assertEqual(p.faults, [])
+
+    def test_an_entry_that_is_not_a_string_is_carried_rather_than_dropped(self):
+        # Dropping it here would be the one silent failure this feature could have: the
+        # entry would vanish between the file and the report, and nothing anywhere would
+        # be able to say why the shortcut did not change.
+        p = written(hotkeys={"toggle": 5, "send": None})
+        self.assertEqual(p.hotkeys, {"toggle": 5, "send": None})
+        self.assertEqual(p.faults, [])
+
+    def test_a_hotkeys_that_is_not_a_table_costs_the_field_and_is_named(self):
+        for bad in ("ctrl+alt+space", ["ctrl+alt+space"], 5, True, 3.5):
+            with self.subTest(bad=bad):
+                p = written(hotkeys=bad, floor_db=-61.5, speech_db=-24.0)
+                self.assertEqual(p.hotkeys, {})
+                self.assertIn("hotkeys", p.faults)
+                # Per field, like every neighbour: a shortcut nobody can read must not
+                # cost a calibration nobody can retype.
+                self.assertTrue(p.calibrated)
+
+    def test_an_empty_table_written_on_purpose_is_not_a_fault(self):
+        self.assertEqual(written(hotkeys={}).faults, [])
+
+    def test_a_null_reads_as_absent_the_way_it_does_everywhere_else(self):
+        p = written(hotkeys=None)
+        self.assertEqual(p.hotkeys, {})
+        self.assertEqual(p.faults, [])
+
+    def test_the_block_round_trips_through_a_save(self):
+        # Flow rewrites this file on every dictated utterance, so a hand-written block
+        # that did not survive a save would last until the first sentence somebody said.
+        p = written(hotkeys={"toggle": "ctrl+shift+space"})
+        self.assertTrue(p.save())
+        again = Profile(p.path)
+        self.assertEqual(again.hotkeys, {"toggle": "ctrl+shift+space"})
+        # Named rather than compared against an empty list: a saved-and-reloaded profile
+        # reports a `dismissed` fault of its own, because `save` writes that set as a
+        # list and `take` reads `[] != set()` as a degraded field. It predates this and
+        # is nothing to do with hotkeys, and asserting the whole list here would tie this
+        # test to it.
+        self.assertNotIn("hotkeys", again.faults)
+
+    def test_and_an_empty_table_is_written_out_where_somebody_can_find_it(self):
+        # The only advertisement this feature gets. There is no settings dialog to put it
+        # in, and a key that appears in the file is one somebody can search the guide for.
+        p = tmp_profile()
+        p.save()
+        self.assertEqual(json.loads(p.path.read_text(encoding="utf-8"))["hotkeys"], {})

@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     say(f"version: {version()} (nothing checks for updates on its own; "
         "--check-update asks GitHub)")
     if not lite:
-        from .hotkey import DEFAULT_BINDINGS, Hotkeys
+        from .hotkey import BAD_BLOCK_LINE, DEFAULT_BINDINGS, Hotkeys
         from .inject import paste, take_warnings
     from .ui import Pill
 
@@ -463,7 +463,20 @@ def main(argv: list[str] | None = None) -> int:
 
     hotkeys = None
     if not args.no_hotkeys and not lite:
-        hotkeys = Hotkeys(DEFAULT_BINDINGS)
+        # Read only where registration happens, which is why `--no-hotkeys` and Lite are
+        # untouched by a `hotkeys` block: nothing is asked of the OS there, so there is
+        # nothing for an override to change and nothing to report about one.
+        #
+        # Both refusals are said before the combos that did register, so the block reads
+        # in the order it happened — what was thrown away, then what Flow is actually
+        # listening for. The second half is the answer to the first: somebody who
+        # misspelled an action name has the five real ones on the next five lines.
+        if profile is not None and "hotkeys" in profile.faults:
+            say(BAD_BLOCK_LINE)
+        hotkeys = Hotkeys(DEFAULT_BINDINGS,
+                          profile.hotkeys if profile is not None else None)
+        for line in hotkeys.ignored:
+            say(line)
         if hotkeys.start():
             for action, combo in hotkeys.chosen.items():
                 say(f"hotkey  {action:8s} {combo}")
