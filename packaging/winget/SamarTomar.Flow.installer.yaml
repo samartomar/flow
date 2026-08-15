@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+
+# What winget downloads and what it does with it.
+#
+# The release asset is a zip, not an installer, so `InstallerType: zip` and the real
+# payload is named inside it. `NestedInstallerType: portable` is the honest description of
+# what is in there: an exe that runs from wherever it is unpacked, writes no registry keys
+# and needs no uninstaller. winget unpacks the archive under its own packages directory and
+# puts a `flow` shim on PATH, which is the same name `uv tool install` leaves behind, so
+# the instruction after either install is the same one word.
+#
+# `RelativeFilePath` is the path *inside the zip*, and it is nested because the workflow
+# compresses the directory rather than its contents: `Compress-Archive -Path dist/flow`
+# makes `flow/` the archive's root entry, and `packaging/flow.spec` names both the COLLECT
+# directory and the exe `flow`. So `flow\flow.exe`, not `flow.exe`. It is quoted nowhere on
+# purpose: a double-quoted YAML scalar would read `\f` as a form feed.
+#
+# `InstallerSha256` is a placeholder. winget's validation will reject it, which is correct
+# and expected: this file is the prepared submission, and packaging/PUBLISHING.md carries
+# the one-liner that fills it from the release's `.sha256` asset before anything is sent.
+PackageIdentifier: SamarTomar.Flow
+PackageVersion: 0.5.1
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: flow\flow.exe
+    PortableCommandAlias: flow
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/samartomar/flow/releases/download/v0.5.1/flow-windows-x64.zip
+    InstallerSha256: FILL-ME-SHA256
+ManifestType: installer
+ManifestVersion: 1.6.0

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
+
+# The version manifest: the smallest of the three, and the one that says which locale is
+# authoritative. A winget submission is this file plus the installer and the defaultLocale
+# beside it, all three carrying the same PackageIdentifier and PackageVersion. A
+# disagreement between them is rejected before a human reads the pull request.
+PackageIdentifier: SamarTomar.Flow
+PackageVersion: 0.5.1
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

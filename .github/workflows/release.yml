@@ -63,6 +63,19 @@ jobs:
       - name: Zip it
         run: Compress-Archive -Path dist/flow -DestinationPath flow-windows-x64.zip
 
+      # A package manifest has to state the zip's SHA-256, and the only place that number
+      # can be established honestly is here, beside the bytes that were just built.
+      # Anywhere else it is a number somebody read off a machine that downloaded something.
+      # The line format is the one `sha256sum -c` reads and the one Scoop's autoupdate
+      # looks for: the hash, a space, `*` for binary mode, the file name. Written through
+      # .NET rather than `Out-File` so the newline is LF and there is no BOM; a CR here
+      # becomes part of the file name as far as `sha256sum -c` is concerned.
+      - name: Checksum it
+        run: |
+          $hash = (Get-FileHash flow-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$PWD/flow-windows-x64.zip.sha256",
+            "$hash *flow-windows-x64.zip`n")
+
       # Uploaded with the CLI the runner already has rather than a third-party action,
       # for the same reason the app has three dependencies. `--clobber` so a re-run of a
       # failed release replaces the artifact instead of erroring on it.
@@ -72,8 +85,10 @@ jobs:
         run: |
           gh release view $env:GITHUB_REF_NAME 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:GITHUB_REF_NAME flow-windows-x64.zip --clobber
+            gh release upload $env:GITHUB_REF_NAME `
+              flow-windows-x64.zip flow-windows-x64.zip.sha256 --clobber
           } else {
-            gh release create $env:GITHUB_REF_NAME flow-windows-x64.zip `
+            gh release create $env:GITHUB_REF_NAME `
+              flow-windows-x64.zip flow-windows-x64.zip.sha256 `
               --title $env:GITHUB_REF_NAME --generate-notes
           }

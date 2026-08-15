@@ -1,0 +1,43 @@
+{
+    "##": [
+        "The zip is a PyInstaller onedir tree compressed whole, so `flow` is a directory",
+        "inside it and the exe is at `flow\\flow.exe` rather than at the root. No",
+        "`extract_dir` here on purpose: the archive is unpacked as it is, which keeps every",
+        "path below identical to the path inside the zip, so one reading of",
+        "`packaging/flow.spec` and `.github/workflows/release.yml` covers both.",
+        "`hash` is a placeholder until a release exists to hash. packaging/PUBLISHING.md",
+        "has the one-liner that fills it; the manifest will not install until it is filled.",
+        "`autoupdate.hash` reads the `.sha256` the release workflow now uploads beside the",
+        "zip, so a version bump does not have to download 126 MB to learn one number."
+    ],
+    "version": "0.5.1",
+    "description": "Local English dictation with a talk-to-it refine loop",
+    "homepage": "https://github.com/samartomar/flow",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/samartomar/flow/releases/download/v0.5.1/flow-windows-x64.zip",
+            "hash": "FILL-ME-SHA256"
+        }
+    },
+    "bin": "flow\\flow.exe",
+    "shortcuts": [
+        [
+            "flow\\flow.exe",
+            "Flow"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/samartomar/flow"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/samartomar/flow/releases/download/v$version/flow-windows-x64.zip"
+            }
+        },
+        "hash": {
+            "url": "$url.sha256"
+        }
+    }
+}

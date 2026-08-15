@@ -11,6 +11,7 @@ the one thing that does not work. So the commands are asserted to be exact, here
 a change to either side has to move both.
 """
 
+import json
 import re
 import shutil
 import subprocess
@@ -21,6 +22,13 @@ import tomllib
 import unittest
 from pathlib import Path
 
+# Not a new dependency and not a test-only one: `uv.lock` carries PyYAML twice over as a
+# transitive of `faster-whisper` (ctranslate2 requires it, and so does huggingface-hub),
+# so it is present anywhere `flow` can be imported at all. What it buys is that the
+# workflow and the manifests are *parsed* below rather than string-matched, so a file this
+# repo breaks fails as a parse error rather than as a substring that happens to survive.
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,10 +36,38 @@ LICENSE = ROOT / "LICENSE"
 PYPROJECT = ROOT / "pyproject.toml"
 README = ROOT / "README.md"
 GUIDE = ROOT / "docs" / "guide.md"
+RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
+SCOOP = ROOT / "packaging" / "scoop" / "flow.json"
+WINGET = ROOT / "packaging" / "winget"
+
+#: The one asset name every one of these files has to agree on. It never changes between
+#: versions on purpose, which is what makes `releases/latest/download/...` true forever.
+ASSET = "flow-windows-x64.zip"
+
+#: The exe's path *inside* that zip. Not a guess: `packaging/flow.spec` names both the
+#: COLLECT directory and the exe `flow`, and the workflow compresses `dist/flow` rather
+#: than `dist/flow/*`, so the directory itself is the archive's root entry.
+IN_ZIP_EXE = "flow\\flow.exe"
 
 
 def pyproject() -> dict:
     return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+
+
+def scoop() -> dict:
+    return json.loads(SCOOP.read_text(encoding="utf-8"))
+
+
+def winget(name: str) -> dict:
+    """One of the three files a winget submission is made of."""
+    return yaml.safe_load((WINGET / name).read_text(encoding="utf-8"))
+
+
+def asset_url() -> str:
+    """The versioned download, built from the metadata rather than typed a third time."""
+    project = pyproject()["project"]
+    repo = project["urls"]["Repository"]
+    return f"{repo}/releases/download/v{project['version']}/{ASSET}"
 
 
 class TestTheLicence(unittest.TestCase):
@@ -394,3 +430,231 @@ class TestTheSuiteGatesEveryPush(unittest.TestCase):
             encoding="utf-8")
         self.assertIn('tags: ["v*"]', release)
         self.assertNotIn("pull_request", release)
+
+
+class TestTheScoopManifest(unittest.TestCase):
+    """A file whose whole job is to be right about a URL nothing here dereferences.
+
+    Homebrew was the most-upvoted request in the competitor's tracker; on Windows that
+    request is Scoop and winget, and both are answered by a small file naming a download,
+    its checksum and the executable inside it. `packaging/PUBLISHING.md` is how it gets
+    submitted; this is what stops it going stale afterwards.
+
+    The failure it prevents is quiet rather than loud. `pyproject.toml` moves to 0.6.0,
+    the tag moves, the workflow builds and attaches the new zip, and this manifest still
+    names v0.5.1, which still downloads, still installs and still runs. Nobody finds out
+    from an error; they find out from a bug report about something fixed two versions ago.
+
+    So the version is read out of `pyproject.toml` and the URL rebuilt from it rather than
+    typed twice, which is the trick `TestTheInstallSection` already plays on the README.
+    """
+
+    def test_it_is_committed_and_it_parses(self):
+        self.assertTrue(SCOOP.is_file(), "no Scoop manifest to submit")
+        self.assertIsInstance(scoop(), dict)
+
+    def test_the_version_it_names_is_the_version_pyproject_names(self):
+        self.assertEqual(scoop()["version"], pyproject()["project"]["version"])
+
+    def test_and_the_download_is_the_release_asset_for_that_version(self):
+        self.assertEqual(scoop()["architecture"]["64bit"]["url"], asset_url())
+
+    def test_the_metadata_agrees_with_the_metadata_beside_it(self):
+        # Same argument as the licence tests above: two places to state one fact is one
+        # place to get it wrong, and this is the copy strangers read in a search result.
+        manifest, project = scoop(), pyproject()["project"]
+        self.assertEqual(manifest["license"], project["license"])
+        self.assertEqual(manifest["homepage"], project["urls"]["Repository"])
+
+    def test_checkver_watches_this_repository(self):
+        self.assertEqual(scoop()["checkver"]["github"],
+                         pyproject()["project"]["urls"]["Repository"])
+
+    def test_and_autoupdate_templates_the_version_rather_than_freezing_it(self):
+        # The half of the manifest that has to survive the *next* release without being
+        # edited. A literal version number in here is the same defect as one in the
+        # workflow, and it is checked the same way.
+        auto = scoop()["autoupdate"]
+        url = auto["architecture"]["64bit"]["url"]
+        self.assertIn("$version", url)
+        self.assertNotIn(pyproject()["project"]["version"], url)
+        # And the hash comes from the `.sha256` the workflow now uploads, so a version
+        # bump costs one small request instead of re-downloading 126 MB to learn a number.
+        self.assertEqual(auto["hash"]["url"], "$url.sha256")
+
+
+class TestTheWingetManifests(unittest.TestCase):
+    """Three files that are one submission, and every one of them repeats the version.
+
+    winget will not take a package as a single file: a version manifest, an installer
+    manifest and a locale manifest go up together, and a disagreement between them is
+    rejected before a human reads the pull request. Which means the version is written
+    three more times, in three files that cannot read `pyproject.toml`, and the drift this
+    guards against is the same one the Scoop manifest has with three times the surface.
+    """
+
+    NAMES = ("SamarTomar.Flow.yaml",
+             "SamarTomar.Flow.installer.yaml",
+             "SamarTomar.Flow.locale.en-US.yaml")
+
+    def test_all_three_files_a_submission_needs_are_committed(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                self.assertTrue((WINGET / name).is_file(), name)
+
+    def test_they_agree_on_which_package_this_is(self):
+        identifiers = {winget(name)["PackageIdentifier"] for name in self.NAMES}
+        self.assertEqual(identifiers, {"SamarTomar.Flow"})
+
+    def test_and_all_three_name_the_version_pyproject_names(self):
+        version = pyproject()["project"]["version"]
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(str(winget(name)["PackageVersion"]), version)
+
+    def test_the_installer_downloads_the_release_asset_for_that_version(self):
+        installer = winget("SamarTomar.Flow.installer.yaml")["Installers"][0]
+        self.assertEqual(installer["InstallerUrl"], asset_url())
+        self.assertEqual(installer["Architecture"], "x64")
+
+    def test_and_describes_it_as_what_it_is(self):
+        # A zip with a portable exe inside, which is the honest description of a
+        # PyInstaller onedir tree: it runs from wherever it is unpacked, writes no
+        # registry keys and has nothing to uninstall.
+        doc = winget("SamarTomar.Flow.installer.yaml")
+        self.assertEqual(doc["InstallerType"], "zip")
+        self.assertEqual(doc["NestedInstallerType"], "portable")
+
+    def test_the_licence_it_publishes_is_the_licence_in_the_repository(self):
+        # Same failure as a wheel whose METADATA says Apache while LICENSE says MIT,
+        # except this copy is the one shown to everyone running `winget show`.
+        locale = winget("SamarTomar.Flow.locale.en-US.yaml")
+        self.assertEqual(locale["License"], pyproject()["project"]["license"])
+        self.assertEqual(locale["PackageUrl"],
+                         pyproject()["project"]["urls"]["Repository"])
+
+
+class TestBothManifestsPointAtTheSameFileInTheSameZip(unittest.TestCase):
+    """`flow.exe` is not at the root of the zip, and two package managers depend on that.
+
+    The path is established by two lines that live nowhere near each other.
+    `packaging/flow.spec` names the COLLECT directory and the exe `flow`, so PyInstaller
+    writes `dist/flow/flow.exe`, which is the path the workflow then runs `--help` against. And
+    `Compress-Archive -Path dist/flow` names the *directory*, not its contents, so the
+    directory itself becomes the archive's root entry and the exe sits one level down.
+
+    Scoop's `bin` and winget's `RelativeFilePath` both encode that conclusion. Neither can
+    check it, and getting it wrong does not fail loudly: Scoop shims a path that is not
+    there and winget installs a package whose command does not exist. So the premise is
+    asserted here, beside the two files that depend on it. Change the zip's shape and
+    this fails, naming the manifests that have to move with it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.yml = RELEASE_YML.read_text(encoding="utf-8")
+
+    def test_the_workflow_still_zips_the_directory_and_not_its_contents(self):
+        self.assertIn(f"Compress-Archive -Path dist/flow -DestinationPath {ASSET}",
+                      self.yml)
+        # `dist/flow/*` would flatten the archive and silently invalidate both manifests.
+        self.assertNotIn("dist/flow/*", self.yml)
+
+    def test_and_the_bundle_it_zips_is_still_the_one_the_spec_builds(self):
+        # The other half of the premise: the exe is `flow.exe` inside a directory called
+        # `flow`, which is what makes the in-zip path one level deep rather than two or
+        # none. The workflow launches exactly that path before it zips anything.
+        self.assertIn("dist/flow/flow.exe --help", self.yml)
+        spec = (ROOT / "packaging" / "flow.spec").read_text(encoding="utf-8")
+        self.assertEqual(spec.count('name="flow"'), 2, "EXE and COLLECT both name it")
+
+    def test_and_both_package_managers_name_that_path(self):
+        nested = winget("SamarTomar.Flow.installer.yaml")["NestedInstallerFiles"][0]
+        self.assertEqual(nested["RelativeFilePath"], IN_ZIP_EXE)
+        self.assertEqual(scoop()["bin"], IN_ZIP_EXE)
+
+    def test_and_leave_the_same_command_behind_as_a_source_install(self):
+        # `uv tool install` puts `flow` on PATH, so a reader who arrives by either route
+        # types the same word. Scoop shims by the exe's basename; winget is told outright.
+        nested = winget("SamarTomar.Flow.installer.yaml")["NestedInstallerFiles"][0]
+        self.assertEqual(nested["PortableCommandAlias"], "flow")
+        self.assertIn("flow", pyproject()["project"]["scripts"])
+
+    def test_and_both_state_the_same_checksum(self):
+        # The one number in either file that this repo cannot derive, because it is a
+        # fact about a file on a Releases page. `packaging/PUBLISHING.md` is the runbook
+        # for filling it; what is checked here is that it is filled the same way in both
+        # places, and that it is either the placeholder or something the shape of a
+        # SHA-256. A half-pasted hash is the failure that would otherwise ship.
+        hashes = {scoop()["architecture"]["64bit"]["hash"],
+                  winget("SamarTomar.Flow.installer.yaml")["Installers"][0][
+                      "InstallerSha256"]}
+        self.assertEqual(len(hashes), 1, f"the two manifests disagree: {hashes}")
+        stated = hashes.pop()
+        if stated != "FILL-ME-SHA256":
+            self.assertRegex(stated, r"^[A-Fa-f0-9]{64}$")
+
+
+class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
+    """A package manifest has to state a SHA-256, so the release has to publish one.
+
+    Before this, the number existed only on whichever machine last downloaded the zip,
+    which is the wrong place for it: a checksum read off a download proves that the
+    download is the download. Computed on the runner, beside the bytes it just built, it
+    is worth something, and `winget install` and `scoop install` both refuse an artifact
+    that does not match it.
+
+    The workflow is parsed rather than grepped here, because the change added a step to a
+    file whose existing gates are load-bearing, and "still valid YAML" is the cheapest
+    proof that nothing above it was disturbed.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.doc = yaml.safe_load(RELEASE_YML.read_text(encoding="utf-8"))
+        cls.runs = [step.get("run", "") for step in cls.doc["jobs"]["release"]["steps"]]
+
+    def step_running(self, fragment: str) -> int:
+        found = [i for i, run in enumerate(self.runs) if fragment in run]
+        self.assertEqual(len(found), 1, f"{fragment!r} runs in {len(found)} steps")
+        return found[0]
+
+    def test_the_workflow_is_still_a_yaml_file_with_a_release_job_in_it(self):
+        self.assertIsInstance(self.doc, dict)
+        self.assertIn("release", self.doc["jobs"])
+        self.assertTrue(self.runs, "the release job has no steps that run anything")
+
+    def test_the_checksum_is_taken_after_the_zip_exists_and_before_it_is_uploaded(self):
+        # Order, not presence, for the same reason the suite is asserted to run before
+        # the build: a checksum computed at the wrong moment is a checksum of nothing.
+        zipped = self.step_running("Compress-Archive")
+        hashed = self.step_running("Get-FileHash")
+        attached = self.step_running("gh release")
+        self.assertLess(zipped, hashed)
+        self.assertLess(hashed, attached)
+
+    def test_and_the_line_it_writes_is_the_shape_sha256sum_reads(self):
+        # `<hash> *<file>`: the hash, a space, `*` for binary mode, the name. That is what
+        # `sha256sum -c` accepts and what Scoop's autoupdate looks for in a hash file, so
+        # the format is the interface and not a detail.
+        run = self.runs[self.step_running("Get-FileHash")]
+        self.assertIn("SHA256", run)
+        self.assertIn(f"*{ASSET}", run)
+        self.assertIn(f"{ASSET}.sha256", run)
+        self.assertIn(".ToLower()", run)
+
+    def test_and_it_goes_up_beside_the_zip_however_the_release_is_made(self):
+        # Two branches, because a re-run of a failed release uploads to a release that
+        # already exists. A checksum attached in only one of them is the branch nobody
+        # tests until the day it runs.
+        run = self.runs[self.step_running("gh release")]
+        self.assertIn("gh release upload", run)
+        self.assertIn("gh release create", run)
+        self.assertEqual(run.count(f"{ASSET}.sha256"), 2, run)
+
+    def test_and_no_third_party_action_was_added_to_do_it(self):
+        # The workflow's own argument, unchanged: the runner already has `gh` and
+        # PowerShell, and this is the workflow that builds what strangers download.
+        uses = [step.get("uses", "") for step in self.doc["jobs"]["release"]["steps"]]
+        self.assertEqual([u.split("@")[0] for u in uses if u],
+                         ["actions/checkout", "astral-sh/setup-uv"])

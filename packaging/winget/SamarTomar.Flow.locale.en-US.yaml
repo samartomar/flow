@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+# The text a stranger reads in `winget show SamarTomar.Flow` and in the Store listing that
+# mirrors this repository. Every claim below is one the README already makes, written in
+# the same register: what it does, where it runs, and what it does not do. Nothing here
+# sells anything, because a package description that oversells is a bug report later.
+PackageIdentifier: SamarTomar.Flow
+PackageVersion: 0.5.1
+PackageLocale: en-US
+Publisher: Samar Tomar
+PublisherUrl: https://github.com/samartomar
+PublisherSupportUrl: https://github.com/samartomar/flow/issues
+PackageName: Flow
+PackageUrl: https://github.com/samartomar/flow
+License: MIT
+LicenseUrl: https://github.com/samartomar/flow/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Samar Tomar
+ShortDescription: Local English dictation with a talk-to-it refine loop
+Description: |-
+  Dictate into whatever window you were working in, fix the text by talking to it, then
+  send. Click the pill or press ctrl+alt+space and talk; the draft floats above it and
+  refreshes about once a second. Talk to the draft to correct it - "change Tuesday to
+  Wednesday", "delete the last sentence" - or press Edit and type. Send pastes it back
+  into the window you came from.
+
+  Speech recognition runs on the machine with faster-whisper, so no audio leaves it and
+  there is no API key. English only. An agent CLI - codex or claude, on PATH and already
+  signed in - is optional and adds semantic rewrites, the prompt polish and converse mode;
+  without one, everything else works and startup says so.
+
+  The models are not in the download. They are fetched to the Hugging Face cache on the
+  first decode, the same way a source install fetches them, and the startup line names the
+  path. The build is unsigned, so the first launch shows the Windows SmartScreen panel and
+  takes More info then Run anyway, once, per machine.
+Moniker: flow
+Tags:
+  - dictation
+  - speech-to-text
+  - whisper
+  - offline
+  - transcription
+  - voice
+  - hotkey
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
