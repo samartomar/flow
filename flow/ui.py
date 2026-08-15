@@ -2223,6 +2223,20 @@ class Pill(tk.Tk):
                 # Shown, not hidden: P2 is that a rejection is never silent. The
                 # recovery affordance itself is Phase 3's rescue chip.
                 self.front.note(ev.text)
+            elif ev.kind == "disarm":
+                # Capture has stopped and cannot start itself again — the input device
+                # went away and did not come back inside `MIC_RETRIES`. `armed` belongs
+                # to this thread, so this is the only way the session can stop a pill
+                # claiming to listen with no microphone under it, which is the same lie
+                # `_toggle` already refuses to tell when capture fails at startup. The
+                # error event just before this one carries the reason and the flash.
+                #
+                # Deliberately not `session.pause()`: the session has already stopped
+                # the device, and pausing would bump the capture generation and refuse
+                # the decode of the words the loss cut short — which is the one thing
+                # the recovery path went out of its way to keep.
+                self.armed = False
+                self._disarmed_since = time.perf_counter()  # starts the 8 s idle dim
 
     def _pump_warnings(self) -> None:
         """Surface inject warnings that arrived since the last frame.

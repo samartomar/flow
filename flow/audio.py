@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import queue
 import threading
+import time
 from collections import deque
 
 import numpy as np
@@ -25,6 +26,29 @@ import sounddevice as sd
 from . import SAMPLE_RATE
 
 BLOCK = 1024  # 64 ms at 16 kHz — fine enough for a responsive level meter (R13)
+
+#: How long PortAudio may go without handing over a block before the stream counts as
+#: dead, whatever the stream says about itself.
+#:
+#: **This is not a silence heuristic, and the distinction is the whole reason it is
+#: allowed to exist.** A working microphone in a silent room delivers blocks of
+#: near-zero samples at exactly the rate a loud one does. What is timed here is
+#: *delivery* — PortAudio's own half of the contract — and never loudness. `SpeechGate`
+#: below is the only thing in this file with an opinion about how loud a block is, and
+#: it is deliberately not consulted here.
+#:
+#: Two seconds, measured rather than guessed. On this machine (PortAudio 19.7-devel,
+#: sounddevice 0.5.5, a USB mic at 16 kHz/1024) the gap between callbacks is a median
+#: **63.0 ms** — the block period — with a p99 of 79 ms and a maximum of 79 ms when
+#: nothing else is running. Under four CPU-bound threads, standing in for a decode
+#: running beside capture, the median does not move and the worst gap seen over ~109 s
+#: is **453 ms**. Two seconds is 4.4x that worst case and 31 block periods.
+#:
+#: That much headroom is right because this is the *backstop*, not the detector. The
+#: detector is `InputStream.active`, which flips within one 30 ms frame; this only has
+#: to catch a host API that keeps reporting a dead stream as running. A false positive
+#: tears down a working stream mid-sentence, so the bias is deliberately toward late.
+STALL_SEC = 2.0
 
 # Bounds on the adaptive noise floor. Without them, a stretch of true digital silence
 # drags the floor arbitrarily low and every subsequent block reads as speech.
@@ -52,12 +76,57 @@ def rms_db(block: np.ndarray) -> float:
     return 20.0 * math.log10(float(np.sqrt(np.mean(block**2))) + 1e-9)
 
 
+def refresh_devices() -> bool:
+    """Make PortAudio look at the machine's audio hardware again. True if it did.
+
+    PortAudio takes its device list once, when it initialises, and never looks again.
+    The headset plugged in after launch is not in that list, and neither is the new
+    system default that arrived with it — so `device=None`, which means "whatever the
+    default input is", keeps meaning the default *as it was at startup*. That is
+    precisely the wrong answer for the one case reopening exists to serve: the user
+    plugged something in, and the new default is what they want. Terminating and
+    re-initialising is what sounddevice offers for this, and it is the only thing that
+    does.
+
+    Costs 12.2 ms on this machine (11.5-13.8 ms over six rounds), with a 20.6 ms reopen
+    behind it — small enough to pay on every attempt rather than reason about when it is
+    needed.
+
+    **Only safe when this process has no PortAudio stream open at all**, and the second
+    half of that sentence is the trap. `Pa_Terminate` closes every open stream, and the
+    Python object still holding one is then pointing at freed memory — a use-after-free
+    on the next write or close, which no `except` catches. `Mic.restart` closes its own
+    stream first, but Flow has a *second* PortAudio user: a spoken reply, played through
+    a `RawOutputStream` by `flow/piper.py` and `flow/edge.py`. Only the session can see
+    whether one is playing, which is why `Session._pump_device` holds the whole recovery
+    while Flow is talking rather than this function trying to decide for itself.
+
+    Never raises otherwise. This runs on the recovery path, where the caller already has
+    one failure to report and a second one from the diagnosis would bury it; False here
+    only means the reopen behind it is working from the older list.
+    """
+    try:
+        sd._terminate()
+        sd._initialize()
+        return True
+    except Exception:
+        return False
+
+
 class Mic:
-    """Bounded, non-blocking capture.
+    """Bounded, non-blocking capture, and whether it is still happening.
 
     The queue drops the oldest block when full rather than growing. If the consumer
     stalls (a slow decode, say), memory stays flat and we lose audio instead of
     accumulating an ever-growing backlog — the right trade for R8.
+
+    The second job is `trouble`. A microphone that fails at startup fails loudly, but
+    one that goes away *mid-session* — a headset unplugged, a Bluetooth link dropping,
+    Windows moving the default device out from under an open stream — fails as an
+    absence: the callback simply stops being called. Nothing raises on the session's
+    thread, so this object is where the question "is capture still happening" has to be
+    answerable, and it answers it from PortAudio's own signals rather than from the
+    audio (see `trouble` and `STALL_SEC`).
     """
 
     def __init__(self, device: int | None = None, max_blocks: int = 256) -> None:
@@ -67,11 +136,45 @@ class Mic:
         self._level = -90.0
         self._lock = threading.Lock()
         self.dropped = 0
+        #: Monotonic time of the last block PortAudio handed over, and the whole of the
+        #: liveness check. Written on the PortAudio thread and read on the session's; a
+        #: float store is atomic under the GIL, so this deliberately does *not* take
+        #: `_lock` — the callback must never queue behind a reader.
+        self._last_block = 0.0
+        #: Set by PortAudio's own `finished_callback` when a stream ends without our
+        #: having asked it to. The earliest death signal there is, and the only pushed
+        #: one; `_stopping` is what keeps our own teardown from setting it.
+        self._ended = False
+        self._stopping = False
+        #: What the open stream is called, read once at open time. Recorded rather than
+        #: asked for later because the question is unanswerable exactly when it matters:
+        #: `device_name` has to reach PortAudio, and a device that is being unplugged is
+        #: the case where that fails. A pinned index that reopens onto a different name
+        #: is the one substitution Flow can make without choosing to, and this is what
+        #: lets the session notice and say so.
+        self.opened_name = ""
+        #: How many callbacks arrived with PortAudio's input-overflow flag set: audio
+        #: the hardware threw away before Flow ever saw it. Distinct from `dropped`,
+        #: which is this process's own queue discarding blocks it did receive. Counted
+        #: rather than ignored because invariant 4 does not care which side of the API
+        #: lost the words.
+        self.overflows = 0
 
     def _callback(self, indata, _frames, _time, status) -> None:
         # Runs on the PortAudio thread: no allocation-heavy or blocking work here.
+        #
+        # The timestamp first, and before anything that could go wrong with the block
+        # itself: a block that arrived is proof this stream is still delivering,
+        # whatever else is true of it.
+        self._last_block = time.monotonic()
         if status:
-            pass  # over/underflows are non-fatal; the level meter will show the gap
+            # Over/underflows are non-fatal — the level meter will show the gap — and a
+            # status flag is emphatically *not* how a device announces that it is gone;
+            # there is no such flag. What it does announce is loss, and an input
+            # overflow is audio dropped in the driver, upstream of the queue. Counted
+            # here, said out loud by `Session._pump_overflow`.
+            if status.input_overflow:
+                self.overflows += 1
         block = indata[:, 0].copy() if indata.ndim > 1 else indata.copy()
         with self._lock:
             self._level = rms_db(block)
@@ -89,6 +192,13 @@ class Mic:
         # Ask the device for 16 kHz mono directly and let the driver resample; the
         # local mic is natively 44.1 kHz stereo, and doing it here would mean writing
         # a resampler we do not need.
+        self._ended = False
+        self._stopping = False
+        # Stamped before the stream exists, so a stream that dies between here and its
+        # first callback goes stale on schedule instead of being eternally fresh. The
+        # first block measured 111-266 ms behind the open on this machine, comfortably
+        # inside `STALL_SEC`.
+        self._last_block = time.monotonic()
         self._stream = sd.InputStream(
             device=self._device,
             channels=1,
@@ -96,14 +206,34 @@ class Mic:
             blocksize=BLOCK,
             dtype="float32",
             callback=self._callback,
+            # PortAudio's own "this stream is over", however it got there — including a
+            # host API abandoning a device that has been removed, which raises nowhere.
+            finished_callback=self._finished,
         )
         self._stream.start()
+        self.opened_name = self.device_name
+
+    def _finished(self) -> None:
+        """PortAudio's own end-of-stream, delivered on the PortAudio thread.
+
+        Recorded only when nobody here asked for it, which is what makes it evidence:
+        a stream that finished with no `stop()` behind it finished because the device
+        did. `stop()` claims the flag before it calls into PortAudio, since this fires
+        from inside that call and would otherwise file our own teardown as a fault.
+        """
+        if not self._stopping:
+            self._ended = True
 
     def stop(self) -> None:
         if self._stream is not None:
+            self._stopping = True
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        # Cleared here rather than in `start()` alone, so a Mic that is stopped and left
+        # stopped does not keep reporting the last device it had as though it were open.
+        self._ended = False
+        self.opened_name = ""
 
     def __enter__(self) -> "Mic":
         self.start()
@@ -118,13 +248,69 @@ class Mic:
             return self._level
 
     @property
+    def trouble(self) -> str:
+        """Why capture is not working, in one ASCII phrase — or "" while it is.
+
+        A dead PortAudio stream stops delivering blocks without raising anywhere the
+        session can see, so over a long run this has to be polled (R8). Four questions,
+        cheapest and most certain first, and every one of them reads a signal PortAudio
+        itself produces rather than inferring anything from the audio:
+
+        1. **Is there a stream at all.** Nothing opened yet, or `stop()` closed it.
+        2. **Did PortAudio end it.** `finished_callback` fires when a stream finishes
+           for any reason that was not our own `stop()` — a callback raising
+           `CallbackAbort`, a host API giving up on a device that has been removed.
+        3. **Does it still say it is running.** `Pa_IsStreamActive`, measured at
+           **0.43 us** a call here, which is what makes it affordable on every 30 ms
+           frame rather than on a five-second heartbeat. A raise counts as an answer:
+           a stream whose device is being pulled can throw out of the accessor, and an
+           exception from the stream machinery is a death signal like any other.
+        4. **Is it still delivering.** The backstop for a host API that reports a dead
+           stream as active — see `STALL_SEC`, which times *blocks arriving*, not
+           quiet. Silence is a working microphone in a quiet room.
+
+        A phrase and not a bool because the session has to say what happened, and a
+        note reading "the microphone stopped" with no reason attached is the kind
+        people learn to scroll past. ASCII because it ends up in a note and notes are
+        also printed (`__main__.say`).
+        """
+        stream = self._stream
+        if stream is None:
+            return "capture is not open"
+        if self._ended:
+            return "PortAudio ended the stream"
+        try:
+            if not stream.active:
+                return "the stream stopped running"
+        except Exception as exc:
+            return f"the stream could not be read ({type(exc).__name__})"
+        quiet = time.monotonic() - self._last_block
+        if quiet >= STALL_SEC:
+            return f"no blocks arrived for {quiet:.1f} s"
+        return ""
+
+    @property
     def active(self) -> bool:
         """False if the device went away mid-session (unplugged, driver reset).
 
-        A dead PortAudio stream stops delivering blocks without raising anywhere the
-        session can see, so over a long run this has to be polled (R8).
+        `trouble` asked as a yes/no, for the callers that only need to draw a label
+        with the answer. One implementation, so the pill's `NO INPUT` and the session's
+        recovery can never disagree about whether there is a microphone.
         """
-        return self._stream is not None and bool(self._stream.active)
+        return not self.trouble
+
+    @property
+    def pinned(self) -> int | None:
+        """The device index a person chose, or None for "whatever is default".
+
+        What reopening is allowed to do turns on this. With no pin, the right device
+        after a change is whatever the system now calls default, and following it is
+        the feature — plug in a headset and Flow moves to it. With a pin, the index is
+        an instruction, and quietly opening a different microphone because this one
+        stopped answering would be Flow overruling it in the one direction nobody can
+        check: a recording that keeps going, from somewhere else.
+        """
+        return self._device
 
     @property
     def device_name(self) -> str:
@@ -153,8 +339,31 @@ class Mic:
             return ""
 
     def restart(self) -> None:
+        """Close whatever is left, and open again against the machine as it is now.
+
+        The refresh in the middle is the whole difference between this and
+        `stop(); start()`, and without it the auto-device promise is empty: `device=None`
+        would reopen onto the default *as it was at launch*, which is the one answer
+        guaranteed to be wrong when the reason for reopening is that the hardware
+        changed. A pinned index is re-read from the same fresh list, so `--device 3`
+        keeps meaning index 3 on the machine as it is now — and `opened_name` is what
+        lets the caller notice when index 3 has become a different microphone.
+
+        Between the close and the open, because that is the only window in which
+        `refresh_devices` is safe — read its second paragraph before moving this line.
+        """
         self.stop()
+        self.refresh()
         self.start()
+
+    def refresh(self) -> bool:
+        """`refresh_devices`, reachable through the object the session already holds.
+
+        A method rather than the bare function at the session's call sites, so a fake
+        microphone simply does not have it and the suite never terminates the real
+        PortAudio — the `getattr` idiom `dropped` and `trouble` are read through.
+        """
+        return refresh_devices()
 
     def drain(self) -> list[np.ndarray]:
         """Take every block captured since the last call."""

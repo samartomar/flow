@@ -129,7 +129,16 @@ def main(argv: list[str] | None = None) -> int:
         "--no-lexicon", action="store_true",
         help="ignore the lexicon file without deleting it",
     )
-    ap.add_argument("--device", type=int, default=None, help="input device index")
+    # The pin is worth a sentence because it changes what happens on the worst day. With
+    # no flag, a microphone that goes away mid-session is reopened against whatever is
+    # default by then, which is what somebody plugging in a headset wants. Pinned, the
+    # index is an instruction, and Flow will not quietly start recording through a
+    # different microphone because this one stopped answering.
+    ap.add_argument(
+        "--device", type=int, default=None,
+        help="input device index, pinned: if it goes away mid-session Flow retries this "
+             "index and never substitutes another (default: follow the system default)",
+    )
     ap.add_argument(
         "--no-hotkeys", action="store_true", help="skip global hotkey registration"
     )

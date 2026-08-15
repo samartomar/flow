@@ -202,7 +202,7 @@ is written down.
 | Thread | Started by | Does | Rules |
 |---|---|---|---|
 | main / UI | `Pill.mainloop()` | `Pill._tick()` every 30 ms → poll the foreground → `Session.tick()` → repaint | **The only thread that may touch Tk.** `_tick` re-schedules itself in a `finally`, so an exception cannot break the chain and leave a dead pill on screen. The foreground poll is two user-mode calls and is where `paste_target` comes from — asking at paste time asks after the click. The one thing that stops this thread is the right-click menu, which is a native `TrackPopupMenu` running its own modal loop |
-| PortAudio callback | `Mic.start()` | copies each block into the queue, updates the level | No allocation-heavy or blocking work. Never touches the session — which is exactly why `Mic.level_db` is not what the meter draws: it reports the room whether or not anything is reading the blocks. `Session.level_db` is the honest one |
+| PortAudio callback | `Mic.start()` | copies each block into the queue, updates the level, stamps the arrival time, counts driver-side overflows | No allocation-heavy or blocking work. Never touches the session — which is exactly why `Mic.level_db` is not what the meter draws: it reports the room whether or not anything is reading the blocks. `Session.level_db` is the honest one. The arrival stamp is a bare float store and deliberately takes no lock: the callback must never queue behind a reader, and a float store is atomic under the GIL. A second PortAudio callback, `finished_callback`, fires on the same thread when a stream ends without `Mic.stop()` having asked — the one *pushed* death signal there is |
 | `decode` | `DecodeWorker.__init__` | runs the model | Owns the only model calls. Catches every exception and turns it into an `error` result. `close()` signals **and joins**, bounded by `JOIN_SEC` — signalling alone let it run on past the quit, holding a model and a tier lock |
 | `preload` | `Session.start()` | warms both tiers | Not awaited — a first run includes a model download, and doing it inline froze the UI on the first click. **One at a time**: `start()` runs on every arm, and a thread per arm meant 100 arm/pause cycles during a blocked load left 100 live threads (measured). The gate is "is one running", so a load that failed is retried on the next arm |
 | `hotkeys` | `Hotkeys.start()` | `RegisterHotKey` + `GetMessageW` message loop | `RegisterHotKey` requires the message loop to be on the registering thread. Presses go back through a `queue`, drained on the UI thread. Each action walks an ordered candidate list, and a `hotkeys` entry from `profile.json` is inserted at the **front** of its action's list rather than replacing it — a chosen combo another program already owns must fall back exactly as a shipped one does, or a rebind could leave an action with nothing bound. `hotkey.parse` reads the combo strings and `hotkey.overridden` does the merge; both live here rather than in `flow/profile.py` because this module binds `user32` at import and cannot be reached from a Lite launch, and a second key table on that side of the line is the drift the profile's validators exist to prevent. What it refuses arrives as `Hotkeys.ignored`, printed with the registration report — one ASCII line per entry, naming the entry and what was wrong with it |
@@ -242,7 +242,8 @@ in the headless harnesses. No UI framework is imported in `session.py`.
 def tick(self):
     self._pump_audio()     # drain mic, run the gate, submit partials/finals
     self.pump_results()    # everything not waiting on the microphone
-    self._pump_health()    # device liveness, idle model unload (R8)
+    self._pump_auto_ask()  # P9: a settled draft goes on its own after a pause
+    self._pump_health()    # overflow, device liveness + recovery, idle unload (R8)
 
 def pump_results(self):
     self._pump_decodes()   # take decode results, route them
@@ -280,6 +281,54 @@ undrained — and nothing consumed any of it in between, because the UI skips `t
 disarmed. All three now go at the pause. The fourth road cannot be closed there because it
 is not there yet: a decode already in flight belongs to the session the user stopped, so it
 is refused on arrival by generation and says so.
+
+**`_pump_health` also owns the device going away**, and that is the third liveness
+question the pump asks every frame — after "what did the mic deliver" and "what came back
+from a thread", *is there still a microphone*. `Mic.trouble` answers it from PortAudio's
+own signals only: the `finished_callback` that fires when a stream ends unasked,
+`Pa_IsStreamActive`, an exception out of the accessor, and — as a backstop for a host API
+that reports a dead stream as running — how long it has been since a block arrived
+(`STALL_SEC`, §8). Never from the audio: silence is a working microphone in a quiet room,
+and a status flag is loss rather than death, which is why an input overflow is counted and
+said out loud beside the queue's own drops and changes nothing else.
+
+What follows is one incident: the utterance in flight is finalised and decoded rather
+than dropped, the gate is reset so the next device does not continue the old utterance
+across the missing seconds, the state settles off anything that looks live (and
+`level_db` floors, so the meter does not freeze on the last block that ever arrived),
+and `MIC_RETRIES` reopens are spaced `MIC_RETRY_SEC` apart. Each reopen re-reads the
+machine's hardware first (`audio.refresh_devices`), because PortAudio takes its device
+list once and "the current default" is otherwise the default as it was at launch —
+`Session.start()` does the same before it opens, so the re-arm the give-up path offers is
+genuinely fresh rather than a second helping of the stale answer. A
+reopen that lands is compared against the calibration's device the same way an arm is —
+unplug a USB mic and the laptop array takes over, and the stored numbers describe
+neither — and, under `--device N`, against the name the index used to have, since indexes
+move when hardware does. A reopen that never lands ends in the state a failed *start*
+ends in: `mic.stop()`, `_mic_started` false, an error naming what happened, and a
+`disarm` event, because `armed` belongs to the UI thread and a session that has stopped
+capturing cannot take a pill off green by itself. Deliberately `mic.stop()` and not
+`pause()` — `pause()` bumps the capture generation, which would refuse the decode of the
+words the loss just cut short.
+
+**The whole recovery is held while Flow is talking**, and that guard is not politeness.
+`refresh_devices` is `Pa_Terminate` + `Pa_Initialize`, and `Pa_Terminate` closes every
+stream *this process* has open — Flow has a second PortAudio user, the spoken reply
+`flow/piper.py` and `flow/edge.py` play through a `RawOutputStream`, which would be left
+as freed memory under whoever is writing to it. A reopen mid-reply also buys nothing,
+since `_pump_audio` discards every block while Flow talks. So the incident stays open,
+the pill stays off green, and the attempts run when the reply ends; `speaking` is bounded
+by the reader, so this cannot wait forever. `Session.talking` is the predicate, split out
+of `hearing` because the editor half of that property holds no stream and this half can.
+
+**The loss is announced only once the immediate attempt has failed**, and that is a
+decision about how many true sentences a moment deserves rather than a decision to keep
+quiet. The commonest version of this is the default moving, which ends inside one frame;
+announcing first would put two notes on a surface that shows one at a time, the second
+overwriting the first within 30 ms, and the *first* is the one carrying the fact the user
+needs — how much of the utterance they were part-way through was cut. So the cut clause
+rides on whichever note *ends* the incident, a blip produces one complete sentence, and a
+test asserts that no incident ever resolves saying nothing.
 
 `Session.events()` drains what happened. The UI never reads session internals; it reacts to
 the event stream.
@@ -368,6 +417,15 @@ written by the PortAudio callback, which knows nothing about the echo guard, so 
 spoken reply it tracks Flow's own voice coming back through the speakers — see the
 [Verification](#verification) row for what that measured.
 
+**A fourth deafness is not on that table, because it is not a wait: the device being
+gone.** `Pill._bar_label` reads `Mic.active` ahead of the state and says `NO INPUT`, and
+it outranks everything below it — `SPEAKING` and `EDITING` promise the microphone is
+coming back on its own, and this one does not. The state machine agrees rather than
+being overruled: `_pump_device` settles the session off `LISTENING` in the frame the loss
+is noticed, so the label and the colour cannot disagree about whether Flow is capturing.
+Before that, an unplug mid-utterance left `LISTENING` standing indefinitely — the gate
+could not close without blocks to close it — and green means "capturing speech".
+
 ### Events
 
 | Kind | Payload | UI response |
@@ -380,6 +438,9 @@ spoken reply it tracks Flow's own voice coming back through the speakers — see
 | `reply` | the CLI's answer | its own colour, plus spoken aloud |
 | `mode` | `dictate` / `converse` | pill badge and chip label (an accompanying `note` is what the user reads) |
 | `drop` | a rejected segment with its evidence | shown as a note — P2 is that a rejection is never *silent* |
+| `conversation` | — | the card clears; the note that follows lands on the cleared card |
+| `send` | `""` or `enter` | the same button the Send chip presses, arrived at by a spoken trigger |
+| `disarm` | why | `Pill.armed` goes false, exactly as if the pill had been clicked off. The only way a session that has stopped capturing can stop a surface claiming otherwise — `armed` belongs to the UI thread. Emitted once, after the `error` that names the reason, when the input device did not come back |
 
 ## 5. Decoding
 
@@ -1434,7 +1495,9 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | `MAX_UTTERANCE_SEC` | 24.0 s | Whisper pads to one 30 s mel window, so cost is flat below it and climbs past it. Cut before the boundary keeps latency constant in a long session |
 | `PARTIAL_MIN_GROWTH_SEC` | 0.7 s | Paired with the worker-idle check, this is what bounds partial latency |
 | `IDLE_UNLOAD_SEC` | 300 s | Release the models, keep the mic. Releasing the mic would leave the app unable to hear its own wake-up |
-| `MIC_CHECK_SEC` | 5 s | A dead PortAudio stream stops delivering blocks without raising anywhere the session can see. What it reopens onto may not be what went away — unplug a USB mic and the laptop array takes over — so the reopened device is compared against the one the profile was calibrated through, and a mismatch is said once |
+| `STALL_SEC` | 2.0 s | The liveness *backstop*: how long PortAudio may go without handing over a block before the stream counts as dead whatever it says about itself. Not a silence heuristic — what is timed is delivery, and a quiet room delivers blocks at exactly the rate a loud one does. Measured here: the gap between callbacks is a median **63.0 ms** (p99 79 ms, max 79 ms) idle, and a worst case of **453 ms** over ~109 s under four CPU-bound threads standing in for a decode. 2.0 s is 4.4x that worst case and 31 block periods; a false positive tears down a working stream mid-sentence, so the bias is toward late. The actual detector is `Pa_IsStreamActive`, polled every frame at **0.43 us** a call |
+| `MIC_RETRY_SEC` | 1.0 s | Spacing between reopen attempts. Measured: `sd._terminate()` + `sd._initialize()` costs **12.2 ms** (11.5-13.8 over six rounds), the open behind it **20.6 ms** (20.1-23.0), and the first block arrives **111-266 ms** after the open begins — a full `Mic.restart()` on real hardware measured **103 ms**. So a second is roughly 4x the worst end-to-end cost of an attempt: long enough that a retry is a fresh chance at a device still settling rather than the same failure re-timed, short enough that the whole ordeal fits inside `AUTO_ASK_SEC`. Spent as a deadline the pump checks, never as a sleep |
+| `MIC_RETRIES` | 3 | Attempts, counting the immediate one. The first covers the commonest failure, which is not a device dying but the *default moving* — a headset plugged in, the old stream orphaned, the replacement already there. The other two cover a device that is coming back but is not back yet (USB re-enumeration, a Bluetooth re-pair). Past ~2 s a device is not settling, and the honest end is the disarmed state a failed startup produces: pill off, reason on screen, clicking it opens fresh against whatever is plugged in by then. This replaced a 5 s heartbeat that reopened *forever*, one note and one error every five seconds, over a pill still claiming to be armed |
 | `FORCE_NEXT_TTL_SEC` | 30 s | A Refine/Continue chip means "the next thing I say"; after this long the next thing someone says is a different thought. The chips also toggle, because a one-way door that lasts 30 s reads as the app being stuck |
 | `AUTO_ASK_SEC` | 4 s | Converse mode only. Measured: the pauses a speaker leaves between separate spoken items run 1.4–3.3 s (median 2.5 s) on the one recording where every item was located, and each gap also contains a spoken item number, so real silence is shorter — under ~3.3 s fires mid-thought. R5 still holds where it matters: pasting into a window is irreversible and stays manual, asking is not |
 | `ui.SENT_LINGER_SEC` | 4 s | How long the bubble holds what a dictate-mode Send just handed over, with the chip that puts it back. Deliberately **not** `AUTO_ASK_SEC`, which is also 4 s and is a different four seconds: that one is how long a settled draft waits before asking itself, this is how long words stay recoverable after they have gone, and either could move without the other. The number it replaces was zero — the bubble was withdrawn on Send, so a Send that went nowhere and a Send that worked left the same empty screen |
@@ -1655,6 +1718,20 @@ policy here; it is enforced by absence.
    separates a suspension from a fault. The editor's is the one somebody would otherwise
    diagnose as a broken microphone, since they caused it themselves and by typing rather
    than by pressing anything marked "mute".
+
+   **The involuntary deafness is the device going away mid-session**, and it is where
+   both halves of this invariant land at once. The utterance in flight is *decoded*, not
+   discarded: those are seconds somebody actually said, Whisper handles a truncated
+   utterance, and the same call is already made at the 24 s cut and when a spoken reply
+   begins. The note says the utterance was cut, so a decode that ends mid-word is
+   explained rather than mysterious. What is *not* promised is the audio spoken during
+   the outage — nothing recorded it, and the note cannot report words that reached no
+   microphone. On the far side of the API, PortAudio's own input-overflow flag is now
+   counted and reported too (`Mic.overflows`), which used to be the one loss in this app
+   that nothing anywhere read: `Mic.dropped` is Flow's queue discarding blocks it
+   received, and this is the driver discarding blocks Flow was never offered. No duration
+   is claimed for it, because the flag reports that a buffer was lost and not how long it
+   was.
 5. **Nothing is pasted without an explicit Send.** Stopping speech produces a held draft,
    and text never reaches another window on its own. Converse mode is the one narrow
    exception to the broader claim this used to make: a settled draft may go to the CLI

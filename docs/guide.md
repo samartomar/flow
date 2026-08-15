@@ -7,7 +7,7 @@ spoken command, both modes, and what is stored where.
 ## Contents
 
 - [Install, in detail](#install) · [Requirements](#requirements)
-- [Running it](#running-it) — [flags](#flags), [hotkeys](#hotkeys), [the pill](#the-pill-and-the-bubble)
+- [Running it](#running-it) — [flags](#flags), [the microphone going away](#if-the-microphone-goes-away-mid-session), [hotkeys](#hotkeys), [the pill](#the-pill-and-the-bubble)
 - [Dictate mode](#dictate-mode) — [saying the send](#sending-it-without-touching-anything)
 - [Talking to the draft](#talking-to-the-draft) — [local corrections](#local-corrections), [rewrites](#rewrites-via-the-agent-cli)
 - [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [taking the answer](#taking-the-answer), [voices](#choosing-the-voice)
@@ -224,7 +224,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one) |
 | `--lexicon PATH` | personal terms file (default `~/.flow/lexicon.txt`) |
 | `--no-lexicon` | ignore that file without deleting it |
-| `--device N` | input device index; list them with `scripts/devices.py` |
+| `--device N` | input device index; list them with `scripts/devices.py`. **Pinned**: if it goes away mid-session Flow retries *this* index and never substitutes another — see [When the microphone goes away](#if-the-microphone-goes-away-mid-session) |
 | `--arm` | start listening immediately, no click needed |
 | `--no-paste` | print the draft to stdout instead of pasting it |
 | `--no-hotkeys` | skip global hotkey registration |
@@ -245,6 +245,79 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 If capture cannot start — no microphone, device held exclusively by another app, a bad
 `--device` index — the pill stays slate and the reason appears in a red bubble. It will
 not show a green pill that is quietly recording nothing.
+
+### If the microphone goes away mid-session
+
+The same promise, kept for the harder case: you unplug the headset, the Bluetooth link
+drops, or Windows moves the default device while you are talking. A dead capture stream
+does not raise anything — it simply stops delivering audio — so Flow watches PortAudio's
+own signals every frame and reacts within about 30 ms.
+
+1. **The pill leaves green immediately** and the label reads `NO INPUT`. It never sits
+   green over a microphone that is gone, and the level meter drops to flat rather than
+   freezing on the last thing it heard.
+2. **Whatever you had already said is decoded, not thrown away.** The utterance is cut
+   where the audio stopped and goes to the model as it stands, so it lands in the draft
+   as usual. The cut can end mid-word — the same trade the 24-second utterance cut makes
+   — and the note tells you how much it was. Nothing is discarded quietly.
+3. **Flow tries to reopen, three times, about a second apart.** The first attempt is
+   immediate, because the commonest version of this is not a device dying but the
+   *default moving* — you plugged a headset in, and the replacement is already there.
+   Each attempt makes PortAudio re-read the machine's hardware first, which is the only
+   way a device that appeared after launch can be seen at all.
+4. **If it comes back**, one note says so, names the device that answered, and listening
+   resumes exactly where it was. Nothing is disarmed and nothing is lost:
+
+   > `microphone stopped and reopened on 'Headset (Poly BT700)' - listening again; the
+   > 1.3 s already captured is being decoded`
+
+   When the first attempt works — which is the usual outcome — that line is the *only*
+   thing said, because one complete sentence beats two half ones on a surface that shows
+   one line at a time. If the first attempt fails, the loss is announced on its own first:
+
+   > `microphone stopped - PortAudio ended the stream; reopening on the current default`
+
+5. **If it does not come back**, Flow stops listening and says so, in the same slate-pill
+   state a failed start leaves:
+
+   > `could not reopen the microphone after 3 tries (PortAudio ended the stream) -
+   > stopped listening; click the pill to try again`
+
+   Click the pill (or press the Listen hotkey) and it opens capture fresh against
+   whatever is plugged in by then. If a draft was held, Flow also names the ways out that
+   still work without voice — the Send hotkey, the Edit chip — because every spoken
+   rescue needs a decode and a decode needs a microphone.
+
+**`--device N` changes steps 3 to 5, deliberately.** Without it, reopening follows the
+system default, so plugging in a headset moves Flow to it. With it, the index is an
+instruction: Flow retries that index and will not quietly start recording through a
+different microphone because this one stopped answering. If the index comes back as a
+*different* device — indexes are handed out in enumeration order, so unplugging anything
+below yours shifts them — a second note names both, so you can decide:
+
+> `--device 3 is now 'Webcam Mic', not 'USB Condenser' - indexes move when hardware does;
+> relaunch with the index you meant if this is wrong`
+
+If it never comes back, the message names the index rather than silently picking another,
+and says what the two ways forward are:
+
+> `--device 3 did not come back after 3 tries (OSError: Invalid device [PaErrorCode
+> -9996]) - stopped listening. Flow does not move to another microphone behind a pinned
+> index; click the pill to try 3 again, or relaunch without --device to follow the system
+> default`
+
+The same holds while you are typing in the hand editor and while a reply is being read
+aloud. Those are deliberate deafnesses and both say so, but neither hides a device that
+has actually gone: the pill leaves green and reads `NO INPUT` from the first frame either
+way, and a spoken reply is never interrupted by the microphone dying, because the answer
+has nothing to do with whether Flow can still hear you.
+
+The one difference is that the *reopen attempts* wait for a reply to finish before they
+run. Two reasons agree on that: Flow is deaf while it talks, so a microphone reopened
+mid-reply would be feeding the bin — and reopening has to make PortAudio re-read the
+machine's hardware, which closes every audio stream this process has open, including the
+one the reply is playing through. Nothing is skipped; it is deferred by the length of the
+answer, and the retry budget is spent afterwards exactly as it would have been.
 
 ### Hotkeys
 
@@ -1183,6 +1256,18 @@ tracked at all, and which parts of it are deliberately not.
   is tight.
 - **~848 MB installed**, or ~742 MB after `scripts/slim.py --apply`. The floor is
   `ctranslate2` (60 MB), numpy (42 MB) and the two models (141 + 464 MiB, measured).
+- **A microphone that comes back gets three tries and about two seconds.** When the
+  device goes away mid-session Flow reopens immediately and twice more a second apart,
+  then stops listening and says so ([the full sequence](#if-the-microphone-goes-away-mid-session)).
+  A Bluetooth headset that takes longer than that to re-pair will not be picked up on its
+  own — click the pill and it opens fresh against whatever is connected by then. Retrying
+  for longer was declined on purpose: a pill that sits there reconnecting for half a
+  minute tells you less than one that has gone off and named the reason.
+- **The gap in a cut utterance is not recoverable.** The audio captured before the device
+  died is decoded, but whatever was said *during* the outage was never recorded by
+  anything, so a sentence spoken across an unplug arrives with its middle missing. The
+  note says the utterance was cut; it cannot say what you said into a microphone that
+  was not there.
 - **Speaking for more than 24 s without a pause can split a word.** Whisper decodes
   inside a single 30 s window, so an utterance is cut and committed before that boundary
   to keep latency flat. The cut lands on an audio block, not on a word, so continuous

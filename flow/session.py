@@ -301,8 +301,41 @@ PARTIAL_MIN_GROWTH_SEC = 0.7
 #: mic too): releasing it would make the app unable to hear its own wake-up.
 IDLE_UNLOAD_SEC = 300.0
 
-#: How often to check that the input device is still alive.
-MIC_CHECK_SEC = 5.0
+#: How long to wait between attempts to reopen a microphone that went away.
+#:
+#: Measured on this machine, not chosen. Terminating and re-initialising PortAudio so it
+#: sees the hardware as it is now costs **12.2 ms** (11.5-13.8 over six rounds), opening
+#: the stream behind it **20.6 ms** (20.1-23.0), and the first block arrives **111-266 ms**
+#: after the open begins. So an attempt that is going to work is over in about a tenth of
+#: a second, and a second of waiting is roughly four times the worst of that end to end —
+#: long enough that the next attempt is a fresh chance at a device still settling rather
+#: than the same failure re-timed, and short enough that the whole ordeal fits inside the
+#: `AUTO_ASK_SEC` pause a converse user already sits through.
+#:
+#: Sleeping is not how the wait is spent: the retry is a deadline the pump checks, so the
+#: UI keeps drawing at 30 ms and everything else in `tick()` keeps running.
+MIC_RETRY_SEC = 1.0
+
+#: How many reopen attempts, counting the immediate one. Three, and the count is an
+#: argument about what each attempt is for rather than a round number:
+#:
+#: 1. **Now**, in the frame the loss is noticed. The commonest real failure is not a
+#:    device dying but the *default moving* — a headset plugged in, Windows switching to
+#:    it, the old stream orphaned. The replacement is already there, so this attempt
+#:    costs a tenth of a second and usually ends the incident before the user has
+#:    finished looking down at the pill.
+#: 2. **and 3. A second and two seconds later**, for the device that is coming back but
+#:    is not back yet: a USB endpoint re-enumerating, a Bluetooth headset re-pairing
+#:    after a dropout.
+#:
+#: Past that, waiting stops being honesty. A device that has not returned in two seconds
+#: is not settling, and the truthful end state is the one a failed *startup* already
+#: produces: the pill goes off, the reason is on screen, and clicking it tries again
+#: against whatever is plugged in by then. That is a better offer than a pill sitting
+#: there retrying forever while its owner wonders whether it is listening — which is
+#: exactly what the five-second health check used to do, every five seconds, for as long
+#: as the session lasted.
+MIC_RETRIES = 3
 
 #: How long `close()` waits for a thread it owns before abandoning it. Every wait on the
 #: quit path is bounded, because the two threads being waited on are the ones with no
@@ -372,7 +405,26 @@ CONVERSE = "converse"
 class Event(NamedTuple):
     kind: str  # partial | draft | state | note | error | reply | mode | drop
     #:                | conversation - the thread and the reply were cleared (item 64)
+    #:                | disarm - capture has stopped and cannot restart itself, so the
+    #:                  surface that owns "armed" has to stop claiming it
     text: str
+
+
+def plain(text: str) -> str:
+    """Whatever this is, in characters a legacy console can print.
+
+    Every reason that reaches a device note is either one of `audio.Mic.trouble`'s own
+    phrases — ASCII by construction — or text written by PortAudio, by a driver, or by
+    the machine's own device names. The second kind is not hypothetical on a computer
+    that is not in English: `Mikrofon (Realtek(R) Audio)` is fine, a name with a typographic
+    apostrophe in it is not. Notes are ASCII for the reason `__main__.say` gives, since
+    a note is also a thing that gets printed and a cp437 console cannot encode what it
+    cannot encode.
+
+    Substitutes rather than strips, so a mangled character reads as one lost character
+    instead of two words having silently run together.
+    """
+    return text.encode("ascii", "replace").decode("ascii")
 
 
 class Activity(NamedTuple):
@@ -819,8 +871,26 @@ class Session:
         #: on screen under their cursor.
         self._edit_opened = ""
         self._last_activity = time.perf_counter()
-        self._last_mic_check = time.perf_counter()
         self._mic_started = False
+        #: What the microphone is doing wrong, while it is doing something wrong. "" the
+        #: rest of the time, which is also what says whether an incident is open — one
+        #: fact, so a half-recovered state cannot exist.
+        self._mic_trouble = ""
+        #: Reopen attempts spent on the incident that is open.
+        self._mic_tries = 0
+        #: When the next attempt may run (`perf_counter`). Zero means "this frame".
+        self._mic_next_try = 0.0
+        #: Seconds of speech the loss cut short, waiting to be said once — see
+        #: `_cut_clause`, and `_pump_device` for why it rides on the note that *ends* the
+        #: incident rather than on the one that opens it.
+        self._mic_cut = 0.0
+        #: What the stream was called before the loss, so a reopen can say when it landed
+        #: on something else. Taken from `Mic.opened_name`, which reopening overwrites.
+        self._mic_was = ""
+        #: PortAudio's own overflow count, as last seen. Its growth is audio the driver
+        #: threw away upstream of the queue — a different loss from `_last_mic_dropped`
+        #: below, and one nothing used to read at all.
+        self._last_mic_overflows = getattr(self.mic, "overflows", 0)
         #: Blocks the microphone queue threw away, as observed by this session. The
         #: mic's own counter is the source; this one survives a device that brings a
         #: fresh counter with it, and is the number the diagnostics trace wants.
@@ -873,8 +943,26 @@ class Session:
         with self._lifecycle:
             if self._closed:
                 raise RuntimeError("this session is closed")
+        # Let PortAudio see the machine again before the stream is opened, so that an
+        # arm — including the re-arm the give-up path offers — really does open against
+        # the current default rather than the default as it was at launch. Arming is one
+        # of only two moments this is safe: Flow's own input stream is certainly closed,
+        # and the guard below covers the other holder of a PortAudio stream, a spoken
+        # reply. `getattr` because a fake microphone has no `refresh`, which is exactly
+        # what keeps the suite from terminating the real PortAudio 1 800 times.
+        again = getattr(self.mic, "refresh", None)
+        if callable(again) and not self.talking:
+            again()
         self.mic.start()
         self._mic_started = True
+        # Arming is the fresh start the give-up path promises, so nothing about the last
+        # incident survives into this one: a second loss is announced as a second loss,
+        # and the retry budget is whole again.
+        self._mic_trouble = ""
+        self._mic_tries = 0
+        self._mic_next_try = 0.0
+        self._mic_was = ""
+        self._mic_cut = 0.0
         self._last_activity = time.perf_counter()
         self._check_calibrated_device()
         self._warm()
@@ -1010,7 +1098,15 @@ class Session:
                 return
             self._closed = True
             preload = self._preload_thread
-        self.mic.stop()
+        try:
+            self.mic.stop()
+        except Exception:
+            # A device that has been pulled out can throw on the way closed, and the
+            # quit path is the worst place in the app to let it: everything below this
+            # line is teardown that has to happen anyway, and a raise here leaves the
+            # decode thread, the CLI subprocess and the speech host alive behind a
+            # window that will not go away. The same reasoning as the bounded joins.
+            pass
         self._mic_started = False
         self._cancel.set()
         self.worker.close()
@@ -1147,9 +1243,18 @@ class Session:
         decoration — "busy, still listening" and "busy, and deaf" are different promises
         to the user, and only the second one means *stop talking*.
         """
-        return not (
-            (self.speaker is not None and self.speaker.speaking) or self.editing
-        )
+        return not (self.talking or self.editing)
+
+    @property
+    def talking(self) -> bool:
+        """Whether a spoken reply is playing right now.
+
+        Half of `hearing`, named on its own because the two halves have different
+        consequences beyond deafness: the hand editor holds nothing, and a reply may be
+        holding a PortAudio output stream (`flow/piper.py`, `flow/edge.py`) that the
+        device-recovery path must not terminate underneath it.
+        """
+        return self.speaker is not None and bool(self.speaker.speaking)
 
     @property
     def level_db(self) -> float:
@@ -1161,8 +1266,15 @@ class Session:
         the speakers. Measured: with the guard discarding all 30 blocks of a reply, the
         meter still read 83% of full scale — eighteen bars dancing to prove Flow was
         listening at the one moment it was guaranteed not to be.
+
+        Floored again while the device is in trouble, which is the same defect arriving
+        by the other road. `Mic._level` is whatever the last block that ever arrived
+        measured, so a stream that stops mid-word leaves the meter frozen at that word's
+        loudness — bars claiming to hear somebody for the whole two seconds a recovery
+        takes. Read off the incident rather than by asking the mic again, so this costs
+        nothing on the 30 ms frame: `_pump_device` has already asked, once, this tick.
         """
-        if not self.hearing:
+        if not self.hearing or self._mic_trouble:
             return DEAF_DB
         return self.mic.level_db
 
@@ -1264,22 +1376,7 @@ class Session:
         if not self.draft.text:
             self._said_exits = False
         self._pump_overflow()
-
-        if now - self._last_mic_check >= MIC_CHECK_SEC:
-            self._last_mic_check = now
-            if self._mic_started and not self.mic.active:
-                self._emit("note", "input device went away — restarting capture")
-                try:
-                    self.mic.restart()
-                except Exception as exc:
-                    self.diag.write("device", ok=False, reason="reopen-failed")
-                    self._emit("error", f"could not reopen the mic: {exc}")
-                else:
-                    self.diag.write("device", ok=True, reason="reopened")
-                    # A device that went away is often replaced by a different one —
-                    # the USB mic is unplugged and the laptop array takes over — and
-                    # the reopened stream is calibrated for neither.
-                    self._check_calibrated_device()
+        self._pump_device()
 
         idle = now - self._last_activity
         if (
@@ -1334,6 +1431,249 @@ class Session:
         # Rebased even when it went backwards: a reopened device brings a fresh counter,
         # and counting that as recovered audio would be the opposite of the truth.
         self._last_mic_dropped = raw
+
+        # The other side of the same API, and the half nothing used to read. `dropped` is
+        # this process throwing blocks out of a full queue; `overflows` is PortAudio
+        # saying the *driver* did, upstream, before Flow was offered them. No amount is
+        # said because none is known — the flag reports that a buffer was lost, not how
+        # long it was — and inventing one from the block size would be a number with
+        # nothing behind it.
+        blown = getattr(self.mic, "overflows", 0)
+        if blown > self._last_mic_overflows:
+            n = blown - self._last_mic_overflows
+            self.diag.write("overflow", n=n, reason="device")
+            self._emit(
+                "note",
+                f"the input device dropped {n} buffer{'s' if n != 1 else ''} - "
+                "some audio never reached Flow",
+            )
+            self._say_exits()
+        self._last_mic_overflows = blown
+
+    # -- the device going away mid-session ---------------------------------
+
+    def _mic_reason(self) -> str:
+        """One ASCII phrase for what the input device is doing wrong, or "".
+
+        `getattr` because `Mic` is injectable and every fake in the suite predates
+        `trouble` — the same reason `_pump_overflow` asks for `dropped` that way. A mic
+        that only knows `active` still gets an answer, and it is the answer this check
+        had to work from before there was a better one.
+        """
+        ask = getattr(self.mic, "trouble", None)
+        if ask is not None:
+            return plain(str(ask))
+        return "" if getattr(self.mic, "active", True) else "the stream stopped running"
+
+    def _pump_device(self) -> None:
+        """Notice a dead capture stream within a frame, and try to get it back.
+
+        **What this replaced.** The check ran on a five-second heartbeat and did one
+        thing: reopen. So an unplugged headset left the pill sitting on `LISTENING` —
+        green, which R13 spends on "capturing speech" — for up to five seconds with
+        nothing arriving. Worse if the device died *mid-utterance*, which is the shape a
+        Bluetooth dropout actually has: `_pump_audio` drains an empty queue, the gate
+        never sees the quiet that would close it, `_finalise` is never reached, and the
+        state stays `LISTENING` **permanently**. The captured audio sat in `_utter`
+        undecoded, and if the device did come back the next blocks were concatenated
+        straight onto it, so one utterance spanned the gap with the missing seconds
+        spliced out. And the reopen was unbounded: a device that was really gone
+        produced a note plus an error every five seconds for the rest of the session,
+        forever, while the pill claimed to be armed.
+
+        **The shape now.** Detection every frame, because `Pa_IsStreamActive` costs
+        0.43 us and a five-second heartbeat was only ever a guess that it was expensive.
+        Then one incident with `MIC_RETRIES` attempts spaced `MIC_RETRY_SEC` apart, and
+        exactly two ways out: back to listening, or the same honest disarmed state a
+        failed startup produces. Every incident says at least one thing, and the shortest
+        one says exactly one.
+
+        **The loss is announced only once the immediate attempt has failed**, which is a
+        decision about how many true sentences a moment deserves rather than a decision
+        to keep quiet. The commonest version of this is not a device dying but the
+        default moving, and that ends inside one frame: announcing the loss first would
+        put two notes on a surface that shows one at a time, the second overwriting the
+        first within 30 ms, and the *first* is the one carrying the fact the user
+        actually needs — that the utterance they were part-way through was cut. So the
+        cut rides with whichever note ends the incident, and a blip produces one complete
+        sentence instead of half of two.
+
+        Silent between the later attempts, deliberately: the loss has been announced by
+        then and the whole ordeal is over in about two seconds, so a note per attempt
+        would be three lines about one event.
+        """
+        if not self._mic_started:
+            # Deliberately paused, or already given up on. `pause()` is how the user
+            # says "stop capturing", and a health check that helpfully reopened it would
+            # be arguing with them.
+            return
+        if not self._mic_trouble:
+            reason = self._mic_reason()
+            if not reason:
+                return
+            self._begin_device_loss(reason)
+        if self.talking:
+            # Held, not spent, and for two reasons that agree. Reopening mid-reply buys
+            # nothing — `_pump_audio` discards every block while Flow talks, so the
+            # freshly opened device would be feeding the bin. And reopening has to
+            # terminate PortAudio to see the machine as it is now, which closes *every*
+            # stream in the process — including the `RawOutputStream` the reply is
+            # playing through, leaving `flow/piper.py` holding freed memory. So the
+            # incident stays open, the pill stays off green, and the attempts run the
+            # moment the reply ends. Bounded, because `speaking` is: the reader enforces
+            # a ceiling on it precisely so a wedged host cannot leave Flow deaf.
+            return
+        if time.perf_counter() < self._mic_next_try:
+            return
+        self._retry_device()
+
+    def _begin_device_loss(self, reason: str) -> None:
+        """Stop looking live, keep the words, and open the incident.
+
+        Order matters here and it is the order of what the user loses if it goes wrong.
+
+        **The utterance in flight is decoded, not discarded.** Those are seconds of
+        speech somebody actually said, and invariant 4's one forbidden outcome is losing
+        words quietly. Whisper decodes a truncated utterance perfectly well — that is
+        already the bargain `MAX_UTTERANCE_SEC` strikes at 24 s, where the cut lands on
+        an audio block rather than on a word — and the same call is already made one
+        pump along, where speech in flight when a spoken reply begins is committed
+        rather than dropped. Discarding would mean a note saying "N seconds of what you
+        just said is gone", which is a worse sentence to have to write and an
+        unrecoverable one to read. The note says the utterance was cut, so a decode that
+        ends mid-word is explained rather than mysterious.
+
+        **The gate is reset behind it.** Whatever device answers next is a different
+        recording, and letting the old utterance stay open would glue the two together
+        with the dead seconds silently removed — which is precisely the splice the old
+        code produced.
+
+        **Then the state settles**, which is what takes the pill off green inside one
+        30 ms frame. `_settle_state` and not `IDLE`, because a CLI call in flight is
+        still in flight and a held draft is still held; losing the microphone is not a
+        reason to lie in the other direction.
+        """
+        self._mic_trouble = reason
+        self._mic_tries = 0
+        self._mic_next_try = 0.0  # the first attempt is this frame
+        self._mic_was = plain(getattr(self.mic, "opened_name", "") or "")
+        self.diag.write("device", ok=False, reason="lost")
+
+        self._mic_cut = self._utter_sec()
+        if self._utter:
+            self._finalise()
+        self.gate.reset()
+        self._settle_state()
+
+    def _cut_clause(self) -> str:
+        """What was said into the device before it stopped, once, on the note that ends
+        the incident. Drained, so two incidents never claim the same seconds."""
+        cut, self._mic_cut = self._mic_cut, 0.0
+        return f"; the {cut:.1f} s already captured is being decoded" if cut else ""
+
+    def _announce_loss(self) -> None:
+        """Said after the immediate attempt fails — see `_pump_device` for why then."""
+        pinned = getattr(self.mic, "pinned", None)
+        where = (f"retrying device {pinned}" if pinned is not None
+                 else "reopening on the current default")
+        self._emit("note", plain(
+            f"microphone stopped - {self._mic_trouble}; {where}{self._cut_clause()}"))
+
+    def _retry_device(self) -> None:
+        """One attempt. Ends the incident, or announces it and schedules the next."""
+        self._mic_tries += 1
+        try:
+            self.mic.restart()
+            # Opened is not the same as working: a stream can be handed back already
+            # finished, and a fake that only flips `active` answers here too.
+            failed = self._mic_reason()
+        except Exception as exc:
+            failed = plain(f"{type(exc).__name__}: {exc}")
+        if not failed:
+            self._device_recovered()
+            return
+        if self._mic_tries >= MIC_RETRIES:
+            self._give_up_on_device(failed)
+            return
+        if self._mic_tries == 1:
+            self._announce_loss()
+        self._mic_next_try = time.perf_counter() + MIC_RETRY_SEC
+
+    def _device_recovered(self) -> None:
+        """Back to the armed state the user was already in, and say so briefly."""
+        was, self._mic_was = self._mic_was, ""
+        tries, self._mic_tries = self._mic_tries, 0
+        self._mic_trouble = ""
+        self.diag.write("device", ok=True, reason="reopened", n=tries)
+        now = plain(getattr(self.mic, "opened_name", "") or "")
+        # One phrasing for both positions. After a loss note it reads as the follow-up it
+        # is; with no loss note in front of it — the blip that recovered inside a frame —
+        # it is still the whole story, because "stopped and reopened" says both halves.
+        self._emit("note", f"microphone stopped and reopened"
+                           f"{f' on {now!r}' if now else ''} - listening again"
+                           f"{self._cut_clause()}")
+        pinned = getattr(self.mic, "pinned", None)
+        if pinned is not None and was and now and was != now:
+            # A pin is an index, and indexes are handed out in enumeration order: unplug
+            # something below this one and the number now names a different microphone.
+            # Flow did not choose that substitution, but it happened, and the only honest
+            # thing left is to say whose voice is being recorded now.
+            self._emit(
+                "note",
+                f"--device {pinned} is now {now!r}, not {was!r} - indexes move when "
+                "hardware does; relaunch with the index you meant if this is wrong",
+            )
+        # A device that went away is often replaced by a different one — the USB mic is
+        # unplugged and the laptop array takes over — and the reopened stream is
+        # calibrated for neither.
+        self._check_calibrated_device()
+
+    def _give_up_on_device(self, last: str) -> None:
+        """End where a failed startup ends: disarmed, with the reason on screen.
+
+        `mic.stop()` and not `pause()`, and the difference is the utterance this incident
+        cut short. `pause()` bumps the capture generation, which is how a deliberate stop
+        refuses results decoded from before it — and the decode of those cut-off words is
+        in flight *right now*. Pausing here would throw away the one thing this whole
+        path was careful to keep.
+
+        The pill is asked to disarm rather than told: `armed` belongs to the UI thread,
+        and this is the only way for a session that has stopped capturing to stop a
+        surface claiming otherwise. Re-arming goes through `start()` like any other arm,
+        so it opens against the device list as it is by then — which for an unpinned mic
+        means whatever is default when the user gets round to clicking.
+        """
+        pinned = getattr(self.mic, "pinned", None)
+        tries, self._mic_tries = self._mic_tries, 0
+        self._mic_trouble = ""
+        self._mic_was = ""
+        self.diag.write("device", ok=False, reason="gave-up", n=tries)
+        try:
+            self.mic.stop()
+        except Exception:
+            pass  # already gone; there is nothing left to close
+        self._mic_started = False
+        self._settle_state()
+        kept = self._cut_clause()
+        if pinned is not None:
+            self._emit(
+                "error",
+                f"--device {pinned} did not come back after {tries} tries ({last}) - "
+                f"stopped listening{kept}. Flow does not move to another microphone "
+                f"behind a pinned index; click the pill to try {pinned} again, or "
+                "relaunch without --device to follow the system default",
+            )
+        else:
+            self._emit(
+                "error",
+                f"could not reopen the microphone after {tries} tries ({last}) - "
+                f"stopped listening{kept}; click the pill to try again",
+            )
+        # A held draft with nothing left to hear it is the state invariant 4 grew its
+        # second half for: every spoken rescue needs a decode, a decode needs audio, and
+        # there is none. Name the ways out that still work.
+        self._say_exits()
+        self._emit("disarm", "microphone")
 
     def _utter_sec(self) -> float:
         return len(self._utter) * BLOCK / SAMPLE_RATE

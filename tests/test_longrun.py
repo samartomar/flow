@@ -107,13 +107,18 @@ class TestIdleUnload(unittest.TestCase):
 
 class TestDeviceLoss(unittest.TestCase):
     def test_dead_device_is_reopened(self):
+        """And on the frame it dies, not on the next five-second heartbeat.
+
+        The patch this used to need (`MIC_CHECK_SEC` down to zero) is gone with the
+        constant: `Pa_IsStreamActive` costs 0.43 us, so the check runs every tick and
+        the first reopen happens in the frame that noticed.
+        """
         mic = StubMic(active=False)
         s = Session(asr=TrackingAsr(), mic=mic)
         s.start()
-        with mock.patch.object(session_mod, "MIC_CHECK_SEC", 0.0):
-            s.tick()
+        s.tick()
         self.assertEqual(mic.restarts, 1)
-        self.assertTrue(any("device went away" in e.text for e in s.events()))
+        self.assertTrue(any("microphone stopped" in e.text for e in s.events()))
         s.close()
 
     def test_paused_mic_is_not_reopened(self):
@@ -123,8 +128,7 @@ class TestDeviceLoss(unittest.TestCase):
         s.start()
         s.pause()
         mic._active = False
-        with mock.patch.object(session_mod, "MIC_CHECK_SEC", 0.0):
-            s.tick()
+        s.tick()
         self.assertEqual(mic.restarts, 0)
         s.close()
 

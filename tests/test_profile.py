@@ -9,7 +9,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import numpy as np
 
@@ -679,16 +678,15 @@ class TestCalibrationRemembersItsMicrophone(unittest.TestCase):
         self.assertNotIn("calibrat", self.notes(s))
 
     def test_a_restart_onto_a_different_device_is_pointed_out(self):
-        from flow import session as session_mod
-
         mic = NamedMic("USB Condenser")
         mic.becomes = "Laptop Array"
         s = self._session(self._calibrated(), mic)
         s.start()
         s.events()
         mic._active = False  # the USB mic was unplugged mid-session
-        with mock.patch.object(session_mod, "MIC_CHECK_SEC", 0.0):
-            s.tick()
+        # No `MIC_CHECK_SEC` patch any more: the liveness check runs every tick and the
+        # first reopen attempt is made in the frame that noticed the loss.
+        s.tick()
         self.assertEqual(mic.restarts, 1, "the health check never reopened it")
         self.assertIn("Laptop Array", self.notes(s))
 
