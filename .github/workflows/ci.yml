@@ -31,7 +31,13 @@ jobs:
     # believes is worse than no CI. Worth re-adding the day it can run the UI: the leg was
     # `ubuntu-latest` plus `sudo apt-get install -y libportaudio2` before the sync, which
     # did work — sounddevice bundles PortAudio for Windows and macOS only.
-    name: suite (${{ matrix.os }})
+    #
+    # The third leg re-runs Windows on CPython 3.14, because the `.python-version` pin
+    # cuts both ways: every dev venv is 3.12 now, so the first 3.13+ divergence
+    # (`ntpath.isabs`, 2026-08-15, seven tests red) was found by an *unpinned* venv and
+    # nothing else could have found it. One leg past the pin finds the next one here,
+    # on purpose. Windows only — path semantics are where the interpreter moved.
+    name: suite (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform failing is a fact about that platform; the other answer is what says
@@ -39,6 +45,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
+        python: ["3.12"]
+        include:
+          - os: windows-latest
+            python: "3.14"
 
     # Both actions below are pinned to a commit SHA, not a tag. A tag is a mutable
     # pointer the action's owner can repoint at any time, which is how the trivy-action
@@ -54,10 +64,13 @@ jobs:
       # It also cost 137 of the 153 errors: Debian splits `tkinter` into `python3-tk`,
       # and the suite reaches `flow.ui` in six modules. uv's own build is the same
       # interpreter everywhere, which is the only way the matrix answers a question.
+      # The matrix supplies the version now — still pinned per leg, never the runner's
+      # choice, and this input outranks `.python-version`, which is what lets the 3.14
+      # leg exist beside the pin at all.
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       # `--frozen` and not a plain sync: a run that silently resolves a newer dependency
       # is testing a tree nobody has, and reports green about it.

@@ -44,6 +44,11 @@ than closed: **nothing runs the suite on 3.14**, so the next divergence is found
 builds a venv without the pin. A second CI leg (`windows-latest` at 3.14, ~35 s) is the
 answer if that happens twice; one occurrence is not yet evidence of a pattern.
 
+**Update 2026-08-15, the same day:** the leg exists — the owner chose not to wait for a
+second occurrence. `ci.yml` now runs `windows-latest` twice, 3.12 and 3.14, the second
+named in the workflow for what it is: one leg past the pin, so the next divergence is
+found by a machine that runs on purpose rather than by whoever builds an unpinned venv.
+
 ### 2026-08-09 — The idle pill goes 168 → 205, because the bar label is worth more than the mock
 
 §02 of the v2 design gives the pill a status word — `Bar label · Plex Mono 11 · +.1em` —
