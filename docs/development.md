@@ -26,7 +26,7 @@ flow/
   hotkey.py    RegisterHotKey on its own message-loop thread (ctypes)
   diag.py      the wordless trace, and the identity block every benchmark records
 scripts/       benchmarks, probes, the soak test and the self-drive harness
-tests/         1,595 tests: routing, state machine, filters, phonetics, resilience
+tests/         1,873 tests: routing, state machine, filters, phonetics, resilience
 docs/          what Flow is for, the roadmap, the analysis, the recording kit
 ```
 
@@ -42,7 +42,7 @@ the event stream and the tuning constants with the measurements behind them.
 uv run python -m unittest discover -s tests
 ```
 
-1,595 tests, ~45 s, no microphone or model required — the fakes are injectable precisely so
+1,873 tests, ~40 s, no microphone or model required — the fakes are injectable precisely so
 the routing logic, where the subtle bugs live, can be tested without either.
 
 **The interpreter is pinned.** `.python-version` holds `3.12`, which is what CI installs and
