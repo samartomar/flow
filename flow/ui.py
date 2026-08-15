@@ -43,6 +43,7 @@ from .notes import Notes
 from .profile import path_key, resolve_workspace
 from .refine import available
 from .session import CONVERSE, DICTATE, Session, State
+from .stats import today_note
 from .thread import MAX_TURNS as THREAD_MAX_TURNS
 from .version import version
 
@@ -1939,12 +1940,18 @@ class Pill(tk.Tk):
                 )[1],
                 lite=self.lite,
             ),
-            # Last and quiet: the one row on the sheet that is not about this machine.
-            # Startup names the version too, into a console a GUI user does not have
-            # open — this window is the surface that is always reachable, which is the
-            # whole argument for the sheet existing. Short by construction, so it clears
-            # `help.MAX_NOTE` without being fitted; `test_version.py` keeps that true.
+            # Two quiet rows at the bottom, in the order of how much they are about this
+            # machine. Both are short by construction so they clear `help.MAX_NOTE`
+            # without being fitted; `test_version.py` and `test_stats.py` keep that true.
             ("gap", "", ""),
+            # How much has been said today. `flow --stats` is the full answer and a GUI
+            # user has no prompt open to type it into — the same gap the version row and
+            # the welcome card were built for. Absent when nothing has been dictated
+            # today, because a sheet is a reference to what this machine can do and a
+            # zero is not one of those; `stats.today_note` argues that choice.
+            *([("note", note, "")] if (note := today_note()) else []),
+            # Last: the one row on the sheet that is not about this machine at all.
+            # Startup names the version too, into a console a GUI user does not have open.
             ("note", f"Flow {version()}", ""),
         ])
 

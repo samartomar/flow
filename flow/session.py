@@ -670,6 +670,11 @@ class Session:
         #: screen. Cleared the moment there is nothing left to rescue, so one incident
         #: produces one note and the next incident produces the next.
         self._said_exits = False
+        #: Whether this session has already said that the profile will not save. Once,
+        #: like `_noted_device`: the dictation counters try to write on every utterance,
+        #: and a disk that refuses one refuses all of them - a bubble every few seconds
+        #: would bury the draft the user is trying to read under a fact they were told.
+        self._said_no_save = False
         #: The device a mismatch has already been reported for, so a mic that keeps
         #: being reopened does not say the same thing every five seconds.
         self._noted_device: str | None = None
@@ -1795,6 +1800,65 @@ class Session:
         """
         self._last_append = Append(utterance, record, self.draft.revision)
         self._remember_recent(RECENT_SAID, utterance)
+        self._count_dictation(utterance, record)
+
+    def _count_dictation(self, utterance: str, record: Utterance | None) -> None:
+        """Count what just reached the draft from speech. The seam `flow --stats` reads.
+
+        Here rather than beside `trace()` in the router, because this is the one road
+        every spoken word into the draft takes — and because a route is not the same thing
+        as a word:
+
+          * a **partial** never arrives here at all. It is drawn dim and then replaced, so
+            counting one would count the same sentence two or three times over;
+          * a **local edit** ("change Tuesday to Thursday") is a command. The words it
+            spends are instructions and the draft gains none of them;
+          * a **CLI rewrite** replaces the draft with a paragraph the CLI wrote. Neither
+            the instruction that asked for it nor the answer that came back was spoken,
+            and counting the result would credit dictation with somebody else's prose;
+          * a **restored** utterance goes back through `_give_back`, which deliberately
+            does not come through here: it was counted when it was first said, and putting
+            a failed rescue's words back is not saying them again.
+
+        Two writes, both deliberate.
+
+        The trace record is what "today" is derived from, because the trace is the only
+        file here with a clock in it. A count and a duration — `flow/diag.py` would refuse
+        anything else, and an integer cannot be read back into a sentence.
+
+        The profile counters are saved *here*, on every utterance, rather than at the Send
+        that commits the learned pairs. `flow --stats` is a second process reading a file,
+        so a total that only reaches disk at a Send reads wrong for every session that
+        ended without one — and dictating into another window, then quitting, is not an
+        unusual way to use this. Measured 2026-08-15 on this machine: `Profile.save()`
+        costs **1.2 ms** against the **0.4 ms** `Diag.write()` already spends on this same
+        path, for an event that happens once every few seconds. The write is
+        whole-then-moved, so an interrupted one costs the increment rather than the file.
+
+        `--no-profile` is honoured by both halves without a check of its own: it hands the
+        session a `NullDiag` and no profile at all, so nothing is traced and nothing is
+        counted. That is what the flag already promises, and it costs nothing to keep.
+        """
+        words = len(utterance.split())
+        if not words:
+            return
+        audio = record.audio if record is not None else None
+        # The whole utterance's audio, even where only part of its text was kept — a
+        # follow-up appends what is left after the trigger words. Splitting the sound in
+        # proportion to the words would be inventing a measurement nobody made; the
+        # utterance is the only duration actually known.
+        seconds = len(audio) / SAMPLE_RATE if audio is not None else 0.0
+        self.diag.write("dictated", words=words, ms=round(seconds * 1000))
+        if self.profile is None:
+            return
+        self.profile.note_dictation(words, seconds)
+        if not self.profile.save() and not self._said_no_save:
+            # Said once, and worth saying: a profile that will not write is also losing
+            # the corrections and the calibration, which cost far more to re-create than
+            # a word count does.
+            self._said_no_save = True
+            self._emit("note", f"could not save {self.profile.path} - corrections and "
+                               "counts are not being kept")
 
     @property
     def can_rescue(self) -> bool:

@@ -63,6 +63,9 @@ FIELDS = frozenset({
     "ms",         # a duration
     "provider",   # codex | claude
     "chars",      # a length, never the thing measured
+    "words",      # how many words an utterance put into the draft. A count, never the
+                  # words: an integer cannot be read back into a sentence, which is the
+                  # whole of why this one is allowed and every entry in NEVER is not.
     "confidence",  # how well the decoder heard: worst avg_logprob, or null for unknown
     "sent",       # a length: how much of an over-long input the CLI was given
     "n",          # a count

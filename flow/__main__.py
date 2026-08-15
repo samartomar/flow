@@ -30,6 +30,8 @@ from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, available, named, unverified, unverified_note
 from .session import AUTO_ASK_SEC, Session
+from .stats import TYPING_WPM
+from .stats import report as stats_report
 from .version import check_update, version
 
 # `.hotkey`, `.inject` and `.ui` are imported inside main() rather than up here, and the
@@ -181,10 +183,11 @@ def main(argv: list[str] | None = None) -> int:
         help="clipboard-out mode: Send copies the draft instead of pasting it, and no "
              "hotkeys are registered (automatic off Windows)",
     )
-    # Last, because neither is a way to run Flow: both answer a question about the copy
-    # and exit. `--version` is argparse's own action, so it prints and leaves where
-    # `--help` does, ahead of every flag above it — which is the right order for a
-    # question the answer to which cannot depend on any of them.
+    # Last, because none of these is a way to run Flow: each answers a question about the
+    # copy or about what it has already done, and exits. `--version` is argparse's own
+    # action, so it prints and leaves where `--help` does, ahead of every flag above it —
+    # which is the right order for a question the answer to which cannot depend on any of
+    # them.
     ap.add_argument(
         "--version", action="version", version=f"flow {version()}",
         help="print the version and exit",
@@ -193,6 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         "--check-update", action="store_true",
         help="ask GitHub once whether there is a newer release, print one line and exit "
              "(nothing else ever asks)",
+    )
+    ap.add_argument(
+        "--stats", action="store_true",
+        help="print how much has been dictated - today and all time - and exit "
+             f"(the typing comparison assumes {TYPING_WPM} words a minute)",
     )
     args = ap.parse_args(argv)
 
@@ -205,6 +213,20 @@ def main(argv: list[str] | None = None) -> int:
         line, ran = check_update()
         say(line)
         return 0 if ran else 1
+
+    # Same place and for the same reason: a question about what has already happened, not
+    # a way to make more of it happen. No model is loaded, no microphone is opened and no
+    # window is drawn — this reads two files and leaves, which is what makes it cheap
+    # enough to run from a prompt whenever somebody wonders.
+    #
+    # `--no-profile` is passed through rather than ignored. It is the flag that means
+    # "ignore the stored profile and learn nothing", and stats that read that profile
+    # anyway would make it a promise Flow keeps everywhere except where somebody looks.
+    if args.stats:
+        report, counted = stats_report(no_profile=args.no_profile)
+        for line in report:
+            say(line)
+        return 0 if counted else 1
 
     # The platform is read once, here, and only to choose a body. Everything downstream
     # reads `lite`, which is why `--lite` on Windows runs the same code a Mac runs rather

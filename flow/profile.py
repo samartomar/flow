@@ -77,6 +77,23 @@ def _flag(value, default: bool) -> bool:
     return value if isinstance(value, bool) else default
 
 
+def _count(value, default=0) -> int:
+    """A running total: a whole number, never negative, or `default`.
+
+    Separate from `_number` because a total is not a measurement. A float here would
+    accumulate representation error over years of `+=` and then print a lifetime word
+    count with a decimal point in it, and a *negative* one is not a smaller total, it is
+    a corrupt file — the only arithmetic that could produce one is a hand edit.
+
+    `bool` is excluded for the same reason `_number` excludes it: `True` is an `int` in
+    Python, and a profile whose word count had been overwritten with `true` would
+    otherwise report one word dictated ever.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return default
+    return value
+
+
 def _text_list(value, cap: int) -> list[str]:
     """Non-blank strings from a list, bounded. Anything else is an empty list.
 
@@ -253,6 +270,24 @@ class Profile:
         #: profile gets the notice once rather than never: an upgrade is the first time
         #: this warning has existed at all. Additive, schema stays 1.
         self.converse_seen: bool = False
+        #: How many words have reached the draft from speech on this machine, ever, and
+        #: how many milliseconds of speech were behind them. The lifetime half of
+        #: `flow --stats`; the today half is derived from the trace, which is the only
+        #: file with a clock in it.
+        #:
+        #: Two integers rather than a per-day table, and that is the whole reason they can
+        #: live here at all: this file is a *summary*, forbidden by R8 from growing with
+        #: use, and a row per day is a log with a summary's name on it. The trace already
+        #: answers "when", is already bounded, and already rotates — so each store is
+        #: asked the one question its own bound leaves it able to answer.
+        #:
+        #: Milliseconds rather than seconds because they are added to per utterance, and
+        #: rounding a two-and-a-half second utterance to whole seconds a hundred times a
+        #: day is a drift with no upper bound. Additive, schema stays 1: an older profile
+        #: loads with zeros, and `flow --stats` says "counting started when this version
+        #: first ran" rather than showing somebody a lifetime of nothing.
+        self.words_dictated: int = 0
+        self.dictated_ms: int = 0
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -307,6 +342,12 @@ class Profile:
         self.workspaces = take(
             "workspaces", lambda v, _d: _text_list(v, MAX_WORKSPACES), []
         )
+        # Zero is the default *and* a legitimate value, so `take`'s "present but degraded"
+        # rule does the right thing here for free: a file carrying `0` reports no fault,
+        # and one carrying `-3` or `"lots"` names the field so `--stats` can say the total
+        # is unusable instead of printing a zero it made up.
+        self.words_dictated = take("words_dictated", _count, 0)
+        self.dictated_ms = take("dictated_ms", _count, 0)
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
         self.dismissed = take("dismissed", lambda v, _d: _text_set(v), set())
@@ -328,6 +369,8 @@ class Profile:
             "send_enter_word": self.send_enter_word,
             "workspace": self.workspace,
             "workspaces": list(self.workspaces[:MAX_WORKSPACES]),
+            "words_dictated": self.words_dictated,
+            "dictated_ms": self.dictated_ms,
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's
@@ -525,3 +568,30 @@ class Profile:
         entry is the deliverable; a human decides.
         """
         return [k for k, c in self.misroutes.most_common() if c >= promote_after]
+
+    # -- what was counted --------------------------------------------------
+
+    def note_dictation(self, words: int, seconds: float) -> None:
+        """One utterance reached the draft from speech. Add it to the lifetime totals.
+
+        A count and a duration, and neither is reversible into anything: two integers say
+        how much was said and for how long, and cannot say what any of it was. That is the
+        same line `flow/diag.py` draws with its allow-list, held here by there being
+        nothing else to hold.
+
+        Refuses rather than accumulates nonsense. A caller that has miscounted must not be
+        able to move a total nothing in the app can correct — there is no UI that edits
+        this file, so a bad increment is permanent until somebody deletes their profile.
+        `seconds` is allowed to be zero: a replayed utterance has words behind it and no
+        audio of its own, and its words still reached the draft.
+        """
+        if isinstance(words, bool) or not isinstance(words, int) or words <= 0:
+            return
+        self.words_dictated += words
+        if (
+            not isinstance(seconds, bool)
+            and isinstance(seconds, (int, float))
+            and math.isfinite(seconds)
+            and seconds > 0
+        ):
+            self.dictated_ms += int(round(seconds * 1000))

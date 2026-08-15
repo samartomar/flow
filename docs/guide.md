@@ -12,6 +12,7 @@ spoken command, both modes, and what is stored where.
 - [Talking to the draft](#talking-to-the-draft) — [local corrections](#local-corrections), [rewrites](#rewrites-via-the-agent-cli)
 - [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [taking the answer](#taking-the-answer), [voices](#choosing-the-voice)
 - [Calibration](#calibration-p8) · [Vocabulary](#vocabulary-p4)
+- [The numbers](#the-numbers) — how much you have dictated
 - [What Flow stores on disk](#what-flow-stores-on-disk)
 - [Known limitations](#known-limitations) · [Measured](#measured)
 
@@ -239,6 +240,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--lite` | clipboard-out mode: Send copies the draft instead of pasting it, and no hotkeys are registered (automatic off Windows — see [Install](#install)) |
 | `--version` | print `flow X.Y.Z` and exit. The same number the startup block names, and the one Help shows at the bottom of the sheet |
 | `--check-update` | ask GitHub once whether a newer release exists, print one line, and exit. Manual only: nothing in Flow ever checks on its own, and the request carries no version, no identifier and no account — see [What leaves the machine](architecture.md#what-leaves-the-machine) |
+| `--stats` | print how much has been dictated — today and all time — and exit, without loading a model or opening the microphone. See [The numbers](#the-numbers). With `--no-profile` it reads nothing and says so |
 
 If capture cannot start — no microphone, device held exclusively by another app, a bad
 `--device` index — the pill stays slate and the reason appears in a red bubble. It will
@@ -974,14 +976,73 @@ cannot establish "this is never dictation".
 **Biasing cuts both ways, and the measurement says so loudly.** See
 [Known limitations](#known-limitations).
 
+## The numbers
+
+`flow --stats` prints how much you have actually dictated. It reads two files and exits —
+no model, no microphone, no window — so it is cheap to run from a prompt whenever you
+wonder.
+
+```
+words today: 1,240, from 9 minutes of speech
+words all time: 18,320, from 2.3 hours of speech
+at 40 words a minute typed, today's 1,240 words are about 31 minutes of typing
+```
+
+The Help sheet carries the first of those as one line at the bottom
+(**right-click > Help > Commands & shortcuts**), so you do not need a prompt open to see
+it. The line is absent on a day you have not dictated anything.
+
+**What is counted.** Words that actually reached the draft from speech. A live partial is
+not counted — it is replaced by the final text, so counting it would count the same
+sentence two or three times. Neither is a spoken correction: *"change Tuesday to
+Thursday"* is a command, and the draft gains none of its words. Nor is a rewrite that came
+back from the agent CLI, which nobody spoke.
+
+**The 40 is an assumption, and the line says so.** Flow does not watch you type and could
+not — there is no keyboard hook in it, and nothing in this project has ever measured
+anybody's typing speed. 40 words a minute is the figure commonly cited for average adult
+typing, and it is there because a comparison you can check the arithmetic of is worth more
+than none. It is stated as a conditional — *at 40 words a minute typed …* — and never as
+"you saved 31 minutes", which would be a measurement this project has not made. If you
+type quickly, read it as an over-estimate.
+
+**Today comes from the trace, all time from the profile**, because neither file can answer
+both questions. `~/.flow/diag.jsonl` is the only one with a clock in it, and it is bounded
+at a megabyte and rotates once — so it can say *when*, but not *ever*. `~/.flow/profile.json`
+carries two integers that only ever go up; it cannot say *when* without growing a row per
+day, which is a log rather than a summary.
+
+That seam is visible in the output. If the trace has rotated and can no longer see back to
+midnight, the count is labelled with the time it really starts from rather than being
+passed off as the whole day:
+
+```
+the trace has rotated, so it reaches back only to 09:14 - what follows is since then, not since midnight
+words since 09:14: 320, from 2 minutes of speech
+```
+
+Anything it cannot read, it names: a missing file, a line of the trace that is not
+readable, a profile that will not load. It never prints a zero for a question it did not
+manage to ask.
+
+**`--no-profile` counts nothing and reads nothing.** That flag already means "ignore the
+stored profile and learn nothing this session", so with it Flow writes no trace record and
+moves no counter — and `flow --stats --no-profile` says there is nothing to count rather
+than reading the profile the same command line just said to ignore.
+
+A profile written by an older Flow has no totals in it, so all-time counting starts the
+first time a version with this feature runs; the output says that plainly rather than
+showing you a lifetime of zero. Deleting `~/.flow/profile.json` resets the all-time
+figure — along with everything else in there.
+
 ## What Flow stores on disk
 
 | Path | Written by | Contents |
 |---|---|---|
 | `~/.flow/lexicon.txt` | you, by hand — and by Flow in exactly two cases: creating it from a template of comments if the menu's **Open settings folder** finds it missing, and appending one `wrong -> right` line when you tap an offered correction | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders, removes or reformats a line — what you wrote comes back byte for byte |
-| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice, and toggling auto-ask | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, and the `workspace` a converse question is asked from. Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks |
+| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks |
 | `~/.cache/huggingface/hub/` | first decode | the models. `base.en` 141 MiB, `small.en` 464 MiB |
-| `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call and device event, unless `--no-profile` | a content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, error *categories*, and on each route a `confidence` — how well the decoder heard the utterance being routed, or `null` when that is unknown. **No words.** Field names are an allow-list checked against a deny-list at import, so a draft cannot get in by being short. Bounded with one rotation: two files, a known ceiling. Startup names the path out loud |
+| `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call and device event, unless `--no-profile` | a content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, error *categories*, on each route a `confidence` — how well the decoder heard the utterance being routed, or `null` when that is unknown — and on each utterance that reached the draft, how many words it was and how long it took to say ([The numbers](#the-numbers)). **No words.** A count of words is a number; the words are never written Field names are an allow-list checked against a deny-list at import, so a draft cannot get in by being short. Bounded with one rotation: two files, a known ceiling. Startup names the path out loud |
 | `.bench/` | `scripts/` | benchmark audio, results and manifests. **Tracked**, except the downloadable corpora and the volunteer recordings — a recording is a person, so those live outside the repo and out of its history; `.bench/README.md` says where. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the model revisions that run loaded |
 
 Deleting `~/.flow/profile.json` forgets every inference and nothing else. None of these
