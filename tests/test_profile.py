@@ -820,6 +820,41 @@ def written(**fields) -> Profile:
     return Profile(path)
 
 
+class TestASavedProfileComesBackWithoutConfessingAFault(unittest.TestCase):
+    """`faults` is the channel that exists so a degraded field is believed.
+
+    Until 2026-08-15 every `save()` → `load()` round trip put `dismissed` in it: JSON
+    has no set, so `save` writes the empty set as `[]`, and `take` read `[] != set()`
+    as "present but degraded". A channel that cries on every round trip trains its
+    callers to filter it — one already had to — which is the same end state as having
+    no channel at all.
+    """
+
+    def test_a_fresh_save_reloads_with_nothing_to_confess(self):
+        p = tmp_profile()
+        p.save()
+        self.assertEqual(Profile(p.path).faults, [])
+
+    def test_a_lived_in_save_reloads_with_nothing_to_confess(self):
+        p = tmp_profile()
+        p.dismissed = {"a -> b"}
+        p.pairs = Counter({"sameer -> Samir": 2})
+        p.hotkeys = {"toggle": "ctrl+shift+space"}
+        p.save()
+        self.assertEqual(Profile(p.path).faults, [])
+
+    def test_an_empty_list_written_by_hand_is_not_a_fault_either(self):
+        self.assertEqual(written(dismissed=[]).faults, [])
+
+    def test_junk_inside_the_list_still_confesses(self):
+        # The guard the fix must not widen: a list of non-strings degrades to empty,
+        # and that is a real degradation with a name.
+        self.assertEqual(written(dismissed=[42]).faults, ["dismissed"])
+
+    def test_a_scalar_dismissed_still_confesses(self):
+        self.assertEqual(written(dismissed="a -> b").faults, ["dismissed"])
+
+
 class TestAWrongTypeCostsItsFieldAndNothingElse(unittest.TestCase):
     """PERSONAL-01: the schema number was checked and the fields were not.
 
@@ -1031,12 +1066,7 @@ class TestTheHotkeyOverridesAreCarriedRatherThanJudged(unittest.TestCase):
         self.assertTrue(p.save())
         again = Profile(p.path)
         self.assertEqual(again.hotkeys, {"toggle": "ctrl+shift+space"})
-        # Named rather than compared against an empty list: a saved-and-reloaded profile
-        # reports a `dismissed` fault of its own, because `save` writes that set as a
-        # list and `take` reads `[] != set()` as a degraded field. It predates this and
-        # is nothing to do with hotkeys, and asserting the whole list here would tie this
-        # test to it.
-        self.assertNotIn("hotkeys", again.faults)
+        self.assertEqual(again.faults, [])
 
     def test_and_an_empty_table_is_written_out_where_somebody_can_find_it(self):
         # The only advertisement this feature gets. There is no settings dialog to put it

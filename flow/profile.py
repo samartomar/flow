@@ -350,12 +350,17 @@ class Profile:
         # that never saved.
         self.faults = []
 
-        def take(key, validate, default=None):
+        def take(key, validate, default=None, stored=None):
             present = key in raw and raw[key] is not None
             value = validate(raw.get(key), default)
             if present and value != default:
                 return value
-            if present and value == default and raw[key] != default:
+            # `stored` is the default as the *file* spells it, for a field whose Python
+            # default JSON cannot hold: an empty set is written back as [], and
+            # [] != set() read every saved profile as confessing a `dismissed` fault it
+            # did not have — noise in a channel that exists to be believed.
+            baseline = default if stored is None else stored
+            if present and value == default and raw[key] != baseline:
                 self.faults.append(key)
             return value
 
@@ -395,7 +400,9 @@ class Profile:
         self.hotkeys = take("hotkeys", lambda v, _d: _hotkeys(v), {})
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
-        self.dismissed = take("dismissed", lambda v, _d: _text_set(v), set())
+        # `stored=[]` because JSON has no set: `save` writes this one as a sorted list,
+        # so the file's spelling of "nothing dismissed" is [] and must read as clean.
+        self.dismissed = take("dismissed", lambda v, _d: _text_set(v), set(), stored=[])
         return True
 
     def save(self) -> bool:
