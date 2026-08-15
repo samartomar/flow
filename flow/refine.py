@@ -325,8 +325,26 @@ def trusted(path: str | None) -> str | None:
     into it all reach here instead. Two rules, and neither needs the environment to have
     been arranged — a result must be absolute, and its directory must not be the one Flow
     happens to be sitting in.
+
+    **What "absolute" means is stated here rather than left to `os.path.isabs`, because on
+    Windows the word has two meanings and the interpreter changed which one it uses.**
+    `\\codex.EXE` is rooted but not *fully qualified*: it names the root of whichever drive
+    the process happens to be on, so one string is two executables on a machine with two
+    drives — and `--cwd` is the workshop, so the drive it lands on is the user's project's,
+    never one this code chose. That is `.\\codex.EXE` one directory up, and it fails for
+    the same reason.
+
+    Both halves of that were measured here on 2026-08-15, and the second is why the rule is
+    written down rather than inherited: `ntpath.isabs("\\codex.EXE")` is **True on 3.12.13
+    and False on 3.14.7** — 3.13 corrected it — and the cwd rule below never catches the
+    case, because a drive root is not the working directory. So `trusted(r"\\codex.EXE")`
+    returned the path on the interpreter this project pins and `None` on the newest one. A
+    security predicate whose answer arrives from the venv is not a predicate; `splitdrive`
+    is the same sentence on every Python.
     """
     if not path or not os.path.isabs(path):
+        return None
+    if os.name == "nt" and not os.path.splitdrive(path)[0]:
         return None
     try:
         if os.path.realpath(os.path.dirname(path)) == os.path.realpath(os.getcwd()):

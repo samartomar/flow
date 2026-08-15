@@ -46,12 +46,24 @@ _REAL_WHICH = shutil.which
 #: is the only thing that reads it — a per-platform suffix would quietly change what the
 #: `.cmd` refusal tests are testing.
 #:
-#: Chosen by asking `os.path.isabs` rather than by reading `sys.platform`, which is not
-#: pedantry: the property this needs is "absolute according to the predicate `trusted()`
-#: calls", and a platform check is a *guess* about what that predicate will say. The two
-#: agree today. They did not agree in the harness that reproduced this failure, and that
-#: disagreement is the whole bug in miniature.
-_FAKE_DIR = "C:\\fake" if os.path.isabs("C:\\fake") else "/fake"
+#: Chosen by asking `refine.trusted` rather than by reading `sys.platform`, which is not
+#: pedantry: the property this needs is "acceptable to the predicate that will judge it",
+#: and a platform check is a *guess* about what that predicate will say.
+#:
+#: It asked `os.path.isabs` until 2026-08-15, which was the same guess one step closer —
+#: and the guess broke on a venv built with a newer Python. `ntpath.isabs("/x/pwsh")` is
+#: True on 3.12 and **False on 3.13+**, where a single leading slash is correctly read as
+#: "the current drive" rather than as a location. Every test that hand-wrote a `/`-rooted
+#: fake path got no CLI on 3.14 for exactly the reason the Linux leg got none in 2026-08:
+#: `trusted()` refused the fake, `resolve()` returned None, and the mocked `Popen` sat
+#: untouched. Seven tests, and not one of them was about paths.
+#:
+#: So this now asks the function itself, which cannot drift from it by construction — and
+#: `fake_exe` is the one spelling of "where a declared CLI pretends to live" in the suite,
+#: because two spellings is how one of them goes stale.
+_FAKE_DIR = next(
+    d for d in ("C:\\fake", "/fake") if refine.trusted(os.path.join(d, "probe.exe"))
+)
 
 
 def fake_exe(name: str) -> str:

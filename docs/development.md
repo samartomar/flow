@@ -26,7 +26,7 @@ flow/
   hotkey.py    RegisterHotKey on its own message-loop thread (ctypes)
   diag.py      the wordless trace, and the identity block every benchmark records
 scripts/       benchmarks, probes, the soak test and the self-drive harness
-tests/         1,591 tests: routing, state machine, filters, phonetics, resilience
+tests/         1,595 tests: routing, state machine, filters, phonetics, resilience
 docs/          what Flow is for, the roadmap, the analysis, the recording kit
 ```
 
@@ -42,8 +42,16 @@ the event stream and the tuning constants with the measurements behind them.
 uv run python -m unittest discover -s tests
 ```
 
-1,591 tests, ~45 s, no microphone or model required — the fakes are injectable precisely so
+1,595 tests, ~45 s, no microphone or model required — the fakes are injectable precisely so
 the routing logic, where the subtle bugs live, can be tested without either.
+
+**The interpreter is pinned.** `.python-version` holds `3.12`, which is what CI installs and
+what the README promises `uv` will fetch, so `uv sync` builds the same venv here as it does
+there instead of whichever Python the machine happened to offer. It is a floor for
+*development* and not a ceiling for users: `requires-python` stays `>=3.12`, and the suite is
+green on 3.12.13 and 3.14.7 both. Pinned so that when two interpreters disagree, the
+disagreement is a finding rather than a surprise — it was one on 2026-08-15, when a 3.14 venv
+ran seven tests red over a change to what `ntpath.isabs` calls absolute (decisions.md).
 
 The end-to-end harness is the one that catches what unit tests cannot:
 

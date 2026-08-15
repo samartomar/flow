@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flow.__main__ as main_mod  # noqa: E402
-from cli_env import no_off_path_installs  # noqa: E402
+from cli_env import fake_exe, no_off_path_installs  # noqa: E402
 from flow.refine import MAX_CHARS, Cli, _split_tail, refine  # noqa: E402
 from flow.session import Session  # noqa: E402
 
@@ -329,8 +329,14 @@ class TestTheFallbackIsReal(unittest.TestCase):
 
 
 def only(*names):
-    """A `shutil.which` that finds exactly these, so PATH is not the test's variable."""
-    return lambda cmd, *a, **kw: f"/somewhere/{cmd}" if cmd in names else None
+    """A `shutil.which` that finds exactly these, so PATH is not the test's variable.
+
+    Answers with `cli_env.fake_exe` rather than a literal of its own. A declared CLI has
+    to survive `trusted()` to be declared at all, and "absolute" is not a property a path
+    literal carries by looking like one — `/somewhere/codex` was absolute here until a
+    venv was built on 3.14. One spelling, in the module that asks the predicate.
+    """
+    return lambda cmd, *a, **kw: fake_exe(cmd) if cmd in names else None
 
 
 #: What kiro-cli actually put on stdout here on 2026-08-02, captured through the same
@@ -435,9 +441,16 @@ class TestFindingAnInstallThatIsNotOnPath(unittest.TestCase):
     """
 
     def test_path_is_asked_first(self):
-        with mock.patch("shutil.which", only("kiro-cli")):
+        # The probe is made to answer, and to lose. Left to the disk it answers only on a
+        # machine that has kiro-cli installed, so on every other one this asserted an
+        # order between one candidate and nothing — and on the machine it was written on
+        # it did answer, which is how a 3.14 venv turned "PATH wins" into a green test
+        # reporting the developer's `%LOCALAPPDATA%` install. Same lesson as `cli_env`.
+        elsewhere = str(Path(tempfile.gettempdir()) / "Kiro-Cli" / "kiro-cli.exe")
+        with mock.patch("shutil.which", only("kiro-cli")), \
+                mock.patch.object(refine_mod, "probed", return_value=elsewhere):
             found = refine_mod.resolve(refine_mod.named("kiro-cli"))
-        self.assertEqual(found, "/somewhere/kiro-cli")
+        self.assertEqual(found, fake_exe("kiro-cli"))
 
     def test_the_probe_answers_when_path_does_not(self):
         with mock.patch("shutil.which", only()), \
@@ -953,7 +966,7 @@ class TestStdinIsACapabilityAndNotAGuess(unittest.TestCase):
     def test_argv_clis_still_get_a_closed_stdin(self):
         # codex hangs on an open one, measured, which is the whole reason this is per-CLI.
         proc = fake_proc("ok")
-        with mock.patch("shutil.which", resolves_to("/usr/bin/codex")), \
+        with mock.patch("shutil.which", resolves_to(fake_exe("codex"))), \
                 mock.patch("subprocess.Popen", return_value=proc) as started:
             refine_mod._invoke(Cli("codex", ("codex", "exec")), "a\nprompt", timeout=30)
         self.assertEqual(started.call_args.args[0][-1], "a\nprompt")
@@ -1060,6 +1073,34 @@ class TestExecutablesComeFromTrustedDirectories(unittest.TestCase):
         planted = str(Path(os.getcwd()) / "codex.EXE")
         with mock.patch("shutil.which", resolves_to(planted)), no_off_path_installs():
             self.assertIsNone(refine_mod.resolve(refine_mod.named("codex")))
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "Windows-only: a drive-relative path needs a current drive")
+    def test_a_rooted_path_with_no_drive_is_refused(self):
+        # `\codex.EXE` is `.\codex.EXE` one directory up: rooted, but on *whichever drive
+        # the process is on*, which `--cwd` hands to the user's project rather than to
+        # this code. The cwd rule below cannot see it — a drive root is not the working
+        # directory — so before 2026-08-15 it was accepted, and `trusted` returned it.
+        for planted in ("\\codex.EXE", "/codex.EXE", "\\tools\\codex.EXE"):
+            with self.subTest(path=planted):
+                self.assertIsNone(refine_mod.trusted(planted))
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "Windows-only: `ntpath.isabs` is the predicate that moved")
+    def test_the_answer_does_not_come_from_the_interpreter(self):
+        """The reason the rule above is written down rather than inherited.
+
+        `ntpath.isabs("\\codex.EXE")` is **True on 3.12.13 and False on 3.14.7** — 3.13
+        corrected it — so for two years this function said yes or no to a planted drive
+        root depending on which Python built the venv. `requires-python` allows both.
+
+        Pinned as a pair rather than as one assertion: what has to hold is that the two
+        shapes are told apart, and told apart the same way on every interpreter. A fix
+        that refused everything would satisfy the first line and take refine away from
+        every machine, which is what the second line is for.
+        """
+        self.assertIsNone(refine_mod.trusted("\\codex.EXE"))
+        self.assertEqual(refine_mod.trusted("C:\\tools\\codex.EXE"), "C:\\tools\\codex.EXE")
 
     def test_an_ordinary_absolute_path_is_still_accepted(self):
         # The refusal must not become "nothing resolves", which would take refine away
@@ -1456,7 +1497,7 @@ class TestThePromptLeavesTheProcessListing(unittest.TestCase):
         for name in ("codex", "claude"):
             with self.subTest(cli=name):
                 proc = fake_proc("ok")
-                with mock.patch("shutil.which", resolves_to(f"/usr/bin/{name}")), \
+                with mock.patch("shutil.which", resolves_to(fake_exe(name))), \
                         mock.patch("subprocess.Popen", return_value=proc) as started:
                     refine_mod._invoke(refine_mod.named(name),
                                        "the SECRET is marmalade", timeout=30)

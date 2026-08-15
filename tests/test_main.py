@@ -29,7 +29,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cli_env import no_off_path_installs  # noqa: E402
+from cli_env import fake_exe, no_off_path_installs  # noqa: E402
 
 #: The three modules that reach for Win32. `inject` and `hotkey` still bind it at import
 #: and are never imported in Lite; `ui` binds it behind a `sys.platform` check, because a
@@ -300,7 +300,7 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         # exact lesson `cli_env.py` was written for, one seam along.
         with mock.patch.object(sys, "platform", "win32"), no_off_path_installs(), \
                 mock.patch("shutil.which", lambda cmd, *a, **kw:
-                           "/somewhere/gemini" if cmd == "gemini" else None), \
+                           fake_exe("gemini") if cmd == "gemini" else None), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
                 mock.patch.object(flow.ui, "Pill"), \

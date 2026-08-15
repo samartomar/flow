@@ -36,7 +36,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from cli_env import fake_exe  # noqa: E402
 from flow.speak import HOSTS, VOICE_PREFIX, Voice, host, pick  # noqa: E402
 
 #: Whether the optional `[voice]` extra is installed here. Decided once, at import,
@@ -725,18 +727,24 @@ class TestHost(unittest.TestCase):
     keep what the lookup returned. The preference order they pin has not moved at all —
     only what a chosen host is spelled as, which is why the edit is to the expectation
     and not to the case.
+
+    Edited again on 2026-08-15, and for the same shape of reason: `host()` passes what it
+    finds through `refine.trusted`, so a fake host has to be a path that survives it, and
+    `/x/pwsh` stopped being one the day a venv was built on 3.13+. The fake now comes from
+    `cli_env.fake_exe`, which asks the predicate instead of imitating it. The order is
+    still the only thing asserted.
     """
 
     def test_the_modern_shell_is_preferred(self):
-        with mock.patch("flow.speak.shutil.which", side_effect=lambda n: f"/x/{n}"), \
+        with mock.patch("flow.speak.shutil.which", side_effect=fake_exe), \
              mock.patch("flow.speak._HOST", None):
-            self.assertEqual(host(), "/x/pwsh")
+            self.assertEqual(host(), fake_exe("pwsh"))
 
     def test_it_falls_back_to_the_one_every_windows_has(self):
         with mock.patch("flow.speak.shutil.which",
-                        side_effect=lambda n: None if n == "pwsh" else "/x/powershell"), \
+                        side_effect=lambda n: None if n == "pwsh" else fake_exe(n)), \
              mock.patch("flow.speak._HOST", None):
-            self.assertEqual(host(), "/x/powershell")
+            self.assertEqual(host(), fake_exe("powershell"))
 
     @unittest.skipUnless(sys.platform == "win32", "Windows-only: the PowerShell speech host")
     def test_with_neither_found_it_still_returns_something_runnable(self):

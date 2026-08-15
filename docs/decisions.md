@@ -6,6 +6,44 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-08-15 — The interpreter is pinned, and `trusted()` stops asking it what "absolute" means
+
+A venv built on **CPython 3.14.7** ran the suite seven red; **3.12.13** ran the same tree
+green. `ntpath.isabs("/x/pwsh")` is True on 3.12 and **False on 3.13+**, where a single
+leading slash is correctly read as "the current drive" rather than as a location — and
+`refine.trusted()` calls `os.path.isabs`. So seven tests that mocked `shutil.which` with
+drive-less fakes had their declared CLI refused, resolved nothing, and left a mocked `Popen`
+untouched. That is the Linux leg's failure of 2026-08 exactly (`tests/cli_env.py` records
+it), arriving this time from the interpreter instead of from the platform. `requires-python`
+allows `>=3.12`, so this was reachable by any user who let `uv` pick.
+
+**The tests were wrong, not the code.** A fake path has to survive the predicate that will
+judge it, and "absolute" is not a property a literal carries by looking like one.
+`cli_env._FAKE_DIR` had already made that argument and then hedged it, choosing by asking
+`os.path.isabs` — the same guess, one step closer. It asks `refine.trusted` itself now, and
+`fake_exe` is the single spelling of "where a declared CLI pretends to live" across
+`test_refine`, `test_voice` and `test_main`.
+
+**But `trusted()` had the hole 3.13 closed by accident, and it was live on the version this
+project pins.** Measured here: `trusted(r"\codex.EXE")` returned that path on 3.12.13 and
+`None` on 3.14.7. A rooted path with no drive is `.\codex.EXE` one directory up — it names
+the root of whichever drive the process is on, which `--cwd` hands to the user's project and
+never to this code — and the cwd rule cannot catch it, because a drive root is not the
+working directory. So the function states the rule with `splitdrive` rather than inheriting
+it: the same answer on every Python. A security predicate whose answer arrives from the venv
+is not a predicate, which is the general form of this and the reason it is written down.
+
+**And the development interpreter is declared.** `.python-version` holds `3.12` — what CI
+installs and what the README promises `uv` fetches — so `uv sync` builds one venv rather than
+whichever the machine had. `requires-python` deliberately stays `>=3.12`: the pin is for
+reproducibility, not a claim that 3.13+ is unsupported, and the suite is green on both.
+
+**Reopens if** development wants a newer interpreter — the pin is one line, and what makes
+moving it safe is that both versions are green today. The gap this leaves is named rather
+than closed: **nothing runs the suite on 3.14**, so the next divergence is found by whoever
+builds a venv without the pin. A second CI leg (`windows-latest` at 3.14, ~35 s) is the
+answer if that happens twice; one occurrence is not yet evidence of a pattern.
+
 ### 2026-08-09 — The idle pill goes 168 → 205, because the bar label is worth more than the mock
 
 §02 of the v2 design gives the pill a status word — `Bar label · Plex Mono 11 · +.1em` —
