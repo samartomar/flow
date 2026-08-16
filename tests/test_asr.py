@@ -255,5 +255,69 @@ class TestAModelThatCannotSayNoSpeech(unittest.TestCase):
         self.assertEqual([d.reason for d in asr.take_drops()], ["filler"])
 
 
+class TestTheCpuFallbackSaysWhichCheckFailed(unittest.TestCase):
+    """The three ways `cuda_ready()` says no, and what each one tells the reader.
+
+    Untested until an owner with a GTX 1070 in the machine read "no usable CUDA device
+    found" and asked whether it was noise. It was not — CTranslate2 saw the card and the
+    cuBLAS/cuDNN DLLs were simply absent — but nothing on the line distinguished that
+    from having no GPU at all, and only one of the two is worth doing anything about.
+    """
+
+    def setUp(self):
+        # Memoised in module globals, so every case starts by forgetting the answer —
+        # otherwise the first test to run decides the rest of them.
+        self._reset()
+        self.addCleanup(self._reset)
+
+    @staticmethod
+    def _reset():
+        import flow.asr
+
+        flow.asr._cuda_ok = None
+        flow.asr._cuda_why = ""
+
+    def _probe(self, devices: int, dlls_load: bool):
+        """Run the probe against a machine described by its two interesting facts."""
+        import flow.asr
+
+        ct2 = mock.Mock()
+        ct2.get_cuda_device_count.return_value = devices
+        cdll = mock.DEFAULT if dlls_load else OSError("Could not find module")
+        with mock.patch.dict(sys.modules, {"ctranslate2": ct2}), \
+                mock.patch.object(flow.asr, "_wheel_dll_dirs", return_value=[]), \
+                mock.patch("ctypes.CDLL", side_effect=None if dlls_load else cdll):
+            return flow.asr.cuda_ready(), flow.asr.cuda_reason()
+
+    def test_no_card_says_so_and_offers_nothing_to_install(self):
+        ok, why = self._probe(devices=0, dlls_load=False)
+        self.assertFalse(ok)
+        self.assertEqual(why, "no NVIDIA device")
+        # The one thing this reader must not be told is to install a runtime for a GPU
+        # they do not have.
+        self.assertNotIn("install", why)
+
+    @unittest.skipUnless(sys.platform == "win32", "the DLL probe is Windows-only")
+    def test_a_card_with_no_runtime_names_the_card_and_the_command(self):
+        ok, why = self._probe(devices=1, dlls_load=False)
+        self.assertFalse(ok)
+        self.assertIn("GPU found", why)
+        self.assertIn('uv pip install -e ".[cuda]"', why)
+
+    def test_a_working_gpu_gives_no_reason_at_all(self):
+        ok, why = self._probe(devices=1, dlls_load=True)
+        self.assertTrue(ok)
+        self.assertEqual(why, "")
+
+    def test_every_reason_survives_a_legacy_console(self):
+        # Same rule as every other startup line: `say()` writes these to a stdout that
+        # may be on cp437, and a line carrying anything else crashes instead of printing.
+        for devices, dlls in ((0, False), (1, False)):
+            self._reset()
+            _ok, why = self._probe(devices=devices, dlls_load=dlls)
+            why.encode("cp437")
+            why.encode("ascii")
+
+
 if __name__ == "__main__":
     unittest.main()

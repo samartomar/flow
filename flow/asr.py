@@ -246,6 +246,10 @@ _CUDA_LIBS = ("cublasLt64_12.dll", "cublas64_12.dll", "cudnn_ops64_9.dll")
 #: change inside a session. None means "not asked yet".
 _cuda_ok: bool | None = None
 
+#: Which of `cuda_ready`'s three checks said no, in the words the startup line says out
+#: loud. Set beside `_cuda_ok`, and empty whenever the GPU is actually in use.
+_cuda_why = ""
+
 
 def _wheel_dll_dirs() -> list[str]:
     """Directories inside the venv holding CUDA DLLs, or [] when the wheels are absent.
@@ -277,16 +281,21 @@ def cuda_ready() -> bool:
     cublas64_12.dll is not found`. Checking the libraries here rather than trusting the
     device count is what turns that into a fallback instead of a broken session.
     """
-    global _cuda_ok
+    global _cuda_ok, _cuda_why
     if _cuda_ok is not None:
         return _cuda_ok
     _cuda_ok = False
+    # Each stage names itself on the way in and the next one overwrites it, so whichever
+    # stage a failure stops at is the one still holding the reason — including the
+    # `except` below, which cannot see how far it got.
+    _cuda_why = "CUDA could not be probed"
     try:
         import ctypes
 
         import ctranslate2
 
         if ctranslate2.get_cuda_device_count() < 1:
+            _cuda_why = "no NVIDIA device"
             return _cuda_ok
         if sys.platform == "win32":
             dirs = _wheel_dll_dirs()
@@ -295,14 +304,35 @@ def cuda_ready() -> bool:
             if dirs:
                 os.environ["PATH"] = os.pathsep.join(
                     dirs + [os.environ.get("PATH", "")])
+            _cuda_why = ('GPU found, CUDA runtime not installed: '
+                         'uv pip install -e ".[cuda]"')
             for name in _CUDA_LIBS:
                 ctypes.CDLL(name)  # by name: PATH, then what is already loaded
         _cuda_ok = True
+        _cuda_why = ""
     except Exception:
         # Any of it missing means CPU, and CPU is a working configuration rather than a
         # degraded one — this is a speed and accuracy ceiling, not a dependency.
         _cuda_ok = False
     return _cuda_ok
+
+
+def cuda_reason() -> str:
+    """Why the GPU is not in use, or "" when it is.
+
+    Split out because the two failures want different things from whoever reads the
+    line. A machine with no NVIDIA card has nothing to do about it; a machine with one
+    is a single install away from the strongest model driving both tiers. The startup
+    line said "no usable CUDA device found" for both, and the first owner to read that
+    with a GTX 1070 in the machine reasonably concluded the message was simply wrong —
+    it was not, but "device" is the word it puts the weight on and the device was never
+    the problem.
+
+    ASCII, like every other startup line: `say()` documents why a redirected stdout on a
+    legacy code page cannot encode anything else.
+    """
+    cuda_ready()
+    return _cuda_why
 
 
 def resolve_device(device: str = DEVICE) -> str:

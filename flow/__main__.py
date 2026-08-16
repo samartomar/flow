@@ -307,12 +307,17 @@ def main(argv: list[str] | None = None) -> int:
     # runs one strong model for both paths and a CPU cannot. Named out loud for the same
     # reason the models are — the two answers are a 3.7 s final decode and a 0.3 s one,
     # and somebody whose GPU quietly did not engage has no other way to tell.
-    from .asr import default_models, resolve_device
+    from .asr import cuda_reason, default_models, resolve_device
 
     decode_device = resolve_device(args.decode_device)
+    # `cuda_reason()` rather than one sentence for every way this can be CPU: "no NVIDIA
+    # device" and "the runtime is not installed" are the same line to write and a
+    # completely different line to read, and only the second is something the reader can
+    # act on. It costs nothing extra — the probe has already run inside `resolve_device`
+    # and remembers its answer.
     say(f"decoding on: {decode_device}"
         + ("" if decode_device != "cpu" or args.decode_device == "cpu"
-           else " (no usable CUDA device found)"))
+           else f" ({cuda_reason()})"))
 
     default_partial, default_final = default_models(decode_device)
     partial_name = args.model or args.partial_model or default_partial
