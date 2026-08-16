@@ -339,6 +339,12 @@ command. It is regenerated every time you open it, so it is never describing a m
 are not sitting at. Scroll it with the wheel or by dragging the page; the Close chip shuts
 it. It never takes the focus from whatever you were typing in.
 
+`Ctrl+C` in the terminal you launched from is a quit too, and gets the same teardown as
+`ctrl+alt+Q`: the microphone closes, the CLI Flow started is killed rather than left
+billing for an answer nobody will read, and the voice's PowerShell goes with it. It used
+to print a traceback about whatever the pill was mid-way through drawing and then carry
+on running.
+
 Quit used to be `Esc`, and `Esc` was a Tk key binding on the pill. The pill does not take
 keyboard focus any more — that is what makes Send land in the window you were working in
 — so that binding could never fire again, and a documented shortcut that silently does

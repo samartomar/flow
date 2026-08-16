@@ -557,11 +557,23 @@ def main(argv: list[str] | None = None) -> int:
     # exist, so the menu is sent to the real settings folder instead: the profile lives
     # there either way, and creating a template beside the source is nobody's idea of
     # settings.
-    Pill(
+    pill = Pill(
         session, on_send=None if lite else on_send, hotkeys=hotkeys, arm=args.arm,
         settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
         lite=lite,
-    ).mainloop()
+    )
+    try:
+        pill.mainloop()
+    except KeyboardInterrupt:
+        # The other half of the guard in `Pill._tick`, and the reason the pill is bound
+        # to a name at all. Tkinter reports and swallows whatever a callback raises, so
+        # nearly every ctrl+C is caught in the frame pump — but one that lands at the
+        # entry to a callback, before Tkinter's own `try`, comes out of `mainloop`
+        # instead, and that is the exit which skips teardown entirely.
+        #
+        # 0 rather than 130: ctrl+C is now a way to quit Flow rather than a way to
+        # interrupt it, and it should report what ctrl+alt+Q reports.
+        pill.quit_app()
     return 0
 
 

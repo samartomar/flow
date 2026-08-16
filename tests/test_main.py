@@ -176,6 +176,45 @@ class TestTheStartupBlockNamesTheCopy(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+class TestCtrlCIsAQuitAndNotAnAbandonment(unittest.TestCase):
+    """What happens to the session when the interrupt does not land in the frame pump.
+
+    Nearly every ctrl+C is caught by `Pill._tick` and never reaches here, because that
+    callback is where the main thread spends its time. The one that lands at the entry
+    to a Tkinter callback — before Tkinter's own `try`, so it is not reported and
+    swallowed — comes out of `mainloop`, and that is the exit that used to skip teardown
+    completely: `main()` has no `with` around the session and never had one.
+
+    Run on darwin so the assertion is about the entry point rather than about Windows;
+    the `try` it covers is the same code on both.
+    """
+
+    def _interrupted(self):
+        import flow.asr
+        import flow.ui
+
+        import flow.__main__ as mod
+
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill") as pill:
+            pill.return_value.mainloop.side_effect = KeyboardInterrupt
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = mod.main(["--no-profile", "--no-speak", "--no-lexicon"])
+        return code, pill.return_value
+
+    def test_it_tears_down_rather_than_leaving_the_mic_and_the_cli_behind(self):
+        _code, pill = self._interrupted()
+        pill.quit_app.assert_called_once()
+
+    def test_the_interrupt_does_not_escape_main(self):
+        # It used to, and the traceback landed on the launching terminal with the pill
+        # already gone from the screen — an error report for a successful quit.
+        code, _pill = self._interrupted()
+        self.assertEqual(code, 0)
+
+
 @unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 class TestWindowsStillGetsHands(unittest.TestCase):
     """The full body is the default here, and `--lite` is the way to ask for the other."""

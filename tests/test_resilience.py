@@ -63,9 +63,17 @@ class StubDraft:
 class StubSession:
     """Minimal Session surface, with injectable failures."""
 
-    def __init__(self, fail_start: bool = False, fail_tick: bool = False) -> None:
+    def __init__(
+        self,
+        fail_start: bool = False,
+        fail_tick: bool = False,
+        interrupt_tick: bool = False,
+    ) -> None:
         self.fail_start = fail_start
         self.fail_tick = fail_tick
+        #: ctrl+C, raised from where a real one lands: part-way through a frame.
+        self.interrupt_tick = interrupt_tick
+        self.closed = False
         self.state = State.IDLE
         self.draft = StubDraft()
         self.force_next = None
@@ -83,12 +91,15 @@ class StubSession:
     def pause(self) -> None:
         self.paused += 1
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        self.closed = True
 
     def tick(self) -> None:
         self.tick_calls += 1
         if self.fail_tick:
             raise RuntimeError("decoder exploded")
+        if self.interrupt_tick:
+            raise KeyboardInterrupt
 
     def events(self) -> list[Event]:
         return []
@@ -146,6 +157,32 @@ class TestPumpNeverDies(unittest.TestCase):
             self.assertEqual(after.call_args.args[0], 30)
 
         self.assertGreater(pill._flash, 0, "failure must be visible on the pill")
+
+    def test_ctrl_c_in_a_frame_is_a_quit_rather_than_a_traceback(self):
+        # The inverse of the test above, and the reason the two clauses cannot be one:
+        # a `RuntimeError` from the decoder must leave the loop running, and a ctrl+C
+        # must stop it. Before the split, `except Exception` missed `KeyboardInterrupt`
+        # entirely, Tkinter reported it as a crash in whatever `_draw` was part-way
+        # through, and the app kept ticking with the microphone still open.
+        session = StubSession(interrupt_tick=True)
+        pill = self._pill(session)
+        pill.armed = True
+
+        # `destroy` is stubbed so the fixture's own teardown is still the thing that
+        # tears this widget down, and `_unload_fonts` because it is process-global:
+        # letting a real quit run here unregisters the bundled families for every test
+        # after it, and the ones that measure a real font would then be measuring Tk's
+        # fallback.
+        with mock.patch.object(pill, "after") as after, \
+                mock.patch.object(pill, "destroy") as destroy, \
+                mock.patch("flow.ui._unload_fonts"):
+            pill._tick()  # must not raise
+
+        self.assertTrue(session.closed, "ctrl+C left the session open")
+        destroy.assert_called_once()
+        # No red flash and no re-arm: this is a quit, not a failure to report.
+        after.assert_not_called()
+        self.assertEqual(pill._flash, 0)
 
     def test_failing_mic_leaves_the_pill_disarmed(self):
         session = StubSession(fail_start=True)

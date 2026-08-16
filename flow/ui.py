@@ -1998,6 +1998,13 @@ class Pill(tk.Tk):
         self.bubble.hide()
 
     def quit_app(self) -> None:
+        # Idempotent, because ctrl+C reaches here down either of two paths and nothing
+        # upstream can tell which one ran: caught in `_tick`, or escaping `mainloop` and
+        # torn down by `__main__`. A second `destroy()` against an interpreter that is
+        # already gone is a TclError raised while quitting — the one moment at which
+        # nobody is left to act on it.
+        if not self._alive:
+            return
         # Cleared before anything is torn down, so a `_tick` already in flight does not
         # re-arm itself against a destroyed interpreter on its way out.
         self._alive = False
@@ -2022,6 +2029,23 @@ class Pill(tk.Tk):
         """
         try:
             self._frame()
+        except KeyboardInterrupt:
+            # ctrl+C in the terminal Flow was launched from, and it lands *here* for a
+            # reason: Tcl's event loop is C, so a pending SIGINT is not raised until
+            # Python bytecode runs again, and this callback is nearly all the bytecode
+            # there is. The clause below cannot see it — `KeyboardInterrupt` is a
+            # `BaseException` — so it used to escape into Tkinter, which prints
+            # "Exception in Tkinter callback" and swallows it. That named whatever
+            # `_draw` happened to be part-way through, as though the repaint had
+            # crashed, and then the `finally` re-armed the loop and the pill carried on:
+            # the one key everybody presses to stop a terminal program did nothing but
+            # produce a traceback about polygons.
+            #
+            # Taken as the quit it was, and given the teardown ctrl+alt+Q gets, because
+            # the alternative is not "exit slightly untidily" — it is a microphone still
+            # open, a refine CLI whose `node` keeps billing for an answer nobody will
+            # read, and the speaker's PowerShell left behind (`Session.close`).
+            self.quit_app()
         except Exception as exc:
             self._flash = FLASH_FRAMES
             traceback.print_exc()
