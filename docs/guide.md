@@ -1296,7 +1296,7 @@ Verified on this machine while writing this document:
 
 | | |
 |---|---|
-| Test suite | **1,873 tests, 37.1 s**, no mic or model needed |
+| Test suite | **1,881 tests, 39.6 s**, no mic or model needed |
 | End-to-end | `scripts/selfdrive.py`, **64/64 checks**, live CLI round trip |
 | Build | `uv build` → wheel + sdist; wheel installs into a clean venv and its `flow` command runs |
 | Dependencies | 3 declared, **28 installed**, 243.9 MB venv |

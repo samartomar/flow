@@ -158,7 +158,7 @@ where Flow mishears them. That is the one thing I cannot measure alone.
 ```bash
 git clone https://github.com/samartomar/flow && cd flow
 uv sync && uv run flow                          # run it
-uv run python -m unittest discover -s tests     # 1,873 tests, ~40 s, no mic needed
+uv run python -m unittest discover -s tests     # 1,881 tests, ~40 s, no mic needed
 uv run python scripts/selfdrive.py              # the end-to-end harness
 ```
 
