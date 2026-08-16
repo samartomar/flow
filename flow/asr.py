@@ -159,6 +159,33 @@ NO_SPEECH_THRESHOLD = None
 #: on near-silence is exactly what a retry cannot fix.
 LOG_PROB_THRESHOLD = None
 
+#: Every decode targets English *output*, whatever language was spoken.
+#:
+#: On the multilingual GPU tier this is Whisper's trained X->English task: Hindi — or
+#: the Hinglish code-switching a dictation session actually sounds like — comes out as
+#: English text by design. The pinned `language: "en"` below was already doing this
+#: emergently, because forcing the `<|en|>` token on non-English audio behaves like
+#: translation; emergent is the problem, though — on longer monolingual stretches it
+#: can flip to Latin-script transliteration ("main keh raha tha...") instead.
+#: `<|translate|>` is the switch the model was trained on for this output contract.
+#:
+#: `language` stays pinned all the same (R2). Under `translate` that token names the
+#: *source*, so for Hindi audio it is knowingly wrong — accepted, because both tokens
+#: still point the output at English, and unpinning it would buy a per-utterance
+#: detection pass plus its known flakiness on short clips, which a dictation
+#: utterance usually is.
+#:
+#: The CPU tiers are unchanged by construction, not by luck: `base.en` / `small.en`
+#: are English-only, and faster-whisper's Tokenizer emits no task token at all for a
+#: non-multilingual model (the `multilingual=False` branch sets it to None) — the
+#: option is ignored there, not an error.
+#:
+#: Unmeasured: `<|en|><|translate|>` on *English* audio is rare in Whisper's training
+#: mix (translate pairs were non-English -> English). Nothing observed wrong yet; if
+#: GPU English accuracy ever looks off, `scripts/accent_bench.py` with this reverted
+#: to "transcribe" is the first experiment to run.
+TASK = "translate"
+
 
 #: **The send word is never biased toward. This is a safety rule, not a tuning choice.**
 #:
@@ -317,6 +344,7 @@ def decode_options(final: bool, hotwords: str | None = None) -> dict:
         return {**decode_options(final), "hotwords": hotwords}
     return {
         "language": "en",  # R2: never spend compute on language detection
+        "task": TASK,  # English out regardless of language in — see TASK above
         "beam_size": FINAL_BEAM if final else PARTIAL_BEAM,
         "temperature": FINAL_TEMPERATURES if final else PARTIAL_TEMPERATURES,
         "vad_filter": False,  # SpeechGate already decided this is speech

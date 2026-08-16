@@ -23,6 +23,7 @@ from flow.asr import (  # noqa: E402
     NO_SPEECH_THRESHOLD,
     PARTIAL_BEAM,
     PARTIAL_TEMPERATURES,
+    TASK,
     WhisperTranscriber,
     decode_options,
 )
@@ -79,6 +80,16 @@ class TestDecodeOptions(unittest.TestCase):
             self.assertIs(opts["vad_filter"], False)
             self.assertIs(opts["condition_on_previous_text"], False)
 
+    def test_output_is_english_by_task_not_by_accident(self):
+        # The pinned `<|en|>` token on Hindi audio already translated emergently, and
+        # emergently it could transliterate instead. The task token is the trained
+        # switch. Both tiers, because the draft the user reads must agree with the
+        # final that gets pasted; the English-only CPU models ignore it inside
+        # faster-whisper's tokenizer, so on CPU this asserts a harmless no-op.
+        self.assertEqual(TASK, "translate")
+        for final in (False, True):
+            self.assertEqual(decode_options(final)["task"], TASK)
+
 
 class TestOptionsReachTheModel(unittest.TestCase):
     """decode_options() is only useful if text() actually passes it through."""
@@ -87,11 +98,13 @@ class TestOptionsReachTheModel(unittest.TestCase):
         kw = call_kwargs(final=False)
         self.assertEqual(kw["temperature"], PARTIAL_TEMPERATURES)
         self.assertEqual(kw["beam_size"], PARTIAL_BEAM)
+        self.assertEqual(kw["task"], TASK)
 
     def test_final_call(self):
         kw = call_kwargs(final=True)
         self.assertEqual(kw["temperature"], FINAL_TEMPERATURES)
         self.assertEqual(kw["beam_size"], FINAL_BEAM)
+        self.assertEqual(kw["task"], TASK)
 
     def test_the_library_filter_is_turned_off_explicitly(self):
         # Defect 2: with a threshold set, faster-whisper deletes segments before Flow

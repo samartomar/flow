@@ -456,8 +456,14 @@ Two tiers, because one model cannot serve both paths on this CPU.
 `decode_options()` in [`flow/asr.py`](../flow/asr.py) is the single source both the app and
 the benchmarks decode with; a bench that drifts from the app measures a build nobody runs.
 
-Three settings are deliberately non-default:
+Four settings are deliberately non-default:
 
+- `task="translate"` — English output for any spoken language. On the multilingual GPU tier
+  this is Whisper's trained X→English task, so Hindi (or Hinglish) dictation lands as English
+  text on purpose rather than as an emergent side effect of the pinned `language="en"` token —
+  which already translated in practice but could flip to Latin-script transliteration on longer
+  monolingual stretches. The English-only CPU tiers ignore the task token inside
+  faster-whisper, so nothing changes there.
 - `vad_filter=False` — `SpeechGate` already decided this is speech. This is also why
   `onnxruntime` is unreachable and `scripts/slim.py` can remove it.
 - `condition_on_previous_text=False` — with context carry-over a long session can fall into
