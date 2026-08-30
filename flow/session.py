@@ -52,7 +52,7 @@ from .phonetic import MATCH_THRESHOLD, similarity
 from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
-from .refine import ask, available, refine, tail_sent
+from .refine import app_note, ask, available, refine, tail_sent
 from .thread import ASK_CONTEXT_CHARS, Thread
 
 # -- P4/P8: what a repair typed by hand teaches -------------------------------
@@ -295,11 +295,39 @@ RECENT_ANSWERED = "answer"
 #: worker-idle check below, this is what bounds partial latency.
 PARTIAL_MIN_GROWTH_SEC = 0.7
 
-#: R8: drop the 141 MB model after a long quiet spell. The mic stays open — it is
-#: cheap, and keeping it means speech still wakes the session with no keypress. This
-#: is a deliberate narrowing of what docs/analysis.md §4 proposed (which released the
-#: mic too): releasing it would make the app unable to hear its own wake-up.
-IDLE_UNLOAD_SEC = 300.0
+#: R8: drop the models after a long quiet spell. The mic stays open — it is cheap, and
+#: keeping it means speech still wakes the session with no keypress. This is a
+#: deliberate narrowing of what docs/analysis.md §4 proposed (which released the mic
+#: too): releasing it would make the app unable to hear its own wake-up.
+#:
+#: **"the 141 MB model" is what this comment used to say, and it was one tier out of
+#: date.** Two are resident — `base.en` for partials at 141 MB and `small.en` for finals
+#: at 464 MB — so what the idle path gives back is ~605 MB, not 141. The number is worth
+#: correcting rather than rounding past: it is the entire case for unloading at all, and
+#: it is four times better than the sentence defending it claimed.
+#:
+#: **Thirty minutes, not five.** Five was measuring the wrong thing — it asked how long
+#: the session had been quiet, and answered as if quiet meant gone. It does not: the gaps
+#: inside an ordinary working session run well past five minutes, so the common case was
+#: not "reclaim memory from somebody who left", it was "pay a reload in the middle of
+#: somebody's first sentence back". Half an hour rides out the gaps in a day and still
+#: hands the memory back overnight, which is the case the unload was written for.
+IDLE_UNLOAD_SEC = 1800.0
+
+#: How long a warm request holds the models against the idle unload.
+#:
+#: Exists because the two clocks disagreed about what "idle" means. `_last_activity` is
+#: only moved by Flow's own milestones, so a person who has just *reached for the chord*
+#: is still idle by that measure — and the health pump, which runs every tick, could
+#: unload the models between the press and the release that starts capture. That is the
+#: one moment the warm exists to cover, and it is exactly the moment it would have lost.
+#:
+#: A grace window rather than a touch of `_last_activity`, because they answer different
+#: questions and conflating them costs the unload its meaning: a chord press-down also
+#: arrives from Windows' own `ctrl+win+arrow`, and letting that reset the idle clock
+#: would mean anybody who switches virtual desktops through the day never unloads at
+#: all. Sixty seconds covers press-hold-release-speak and then stops mattering.
+WARM_GRACE_SEC = 60.0
 
 #: How long to wait between attempts to reopen a microphone that went away.
 #:
@@ -837,6 +865,16 @@ class Session:
         #: None disables learning entirely — the tests and the benchmarks pass None so
         #: a harness run never writes to the user's real profile.
         self.profile = profile
+        #: The executable in front, as `inject.Target.process` spells it, or "".
+        #:
+        #: Written by the pill rather than read here, and that is the split that keeps
+        #: `OpenProcess` off a 30 fps path: `Pill._track_target` already asks who has the
+        #: foreground every frame, so it is the one place that knows when the answer
+        #: *changed* and a name only has to be resolved then. Lite leaves it empty — it
+        #: has no target-window awareness at all (product.md) — which reads here as an
+        #: app with nothing configured, and that is the correct behaviour rather than a
+        #: gap: a rewrite with no per-app note is what every launch did until now.
+        self.target_app = ""
         #: A content-free shadow of the event stream (see flow/diag.py). Off unless
         #: the caller passes one, for the same reason `profile=None` disables learning:
         #: the tests build sessions in their hundreds, and a default that wrote to
@@ -923,6 +961,13 @@ class Session:
         #: The one preload this session owns, or None before the first arm. Single, not
         #: one per arm: see `_warm`.
         self._preload_thread: threading.Thread | None = None
+        #: Deadline until which the idle unload stands down, set by `warm`. Zero means
+        #: nobody has asked, which is the state every session starts and mostly stays in.
+        self._warm_until = 0.0
+        #: Whether the current push-to-talk hold is the thing that opened the mic. False
+        #: when the hold began against a session already capturing, which is what stops
+        #: a chord from closing a microphone the toggle hotkey opened.
+        self._ptt_opened = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -967,6 +1012,30 @@ class Session:
         self._check_calibrated_device()
         self._warm()
         self._set_state(State.IDLE)
+
+    def warm(self) -> None:
+        """Start loading the models now, before anybody asks them to decode anything.
+
+        The chord's press-down calls this, and the release that follows is what actually
+        arms. That gap — a person holding two modifiers, about to let go and speak — is
+        free time the load used to spend nowhere: `start()` deliberately does not await
+        the preload (see the docstring there, and the first-run download it exists to
+        keep off the UI thread), so on a cold arm the reload landed *inside* the first
+        utterance instead of in front of it. Measured on the run that prompted this:
+        first partial 1 230 ms, the four behind it ~570 ms.
+
+        Safe to call at any moment and as often as anybody likes. `_warm` is
+        single-flight and finds an already-loaded model instantly, so the cost of a
+        spurious call is a thread that starts and exits — which matters, because
+        `ctrl+win` is also the prefix Windows uses for `ctrl+win+d` and `ctrl+win+arrow`
+        and the hook cannot tell those from a real chord until the third key lands.
+
+        The grace window is the half that is not just a preload: without it the health
+        pump, which runs every tick, is free to unload between this call and the arm it
+        is preparing for. See `WARM_GRACE_SEC`.
+        """
+        self._warm_until = time.perf_counter() + WARM_GRACE_SEC
+        self._warm()
 
     def _warm(self) -> None:
         """One preload at a time, however often this session is armed.
@@ -1063,6 +1132,85 @@ class Session:
         self.speaker.stop()
         self._emit("note", "stopped reading the answer")
         return True
+
+    # -- push to talk ------------------------------------------------------
+    #
+    # The chord's two halves, as session verbs. `Pill` owns the state machine between
+    # them — it is the thread that may touch Tk and the one that already knows what
+    # `armed` means — and these are the two things it cannot do from outside: opening
+    # capture for the length of a hold, and closing it *without* discarding what was
+    # said into it.
+
+    @property
+    def busy(self) -> bool:
+        """True while a decode this session submitted is still in flight.
+
+        Exists for the push-to-talk paste, which must wait for the *final* rather than
+        paste the partial that preceded it. Narrow on purpose: it answers "is the
+        decoder still working", not "is Flow doing anything" — a CLI refine has its own
+        state, and `send()` already refuses while one is running.
+        """
+        return self.worker.busy
+
+    def talk_start(self) -> bool:
+        """Open the microphone for a hold. True if capture is running when this returns.
+
+        Idempotent against a session that is already capturing, and the return value is
+        the reason: somebody who armed with the toggle hotkey and then reaches for the
+        chord has a live microphone already, and re-opening it would cut the utterance
+        they are in the middle of. `talk_end` reads the same fact from `_ptt_opened` and
+        gives back only what this took.
+
+        Raises what `start()` raises — no microphone, a device held exclusively by
+        something else. The caller renders that; a swallowed failure here would be a
+        hold that records nothing and says so nowhere.
+        """
+        with self._lifecycle:
+            if self._closed:
+                return False
+        if self._mic_started:
+            self._ptt_opened = False
+            self.warm()
+            return True
+        self.start()
+        self._ptt_opened = True
+        return True
+
+    def talk_end(self) -> bool:
+        """Close a hold. True if there is now a decode in flight worth waiting for.
+
+        **`mic.stop()` and not `pause()`, and the difference is the whole gesture.**
+        `pause()` bumps the capture generation, which is precisely how a deliberate stop
+        refuses results decoded from before it — and under push-to-talk the words the
+        user just said are in flight *at this moment*. Pausing here would throw away the
+        utterance the release exists to send. `_give_up_on_device` reached the same
+        conclusion from the other direction and the comment there is the longer version.
+
+        **What was said is always committed, including on the break path**, and there is
+        deliberately no minimum-length rule deciding otherwise. `_utter` is what the gate
+        let through, so a hold with nothing spoken into it is already empty and
+        `_finalise` already returns early — a `ctrl+win+d` costs nothing without a
+        threshold, and a threshold would be a number that eventually eats somebody's
+        one-word answer. Whether the words get *pasted* is the caller's decision and a
+        different question; whether they are kept is not up for debate (P2).
+        """
+        pending = bool(self._utter)
+        self._finalise()
+        if self._ptt_opened:
+            try:
+                self.mic.stop()
+            except Exception:
+                pass  # already gone; there is nothing left to close
+            self._mic_started = False
+            # The hygiene `pause()` does either side of the generation bump, minus the
+            # bump: a gate left open would resume the next hold mid-utterance with no
+            # onset, and blocks captured after the stop belong to nobody.
+            self.gate.reset()
+            self.mic.drain()
+            self._ptt_opened = False
+            self._settle_state()
+            self._emit("disarm", "push-to-talk")
+        return pending
 
     def close(self) -> None:
         """Give back everything `start()` and the constructor took, in that order.
@@ -1381,6 +1529,7 @@ class Session:
         idle = now - self._last_activity
         if (
             idle >= IDLE_UNLOAD_SEC
+            and now >= self._warm_until
             and not self.draft.text
             and not self.gate.speaking
             and not self.worker.busy
@@ -2804,6 +2953,28 @@ class Session:
 
     # -- semantic refine (off-thread: ~7 s measured) ------------------------
 
+    def _app_note(self) -> str:
+        """The per-app block for whatever is in front, or "".
+
+        Matched case-insensitively on the executable name, because `"Code.exe"` and
+        `"code.exe"` are the same program and a table that cared would be a table whose
+        entries silently stop matching after a vendor changes the capitalisation of a
+        shipped binary.
+
+        Every way of having nothing to say lands on "" — no profile, no table, an app
+        with no entry, an entry that is blank or is not a string. A rewrite without a
+        note is exactly what Flow did before this existed, so the degraded path is the
+        old behaviour rather than an error.
+        """
+        table = getattr(self.profile, "apps", None) if self.profile else None
+        if not table or not self.target_app:
+            return ""
+        wanted = self.target_app.lower()
+        for name, note in table.items():
+            if isinstance(name, str) and name.strip().lower() == wanted:
+                return app_note(self.target_app, note)
+        return ""
+
     def _start_refine(self, instruction: str, *, polish: bool = False) -> None:
         if self._refine_op is not None:
             # The refusal `send()` already makes, for the same reason. Two rewrites of
@@ -2839,6 +3010,13 @@ class Session:
             )
 
         context = self.thread.tail() if self.following_up else []
+        # Resolved here and not on the worker, because `target_app` is written by the UI
+        # thread every frame and the worker runs for the ~7 s the CLI takes. Reading it
+        # there would let the app the user tabbed to *during* the rewrite decide how the
+        # words they already spoke come out.
+        app = self._app_note()
+        if app:
+            self._emit("note", f"using your {self.target_app} note")
 
         def work() -> None:
             passed_over: list[str] = []
@@ -2846,7 +3024,7 @@ class Session:
                 before, instruction, cwd=self._refine_cwd, polish=polish,
                 context=context, cancel=self._cancel,
                 cli=self._cli, timeout=self._cli_timeout,
-                skipped=passed_over,
+                skipped=passed_over, app=app,
             )
             with self._refine_lock:
                 self._refine_result = (op, revision, result, tuple(passed_over))

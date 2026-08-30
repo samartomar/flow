@@ -35,6 +35,11 @@ class Canvas:
 
     def delete(self, *a, **kw) -> None: ...
 
+    #: `_sync_dock` resizes the canvas when a panel docks or goes away. Accepted and
+    #: recorded rather than ignored, so a test can tell a widened pill from a moved one.
+    def configure(self, **kw) -> None:
+        self.width = kw.get("width", getattr(self, "width", None))
+
     def create_polygon(self, *a, **kw) -> None: ...
 
     def create_arc(self, *a, **kw) -> None: ...
@@ -63,7 +68,7 @@ def pill(state=State.IDLE, *, armed=True, mode=DICTATE, hearing=True,
     p = ui.Pill.__new__(ui.Pill)
     p.canvas = Canvas()
     p.armed = armed
-    p.levels = [0.0] * ui.BARS
+    p._meter_level = 0.0
     p.session = mock.Mock(
         mode=mode, state=state, hearing=hearing, editing=editing, cli=None,
         mic=mock.Mock(active=mic_active),
@@ -410,6 +415,328 @@ class TestTheModeSwitchIsContinuous(unittest.TestCase):
         self.assertEqual({o[-1] for o in p.canvas.ovals if o[0] < ui.METER_X}, {half})
 
 
+class TestTheMeterBloomsFromItsCentre(unittest.TestCase):
+    """The shape taken from FluidVoice's `BottomWaveformView`, asserted as a shape.
+
+    Flow's meter used to be a scrolling history — one level per frame through a deque,
+    travelling right to left. It is a symmetric bloom now: every bar reads the same
+    current level, and the envelope is what makes the middle ones tallest. These are
+    the properties that distinguish the two, so that a future edit which quietly
+    restored the old behaviour would fail here rather than merely look different.
+    """
+
+    def heights(self, level: float) -> list[float]:
+        return [ui.Pill._bar_half_height(i, level) for i in range(ui.BARS)]
+
+    def test_the_middle_is_the_tallest_part_of_the_shape(self):
+        h = self.heights(1.0)
+        self.assertEqual(max(h), max(h[ui.BARS // 2 - 1:ui.BARS // 2 + 1]))
+
+    def test_it_falls_away_toward_both_ends(self):
+        # Monotonic out from the centre in each direction. The per-bar variation is
+        # deliberately small enough not to break this — a wobble that reordered the
+        # envelope would be a comb, not a bloom.
+        h = self.heights(1.0)
+        mid = ui.BARS // 2
+        self.assertEqual(h[:mid], sorted(h[:mid]))
+        self.assertEqual(h[mid:], sorted(h[mid:], reverse=True))
+
+    def test_the_ends_still_move_rather_than_sitting_dead(self):
+        # `_ENVELOPE_MIN` is 18% and not 0. An end bar pinned at the minimum would read
+        # as a broken meter rather than a shaped one.
+        self.assertGreater(self.heights(1.0)[0], self.heights(0.0)[0])
+
+    def test_silence_is_a_flat_line_of_stubs_and_not_an_empty_box(self):
+        # The one thing the old meter and this one agree on, and the reason `BAR_MIN_H`
+        # is not zero: an empty widget reads as "not working", not as "quiet".
+        self.assertEqual(self.heights(0.0), [ui.BAR_MIN_H] * ui.BARS)
+
+    def test_nothing_ever_draws_outside_the_pill(self):
+        # Half-heights, mirrored, inside a 40 px pill with 8 px of air.
+        for level in (0.0, 0.25, 0.5, 0.75, 1.0, 2.0, -1.0):
+            with self.subTest(level=level):
+                for h in self.heights(level):
+                    self.assertGreaterEqual(h, ui.BAR_MIN_H)
+                    self.assertLessEqual(h, ui.BAR_MAX_H)
+
+    def test_ordinary_speech_reaches_most_of_the_way_up(self):
+        # What the 0.55 exponent buys. At half level a linear meter would draw half
+        # height, which is what made the old one look timid at conversational volume —
+        # the top of the widget was reserved for shouting.
+        half = self.heights(0.5)[ui.BARS // 2]
+        full = self.heights(1.0)[ui.BARS // 2]
+        self.assertGreater(half, full * 0.6)
+
+    def test_every_bar_answers_the_same_level(self):
+        # The bloom's defining property, and the one a reintroduced history would break:
+        # the shape between bars is the envelope, never the past.
+        first = self.heights(0.7)
+        self.assertEqual(first, self.heights(0.7))
+
+
+class TestWhereThePanelOpens(unittest.TestCase):
+    """FluidVoice's `positionWindow` arithmetic, ported and asserted.
+
+    Their rule reads oddly until you notice it uses *two* rectangles on purpose:
+    centred on `screen.frame` — the physical display — but stood on
+    `screen.visibleFrame`, which excludes the Dock. Windows hands back the same pair as
+    `rcMonitor` and `rcWork`, so this ports without being reinterpreted.
+    """
+
+    #: A 1920×1080 display with a 48 px taskbar, offset on a virtual desktop so that a
+    #: test cannot pass by assuming the origin is (0, 0) — which is the bug a
+    #: second-monitor user gets.
+    FULL = (1920, 0, 3840, 1080)
+    WORK = (1920, 0, 3840, 1032)
+
+    def test_it_centres_on_the_physical_display(self):
+        x, _y = ui.bottom_centre(400, 100, self.FULL, self.WORK)
+        self.assertEqual(x, 1920 + (1920 - 400) // 2)
+
+    def test_it_stands_on_the_work_area_and_not_the_screen_edge(self):
+        # The asymmetry that matters: centred on `full`, but lifted clear of the
+        # taskbar. Standing on `full` would put the panel under it.
+        _x, y = ui.bottom_centre(400, 100, self.FULL, self.WORK)
+        self.assertLessEqual(y + 100, self.WORK[3])
+
+    def test_the_offset_lifts_it_and_is_measured_from_the_bottom(self):
+        # Both offsets clear of the 10 px floor, so this measures the offset rather than
+        # the clamp. FluidVoice floors at `visibleFrame.minY + 10` the same way, which
+        # is why an offset of 0 and an offset of 10 land in the same place.
+        _x, near = ui.bottom_centre(400, 100, self.FULL, self.WORK, offset=20)
+        _x, far = ui.bottom_centre(400, 100, self.FULL, self.WORK, offset=120)
+        self.assertEqual(near - far, 100)
+
+    def test_the_last_ten_pixels_are_a_floor_rather_than_a_range(self):
+        flush = ui.bottom_centre(400, 100, self.FULL, self.WORK, offset=0)
+        floored = ui.bottom_centre(400, 100, self.FULL, self.WORK, offset=10)
+        self.assertEqual(flush, floored)
+
+    def test_an_offset_from_a_hand_edited_profile_cannot_push_it_off_screen(self):
+        # The clamp is what makes the offset safe to expose as a setting. Both ends,
+        # because a negative number is as easy to type as a huge one.
+        for offset in (-10_000, -1, 0, 900, 10_000):
+            with self.subTest(offset=offset):
+                x, y = ui.bottom_centre(400, 100, self.FULL, self.WORK, offset)
+                self.assertGreaterEqual(y, self.WORK[1] + 40)
+                self.assertLessEqual(y + 100, self.WORK[3] - 10)
+                self.assertGreaterEqual(x, self.WORK[0])
+                self.assertLessEqual(x + 400, self.WORK[2])
+
+    def test_a_panel_taller_than_the_display_keeps_its_bottom(self):
+        # The one case where the clamp cannot satisfy both ends. The bottom is the edge
+        # worth keeping: the top of a draft can run under the taskbar and still be read,
+        # and the chips that act on it live at the bottom.
+        _x, y = ui.bottom_centre(400, 5000, self.FULL, self.WORK)
+        self.assertEqual(y + 5000, self.WORK[3] - 10)
+
+    def test_a_panel_wider_than_the_display_starts_at_its_left_edge(self):
+        x, _y = ui.bottom_centre(4000, 100, self.FULL, self.WORK)
+        self.assertEqual(x, self.WORK[0])
+
+    def test_the_monitor_under_the_pointer_answers_with_two_rectangles(self):
+        # `_work_area` asks `SystemParametersInfoW`, which only ever answers for the
+        # primary display — so on a two-monitor desk everything Flow drew landed on the
+        # wrong one whenever the user was working on the other.
+        full, work = ui._pointer_monitor(1280, 720)
+        for rect in (full, work):
+            self.assertEqual(len(rect), 4)
+            self.assertGreater(rect[2], rect[0])
+            self.assertGreater(rect[3], rect[1])
+        # The work area is the one the taskbar comes out of, so it can only be smaller.
+        self.assertLessEqual(work[3] - work[1], full[3] - full[1])
+        self.assertLessEqual(work[2] - work[0], full[2] - full[0])
+
+    def test_it_degrades_to_the_primary_work_area_rather_than_raising(self):
+        # A repaint is not a place to handle a Win32 failure. `_NoHands` is this
+        # module's own idea of "nothing happened", and the fallback has to land
+        # somewhere drawable rather than at (0, 0) with no size.
+        with mock.patch.object(ui.ctypes, "windll", ui._NoHands()):
+            full, work = ui._pointer_monitor(1280, 720)
+        self.assertEqual(full, work)
+        self.assertGreater(full[2], full[0])
+
+
+class TestWhichPlacementIsInForce(unittest.TestCase):
+    """`PLACE`, and the two answers `_placed` gives.
+
+    Restores the module afterwards for `tests/test_overlay.py`'s reason: this is a
+    global, and a test that moved it would outlive itself.
+    """
+
+    FULL = (1920, 0, 3840, 1080)
+    WORK = (1920, 0, 3840, 1032)
+
+    def setUp(self):
+        self.addCleanup(ui.apply_place, ui.PLACE_DEFAULT)
+        self.p = ui.Pill.__new__(ui.Pill)
+        self.p.full, self.p.work = self.FULL, self.WORK
+
+    def test_bottom_is_what_ships(self):
+        # Stated as a fact rather than left to the constant, because this is the change
+        # of default: the corner is where Windows puts the tray, every toast, and most
+        # apps' own status chrome, and it was the one place Flow had reserved.
+        self.assertEqual(ui.PLACE_DEFAULT, "bottom")
+        self.assertEqual(ui.PLACE, "bottom")
+
+    def test_bottom_centres_the_stack_on_the_display(self):
+        ui.apply_place("bottom")
+        x, _y = self.p._placed(ui.PILL_W)
+        self.assertEqual(x, ui.bottom_centre(ui.PILL_W, ui.PILL_H, self.FULL,
+                                             self.WORK, ui.PANEL_BOTTOM_OFFSET)[0])
+
+    def test_corner_still_puts_it_bottom_right_where_it_always_was(self):
+        # Kept rather than removed: somebody who has spent months with the pill in the
+        # bottom right should not have it moved by an upgrade they did not ask for.
+        ui.apply_place("corner")
+        x, y = self.p._placed(ui.PILL_W)
+        self.assertEqual(x, self.WORK[2] - ui.PILL_W - 28)
+        self.assertEqual(y, self.WORK[3] - ui.PILL_H - 24)
+
+    def test_the_two_placements_are_actually_different(self):
+        # A guard against both branches collapsing to the same arithmetic, which is how
+        # a setting comes to look like it works while doing nothing.
+        ui.apply_place("bottom")
+        here = self.p._placed(ui.PILL_W)
+        ui.apply_place("corner")
+        self.assertNotEqual(here, self.p._placed(ui.PILL_W))
+
+    def test_a_typo_costs_the_setting_and_not_the_app(self):
+        # This arrives from a hand-edited profile. Raising here would be a launch that
+        # dies on a misspelled word.
+        for name in ("bottomm", "", "BOTTOM", "centre", "left"):
+            with self.subTest(name=name):
+                ui.apply_place(name)
+                self.assertEqual(ui.PLACE, ui.PLACE_DEFAULT)
+
+    def test_the_widths_it_is_asked_about_are_the_ones_it_is_placed_at(self):
+        # `_placed` takes the width because the pill grows to the panel's when one is
+        # docked. Centring a 420-wide stack using the 152-wide pill's position is how
+        # the stack would sit off-centre exactly when it is most visible.
+        ui.apply_place("bottom")
+        narrow, _ = self.p._placed(ui.PILL_W)
+        wide, _ = self.p._placed(ui.BUBBLE_W)
+        self.assertGreater(narrow, wide)
+
+
+class TestTheStackFollowsThePointersMonitor(unittest.TestCase):
+    """The bug the placement work turned up, asserted so it cannot come back.
+
+    `self.work` was read once in `__init__` from `SystemParametersInfoW`, which only
+    ever answers for the primary display. On a two-monitor desk that put every window
+    Flow drew against a screen the user might not be looking at — and pointed the
+    on-screen clamps at the wrong rectangle too.
+    """
+
+    ONE = ((0, 0, 1920, 1080), (0, 0, 1920, 1032))
+    TWO = ((1920, 0, 3840, 1080), (1920, 0, 3840, 1032))
+
+    def pill(self, at):
+        p = ui.Pill.__new__(ui.Pill)
+        p.full, p.work = at
+        p.x, p.y = p._placed(ui.PILL_W)
+        p._docked_w = ui.PILL_W
+        p.canvas = Canvas()
+        # `pill_w` reads `front`, which reads `session.mode`. Set for the reason
+        # `test_lite`'s harness sets everything: `tk.Misc.__getattr__` forwards an
+        # unknown attribute to `self.tk`, so a missing one recurses rather than defaults.
+        p.session = mock.Mock(mode=DICTATE)
+        p.bubble = mock.Mock(_visible=False)
+        p.card = mock.Mock(_visible=False)
+        p.winfo_screenwidth = lambda: 1920
+        p.winfo_screenheight = lambda: 1080
+        p.window_geometry = lambda: (ui.PILL_W, p.x, p.y)
+        p.geometry = mock.Mock()
+        return p
+
+    def test_moving_the_pointer_to_the_other_monitor_moves_the_stack(self):
+        p = self.pill(self.ONE)
+        was = (p.x, p.y)
+        with mock.patch.object(ui, "_pointer_monitor", return_value=self.TWO):
+            p._sync_monitor()
+        self.assertNotEqual((p.x, p.y), was)
+        self.assertGreaterEqual(p.x, self.TWO[1][0])
+        self.assertLessEqual(p.x + ui.PILL_W, self.TWO[1][2])
+
+    def test_a_pointer_that_has_not_left_the_monitor_costs_nothing(self):
+        # Every frame asks. Acting unconditionally would be a `geometry` call per frame
+        # forever — the same shape `_track_target` uses for `classify`, for the reason.
+        p = self.pill(self.ONE)
+        with mock.patch.object(ui, "_pointer_monitor", return_value=self.ONE):
+            p._sync_monitor()
+        p.geometry.assert_not_called()
+
+    def test_a_panel_that_is_up_is_moved_with_the_pill(self):
+        # The panels are placed *from* the pill, so moving it is the whole move — but
+        # only for a window somebody can see.
+        p = self.pill(self.ONE)
+        p.bubble = mock.Mock(_visible=True, width=ui.BUBBLE_W)
+        with mock.patch.object(ui, "_pointer_monitor", return_value=self.TWO):
+            p._sync_monitor()
+        p.bubble.reposition.assert_called_once()
+        p.card.reposition.assert_not_called()
+
+
+class TestAHiddenPanelIsParkedRatherThanUnmapped(unittest.TestCase):
+    """FluidVoice's `parkWindowOffscreen`, and the one property it must have.
+
+    The panels used to `withdraw()`. Push-to-talk made that the wrong trade: a panel now
+    has to be up between a key going down and somebody starting to speak, and a remap is
+    work done in exactly that gap.
+    """
+
+    #: Two monitors side by side, the left one primary. The union is what matters.
+    DESKTOP = (0, 0, 3840, 1080)
+
+    def test_a_parked_panel_is_clear_of_every_monitor(self):
+        # The one thing that must never happen. Parking off the right edge of the *left*
+        # display in a two-monitor desk parks it in the middle of the right one, in full
+        # view, which is why this is the union and not the current screen.
+        x, y = ui.park_spot(420, 300, self.DESKTOP)
+        self.assertGreater(x, self.DESKTOP[2])
+        self.assertGreater(y, self.DESKTOP[3])
+
+    def test_the_panel_clears_the_edge_by_its_own_size_as_well_as_the_margin(self):
+        # Its top-left corner being past the edge is not enough — the window extends
+        # right and down from there.
+        for w, h in ((205, 40), (420, 300), (640, 900)):
+            with self.subTest(w=w, h=h):
+                x, y = ui.park_spot(w, h, self.DESKTOP)
+                self.assertGreaterEqual(x - self.DESKTOP[2], w + ui.PARK_MARGIN)
+                self.assertGreaterEqual(y - self.DESKTOP[3], h + ui.PARK_MARGIN)
+
+    def test_the_desktop_is_every_monitor_and_not_the_primary_one(self):
+        left, top, right, bottom = ui._virtual_desktop(1280, 720)
+        self.assertGreater(right, left)
+        self.assertGreater(bottom, top)
+
+    def test_it_degrades_to_the_screen_rather_than_raising(self):
+        with mock.patch.object(ui.ctypes, "windll", ui._NoHands()):
+            self.assertEqual(ui._virtual_desktop(1280, 720), (0, 0, 1280, 720))
+
+    def test_parking_moves_the_window_and_never_unmaps_it(self):
+        # The distinction the whole change rests on: a `withdraw` here would cost a
+        # remap on the next hold, which is the gap push-to-talk has to fit inside.
+        win = mock.Mock(width=420, _h=300)
+        win.winfo_screenwidth.return_value = 1280
+        win.winfo_screenheight.return_value = 720
+        ui.park(win)
+        win.withdraw.assert_not_called()
+        win.geometry.assert_called_once()
+        asked = win.geometry.call_args[0][0]
+        self.assertTrue(asked.startswith("420x300+"), asked)
+
+    def test_a_panel_with_no_height_yet_is_still_parked_somewhere_legal(self):
+        # `_h` is not set until the first render, and a hide can beat it — a zero-sized
+        # geometry request is one a window manager is entitled to refuse.
+        win = mock.Mock(width=420, spec=["width", "geometry", "winfo_screenwidth",
+                                         "winfo_screenheight"])
+        win.winfo_screenwidth.return_value = 1280
+        win.winfo_screenheight.return_value = 720
+        ui.park(win)
+        self.assertTrue(win.geometry.call_args[0][0].startswith("420x1+"))
+
+
 class TestMix(unittest.TestCase):
     def test_the_ends_are_exact(self):
         self.assertEqual(ui._mix(ui.HEARING, ui.CARD_ACCENT, 0.0), ui.HEARING)
@@ -435,6 +762,7 @@ def docker(*, showing=True, panel_w=ui.BUBBLE_W, window=None, x=1047, docked_w=u
     p.bubble = mock.Mock(width=panel_w, _visible=showing)
     p.card = mock.Mock(width=panel_w, _visible=False)
     p.work = (0, 0, 1280, 720)
+    p.full = (0, 0, 1280, 720)
     p.x, p.y = x, 608
     p._docked_w = docked_w
     p.geometry = mock.Mock()
@@ -450,7 +778,17 @@ class TestTheDockIsCheckedRatherThanAssumed(unittest.TestCase):
     205 px pill sits at, hanging 215 px off the screen and unjoined from the panel it
     is docked to, held there for five seconds because the width already matched and
     nothing looked again.
+
+    Pinned to `"corner"`, because holding the right edge is *corner* placement's rule
+    and not the dock's: the pill is anchored to the screen edge it sits against, and
+    growing away from it is the only direction there is. Centred placement has no
+    anchored edge and re-centres instead — `TestTheDockRecentresWhenThereIsNoEdge`
+    below is the same class of check for it.
     """
+
+    def setUp(self):
+        self.addCleanup(ui.apply_place, ui.PLACE_DEFAULT)
+        ui.apply_place("corner")
 
     def test_a_panel_appearing_moves_the_left_edge_and_holds_the_right(self):
         p = docker()
@@ -487,6 +825,62 @@ class TestTheDockIsCheckedRatherThanAssumed(unittest.TestCase):
         p._sync_dock()
         self.assertEqual(p.x, 1047)
         p.geometry.assert_called_once_with(f"{ui.PILL_W}x{ui.PILL_H}+1047+608")
+
+
+class TestTheDockRecentresWhenThereIsNoEdge(unittest.TestCase):
+    """The same dock under centred placement, where holding an edge is the bug.
+
+    Found by running the shipped placement against the dock rather than by reading it:
+    the pill is 205 px and the panel 420, and holding the right edge put the pair
+    **107 px left of centre the moment a draft appeared** — visibly, on every utterance,
+    because a draft appearing is the single most common thing that happens.
+
+    Corner placement is anchored to the screen edge it sits against, so growing away
+    from that edge is the only direction there is. Centred placement has no anchored
+    edge, and the width it should be centred on is the *new* one.
+    """
+
+    def setUp(self):
+        self.addCleanup(ui.apply_place, ui.PLACE_DEFAULT)
+        ui.apply_place("bottom")
+
+    def centre_of(self, p, w):
+        return p._placed(w)[0]
+
+    def test_a_panel_appearing_recentres_on_the_new_width(self):
+        p = docker(x=538, docked_w=ui.PILL_W)
+        p._sync_dock()
+        self.assertEqual(p.x, self.centre_of(p, ui.BUBBLE_W))
+
+    def test_the_panel_going_away_recentres_on_the_pill(self):
+        p = docker(showing=False, docked_w=ui.BUBBLE_W, x=430)
+        p._sync_dock()
+        self.assertEqual(p.x, self.centre_of(p, ui.PILL_W))
+
+    def test_the_stack_stays_centred_across_an_open_and_a_close(self):
+        # The round trip, because an off-by-one in either direction accumulates: a pill
+        # that came back a few pixels off would drift across a session.
+        p = docker(x=538, docked_w=ui.PILL_W)
+        p._sync_dock()
+        p.bubble = mock.Mock(width=ui.BUBBLE_W, _visible=False)
+        p.window_geometry = mock.Mock(return_value=(ui.BUBBLE_W, p.x, 608))
+        p._sync_dock()
+        self.assertEqual(p.x, 538)
+
+    def test_it_is_still_clamped_onto_the_screen(self):
+        # The clamp survives the branch. A panel wider than the display would otherwise
+        # be centred to a negative x.
+        p = docker(x=538, docked_w=ui.PILL_W, panel_w=4000)
+        p._sync_dock()
+        self.assertGreaterEqual(p.x, p.work[0])
+
+    def test_corner_placement_is_untouched_by_any_of_this(self):
+        # The two branches are different rules, not one rule with a flag, and the
+        # corner's is the one people have been using.
+        ui.apply_place("corner")
+        p = docker()
+        p._sync_dock()
+        self.assertEqual(p.x + ui.BUBBLE_W, 1047 + ui.PILL_W)
 
 
 if __name__ == "__main__":

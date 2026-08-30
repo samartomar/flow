@@ -319,6 +319,12 @@ class TestLiteHasNoTarget(unittest.TestCase):
         pill = ui.Pill.__new__(ui.Pill)
         pill.lite = lite
         pill.paste_target = None
+        # `_track_target` writes the app name onto the session for `_app_note` to read
+        # later. A stand-in rather than a mock, because what the tests below check is the
+        # *value* that lands there — and on a `Pill` built by `__new__`, a missing
+        # attribute is not an AttributeError but a `tkinter` lookup that recurses until
+        # the interpreter gives up, which is a confusing way to learn this line exists.
+        pill.session = type("S", (), {"target_app": ""})()
         return pill
 
     def test_the_foreground_is_never_asked_about_in_lite(self):
@@ -344,6 +350,45 @@ class TestLiteHasNoTarget(unittest.TestCase):
                 mock.patch.object(ui, "owned_by_flow", return_value=False):
             pill._track_target()
         self.assertEqual(pill.paste_target, 0x99)
+
+    def test_the_app_behind_the_window_is_named_for_the_per_app_note(self):
+        import flow.ui as ui
+
+        pill = self._pill(lite=False)
+        with mock.patch.object(ui, "foreground_hwnd", return_value=0x99),                 mock.patch.object(ui, "owned_by_flow", return_value=False),                 mock.patch.object(ui, "classify") as named:
+            named.return_value = type("T", (), {"process": "code.exe"})()
+            pill._track_target()
+        self.assertEqual(pill.session.target_app, "code.exe")
+
+    def test_it_is_resolved_on_the_edge_and_not_once_a_frame(self):
+        # `classify` opens a process handle and this runs at 30 fps. Paying that every
+        # frame is a cost paid forever to answer a question whose answer moves a few
+        # times an hour — so it is asked when the window changes and remembered between.
+        import flow.ui as ui
+
+        pill = self._pill(lite=False)
+        with mock.patch.object(ui, "foreground_hwnd", return_value=0x99),                 mock.patch.object(ui, "owned_by_flow", return_value=False),                 mock.patch.object(ui, "classify") as named:
+            named.return_value = type("T", (), {"process": "code.exe"})()
+            for _ in range(10):
+                pill._track_target()
+            self.assertEqual(named.call_count, 1)
+            named.return_value = type("T", (), {"process": "slack.exe"})()
+            with mock.patch.object(ui, "foreground_hwnd", return_value=0xAB):
+                pill._track_target()
+            self.assertEqual(named.call_count, 2)
+        self.assertEqual(pill.session.target_app, "slack.exe")
+
+    def test_lite_never_names_an_app_because_it_never_has_a_target(self):
+        # No target-window awareness at all (product.md), which reads downstream as an
+        # app with no note configured — the behaviour every launch had before per-app
+        # notes existed, rather than a gap.
+        import flow.ui as ui
+
+        pill = self._pill(lite=True)
+        with mock.patch.object(ui, "classify") as named:
+            pill._track_target()
+        named.assert_not_called()
+        self.assertEqual(pill.session.target_app, "")
 
 
 class TestTheWindowsOnlyTkAttributes(unittest.TestCase):

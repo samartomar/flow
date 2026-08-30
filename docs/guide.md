@@ -228,6 +228,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--arm` | start listening immediately, no click needed |
 | `--no-paste` | print the draft to stdout instead of pasting it |
 | `--no-hotkeys` | skip global hotkey registration |
+| `--no-chord` | skip the modifier-only chord, so no low-level keyboard hook is installed ([The chord](#the-chord-ctrlwin)) |
 | `--calibrate` | measure this room and this voice, store the profile, and exit ([P8](#calibration-p8)) |
 | `--no-profile` | ignore the stored profile and learn nothing this session |
 | `--converse` | start in converse mode: Send asks the agent CLI instead of pasting ([P9](#converse-mode-p9)) |
@@ -406,6 +407,220 @@ for you to fix.
 `--no-hotkeys` and [Lite](#install) register nothing with the OS, so a `hotkeys` block is
 not read on those launches and nothing is said about it.
 
+### Hold the pill (every platform)
+
+**Hold the pill, speak, let go.** Same gesture as the chord below, on a button Flow
+already draws rather than on a system hotkey — so it works in Lite, on macOS and Linux,
+where there is no chord at all and nothing to grant but the microphone.
+
+One button, three gestures, each judged on what you actually did:
+
+| | |
+|---|---|
+| **Quick click** | toggles listening, as it always has |
+| **Hold ~300 ms, then speak** | push-to-talk — release sends |
+| **Press and move** | drags the pill somewhere else |
+
+Moving the mouse *while already talking* does not cancel anything: once capture is open
+the pointer is irrelevant, and a sentence lost to a twitch would be the gesture betraying
+you. The 300 ms and the 4 px of slop are `PILL_HOLD_SEC` and `PILL_DRAG_SLOP`.
+
+This also fixed something older: `_toggle` was bound to the button *press*, so **every
+drag of the pill used to toggle listening on the way past**. A click is judged on
+release now, like a button anywhere else.
+
+### The chord (ctrl+win)
+
+**Settings ▸ Chord (ctrl+win)** picks which of two gestures it is. Both ship, because
+neither replaces the other, and you can switch between them while Flow is running — the
+change takes effect on the next press, with no restart.
+
+| | |
+|---|---|
+| **Hold to talk, release to send** | The shipped default. Press both keys, speak while they are down, let go. What you said is pasted into whatever window has focus — no third key, no clicking anything, no second shortcut to send. |
+| **Press to start, press again to stop** | The original. A clean press-and-release starts listening and the next one stops it, exactly like the `toggle` hotkey. |
+
+**Pick the hold for a sentence and the toggle for a paragraph.** The hold needs no
+decision about when you are finished and cannot leave a microphone running by accident.
+The toggle is the only one of the two that survives a long thought with pauses in it, a
+phone call you are transcribing, or hands that would rather not hold two keys down for a
+minute. It is remembered in `profile.json` as `"gesture": "toggle"`.
+
+The rest of this section describes the hold, which is the default.
+
+The press-down does two things at once: it opens the microphone, and it starts loading
+the models if they had been idle long enough to be released. That second half is why the
+gesture is a *hold* rather than a tap — the second or so you spend pressing the keys and
+drawing breath is the second the models need to come back, so it costs nothing instead of
+landing in the middle of your first sentence.
+
+It exists because every combo in the table above ends in a key. `RegisterHotKey`, the
+Windows call behind them, takes a virtual key and has no way to say "these modifiers and
+nothing else" — so `ctrl+alt+space` is a shape your left hand makes *plus* a reach. Ctrl
+and Win are neighbours, and holding two neighbours is one movement.
+
+**The `toggle` hotkey still works and still toggles.** The two are for different things
+now rather than being two doors to the same room: hold the chord for a sentence, press
+`ctrl+alt+space` for a paragraph you want to say hands-free.
+
+#### What happens when Windows wants ctrl+win too
+
+Windows uses ctrl+win as a prefix — `ctrl+win+d` makes a virtual desktop, `ctrl+win+←/→`
+switch between them. Those still work, and Flow gets out of the way as soon as it sees
+the third key: the capture stops on that keystroke, and **nothing is ever pasted**.
+
+Under the old toggle gesture Flow could refuse these outright, because nothing had
+started until you let go. Push-to-talk opens the microphone on the press-down, so a
+desktop switch does open it for a moment. Two things bound what that costs. The
+microphone closes on the third key rather than at the release, so holding the keys
+through several desktop switches does not record them. And if you *had* already started
+speaking when the third key landed, your words are kept — they go to the draft, where the
+Send chip picks them up — rather than being thrown away or pasted somewhere you did not
+mean.
+
+Adding a modifier is a different chord and starts nothing at all: ctrl+shift+win does
+nothing here.
+
+#### The two things that stop on their own
+
+Both are ceilings on a failure, not limits on you:
+
+- **A hold of two minutes ends itself.** A key release can genuinely go missing — a lock
+  screen or a remote-desktop session takes the keyboard mid-hold, or Windows drops the
+  keyboard hook for being slow. Without a ceiling that leaves a microphone open. What you
+  said is kept and put on screen; it is not pasted, because two minutes later you are
+  somewhere else.
+- **A paste waits up to fifteen seconds for the decode.** Transcribing the final takes
+  from under a second to several, so the release cannot paste immediately — it waits.
+  Past fifteen seconds Flow stops waiting and tells you the words are in the draft. It
+  never pastes late: text arriving a minute after the gesture would land in whatever
+  window you had moved to.
+
+Change it or turn it off with `chord` in `~/.flow/profile.json`, beside the `hotkeys`
+table:
+
+```json
+{
+  "schema": 1,
+  "chord": "ctrl+shift"
+}
+```
+
+Two or three of `ctrl`, `alt`, `shift` and `win`. **One is refused** — a chord of one
+modifier fires every time you tap that key and let go, which is a thing hands do all day
+without meaning anything by it. Four is refused as well, because it is not a shape you
+can hold. `"chord": ""` turns it off entirely, and is deliberately different from
+deleting the line: Flow writes every field back when it saves, so a deleted `chord`
+comes back as the default.
+
+**What this costs, stated plainly.** A modifier-only chord cannot be done with
+`RegisterHotKey`, so Flow installs a low-level keyboard hook (`WH_KEYBOARD_LL`) — which
+means Windows calls into Flow for every keystroke on the machine, not just Flow's own.
+Three things are true about what that code does, and they are the reason it is
+considered acceptable here:
+
+- **It never learns which key you pressed.** The key code is compared against eleven
+  modifier constants and against nothing else. Anything not in that set flips a single
+  true/false — not stored, not logged, not compared to anything, and it never leaves the
+  function. It is about sixty lines in `flow/hotkey.py` (`Chord`), written to be read.
+- **It never swallows a keystroke.** Every event is passed straight on, including the
+  release that ends it. Ctrl and Win keep their normal jobs.
+- **Nothing is sent anywhere.** Same as the rest of Flow: no network, no file.
+
+If you would rather not have that hook at all, `--no-chord` skips it for one launch and
+`"chord": ""` skips it for good. The `toggle` hotkey is unaffected either way.
+
+If the OS refuses the hook — some policies and some elevated desktops do — the startup
+block says so on one line and Flow carries on with the registered combos:
+
+```
+chord   unavailable (keyboard hook refused); the toggle hotkey still works
+```
+
+### Where the panels open
+
+**Bottom centre of whichever monitor your mouse is on.** That is the shipped placement,
+and it changed: Flow used to sit in the bottom-right corner of the primary display.
+
+Two things were wrong with the corner. The bottom right is the busiest part of a Windows
+desktop — the tray lives there, every toast notification opens there, and plenty of apps
+park their own status chrome there — so the one place Flow had reserved for itself was
+the place most likely to be covered. And the primary display is not necessarily the one
+you are working on: the work area was read once at launch from `SystemParametersInfoW`,
+which only ever answers for the primary monitor, so on a two-monitor desk everything
+Flow drew could land on the screen you were not looking at.
+
+The panel now follows the pointer's monitor and re-places itself when you move between
+displays. Set `"place": "corner"` in `profile.json` to put it back in the bottom right;
+it is kept for anybody who has spent months with it there, and only the position
+changes.
+
+`"place"` takes `"bottom"` or `"corner"`. Anything else falls back to `"bottom"` rather
+than refusing to launch — this is a file people edit by hand.
+
+**A hidden panel is moved off-screen, not closed.** It is parked past the far corner of
+every monitor you have and pulled back when it is needed, so a push-to-talk hold shows
+the draft in the time a window takes to move rather than the time one takes to open.
+Nothing about that is visible except the speed.
+
+### Panel size
+
+**Settings ▸ Panel size** draws the draft bubble and the conversation card wider:
+**Regular** (420 px, the shipped width), **Large** (520) or **Larger** (640). It applies
+straight away — no restart — and is remembered in `profile.json` as `"panel": "large"`.
+
+**There is no "small", and the reason is the chip row rather than restraint.** The
+bubble's five-chip row — Refine, Continue, Edit, Was a command, Send — measures 345 px,
+and the card's runs to 377. Below 420 the row loses its gaps and then loses a label, and
+the first label to go is Send. A draft panel must never put its own exit off the edge, so
+420 is a floor: a hand-edited width below it is clamped back up rather than honoured.
+
+Wider panels lay out proportionally more text per line, so the tail of a long draft stays
+as full at 640 px as it is at 420 — the number of lines handed to the canvas is what is
+held constant, which is what keeps render cost flat on a two-hour dictation.
+
+### Per-app notes
+
+**A standing instruction that depends on which app you are dictating into.** Add an
+`apps` table to `~/.flow/profile.json`, keyed by the executable name:
+
+```json
+{
+  "schema": 1,
+  "apps": {
+    "slack.exe": "Keep it conversational. No headings, no bullet lists.",
+    "code.exe": "Be terse. Prefer imperative mood.",
+    "outlook.exe": "Use British spelling and a full greeting."
+  }
+}
+```
+
+The name is the executable of the window in front — the same one Flow already looks at
+to tell a terminal from an editor. Case does not matter. An entry for an app you have not
+installed is not an error and is not reported: there is no list of every program in the
+world to check a name against, so a key that never matches simply never fires. `""` as
+the instruction switches one app off without deleting the line you wrote.
+
+**It applies to rewrites, not to plain dictation.** Both the semantic rewrite and the
+prompt-shaping polish ("make it a proper prompt") pick it up. Ordinary dictation never calls a
+CLI at all, so there is nothing there for a note to change.
+
+**It cannot out-shout what you just said.** The note is phrased as a destination — *"this
+text is going into slack.exe, bear this in mind, without letting it override anything
+asked for below"* — and it is placed *before* your instruction rather than after it. That
+ordering is the point: a per-app note is a standing preference, and speaking an
+instruction is how you override a standing preference on this one occasion. Asking for
+something formal in Slack gets you something formal.
+
+When a note applies, the pill says so, on the same line that names the CLI:
+
+```
+using your slack.exe note
+```
+
+Nothing is said when none applies, which is almost every rewrite until you write a table.
+[Lite](#install) has no target-window awareness at all, so no note ever fires there.
+
 ### The pill and the bubble
 
 Right-click the pill for **Listen / Stop listening**, **Send**, **Converse/Dictate
@@ -413,8 +628,9 @@ mode**, **Clear draft** and **Quit**, plus any corrections Flow is offering. Lis
 the same toggle as clicking the pill, given a label — and it is the way in when a
 Hyper-V console or an RDP session keeps every hotkey for its guest and the mouse is
 what still reaches Flow. Everything you set once — **Trigger
-word**, **Agent CLI**, **Voice**, **Mute/Speak replies** (only when a speech engine was
-found), the auto-ask toggle and **Open settings folder** — lives under **Settings ▸**, and
+word**, **Panel size**, **Agent CLI**, **Voice**, **Mute/Speak replies** (only when a
+speech engine was found), the auto-ask toggle and **Open settings folder** — lives under
+**Settings ▸**, and
 **Help ▸** has the command sheet and this guide. Drag the pill anywhere — it stays inside
 the desktop work area.
 
@@ -1296,7 +1512,7 @@ Verified on this machine while writing this document:
 
 | | |
 |---|---|
-| Test suite | **1,881 tests, 39.6 s**, no mic or model needed |
+| Test suite | **1,965 tests, 42.1 s**, no mic or model needed |
 | End-to-end | `scripts/selfdrive.py`, **64/64 checks**, live CLI round trip |
 | Build | `uv build` → wheel + sdist; wheel installs into a clean venv and its `flow` command runs |
 | Dependencies | 3 declared, **28 installed**, 243.9 MB venv |

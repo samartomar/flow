@@ -46,7 +46,8 @@ from .version import check_update, version
 #: who did not type `--lite` deserves to be told which one they got.
 LITE_LINE = (
     "Flow Lite on {platform}: Send copies the draft and you paste it - no injection, "
-    "no global hotkeys, nothing to grant but the microphone."
+    "no global hotkeys, nothing to grant but the microphone. "
+    "Hold the pill to talk, let go to send; a quick click toggles listening."
 )
 
 
@@ -84,6 +85,56 @@ def _timeout_arg(text: str) -> float:
             f"between 0 and {MAX_TIMEOUT_SEC:.0f}"
         )
     return value
+
+
+
+def _chord(profile, hotkeys, Chord, parse_chord, echo, ignored_line,
+           unavailable, default):
+    """Install the modifier-only chord, and say what happened either way.
+
+    Separated from `main()` for the reason the rest of that function is not: this is the
+    one startup step that can fail *silently and invisibly*. A hotkey that could not
+    register has `Hotkeys.failed` to name it; a chord whose hook was refused looks
+    exactly like a chord nobody pressed. So every path out of here prints a line, and the
+    lines sit in the `hotkey` block where somebody already looks when a shortcut is dead.
+
+    Returns the `Chord` or None. The caller does not need the value — `hotkeys.chord`
+    holds it, which is what keeps the callback alive and gets it torn down — but a
+    returned object is what a test can look at.
+    """
+    wanted = profile.chord if profile is not None else default
+    # The empty string is how somebody turns it off in the file, and it is deliberately
+    # not the same as deleting the key: the next save writes every field back, so a
+    # deleted `chord` would reappear as the default and the setting would look ignored.
+    if not (wanted or "").strip():
+        return None
+    mods, reason = parse_chord(wanted)
+    if mods is None:
+        say(ignored_line.format(combo=echo(wanted), reason=reason))
+        return None
+    chord = Chord(hotkeys.presses, mods,
+                  gesture=getattr(profile, "gesture", None) if profile else None)
+    if not chord.start():
+        # The hook is refusable — by policy, by another process, by an elevated window
+        # this process cannot see into. Not fatal and not silent: the registered toggle
+        # is still there, and the line says so rather than leaving a shape that does
+        # nothing with no explanation.
+        say(unavailable)
+        return None
+    hotkeys.chord = chord
+    # "hold" and not "toggle": the word in this column is what the shortcut *does*, and
+    # the chord stopped doing the same thing as the toggle hotkey when it became
+    # push-to-talk. A startup block that still said toggle would be the only place a
+    # user could check, quietly describing the gesture they no longer have.
+    # The word in this column is what the shortcut *does*, and the chord does two
+    # different things now depending on a setting. A startup block that named only one
+    # of them would be the one place a user could check, describing a gesture half of
+    # them do not have.
+    if chord.gesture == "hold":
+        say(f"chord   {'hold':8s} {chord.describe()}  (hold to talk, release to send)")
+    else:
+        say(f"chord   {'toggle':8s} {chord.describe()}  (press to start, again to stop)")
+    return chord
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,6 +192,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--no-hotkeys", action="store_true", help="skip global hotkey registration"
+    )
+    ap.add_argument(
+        "--no-chord", action="store_true",
+        help="skip the modifier-only chord (no low-level keyboard hook)",
     )
     ap.add_argument(
         "--no-paste", action="store_true", help="print the draft instead of pasting"
@@ -261,9 +316,13 @@ def main(argv: list[str] | None = None) -> int:
     say(f"version: {version()} (nothing checks for updates on its own; "
         "--check-update asks GitHub)")
     if not lite:
-        from .hotkey import BAD_BLOCK_LINE, DEFAULT_BINDINGS, Hotkeys
+        from .hotkey import (
+            BAD_BLOCK_LINE, CHORD_IGNORED_LINE, CHORD_UNAVAILABLE,
+            DEFAULT_BINDINGS, Chord, Hotkeys, _echo, parse_chord,
+        )
+        from .profile import CHORD_DEFAULT
         from .inject import paste, take_warnings
-    from .ui import Pill
+    from .ui import Pill, apply_panel_width, apply_place, panel_width
 
     from .asr import WhisperTranscriber
 
@@ -475,6 +534,13 @@ def main(argv: list[str] | None = None) -> int:
         say("mode: DICTATE - Send pastes into the focused window "
             "(--converse, or ctrl+alt+M, to ask instead)")
 
+    # Before anything is drawn, and that is the whole contract: `apply_panel_width`
+    # rebinds module globals that two window classes and the chrome functions read, so a
+    # call after the first frame would leave a window whose parts disagree about how wide
+    # it is. Here is the last moment that is safely true.
+    apply_panel_width(panel_width(profile.panel if profile is not None else None))
+    apply_place(profile.place if profile is not None else "bottom")
+
     hotkeys = None
     if not args.no_hotkeys and not lite:
         # Read only where registration happens, which is why `--no-hotkeys` and Lite are
@@ -499,6 +565,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             say("hotkey thread did not start; continuing without hotkeys")
             hotkeys = None
+        if hotkeys is not None:
+            if not args.no_chord:
+                _chord(profile, hotkeys, Chord, parse_chord, _echo,
+                       CHORD_IGNORED_LINE, CHORD_UNAVAILABLE, CHORD_DEFAULT)
     # Assigned rather than passed: the session is built before `RegisterHotKey` has been
     # asked for anything, and what the session needs is the answer, not the request. It
     # reads this only to say what still works when voice stops working.

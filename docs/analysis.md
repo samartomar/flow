@@ -173,9 +173,15 @@ Guards that enforce R11 ("no heavy lifting"), **as built**:
 - The **input device** is health-checked every 5 s and reopened if it dies. The decode
   worker instead swallows and reports per-decode exceptions, so it cannot die and needs
   no restart.
-- Idle > 5 min → **unload the model only**. The mic stays open, a deliberate narrowing
+- Idle > 30 min → **unload the models only**. The mic stays open, a deliberate narrowing
   of the "release the mic" idea above: releasing it would leave the app unable to hear
-  its own wake-up, and the mic is cheap while the model is 141 MB.
+  its own wake-up, and the mic is cheap while the models are ~605 MB (`base.en` 141 MB
+  for partials plus `small.en` 464 MB for finals — this line said "the model is 141 MB"
+  while there were two tiers resident, understating its own case fourfold). Was 5 min,
+  which sat *inside* the gaps of an ordinary session: the common case was not reclaiming
+  memory from somebody who had left, it was paying a reload in the middle of their first
+  sentence back. The chord now also warms on press-down, so the load happens during the
+  hold rather than inside the first utterance.
 - Undo history is bounded by **both** snapshot count and total characters, since 30
   copies of a long draft is where undo quietly becomes megabytes.
 

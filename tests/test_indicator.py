@@ -363,7 +363,7 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         pill._flash = 0
         pill.armed = True
         pill._clis = None
-        pill.levels = [0.0] * 18
+        pill._meter_level = 0.0
         pill.session = mock.Mock(mode=mode, state=State.IDLE, cli=pinned)
         return pill
 

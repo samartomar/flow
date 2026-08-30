@@ -92,6 +92,52 @@ class TestIdleUnload(unittest.TestCase):
         self.assertEqual(asr.unloads, 1)
         s.close()
 
+    def test_a_warm_holds_the_models_against_an_idle_that_is_already_due(self):
+        # The race the grace window exists for. `_last_activity` is moved by Flow's own
+        # milestones, so somebody who has just reached for the chord is still idle by
+        # that measure — and the health pump runs every tick, so without this it is free
+        # to unload between the press-down and the release that arms.
+        asr = TrackingAsr()
+        s = Session(asr=asr, mic=StubMic())
+        s.start()
+        s.warm()
+        with mock.patch.object(session_mod, "IDLE_UNLOAD_SEC", 0.0):
+            s.tick()
+        self.assertTrue(asr.loaded)
+        self.assertEqual(asr.unloads, 0)
+        s.close()
+
+    def test_and_lets_go_once_the_grace_is_spent(self):
+        # A window, not a veto. `ctrl+win` is also Windows' desktop-switch prefix, so a
+        # warm that reset the idle clock outright would mean anybody who switches
+        # desktops through the day never unloads at all — the setting would quietly stop
+        # existing for exactly the people using their machine most.
+        asr = TrackingAsr()
+        s = Session(asr=asr, mic=StubMic())
+        s.start()
+        s.warm()
+        with mock.patch.object(session_mod, "IDLE_UNLOAD_SEC", 0.0), \
+                mock.patch.object(session_mod, "WARM_GRACE_SEC", 0.0):
+            s.warm()
+            s.tick()
+        self.assertFalse(asr.loaded)
+        self.assertEqual(asr.unloads, 1)
+        s.close()
+
+    def test_a_session_nobody_warmed_is_not_holding_anything_off(self):
+        # Zero is the state every session starts in and mostly stays in, so the guard
+        # must not be what decides the ordinary case.
+        s = Session(asr=TrackingAsr(), mic=StubMic())
+        self.assertEqual(s._warm_until, 0.0)
+        s.close()
+
+    def test_the_idle_threshold_is_the_gaps_in_a_day_and_not_five_minutes(self):
+        # Stated as a number because it is a judgement and not an accident: five minutes
+        # was inside the gaps of an ordinary working session, so the common case was not
+        # reclaiming memory from somebody who left, it was paying a reload in the middle
+        # of their first sentence back.
+        self.assertEqual(session_mod.IDLE_UNLOAD_SEC, 1800.0)
+
     def test_model_is_kept_while_a_draft_is_held(self):
         # Unloading mid-draft would make the next correction pay a reload for nothing.
         asr = TrackingAsr()

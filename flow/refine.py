@@ -136,6 +136,40 @@ _POLISH_GROWTH = 8
 _POLISH_SLACK = 600
 
 
+#: The per-app instruction, wrapped so the model can tell it from the user's own words.
+#:
+#: **Named as the destination rather than as a rule**, because that is what makes it
+#: obey without over-obeying. "This text is going into Slack" is a fact the model can
+#: weigh against the request; "always be informal" is a competing order, and a competing
+#: order beats the instruction the user just spoke — which is the failure that would make
+#: this feature worse than not having it.
+#:
+#: **Placed before the request, not after.** Both prompts end with the text, and the
+#: sentence nearest the text is the one that wins ties. The user's actual instruction
+#: has to be that sentence: a per-app note is a standing preference, and the whole point
+#: of speaking is to override a standing preference when this one is different.
+_APP_PROMPT = (
+    "This text is going into {app}. Bear this in mind, without letting it override "
+    "anything asked for below: {note}"
+)
+
+
+def app_note(app: str, note) -> str:
+    """The `_APP_PROMPT` block for `app`, or "" when there is nothing to say.
+
+    Everything that could be missing is treated as nothing to say, and deliberately so:
+    an unreadable entry in a hand-written table must cost that entry and not the rewrite.
+    The profile carries values through untouched (`profile._apps`), which is what leaves
+    the judging here — this is the only place that knows whether an instruction has any
+    content, and a non-string is simply an entry with none.
+    """
+    if not isinstance(note, str) or not note.strip() or not app:
+        return ""
+    # `chr(10)` rather than an escape, the idiom this module already uses for every
+    # prompt it assembles — these strings are read far more often than they are edited.
+    return _APP_PROMPT.format(app=app, note=note.strip()) + chr(10) + chr(10)
+
+
 @dataclass(frozen=True)
 class Cli:
     name: str
@@ -916,6 +950,7 @@ def refine(
     context: list[str] | None = None,
     cancel: threading.Event | None = None,
     skipped: list[str] | None = None,
+    app: str = "",
 ) -> tuple[str | None, str]:
     """Apply a semantic instruction to `text`.
 
@@ -929,6 +964,10 @@ def refine(
 
     `cancel` abandons the call — the session sets it on close, so quitting does not
     wait out a rewrite nobody is going to read.
+
+    `app` is the per-app block from `app_note()` — already formatted, because the
+    profile table it comes from is the session's to read and this module has no business
+    knowing that `~/.flow/profile.json` exists.
 
     `skipped` is an out-parameter rather than a third return value, and that is a
     judgement about blast radius: the two-tuple is unpacked at fifteen call sites across
@@ -947,6 +986,12 @@ def refine(
         if polish
         else _PROMPT.format(instruction=instruction, text=tail)
     )
+    # Applied to both routes on purpose. A polish ignores the spoken instruction, which
+    # makes it the pass with the *most* to gain from knowing where the words are headed —
+    # a prompt bound for a terminal and one bound for a chat window differ in exactly the
+    # way this note is for.
+    if app:
+        prompt = app + prompt
     if context:
         prior = chr(10).join(f"- {turn}" for turn in context)
         prompt = (

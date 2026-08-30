@@ -313,6 +313,17 @@ class FakeUser32:
     def PostThreadMessageW(self, *_args):
         return 1
 
+    #: The chord's hook, refused. This fake describes a machine with combos already
+    #: taken, and a hook is not a combo — nothing here is about `WH_KEYBOARD_LL`, and a
+    #: fake that granted one would have `main()` install a real global keyboard hook on
+    #: whoever is running the suite. NULL is a shape the app already handles: the
+    #: startup block says the chord is unavailable and the registered toggle stands.
+    def SetWindowsHookExW(self, *_args):
+        return None
+
+    def UnhookWindowsHookEx(self, *_args):
+        return 1
+
 
 class Registered(unittest.TestCase):
     """One launch's worth of registration against a machine this test describes."""
