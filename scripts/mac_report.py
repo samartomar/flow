@@ -6,7 +6,13 @@ real windows, screenshots them, renders the numbers beside them, and writes **on
 carrying both. One file to send back, and the geometry in it is pixel-exact rather than
 a phone photo of a screen at an angle.
 
-    uv run --with pillow python scripts/mac_report.py
+    uv run --with pillow python scripts/mac_report.py      # the image
+    uv run python scripts/mac_report.py --text             # the numbers alone
+
+`--text` exists because the fastest way to answer a question about this platform has
+turned out to be an agent running one command and pasting what it printed. It needs no
+Pillow, no Screen Recording grant and no screenshot - just the numbers, which are most
+of what the image was carrying anyway.
 
 Pillow is a `--with`, not a dependency, for `scripts/shots.py`'s reason: it is fetched
 into the run and never enters the venv, so R16 still holds at three.
@@ -41,8 +47,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from PIL import Image, ImageDraw, ImageFont  # noqa: E402
-
 import flow.ui as ui  # noqa: E402
 from ui_probe import FakeSession  # noqa: E402
 
@@ -55,8 +59,21 @@ GOOD = (120, 210, 160)
 BAD = (240, 140, 140)
 
 
+def _pil():
+    """Imported here, not at the top, so `--text` needs neither Pillow nor a permission.
+
+    The text form is the one an agent on the machine can run and paste back, and asking
+    it for a screenshot dependency and a Screen Recording grant to print twelve numbers
+    would be the report getting in the way of being read.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    return Image, ImageDraw, ImageFont
+
+
 def mono(size: int):
     """A real monospace if this machine has one, so the numbers line up in columns."""
+    _Image, _Draw, ImageFont = _pil()
     for path in ("/System/Library/Fonts/Menlo.ttc",
                  "/System/Library/Fonts/SFNSMono.ttf",
                  "C:/Windows/Fonts/consola.ttf"):
@@ -119,8 +136,9 @@ def _native_ready() -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def panel(rows, width: int) -> Image.Image:
+def panel(rows, width: int):
     """The numbers, as an image, so they travel in the same file as the picture."""
+    Image, ImageDraw, _Font = _pil()
     font = mono(20)
     line = 30
     img = Image.new("RGB", (width, PAD * 2 + line * (len(rows) + 1)), BG)
@@ -189,16 +207,25 @@ def backdrop(pill) -> None:
 
 
 def main() -> None:
+    text_only = "--text" in sys.argv[1:]
     session = FakeSession()
     pill = ui.Pill(session)
     pill.armed = True
-    backdrop(pill)
+    if not text_only:
+        backdrop(pill)
 
     def report() -> None:
         rows = facts(pill)
+        if text_only:
+            for label, value, _c in rows:
+                if label or value:
+                    print(f"  {label:<24} {value}")
+            pill.quit_app()
+            return
         screen, lit = grab()
         ratio = screen.width / max(1, pill.winfo_screenwidth())
 
+        Image, _Draw, _Font = _pil()
         head = panel(rows, 1400)
         shot = screen.copy()
         shot.thumbnail((1400, 900))
