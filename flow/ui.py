@@ -189,9 +189,14 @@ def _mac_window_style(win) -> bool:
         styled = False
     try:
         if win.winfo_ismapped():
+            # Remembered across the remap. A window that comes back has been placed by
+            # whoever remapped it, not by whoever positioned it, and losing that is a
+            # pill somewhere the user did not put it.
+            where = win.geometry()
             win.withdraw()
             win.overrideredirect(True)
             win.deiconify()
+            win.geometry(where)
         else:
             win.overrideredirect(True)
     except tk.TclError:
@@ -301,11 +306,12 @@ def _tk_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int]:
     if _TK_WORK is not None:
         return _TK_WORK
     fallback = (0, 0, sw, sh)
+    asked_w, asked_h = 200, 120
     probe = None
     try:
         probe = tk.Toplevel(win)
         probe.attributes("-alpha", 0.0)
-        probe.geometry("200x120+80+80")
+        probe.geometry(f"{asked_w}x{asked_h}+80+80")
         probe.state("zoomed")
         probe.update_idletasks()
         x, y = probe.winfo_rootx(), probe.winfo_rooty()
@@ -322,11 +328,35 @@ def _tk_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int]:
                 probe.destroy()
             except tk.TclError:
                 pass
-    if not (found[2] > found[0] and found[3] > found[1]
-            and found[2] - found[0] <= sw and found[3] - found[1] <= sh):
+    if not _plausible_work_area(found, sw, sh, asked_w, asked_h):
         found = fallback
     _TK_WORK = found
     return found
+
+
+def _plausible_work_area(rect, sw: int, sh: int, asked_w: int, asked_h: int) -> bool:
+    """Whether a maximised probe actually got maximised.
+
+    **The check that was missing, and the bug it let through.** On Aqua,
+    `state("zoomed")` does not raise and does not maximise either — it is accepted and
+    ignored. The probe stayed the 200x120 it was asked for, that rectangle passed a
+    check which only asked "positive, and no bigger than the screen", and the pill was
+    placed against a work area 200 px wide. It landed in the top-left corner of a
+    1512-wide display, which is exactly where a Mac reported finding it.
+
+    So the test is not "is this a rectangle" but "did the window manager do the thing".
+    Two ways of asking, because either alone has a hole: a window that never grew is the
+    direct evidence, and a rectangle far smaller than the display is what catches a
+    window manager that grew it a little and stopped. A real work area is the screen
+    minus a Dock or a taskbar — nowhere near half of it.
+    """
+    left, top, right, bottom = rect
+    w, h = right - left, bottom - top
+    if not (w > 0 and h > 0 and w <= sw and h <= sh):
+        return False
+    if w <= asked_w or h <= asked_h:
+        return False  # it never grew: `zoomed` was accepted and ignored
+    return w >= sw * 0.6 and h >= sh * 0.6
 
 
 #: `MonitorFromPoint`'s "nearest monitor" flag, for a cursor that is briefly nowhere —

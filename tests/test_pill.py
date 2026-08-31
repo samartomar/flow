@@ -814,6 +814,38 @@ class TestTheWorkAreaOffWindows(unittest.TestCase):
                     self.assertEqual(ui._tk_work_area(mock.Mock(), 1280, 720),
                                      (0, 0, 1280, 720))
 
+    def test_a_probe_that_was_never_maximised_is_refused(self):
+        # The one that got through, and put the pill in the top-left corner of a Mac.
+        # `state("zoomed")` on Aqua does not raise and does not maximise either: it is
+        # accepted and ignored, so the probe stayed the 200x120 it was asked for and
+        # that rectangle was believed.
+        ui._TK_WORK = None
+        with mock.patch.object(ui.tk, "Toplevel",
+                               return_value=self.fake_win((80, 80, 280, 200))):
+            self.assertEqual(ui._tk_work_area(mock.Mock(), 1512, 982),
+                             (0, 0, 1512, 982))
+
+    def test_a_window_grown_only_a_little_is_refused_too(self):
+        # The other hole: a window manager that honoured `zoomed` partially. A real work
+        # area is the screen minus a Dock or a taskbar, nowhere near half of it.
+        ui._TK_WORK = None
+        with mock.patch.object(ui.tk, "Toplevel",
+                               return_value=self.fake_win((0, 0, 700, 400))):
+            self.assertEqual(ui._tk_work_area(mock.Mock(), 1512, 982),
+                             (0, 0, 1512, 982))
+
+    def test_the_fallback_still_puts_the_stack_on_screen(self):
+        # Refusing the measurement must not mean refusing to place anything. The whole
+        # screen is wrong by a Dock; the top-left corner is wrong by a screen.
+        ui._TK_WORK = None
+        with mock.patch.object(ui.tk, "Toplevel",
+                               return_value=self.fake_win((80, 80, 280, 200))):
+            work = ui._tk_work_area(mock.Mock(), 1512, 982)
+        x, y = ui.bottom_centre(ui.PILL_W, ui.PILL_H, (0, 0, 1512, 982), work,
+                                ui.PANEL_BOTTOM_OFFSET)
+        self.assertGreater(y, 982 * 0.8, "the stack is nowhere near the bottom")
+        self.assertGreater(x, 1512 * 0.3, "the stack is nowhere near the centre")
+
     def test_the_bottom_edge_is_the_one_that_has_to_be_right(self):
         # It is what bottom-centre placement stands on, and getting it wrong is the
         # whole bug: 672 here against a screen of 720 is a 48 px Dock found.
