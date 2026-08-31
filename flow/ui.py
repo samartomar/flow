@@ -15,6 +15,7 @@ from __future__ import annotations
 import ctypes
 import math
 import os
+import queue
 import sys
 import time
 import tkinter as tk
@@ -40,6 +41,7 @@ from .lexicon import (
     ensure as ensure_lexicon,
     pairs,
 )
+from . import tray
 from .notes import Notes
 from .profile import path_key, resolve_workspace
 from .refine import EFFORT_DEFAULT, EFFORTS, available
@@ -1182,9 +1184,18 @@ PANEL_DEFAULT = "regular"
 #: What each chord gesture is called in the menu. Phrased as what it *does* rather
 #: than as its name, because "hold" and "toggle" are the words in the profile and this
 #: is the row somebody reads once while deciding — the whole sentence is the label.
+#: What each gesture is called wherever a user reads it: the Settings menu, the note
+#: after a switch, and the startup line.
+#:
+#: "Push to talk" by name, and the owner asked for it by name — "I think I like the
+#: wording push to talk the default so it's more clear". The label used to describe the
+#: mechanics only ("Hold to talk, release to send"), which is accurate and makes somebody
+#: work out what it is. Push-to-talk is a thing people already know from a decade of
+#: voice chat, so naming it does the explaining, and the mechanics still follow it for
+#: anyone who has not met the term.
 GESTURE_LABELS = {
-    "hold": "Hold to talk, release to send",
-    "toggle": "Press to start, press again to stop",
+    "hold": "Push to talk - hold to speak, release to send",
+    "toggle": "Toggle - press to start, press again to stop",
 }
 
 PLACES = ("bottom", "corner")
@@ -1627,6 +1638,10 @@ class Pill(tk.Tk):
     #: the idle pill this default describes, rather than recursing through `front`.
     _docked_w = PILL_W
     _shell_h = PILL_H
+    #: Whether the window is parked with an icon standing in for it. Class-level for the
+    #: reason `lite` is: a fixture built with `__new__` must not recurse into `self.tk`.
+    _hidden = False
+    _tray = None
     #: Same reason again, for `_draw`'s motion state (§07): a bare fixture draws the
     #: resting frame these describe — not hovered, not mid-collapse, opacity untouched.
     _pointer_in = False
@@ -1754,6 +1769,10 @@ class Pill(tk.Tk):
         #: panel is up. Compared in `_sync_shell` so a frame that changes nothing costs
         #: no `geometry` call.
         self._shell_h = PILL_H
+        #: What the notification-area icon puts its clicks on, drained in `_frame`.
+        #: Built here rather than with the icon, so `_drain_tray` has something to read
+        #: on every frame whether or not anybody has ever hidden the window.
+        self._tray_events: queue.Queue = queue.Queue()
 
         self.canvas = tk.Canvas(
             self, width=BUBBLE_W, height=PILL_H, bg=self.bg, highlightthickness=0
@@ -1939,6 +1958,12 @@ class Pill(tk.Tk):
         mid-utterance would be indistinguishable from the user having spoken into a
         microphone that had just been reopened under them.
         """
+        # Hidden Flow still hears the chord — the hook is global and does not care what
+        # is on screen — and a hold that showed nothing would be an open microphone with
+        # no way to tell it was open, which is what invariant 4 forbids. So the window
+        # comes back for the utterance, before anything else here decides not to run.
+        if self._hidden:
+            self.show_from_tray()
         if self._ptt_since is not None:
             return
         if getattr(self.session, "editing", False):
@@ -2376,6 +2401,11 @@ class Pill(tk.Tk):
             sub.add_cascade(label="Agent CLI", menu=picker)
         self._effort_menu(sub)
         self._model_menu(sub)
+        if tray.available():
+            # Offered where the other once-and-forget settings are, and only where there
+            # is a notification area to hide into. `hide_to_tray` refuses rather than
+            # hides if the icon does not take, so this cannot strand anybody.
+            sub.add_command(label="Hide to tray", command=self.hide_to_tray)
         self._workspace_menu(sub)
         if getattr(self.session, "speaker", None) is not None:
             sub.add_command(
@@ -3065,6 +3095,64 @@ class Pill(tk.Tk):
         self.session.draft.clear()
         self.bubble.hide()
 
+    def hide_to_tray(self) -> bool:
+        """Put Flow out of the way, with an icon to bring it back.
+
+        The need, in the owner's words: "there are times where i wanted to dictate but at
+        the same time i wanted to see but i don't want it to keep it on my screen". The
+        chord still works while hidden — it is a global hook and does not care what is on
+        screen — so dictating is unchanged and only the window goes.
+
+        **The icon comes first, and hiding is conditional on it.** A window parked off the
+        desktop with nothing in the notification area is a Flow that cannot be reached,
+        configured or quit except through Task Manager. So `Tray.start()` is asked first
+        and its answer is believed: no icon, no hiding, and a note saying so. Invariant 4
+        in a new place — hidden must not mean gone.
+        """
+        if not tray.available():
+            self.front.note("hiding needs the Windows notification area")
+            return False
+        if self._tray is None:
+            self._tray = tray.Tray("Flow - press the chord to talk", self._tray_events)
+        if not self._tray.start():
+            self._flash = FLASH_FRAMES
+            self.front.note("the notification area would not take an icon")
+            return False
+        self._hidden = True
+        park(self)
+        return True
+
+    def show_from_tray(self) -> None:
+        """Bring the window back where the user left it.
+
+        The icon stays. Somebody who hid Flow once will hide it again, and an icon that
+        vanished on the first click would make the second one a trip through the menus.
+        """
+        if not self._hidden:
+            return
+        self._hidden = False
+        self._sync_shell()
+        self.deiconify()
+        self.lift()
+
+    def _drain_tray(self) -> None:
+        """What the icon decided, acted on from Tk's own thread.
+
+        `tray.Tray` runs its window procedure on a thread of its own and puts strings on
+        a queue rather than calling back, precisely so this is the only place Tk is
+        touched — see that module's docstring for why that rule is the whole of the
+        threading argument here.
+        """
+        while True:
+            try:
+                event = self._tray_events.get_nowait()
+            except queue.Empty:
+                return
+            if event == tray.SHOW:
+                self.show_from_tray()
+            elif event == tray.QUIT:
+                self.quit_app()
+
     def quit_app(self) -> None:
         # Idempotent, because ctrl+C reaches here down either of two paths and nothing
         # upstream can tell which one ran: caught in `_tick`, or escaping `mainloop` and
@@ -3077,6 +3165,11 @@ class Pill(tk.Tk):
         # re-arm itself against a destroyed interpreter on its way out.
         self._alive = False
         try:
+            # Before the hotkeys and before the window: an icon outliving its process is
+            # a ghost in the notification area that only a hover clears, and the shell
+            # gives no second chance to remove one whose window has already gone.
+            if self._tray is not None:
+                self._tray.stop()
             if self.hotkeys is not None:
                 self.hotkeys.stop()
             self.session.close()
@@ -3252,6 +3345,9 @@ class Pill(tk.Tk):
     def _frame(self) -> None:
         self._track_target()
         self._sync_monitor()
+
+        # Same rule as the hotkeys below: another thread decided, this one acts.
+        self._drain_tray()
 
         # Hotkeys arrive on their own thread; Tk is only ever touched from this one.
         if self.hotkeys is not None:

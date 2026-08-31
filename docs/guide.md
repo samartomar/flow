@@ -468,8 +468,8 @@ change takes effect on the next press, with no restart.
 
 | | |
 |---|---|
-| **Hold to talk, release to send** | The shipped default. Press both keys, speak while they are down, let go. What you said is pasted into whatever window has focus — no third key, no clicking anything, no second shortcut to send. |
-| **Press to start, press again to stop** | The original. A clean press-and-release starts listening and the next one stops it, exactly like the `toggle` hotkey. |
+| **Push to talk - hold to speak, release to send** | The shipped default. Press both keys, speak while they are down, let go. What you said is pasted into whatever window has focus — no third key, no clicking anything, no second shortcut to send. |
+| **Toggle - press to start, press again to stop** | The original. A clean press-and-release starts listening and the next one stops it, exactly like the `toggle` hotkey. |
 
 **Pick the hold for a sentence and the toggle for a paragraph.** The hold needs no
 decision about when you are finished and cannot leave a microphone running by accident.
@@ -882,6 +882,24 @@ that does not bracket prints a warning naming the process — in the bubble, on 
 that holds what was just sent, so it is somewhere you are already looking.
 
 The clipboard is restored about 0.6 s after the paste, so Flow does not permanently own it.
+
+### Hiding it
+
+**Settings → Hide to tray** parks the window and leaves an icon in the Windows
+notification area. The chord still works while hidden — it is a global hook and does not
+care what is on screen — so dictating is unchanged and only the window goes. Pressing it
+brings the overlay back for that utterance.
+
+Left-click the icon to show Flow; right-click it for **Show Flow** and **Quit Flow**.
+
+**It refuses to hide if the icon does not appear.** `Shell_NotifyIcon` can fail — a shell
+still starting, a notification area that will not take another icon — and hiding anyway
+would leave you with no window and nothing to click, reachable only through Task Manager.
+So the icon is registered first and its answer is believed: no icon, no hiding, and the
+bubble says why.
+
+Windows only. macOS has a menu bar item and Linux has whatever the desktop environment
+offers, and neither is `Shell_NotifyIcon`, so the menu entry is simply absent there.
 
 ### On a Mac
 
