@@ -243,9 +243,11 @@ def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:
 _TK_WORK: tuple | None = None
 
 
-#: How much of the screen an Aqua menu bar can plausibly take. 25 px on an ordinary
-#: display, 38 on a notched one; anything outside this is not a menu bar and the probe
-#: that reported it is measuring something else.
+#: How far down an Aqua window asked for `+0+0` can plausibly land. A 14-inch MacBook
+#: Pro measured 58: a menu bar at 30, plus the 28 px of title bar between a window's
+#: frame and the client area `winfo_rooty` reports. Anything past this was not clamped
+#: by a menu bar at all — the window manager honoured the request literally, as Windows
+#: does — and the number means nothing here.
 _AQUA_MENU_MAX = 80
 
 
@@ -253,10 +255,11 @@ def _aqua_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int] | None:
     """The visible frame on macOS, or None if this build cannot say.
 
     **The maximise probe does not work here.** `state("zoomed")` on Aqua neither raises
-    nor maximises — a Mac reported it answering with the whole 1352x878 screen, so
-    `_tk_work_area` fell back to the screen, `bottom_centre` stood the pill 24 px above
-    878, and the pill spent its life inside a 69 px Dock. The close-up in the report was
-    a picture of Dock icons.
+    nor maximises. Asked to maximise a 200x120 window at +80+80, Tk 9.0.3 returned
+    (80, 108, 280, 228) — the same window, the same size, the position it was already
+    in, and no error. `_tk_work_area` rejected that and fell back to the whole screen,
+    `bottom_centre` stood the pill 24 px above 878, and the pill spent its life inside
+    the Dock. The close-up in the report was a picture of Dock icons.
 
     `wm maxsize` is the call that knows, and only on this platform: Tk's Aqua port
     answers it from `[NSScreen visibleFrame]`, which is the screen less the menu bar and
@@ -270,6 +273,14 @@ def _aqua_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int] | None:
     bar, so where a window asked for `+0+0` actually lands is the top of the usable area.
     The bottom — the edge that matters, the one the pill stands on — is then
     `top + height`.
+
+    Measured on a 14-inch MacBook Pro, Tk 9.0.3, a 1352x878 screen: `maxsize` 1352x736,
+    a `+0+0` window landing at y 58, so the Dock's top edge is 794 and the Dock is 84 px
+    tall. Both of those are Tk asking Tk, so they were checked against something that is
+    not: `defaults read com.apple.dock tilesize` on the same machine says 69, and 69 plus
+    Apple's padding is the 84 this leaves. `top` is a title bar low for the same reason
+    it is on Windows — `winfo_rooty` is the client area — and costs nothing, because it
+    feeds only the ceiling in `bottom_centre`. The bottom edge is exact.
 
     **Nothing here is trusted without a shape check.** If `maxsize` answers with the
     whole screen it has told us nothing, and if the `+0+0` probe comes back somewhere a

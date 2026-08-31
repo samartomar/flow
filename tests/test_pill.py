@@ -757,8 +757,14 @@ class TestTheWorkAreaOnAqua(unittest.TestCase):
         ui._TK_WORK = None
         self.addCleanup(lambda: setattr(ui, "_TK_WORK", self._was))
 
-    def win(self, maxsize=(1352, 777), landed=25):
-        """A Mac-shaped stand-in: a 1352x878 screen, a menu bar and a 76 px Dock."""
+    def win(self, maxsize=(1352, 736), landed=58):
+        """The numbers a 14-inch MacBook Pro actually reported, not invented ones.
+
+        `scripts/mac_area_probe.py` on darwin, Tk 9.0.3, a 1352x878 screen:
+        `wm maxsize` 1352x736, a window asked for `+0+0` landing with its client area at
+        y 58, and `zoomed` answering (80, 108, 280, 228) - the 200x120 probe still at
+        the +80+80 it was asked for, never maximised at all.
+        """
         win = mock.Mock()
         win.maxsize.return_value = maxsize
         probe = mock.Mock()
@@ -772,7 +778,19 @@ class TestTheWorkAreaOnAqua(unittest.TestCase):
     def test_the_bottom_is_the_top_of_the_dock(self):
         # The whole point: 802, not 878. The pill stands on this number.
         win, probe = self.win()
-        self.assertEqual(self.call(win, probe), (0, 25, 1352, 802))
+        self.assertEqual(self.call(win, probe), (0, 58, 1352, 794))
+
+    def test_the_dock_it_finds_matches_the_dock_the_os_reports(self):
+        """84 px of Dock, against a `com.apple.dock tilesize` of 69 read separately.
+
+        The reason this platform is believed at all now. `maxsize` and the `+0+0` probe
+        are both Tk asking Tk; a tile size out of `defaults` came from somewhere else
+        entirely, and 69 plus Apple's padding is the 84 this leaves. Three earlier
+        guesses at Aqua all failed for want of a second source.
+        """
+        win, probe = self.win()
+        _l, _t, _r, bottom = self.call(win, probe)
+        self.assertEqual(878 - bottom, 84)
 
     def test_the_probe_is_invisible_and_cleaned_up(self):
         win, probe = self.win()
@@ -792,14 +810,14 @@ class TestTheWorkAreaOnAqua(unittest.TestCase):
         # A number far outside a menu bar's range is a literal placement, so `top` falls
         # back to 0 rather than shifting the whole work area by it.
         win, probe = self.win(landed=400)
-        self.assertEqual(self.call(win, probe), (0, 0, 1352, 777))
+        self.assertEqual(self.call(win, probe), (0, 0, 1352, 736))
 
     def test_a_probe_that_cannot_be_built_still_leaves_the_height(self):
         # The height is the part that keeps the pill off the Dock. Losing the origin
         # costs a menu bar of clearance; losing the height costs the whole fix.
         win, _probe = self.win()
         with mock.patch.object(ui.tk, "Toplevel", side_effect=ui.tk.TclError("no")):
-            self.assertEqual(ui._aqua_work_area(win, 1352, 878), (0, 0, 1352, 777))
+            self.assertEqual(ui._aqua_work_area(win, 1352, 878), (0, 0, 1352, 736))
 
     def test_measurements_that_disagree_are_refused(self):
         # A menu bar plus a visible frame cannot be taller than the display it is on.
@@ -814,18 +832,18 @@ class TestTheWorkAreaOnAqua(unittest.TestCase):
     def test_tk_work_area_prefers_it_on_darwin(self):
         win, probe = self.win()
         with mock.patch.object(sys, "platform", "darwin"),                 mock.patch.object(ui.tk, "Toplevel", return_value=probe):
-            self.assertEqual(ui._tk_work_area(win, 1352, 878), (0, 25, 1352, 802))
+            self.assertEqual(ui._tk_work_area(win, 1352, 878), (0, 58, 1352, 794))
 
     def test_and_falls_through_to_the_maximise_probe_when_it_declines(self):
         # The guarantee that made this safe to write before a Mac had confirmed it: if
         # the Aqua path cannot answer, the worst case is exactly the old behaviour.
         win, probe = self.win(maxsize=(1352, 878))
         probe.winfo_rootx.return_value = 0
-        probe.winfo_rooty.return_value = 25
+        probe.winfo_rooty.return_value = 58
         probe.winfo_width.return_value = 1352
-        probe.winfo_height.return_value = 777
+        probe.winfo_height.return_value = 736
         with mock.patch.object(sys, "platform", "darwin"),                 mock.patch.object(ui.tk, "Toplevel", return_value=probe):
-            self.assertEqual(ui._tk_work_area(win, 1352, 878), (0, 25, 1352, 802))
+            self.assertEqual(ui._tk_work_area(win, 1352, 878), (0, 58, 1352, 794))
 
     def test_windows_never_takes_this_path(self):
         # `maxsize` there is the whole screen, taskbar or not. Asking it would undo the
