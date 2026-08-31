@@ -739,6 +739,47 @@ class TestAHiddenPanelIsParkedRatherThanUnmapped(unittest.TestCase):
         self.assertTrue(win.geometry.call_args[0][0].startswith("420x1+"))
 
 
+class TestTheWindowsOnlyAttributes(unittest.TestCase):
+    """`-transparentcolor` and `-toolwindow` exist on one platform and are fatal on the
+    others: `bad attribute "-transparentcolor"` out of Tk, raised before a window has
+    been drawn.
+
+    The guard used to be `lite` alone, because `__main__` forces lite mode off Windows
+    (`lite = args.lite or sys.platform != "win32"`) so the two could not come apart. They
+    came apart as soon as something other than `__main__` built a `Pill`:
+    `scripts/mac_report.py` asked for full mode on a Mac and the report died in the
+    constructor.
+    """
+
+    def test_full_mode_off_windows_asks_for_neither(self):
+        win = mock.Mock()
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.assertEqual(ui._shell_window(win, lite=False, alpha=0.94), ui.SHELL)
+        asked = [c.args[0] for c in win.attributes.call_args_list]
+        self.assertNotIn("-transparentcolor", asked)
+        self.assertNotIn("-toolwindow", asked)
+
+    def test_full_mode_on_windows_still_asks_for_both(self):
+        # The keyed colour is how the pill has no rectangle around it. Losing this on
+        # Windows would be a visible regression, not a quiet one.
+        win = mock.Mock()
+        with mock.patch.object(sys, "platform", "win32"):
+            self.assertEqual(ui._shell_window(win, lite=False, alpha=0.94),
+                             ui.TRANSPARENT)
+        win.attributes.assert_any_call("-transparentcolor", ui.TRANSPARENT)
+        win.attributes.assert_any_call("-toolwindow", True)
+
+    def test_the_shared_three_are_asked_for_everywhere(self):
+        for platform in ("darwin", "win32", "linux"):
+            with self.subTest(platform=platform):
+                win = mock.Mock()
+                with mock.patch.object(sys, "platform", platform):
+                    ui._shell_window(win, lite=True, alpha=0.5)
+                win.overrideredirect.assert_called_once_with(True)
+                win.attributes.assert_any_call("-topmost", True)
+                win.attributes.assert_any_call("-alpha", 0.5)
+
+
 class TestTheWorkAreaOnAqua(unittest.TestCase):
     """`_aqua_work_area`, which exists because the maximise probe is ignored on a Mac.
 

@@ -194,7 +194,15 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     Two of the five are Windows-only Tk attributes. `-transparentcolor` is what keys the
     magenta out, so without it the keyed colour is not invisible — it is a magenta
     rectangle where the app should be — and `-toolwindow` does not exist off Windows at
-    all. Asking for either is a `TclError` before anything is drawn.
+    all. Asking for either is a `TclError` before anything is drawn, which is why the
+    platform is part of the guard and not only `lite`.
+
+    **It used to be only `lite`**, on the reasoning that `__main__` forces lite mode off
+    Windows so the two can never come apart. They came apart the first time something
+    other than `__main__` built a `Pill`: `scripts/mac_report.py` asked for full mode on
+    a Mac and got `bad attribute "-transparentcolor"` out of Tk before a window existed.
+    An invariant a caller has to know about is one a caller can miss, and this one is
+    cheap to enforce where it is true.
 
     **`overrideredirect` is the whole of it on Aqua too, and two attempts to help it were
     both harm.** A Mac reported the pill wearing a title bar, and the cause was not this
@@ -211,7 +219,7 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     win.overrideredirect(True)
     win.attributes("-topmost", True)
     win.attributes("-alpha", alpha)
-    if lite:
+    if lite or sys.platform != "win32":
         return SHELL
     win.attributes("-transparentcolor", TRANSPARENT)
     win.attributes("-toolwindow", True)

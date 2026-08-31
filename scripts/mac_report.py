@@ -209,7 +209,10 @@ def backdrop(pill) -> None:
 def main() -> None:
     text_only = "--text" in sys.argv[1:]
     session = FakeSession()
-    pill = ui.Pill(session)
+    # Lite, which is what `__main__` runs off Windows - `lite = args.lite or
+    # sys.platform != "win32"`. A report that built a different window from the one the
+    # app builds would be measuring something nobody uses.
+    pill = ui.Pill(session, lite=True)
     pill.armed = True
     if not text_only:
         backdrop(pill)
