@@ -274,11 +274,11 @@ def _aqua_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int] | None:
     The bottom — the edge that matters, the one the pill stands on — is then
     `top + height`.
 
-    Measured on a 14-inch MacBook Pro, Tk 9.0.3, a 1352x878 screen: `maxsize` 1352x736,
-    a `+0+0` window landing at y 58, so the Dock's top edge is 794 and the Dock is 84 px
+    Measured on a 14-inch MacBook Pro, Tk 9.0.3, a 1352x878 screen: `maxsize` 1352x735,
+    a `+0+0` window landing at y 58, so the Dock's top edge is 793 and the Dock is 85 px
     tall. Both of those are Tk asking Tk, so they were checked against something that is
     not: `defaults read com.apple.dock tilesize` on the same machine says 69, and 69 plus
-    Apple's padding is the 84 this leaves. `top` is a title bar low for the same reason
+    Apple's padding is the 85 this leaves. `top` is a title bar low for the same reason
     it is on Windows — `winfo_rooty` is the client area — and costs nothing, because it
     feeds only the ceiling in `bottom_centre`. The bottom edge is exact.
 
