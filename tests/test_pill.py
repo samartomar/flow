@@ -111,6 +111,15 @@ class TestTheSlotIsReservedAtTheWidestLabel(unittest.TestCase):
             root.withdraw()
             ui._load_fonts()
             f = tkfont.Font(root=root, font=ui.FONT_TRACE)
+            # `_load_fonts` registers the bundled Plex weights through GDI and returns
+            # early off Windows, so anywhere else Tk quietly substitutes its own
+            # monospace and this measures *that* - 10 px on a macOS runner against the
+            # 7 the real face gives. Skipped on the substitution rather than on the
+            # platform, because the question is whether the font resolved, and a
+            # Windows machine missing the file deserves the same answer.
+            if f.actual("family") != ui.FONT_TRACE[0]:
+                self.skipTest(f"{ui.FONT_TRACE[0]} not installed; "
+                              f"Tk substituted {f.actual('family')!r}")
             self.assertEqual(f.measure("M"), ui.LABEL_ADV)
             # Monospaced, which is the assumption behind one advance for every glyph —
             # including the space in `NO INPUT`.
