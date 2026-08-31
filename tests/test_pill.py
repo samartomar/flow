@@ -1272,6 +1272,28 @@ class TestTheShellIsOneWindow(unittest.TestCase):
         self.assertGreaterEqual(p.y, 0)
         self.assertLessEqual(p.y + p._shell_h, 200)
 
+    def test_a_panel_size_change_takes_the_row_with_it(self):
+        """The panel-size setting rebinds `BUBBLE_W` while Flow is running, so the width
+        changes with nothing else changing beside it.
+
+        Left out of the comparison, the row kept the width it was built at while the band
+        above it took the new one — two boxes of different widths stacked in one window,
+        which is what a screenshot of "panel size: larger" showed. `_docked_w` is what
+        `_draw` measures the row against, so it moves in the same breath as the canvas.
+        """
+        self.addCleanup(ui.apply_panel_width, ui.PANEL_WIDTHS["regular"])
+        p = docker(showing=False, x=430)
+        p._sync_shell()
+        p.geometry.reset_mock()
+        ui.apply_panel_width(ui.PANEL_WIDTHS["larger"])
+        p.window_geometry = mock.Mock(return_value=(ui.PANEL_WIDTHS["regular"],
+                                                    p.x, p.y))
+        p._sync_shell()
+        self.assertEqual(p._docked_w, ui.PANEL_WIDTHS["larger"])
+        self.assertEqual(p.canvas.place.call_args.kwargs["width"],
+                         ui.PANEL_WIDTHS["larger"])
+        self.assertIn(str(ui.PANEL_WIDTHS["larger"]), p.geometry.call_args.args[0])
+
     def test_the_row_is_placed_at_the_foot_of_whatever_height_it_is(self):
         # The canvas is the bottom band of the window, not the whole of it — which is
         # what makes "the foot never moves" true of the pixels and not just of the frame.

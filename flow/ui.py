@@ -3798,8 +3798,16 @@ class Pill(tk.Tk):
         foot = self.y + self._shell_h
         x = max(left, min(self.x, right - w))
         y = max(top + EDGE_AIR, min(foot - h, bottom - h))
-        if (self.x, self.y, self._shell_h) != (x, y, h):
-            self.x, self.y, self._shell_h = x, y, h
+        # The width is compared too, and leaving it out was a defect. `apply_panel_width`
+        # rebinds `BUBBLE_W` while Flow is running — the panel-size setting — so `w`
+        # changes without x, y or the height changing with it. The row then kept the
+        # width it was built at while the band above it took the new one, which is two
+        # boxes of different widths stacked in one window, and exactly what a screenshot
+        # of "panel size: larger" showed. `_docked_w` is what `_draw` measures the row
+        # against, so it has to move in the same breath as the canvas.
+        if (self.x, self.y, self._shell_h, self._docked_w) != (x, y, h, w):
+            self.x, self.y, self._shell_h, self._docked_w = x, y, h, w
+            self.canvas.configure(width=w)
             self.canvas.place(x=0, y=h - PILL_H, width=w, height=PILL_H)
         if self.window_geometry() != (w, self.x, self.y):
             self.geometry(f"{w}x{h}+{self.x}+{self.y}")
