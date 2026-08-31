@@ -154,56 +154,6 @@ def toplevel_hwnd(win) -> int:
     return _user32.GetParent(win.winfo_id()) or 0
 
 
-def _mac_window_style(win) -> bool:
-    """Aqua's `WS_EX_NOACTIVATE`, without letting it put a title bar back on.
-
-    **`MacWindowStyle plain` is not frameless, and believing it was is what put a title
-    bar and three traffic lights on the pill.** `plain` is a window *class*, and
-    `scripts/mac_frame_probe.py` settled what it looks like on a real Mac: a Toplevel
-    given the style and nothing else comes up decorated, while one given only
-    `overrideredirect(True)` comes up bare. The call reports `ok` either way — it
-    succeeds at doing the wrong thing.
-
-    So `overrideredirect` is what strips the frame here as it does everywhere else, and
-    this exists for `noActivates` alone — the half that keeps a click on the pill from
-    pulling focus off whatever is being dictated into. It is asked for *first* and the
-    redirect is re-asserted after, so the class can never win.
-
-    **The root window needs the frame knocked off twice.** Aqua builds its `NSWindow`
-    when it is first mapped, and a redirect asked for afterwards does not restyle what
-    already exists — which is why `Bubble` and `ConversationCard` were bare while the
-    pill, which *is* the root (`class Pill(tk.Tk)`), was not. Withdrawing and remapping
-    forces the rebuild. Only for a window that is already on screen: the panels are
-    withdrawn at this point in startup and deiconifying them would put two empty
-    surfaces in front of the user.
-
-    Named `::tk::unsupported::` by Tk itself, which is why this is wrapped rather than
-    trusted. A False costs the focus behaviour, not a session.
-    """
-    styled = True
-    try:
-        win.update_idletasks()
-        win.tk.call("::tk::unsupported::MacWindowStyle", "style",
-                    win._w, "plain", "noActivates")
-    except tk.TclError:
-        styled = False
-    try:
-        if win.winfo_ismapped():
-            # Remembered across the remap. A window that comes back has been placed by
-            # whoever remapped it, not by whoever positioned it, and losing that is a
-            # pill somewhere the user did not put it.
-            where = win.geometry()
-            win.withdraw()
-            win.overrideredirect(True)
-            win.deiconify()
-            win.geometry(where)
-        else:
-            win.overrideredirect(True)
-    except tk.TclError:
-        return False
-    return styled
-
-
 def _no_activate(win) -> bool:
     """Take `win` out of the activation chain, and report whether it took.
 
@@ -212,11 +162,18 @@ def _no_activate(win) -> bool:
     number, and there is no other way to tell them apart. The one thing this window
     style has to be is true.
 
-    Off Windows this is `_mac_window_style`'s job, which does both halves at once
-    because Aqua sets the frame and the activation policy from the same window class.
+    **Off Windows this cannot take, and the app is built on that.** `_menu` borrows the
+    foreground on Windows precisely because a `WS_EX_NOACTIVATE` window would otherwise
+    get no input for its popup, and says in as many words that Lite needs none of it —
+    the window is in the activation chain like any other and the popup gets its input the
+    ordinary way.
+
+    Aqua does offer an equivalent, `MacWindowStyle ... noActivates`, and asking for it
+    was a mistake: it took the windows out of that chain, and a window that never
+    activates does not take clicks either. Send stopped working on a Mac. The frame is
+    handled in `_shell_window` now, where `overrideredirect` already lives and where it
+    always belonged.
     """
-    if sys.platform == "darwin":
-        return _mac_window_style(win)
     if sys.platform != "win32":
         return False
     try:
@@ -243,6 +200,7 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     one that contradicts what was applied to it.
     """
     win.overrideredirect(True)
+    _mac_reframe(win)
     win.attributes("-topmost", True)
     win.attributes("-alpha", alpha)
     if lite:
@@ -250,6 +208,41 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     win.attributes("-transparentcolor", TRANSPARENT)
     win.attributes("-toolwindow", True)
     return TRANSPARENT
+
+
+def _mac_reframe(win) -> None:
+    """Make Aqua build the window again, so `overrideredirect` reaches its NSWindow.
+
+    Reported from a Mac: the pill sat there with a title bar and three traffic lights
+    while the panels above it were correctly bare. The difference is that `Pill` **is**
+    the root window — `class Pill(tk.Tk)` — and the panels are Toplevels. Aqua builds the
+    root's NSWindow when it is first mapped, which has already happened by the time
+    anything asks for a redirect, and a redirect does not restyle a window that exists.
+    Withdrawing and remapping forces the rebuild.
+
+    **Not `MacWindowStyle`.** `plain` sounds frameless and is not — a Toplevel given only
+    that style comes up decorated, which `scripts/mac_frame_probe.py` settled on a real
+    machine. Its `noActivates` half was worse: it took the windows out of the activation
+    chain, and a window that never activates does not take clicks, so Send stopped
+    working. `_no_activate` says why the whole app depends on that not happening here.
+
+    Only for a window already on screen. The panels are withdrawn when this runs and
+    deiconifying them would put two empty surfaces in front of the user. Geometry is put
+    back because a window returning from a withdraw has been placed by whoever remapped
+    it, not by whoever positioned it.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        if not win.winfo_ismapped():
+            return
+        where = win.geometry()
+        win.withdraw()
+        win.overrideredirect(True)
+        win.deiconify()
+        win.geometry(where)
+    except tk.TclError:
+        pass
 
 
 def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:

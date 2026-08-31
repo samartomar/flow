@@ -856,65 +856,86 @@ class TestTheWorkAreaOffWindows(unittest.TestCase):
         self.assertLessEqual(y + ui.PILL_H, 672)
 
 
-class TestTheMacWindowStyle(unittest.TestCase):
-    """Aqua's `overrideredirect` + `WS_EX_NOACTIVATE`, which is one call and unsupported.
+class TestTheMacFrame(unittest.TestCase):
+    """Stripping the root window's frame on Aqua, and what must not be asked for to do it.
 
-    Reported from a real Mac: the pill sat there with its close and maximize buttons
-    showing. `overrideredirect(True)` is not enough on Aqua, because Tk maps a Toplevel
-    to an `NSWindow` whose style comes from the window *class*.
+    Reported from a Mac: the pill had a title bar and three traffic lights while the
+    panels above it were bare. `Pill` **is** the root (`class Pill(tk.Tk)`), the panels
+    are Toplevels, and Aqua builds the root's NSWindow before anything asks for a
+    redirect.
+
+    Two wrong answers were tried before this one, and both are asserted against here
+    because both looked right: `MacWindowStyle plain` is not frameless, and its
+    `noActivates` half broke clicking Send.
     """
 
-    def test_it_asks_for_no_activates_and_then_takes_the_frame_off_again(self):
-        # The order is the fix. `plain` is a window *class* and it is **not** frameless —
-        # a Mac showed a Toplevel given only the style coming up decorated. So the
-        # redirect is re-asserted after the style, and the class can never win.
-        win = mock.Mock()
-        win.winfo_ismapped.return_value = False
-        self.assertTrue(ui._mac_window_style(win))
-        args = win.tk.call.call_args[0]
-        self.assertEqual(args[0], "::tk::unsupported::MacWindowStyle")
-        self.assertIn("noActivates", args)
-        win.overrideredirect.assert_called_once_with(True)
+    def win(self, mapped=True):
+        w = mock.Mock()
+        w.winfo_ismapped.return_value = mapped
+        w.geometry.return_value = "205x40+538+608"
+        return w
 
-    def test_a_window_already_on_screen_is_remapped_to_force_the_rebuild(self):
-        # The root window's NSWindow is built when it is first mapped, and a redirect
-        # asked for afterwards does not restyle what already exists. That is why the
-        # panels were bare and the pill — which *is* the root — was not.
-        win = mock.Mock()
-        win.winfo_ismapped.return_value = True
-        ui._mac_window_style(win)
-        win.withdraw.assert_called_once()
-        win.deiconify.assert_called_once()
-
-    def test_a_withdrawn_window_is_not_put_on_screen_by_the_fix(self):
-        # `_no_activate` runs over all three windows at startup, and the panels are
-        # withdrawn at that point. Deiconifying them would put two empty surfaces in
-        # front of the user.
-        win = mock.Mock()
-        win.winfo_ismapped.return_value = False
-        ui._mac_window_style(win)
-        win.withdraw.assert_not_called()
-        win.deiconify.assert_not_called()
-
-    def test_the_frame_still_comes_off_when_the_style_call_is_unavailable(self):
-        # Tk calls it `::tk::unsupported::` itself. Losing it should cost the focus
-        # behaviour, not put a title bar back on the pill.
-        win = mock.Mock()
-        win.winfo_ismapped.return_value = False
-        win.tk.call.side_effect = ui.tk.TclError("no such command")
-        self.assertFalse(ui._mac_window_style(win))
-        win.overrideredirect.assert_called_once_with(True)
-
-    def test_no_activate_routes_to_it_on_a_mac_and_refuses_elsewhere(self):
-        # One name for "take this window out of the activation chain", answered by
-        # whichever platform API can actually do it.
-        win = mock.Mock()
-        win.winfo_ismapped.return_value = False
+    def test_a_mapped_window_is_remapped_to_force_the_rebuild(self):
+        w = self.win()
         with mock.patch.object(ui.sys, "platform", "darwin"):
-            self.assertTrue(ui._no_activate(win))
-            win.tk.call.assert_called_once()
-        with mock.patch.object(ui.sys, "platform", "linux"):
-            self.assertFalse(ui._no_activate(mock.Mock()))
+            ui._mac_reframe(w)
+        w.withdraw.assert_called_once()
+        w.overrideredirect.assert_called_once_with(True)
+        w.deiconify.assert_called_once()
+
+    def test_the_position_survives_the_remap(self):
+        # A window that comes back has been placed by whoever remapped it, not by
+        # whoever positioned it.
+        w = self.win()
+        with mock.patch.object(ui.sys, "platform", "darwin"):
+            ui._mac_reframe(w)
+        w.geometry.assert_called_with("205x40+538+608")
+
+    def test_a_withdrawn_window_is_not_put_on_screen_by_it(self):
+        # The panels are withdrawn when this runs at startup. Deiconifying them would
+        # put two empty surfaces in front of the user.
+        w = self.win(mapped=False)
+        with mock.patch.object(ui.sys, "platform", "darwin"):
+            ui._mac_reframe(w)
+        w.withdraw.assert_not_called()
+        w.deiconify.assert_not_called()
+
+    def test_it_does_nothing_at_all_off_a_mac(self):
+        w = self.win()
+        for platform in ("win32", "linux"):
+            with self.subTest(platform=platform):
+                w.reset_mock()
+                with mock.patch.object(ui.sys, "platform", platform):
+                    ui._mac_reframe(w)
+                w.withdraw.assert_not_called()
+
+    def test_nothing_asks_aqua_for_a_window_class(self):
+        # `MacWindowStyle plain` sounds frameless and is not - a Toplevel given only
+        # that style comes up decorated, which a real Mac settled. Asserted over the
+        # source because the mistake is *making the call at all*, and a mock cannot
+        # notice a call that is no longer there.
+        #
+        # The name still appears twice in prose, explaining why it is not used. Those
+        # comments are the point of this test, not a violation of it - so what is
+        # checked is the invocation, which is the only form that can do damage.
+        source = (Path(__file__).resolve().parent.parent
+                  / "flow" / "ui.py").read_text(encoding="utf-8")
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or stripped.startswith("*"):
+                continue
+            with self.subTest(line=stripped[:60]):
+                self.assertNotIn("::tk::unsupported::", line)
+
+    def test_no_activate_refuses_off_windows_because_the_app_depends_on_it(self):
+        # `_menu` borrows the foreground on Windows precisely because a non-activating
+        # window gets no input for its popup, and says Lite needs none of that. Asking
+        # Aqua for `noActivates` took the windows out of the activation chain and Send
+        # stopped taking clicks.
+        for platform in ("darwin", "linux"):
+            with self.subTest(platform=platform):
+                with mock.patch.object(ui.sys, "platform", platform):
+                    self.assertFalse(ui._no_activate(mock.Mock()))
 
 
 class TestMix(unittest.TestCase):
