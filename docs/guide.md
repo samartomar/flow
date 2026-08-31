@@ -222,6 +222,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--final-model X` | stronger model for the pasted text (default `small.en`) |
 | `--model X` | pin BOTH tiers to one model, for a low-memory machine |
 | `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one) |
+| `--engine {auto,whisper,native}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all. Default `auto`: whisper unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface) |
 | `--lexicon PATH` | personal terms file (default `~/.flow/lexicon.txt`) |
 | `--no-lexicon` | ignore that file without deleting it |
 | `--device N` | input device index; list them with `scripts/devices.py`. **Pinned**: if it goes away mid-session Flow retries *this* index and never substitutes another — see [When the microphone goes away](#if-the-microphone-goes-away-mid-session) |
@@ -535,6 +536,67 @@ block says so on one line and Flow carries on with the registered combos:
 
 ```
 chord   unavailable (keyboard hook refused); the toggle hotkey still works
+```
+
+### Without HuggingFace
+
+faster-whisper's model files are published on HuggingFace and nowhere else official —
+SYSTRAN's GitHub ships the library, not the weights. On a network that blocks
+`huggingface.co` there are three ways through, and they are in this order for a reason.
+
+**An internal proxy, if your organisation runs one.** Nothing to move, nothing to host:
+
+```bash
+export HF_ENDPOINT=https://<your-org-proxy>/huggingface
+```
+
+**Any local directory.** `--model`, `--partial-model` and `--final-model` take a path as
+happily as a name, so a folder holding `config.json`, `model.bin`, `tokenizer.json` and
+`vocabulary.txt` is all Flow needs:
+
+```bash
+uv run python -m flow --model ~/flow-models/base.en
+```
+
+`--model` pins **both** decoder tiers to one model — 138 MB for `base.en` instead of 599
+for the usual pair. Finals come out a little weaker, since `small.en` is what that tier
+exists for, and everything else is unchanged.
+
+Copying a HuggingFace cache between machines needs one flag: the cache stores every file
+as a symlink into `blobs/`, so a plain copy arrives as four broken links. Dereference
+them:
+
+```bash
+cp -RL ~/.cache/huggingface/hub/models--Systran--faster-whisper-base.en <somewhere>
+```
+
+**The macOS engine, which needs no model files at all.**
+
+```bash
+uv run python -m flow --engine native
+```
+
+macOS has an on-device recogniser with models the OS downloads through **System Settings
+▸ Keyboard ▸ Dictation** — enable it once and there is nothing else to fetch, ever. Flow
+talks to it through a small Swift helper it compiles on first use, which needs Xcode
+Command Line Tools (`xcode-select --install`) and one grant under **Privacy & Security ▸
+Speech Recognition**.
+
+**`--engine auto`, the default, will not switch a machine that is working.** It reaches
+for the native engine in exactly one case: the Whisper models are not on the machine and
+cannot be fetched. That is deliberate — Apple's recogniser is a *different* engine rather
+than a spare one. It reports no `no_speech_prob`, so Flow's hallucination filter falls
+back to a much narrower check; it has one quality tier where Whisper has two; and it
+cannot be biased toward your lexicon, so the re-listen that rescues a mis-heard command
+comes back unbiased. Those are real differences, and changing what Flow hears without
+being asked would be the wrong default. The startup line always says which engine you
+got and why.
+
+Before wiring it into anything, you can judge it on your own voice:
+
+```bash
+swiftc -O -o flow-stt native/flow_stt.swift
+./flow-stt --file some-recording.wav
 ```
 
 ### Where the panels open

@@ -137,6 +137,87 @@ def _chord(profile, hotkeys, Chord, parse_chord, echo, ignored_line,
     return chord
 
 
+def _native_transcriber():
+    """Import late, so a Windows launch never touches the macOS-only module."""
+    from .native import NativeTranscriber
+
+    return NativeTranscriber()
+
+
+def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
+    """Which decoder this launch gets, and the clause explaining why.
+
+    `--engine` decides when it is asked to. `auto` is the interesting one, and its rule
+    is deliberately conservative: **Whisper unless it cannot run.** Apple's recogniser
+    is a real engine but a different one — no `no_speech_prob`, so `clean.py` drops to
+    the narrow filler check it documents for a non-Whisper engine, one quality tier
+    where Whisper has two, and no hotword biasing for the rescue path. Switching to it
+    silently, on a machine where Whisper was working, would change what Flow hears for
+    reasons the user never asked about.
+
+    So `auto` reaches for it in exactly one situation: the Whisper models are not on
+    this machine and cannot be fetched. That is the situation it was written for — a
+    network that blocks huggingface.co, where the alternative is not a worse engine but
+    no dictation at all.
+
+    Every path returns a clause for the startup line, because the engine decides what
+    Flow can hear and a silent choice would be the one thing nobody could check.
+    """
+    if args.engine == "whisper":
+        return "whisper", ""
+    if sys.platform != "darwin":
+        if args.engine == "native":
+            say("--engine native is macOS only; using whisper")
+        return "whisper", ""
+
+    from .native import available as native_available
+
+    if args.engine == "native":
+        ok, why = native_available()
+        if ok:
+            return "native", ""
+        say(f"--engine native unavailable: {why}")
+        return "whisper", ""
+
+    # auto. Ask the cheap question first: are the models here?
+    if _models_present(partial_name, final_name):
+        return "whisper", ""
+    ok, why = native_available()
+    if ok:
+        return "native", " (whisper models not found on this machine)"
+    return "whisper", f" (not found locally, and no native engine: {why})"
+
+
+def _models_present(*names: str) -> bool:
+    """Whether every named model is already on disk, without reaching the network.
+
+    A directory holding `model.bin` is what `--model /some/path` gives, and a name like
+    `base.en` is present when huggingface_hub has it cached. Asked with the hub in
+    offline mode so this cannot become the download it is testing for.
+    """
+    import os
+    from pathlib import Path
+
+    for name in names:
+        path = Path(name)
+        if (path / "model.bin").exists():
+            continue
+        was = os.environ.get("HF_HUB_OFFLINE")
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        try:
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(f"Systran/faster-whisper-{name}", local_files_only=True)
+        except Exception:
+            return False
+        finally:
+            if was is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = was
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     # First, before anything resolves anything. Windows searches the current directory
     # ahead of PATH for a bare executable name, and Flow is launched *inside* project
@@ -171,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--decode-device", default=DEVICE, choices=("auto", "cuda", "cpu"),
         help="where decoding runs (default auto: the GPU when there is a working one)",
+    )
+    ap.add_argument(
+        "--engine", default="auto", choices=("auto", "whisper", "native"),
+        help="which decoder: whisper (faster-whisper, needs model files) or native "
+             "(macOS on-device speech, no download at all). Default auto: whisper "
+             "unless its models are missing and the native engine is ready",
     )
     ap.add_argument(
         "--lexicon", default=None,
@@ -381,10 +468,14 @@ def main(argv: list[str] | None = None) -> int:
     default_partial, default_final = default_models(decode_device)
     partial_name = args.model or args.partial_model or default_partial
     final_name = args.model or args.final_model or default_final
-    if partial_name == final_name:
-        say(f"model: {final_name}, for partials and finals both")
+    engine, engine_why = _engine(args, partial_name, final_name)
+    if engine == "native":
+        say(f"engine: macOS on-device speech{engine_why}")
+    elif partial_name == final_name:
+        say(f"model: {final_name}, for partials and finals both{engine_why}")
     else:
-        say(f"models: {partial_name} for partials, {final_name} for finals")
+        say(f"models: {partial_name} for partials, "
+            f"{final_name} for finals{engine_why}")
 
     from .diag import Diag
     from .profile import Profile, resolve_workspace
@@ -469,11 +560,11 @@ def main(argv: list[str] | None = None) -> int:
         profile.save()
 
     session = Session(
-        asr=WhisperTranscriber(
+        asr=(_native_transcriber() if engine == "native" else WhisperTranscriber(
             partial_name, final_name, lexicon=lexicon,
             baseline=profile.confidence if profile is not None else None,
             device=args.decode_device,
-        ),
+        )),
         device=args.device,
         speaker=speaker,
         profile=profile,
