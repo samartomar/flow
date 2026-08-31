@@ -371,6 +371,7 @@ class TestACwdLaunchFeedsTheRecents(unittest.TestCase):
         import flow.asr
         import flow.diag
         import flow.profile
+        import flow.refine
         import flow.ui
 
         import flow.__main__ as mod
@@ -445,15 +446,21 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
         path = self.dir / "profile.json"
         path.write_text(json.dumps({"schema": 1, "hotkeys": hotkeys}), encoding="utf-8")
         out = io.StringIO()
-        # `available()` is patched out, and not only for speed. It reaches
+        # `refine.resolve` is stubbed, and not only for speed. It calls
         # `shutil.which`, and `shutil.which` reads `sys.platform` - which this
         # helper has just lied about. On a real macOS runner that sends the stdlib
         # down its Windows branch, where `_winapi` is None: `AttributeError:
         # 'NoneType' object has no attribute 'NeedCurrentDirectoryForExePath'`,
         # raised from a line no part of Flow wrote. Which agent CLI happens to be
         # installed has nothing to do with what this class asserts.
+        #
+        # Stubbed at `resolve` rather than at its callers, which was the first
+        # attempt and was whack-a-mole: `main` reaches the same line through
+        # `available()` *and* `unverified()`, and patching one left the other. It is
+        # the single choke point - the only `shutil.which` in the module, and what
+        # every lookup goes through.
         with mock.patch.object(sys, "platform", platform), \
-                mock.patch.object(mod, "available", return_value=[]), \
+                mock.patch.object(flow.refine, "resolve", return_value=None), \
                 mock.patch.object(flow.profile, "DEFAULT_PATH", path), \
                 mock.patch.object(flow.diag, "Diag"), \
                 mock.patch.object(mod, "Session"), \
