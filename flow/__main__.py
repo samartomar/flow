@@ -44,6 +44,19 @@ from .version import check_update, version
 #: Said on every Lite launch, before anything else, in ASCII for the reason `say()` gives.
 #: It names the platform because the two ways into Lite are a flag and an OS, and someone
 #: who did not type `--lite` deserves to be told which one they got.
+#: What a Mac is told instead, because on a Mac the sentence above is no longer true.
+#: Send pastes there now — the one thing Lite was defined by. Everything else it says
+#: still holds: no injection DLL, no global hotkeys, the pill is the gesture.
+#:
+#: Accessibility is named at startup rather than at the first failed paste, because it is
+#: a thing to go and do once and finding out at the moment you needed it to work is the
+#: worst time to be told.
+MAC_LINE = (
+    "Flow on {platform}: Send pastes into whatever app is in front, using System Events "
+    "- grant your terminal Accessibility in System Settings > Privacy & Security. "
+    "No global hotkeys: hold the pill to talk, let go to send."
+)
+
 LITE_LINE = (
     "Flow Lite on {platform}: Send copies the draft and you paste it - no injection, "
     "no global hotkeys, nothing to grant but the microphone. "
@@ -404,8 +417,13 @@ def main(argv: list[str] | None = None) -> int:
     # while the platform *was* the problem; it is not one any more (decisions.md,
     # "Flow Lite").
     lite = args.lite or sys.platform != "win32"
+    #: Set when an injector is imported below. `None` means Send has nothing to paste
+    #: with and falls back to the clipboard, which is what `--no-paste` and every
+    #: platform without an injector get.
+    paste = take_warnings = None
     if lite:
-        say(LITE_LINE.format(platform=sys.platform))
+        say((MAC_LINE if sys.platform == "darwin" and not args.no_paste
+             else LITE_LINE).format(platform=sys.platform))
         if args.no_paste:
             # Accepted rather than refused: a launcher shared between two machines should
             # not fail on a flag that has simply run out of things to suppress.
@@ -425,6 +443,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         from .profile import CHORD_DEFAULT
         from .inject import paste, take_warnings
+    elif sys.platform == "darwin" and not args.no_paste:
+        # Lite is about hotkeys and window handles, not about whether Flow can put the
+        # words where they are going. A Mac has no `SendInput` and no `hwnd`, and it does
+        # have `osascript` — so it gets a real send while staying Lite in every other
+        # respect. See `inject_mac` for why the permission is the interesting part.
+        from .inject_mac import paste, take_warnings
     from .ui import Pill, apply_panel_width, apply_place, panel_width
 
     from .asr import WhisperTranscriber
@@ -651,12 +675,13 @@ def main(argv: list[str] | None = None) -> int:
                 "(--no-auto-ask to press it yourself)")
         else:
             say("auto-ask: off - press Ask when you are ready")
-    elif lite:
+    elif paste is None:
         say("mode: DICTATE - Send copies the draft, and you paste it "
             "(--converse, or the right-click menu, to ask instead)")
     else:
         say("mode: DICTATE - Send pastes into the focused window "
-            "(--converse, or ctrl+alt+M, to ask instead)")
+            f"(--converse, or {'the right-click menu' if lite else 'ctrl+alt+M'}, "
+            "to ask instead)")
 
     # Before anything is drawn, and that is the whole contract: `apply_panel_width`
     # rebinds module globals that two window classes and the chrome functions read, so a
@@ -751,8 +776,14 @@ def main(argv: list[str] | None = None) -> int:
     # exist, so the menu is sent to the real settings folder instead: the profile lives
     # there either way, and creating a template beside the source is nobody's idea of
     # settings.
+    # What the mode notes read, and the same fact `on_send` is keyed off.
+    session.pastes = paste is not None
     pill = Pill(
-        session, on_send=None if lite else on_send, hotkeys=hotkeys, arm=args.arm,
+        # Keyed off whether an injector was imported, not off `lite`. The two came
+        # apart the day a Mac got a paste path: it is Lite in every other sense and can
+        # still put the words in the other window.
+        session, on_send=on_send if paste is not None else None,
+        hotkeys=hotkeys, arm=args.arm,
         settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
         lite=lite,
     )

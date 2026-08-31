@@ -758,6 +758,11 @@ class Session:
         #: the same brain — so this is read in exactly one place, the note that would
         #: otherwise name a focused window Lite cannot see.
         self.lite = lite
+        #: Whether Send puts the words in the other window or on the clipboard. Set by
+        #: `__main__` from whether it imported an injector, because `lite` stopped being
+        #: the same question the day a Mac got a paste path: it is Lite there — no global
+        #: hotkeys, no window handles — and it pastes.
+        self.pastes = not lite
         self.mic = mic or Mic(device=device)
         self.gate = SpeechGate()
         self.worker = DecodeWorker(self.asr)
@@ -3224,9 +3229,9 @@ class Session:
                        "converse mode - no agent CLI on PATH, so Ask has nothing to send")
             self._first_converse_notice()
         else:
-            self._emit("note", "dictate mode - Send copies the draft, and you paste it"
-                       if self.lite
-                       else "dictate mode - Send pastes into the focused window")
+            self._emit("note", "dictate mode - Send pastes into the focused window"
+                       if self.pastes
+                       else "dictate mode - Send copies the draft, and you paste it")
         return self.mode
 
     def send(self) -> str:

@@ -2803,9 +2803,7 @@ class Pill(tk.Tk):
         self._ptt_wait = None
         text = self.session.send()
         problem = ""
-        if text and self.lite:
-            problem = self._copy(text)
-        elif text and self.on_send:
+        if text and self.on_send:
             # The window is chosen here, on the UI thread, from what was polled before
             # the click — not inside `paste()` after it. The handler reports back what
             # went wrong rather than printing it somewhere nobody is looking.
@@ -2814,6 +2812,14 @@ class Pill(tk.Tk):
             # handler predating this — `send_check.py`'s fixture is one — still works.
             extra = {"submit": True} if submit else {}
             problem = self.on_send(text, self.paste_target, **extra) or ""
+        elif text and self.lite:
+            # The fallback, not the Lite behaviour. A handler is offered wherever Flow
+            # can actually put the words in the other window — Win32 injection, or
+            # System Events on a Mac — and the copy is what is left when it cannot.
+            # These two used to be the other way round, so a Mac that had grown a real
+            # paste path would still have copied: `lite` is about hotkeys and window
+            # handles, and it was standing in for "cannot send", which it is not.
+            problem = self._copy(text)
         if getattr(self.session, "mode", DICTATE) != DICTATE:
             # Converse: send() returns "" and the answer is still coming, so the bubble
             # stays up to render it and there is nothing to linger over.
@@ -2826,7 +2832,7 @@ class Pill(tk.Tk):
             self.bubble.show_sent(text, problem)
         elif text:
             self.bubble.show_sent(text)
-            if self.lite:
+            if self.lite and self.on_send is None:
                 # After the card, not instead of it: the words are the important half and
                 # the note is what tells somebody the last step is theirs.
                 self.bubble.note(COPIED_ENTER if submit else COPIED)

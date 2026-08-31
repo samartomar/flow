@@ -184,7 +184,7 @@ class Pill:
     found this the hard way). The attribute has to exist.
     """
 
-    def __init__(self, s: Session, lite: bool = True) -> None:
+    def __init__(self, s: Session, lite: bool = True, injector: bool = True) -> None:
         import flow.ui as ui
 
         self.copied: list[str] = []
@@ -193,7 +193,12 @@ class Pill:
         self.pill = ui.Pill.__new__(ui.Pill)
         self.pill.session = s
         self.pill.lite = lite
-        self.pill.on_send = self._on_send
+        # `injector` is what `__main__` decides by importing a paste module or not, and
+        # it is no longer the same question as `lite`. A Mac is Lite — no global hotkeys,
+        # no window handles — and still pastes, through System Events. `injector=False`
+        # is the case with nothing to paste with: `--lite` on Windows, `--no-paste`, or a
+        # platform Flow has no injector for.
+        self.pill.on_send = self._on_send if injector else None
         self.pill.paste_target = 0x22
         self.pill.bubble = mock.Mock()
         self.pill._flash = 0
@@ -223,9 +228,16 @@ class Pill:
 
 
 class TestSendInLiteIsACopy(unittest.TestCase):
+    """Lite with nothing to paste with — `--lite` on Windows, or `--no-paste`.
+
+    Lite used to mean this by definition. It does not any more: a Mac is Lite in every
+    other respect and pastes through System Events, so the copy is now the fallback for
+    *no injector* rather than the behaviour of a mode. See `TestLiteWithAnInjector`.
+    """
+
     def setUp(self):
         self.s = session()
-        self.p = Pill(self.s)
+        self.p = Pill(self.s, injector=False)
         self.s.draft.set(DRAFT)
 
     def test_the_draft_goes_to_the_clipboard_and_nowhere_else(self):
@@ -286,7 +298,7 @@ class TestTheEnterVariantCollapses(unittest.TestCase):
 
     def setUp(self):
         self.s = session()
-        self.p = Pill(self.s)
+        self.p = Pill(self.s, injector=False)
         self.s.draft.set(DRAFT)
 
     def test_it_copies_rather_than_refusing(self):
@@ -305,7 +317,7 @@ class TestTheEnterVariantCollapses(unittest.TestCase):
                              ("enter boom", "Enter is yours to press")):
             with self.subTest(said=said):
                 s = session()
-                p = Pill(s)
+                p = Pill(s, injector=False)
                 s.draft.set(DRAFT)
                 p.say(said)
                 self.assertEqual(p.copied, [DRAFT])

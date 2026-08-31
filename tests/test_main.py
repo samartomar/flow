@@ -94,7 +94,11 @@ class TestNonWindowsRunsLite(unittest.TestCase):
     def test_a_mac_gets_lite_rather_than_a_refusal(self):
         code, out, pill, session = launch("darwin")
         self.assertEqual(code, 0)
-        self.assertIn("Flow Lite on darwin", out)
+        # Not the Lite banner any more: a Mac pastes, which is the one thing Lite was
+        # defined by. It is still Lite in every other respect and the `lite` kwargs below
+        # are what say so.
+        self.assertIn("Flow on darwin", out)
+        self.assertIn("Send pastes", out)
         self.assertNotIn("Windows-only", out)
         self.assertTrue(pill.call_args.kwargs["lite"])
         self.assertTrue(session.call_args.kwargs["lite"])
@@ -103,11 +107,14 @@ class TestNonWindowsRunsLite(unittest.TestCase):
         _code, out, _pill, _session = launch("linux")
         self.assertIn("linux", out)
 
-    def test_no_hotkey_is_registered_and_no_paste_handler_is_built(self):
-        # The two halves of "no hands", asserted where they are decided rather than
-        # where they would be felt. `on_send` is the paste closure, and in Lite it
-        # closes over names that were never imported — so handing one over would be a
-        # handler that fails on its first call.
+    def test_no_hotkey_is_registered_but_a_paste_handler_is(self):
+        """"No hands" was two halves and is now one.
+
+        The hotkeys stay unregistered: there is no `RegisterHotKey` here and the pill is
+        the gesture. The paste closure is built, because `inject_mac` gives it something
+        to close over — `osascript` rather than `SendInput`. Handing one over used to be
+        a handler that would fail on its first call; it is not any more.
+        """
         _code, out, pill, _session = launch("darwin")
         # The registration report is `hotkey  <action> <combo>` per line. Matched on the
         # line rather than on the word, because the Lite banner says "no global hotkeys"
@@ -115,12 +122,19 @@ class TestNonWindowsRunsLite(unittest.TestCase):
         self.assertEqual(
             [ln for ln in out.splitlines() if ln.startswith("hotkey")], [])
         self.assertIsNone(pill.call_args.kwargs["hotkeys"])
-        self.assertIsNone(pill.call_args.kwargs["on_send"])
+        self.assertIsNotNone(pill.call_args.kwargs["on_send"])
 
-    def test_the_mode_line_does_not_name_a_window_lite_cannot_see(self):
-        _code, out, _pill, _session = launch("darwin")
+    def test_no_paste_puts_the_clipboard_back(self):
+        # The one way to get the old behaviour on a Mac, and it has to keep working:
+        # somebody who does not want Flow synthesising keystrokes should not have to
+        # choose between that and using Flow.
+        _code, out, pill, _session = launch("darwin", ["--no-paste"])
+        self.assertIsNone(pill.call_args.kwargs["on_send"])
         self.assertIn("Send copies the draft", out)
-        self.assertNotIn("focused window", out)
+
+    def test_the_mode_line_says_it_pastes(self):
+        _code, out, _pill, _session = launch("darwin")
+        self.assertIn("Send pastes into the focused window", out)
 
     def test_every_lite_startup_line_is_ascii_like_the_rest(self):
         # `say()` documents why: a redirected stdout on a legacy console code page
@@ -495,7 +509,7 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
         # that stops Flow from starting on the platform Lite exists for.
         code, out = self.launch(self.OVERRIDES, ["--lite"], platform="darwin")
         self.assertEqual(code, 0)
-        self.assertIn("Flow Lite on darwin", out)
+        self.assertIn("on darwin", out)
 
     @unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
     def test_no_hotkeys_reads_no_override_because_it_registers_none(self):

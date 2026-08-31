@@ -94,7 +94,7 @@ class Harness:
     under test read is set here on purpose.
     """
 
-    def __init__(self, *, lite: bool = False) -> None:
+    def __init__(self, *, lite: bool = False, injector: bool = False) -> None:
         self.mic = FakeMic()
         # `Pill.converse` is a property reading `session.mode`, so the surface follows
         # the session here exactly as it does in the app — there is nothing to set.
@@ -106,7 +106,11 @@ class Harness:
         p.session = self.session
         p.lite = lite
 
-        p.on_send = self._on_send
+        # An injector is what `__main__` decides by importing a paste module, and it is
+        # no longer the same question as `lite`: a Mac is Lite and pastes through System
+        # Events. The full body always has one; Lite has one only where a platform gives
+        # Flow something to paste with.
+        p.on_send = self._on_send if (injector or not lite) else None
         p.paste_target = 0x22
         p.bubble = mock.Mock()
         p.card = mock.Mock()

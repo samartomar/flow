@@ -269,7 +269,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--cli-effort LEVEL` | how hard the CLI may think: `low`, `medium`, `high`, `xhigh`, `max` (default `low`) |
 | `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
 | `--cwd PATH` | the project converse-mode questions are asked from; overrides the stored `workspace` ([P9](#converse-mode-p9)) |
-| `--lite` | clipboard-out mode: Send copies the draft instead of pasting it, and no hotkeys are registered (automatic off Windows — see [Install](#install)) |
+| `--lite` | no global hotkeys and no target-window tracking (automatic off Windows — see [Install](#install)). On Windows it also makes Send copy instead of paste; on a Mac Send still pastes, through System Events |
 | `--version` | print `flow X.Y.Z` and exit. The same number the startup block names, and the one Help shows at the bottom of the sheet |
 | `--check-update` | ask GitHub once whether a newer release exists, print one line, and exit. Manual only: nothing in Flow ever checks on its own, and the request carries no version, no identifier and no account — see [What leaves the machine](architecture.md#what-leaves-the-machine) |
 | `--stats` | print how much has been dictated — today and all time — and exit, without loading a model or opening the microphone. See [The numbers](#the-numbers). With `--no-profile` it reads nothing and says so |
@@ -882,6 +882,32 @@ that does not bracket prints a warning naming the process — in the bubble, on 
 that holds what was just sent, so it is somewhere you are already looking.
 
 The clipboard is restored about 0.6 s after the paste, so Flow does not permanently own it.
+
+### On a Mac
+
+Send pastes there too, as of this version. It used to copy and stop, which made every
+other Mac fix beside the point — the whole idea is to speak into the window you are
+already in, and "now press Cmd-V yourself" is the step Flow exists to remove.
+
+The mechanism is different because the platform is. There is no `SendInput` and no window
+handle: Flow puts the text on the pasteboard with `pbcopy` and asks **System Events** to
+type Cmd-V into whatever app is frontmost. It does not need to aim, because Flow's own
+windows are built without a title bar and never take focus, so the app you were working in
+is still the frontmost one.
+
+**macOS will refuse until you allow it.** Synthesising keystrokes needs Accessibility, and
+macOS grants that to the *responsible* process — the terminal you started Flow from, not
+Flow and not Python. So:
+
+**System Settings → Privacy & Security → Accessibility**, and switch on your terminal.
+
+Looking for "Flow" in that list is a dead end. Until it is granted, Send says so in the
+bubble and names the setting; the text is on the clipboard either way, so Cmd-V works in
+the meantime. `--no-paste` puts the old copy-only behaviour back if you would rather Flow
+did not synthesise keystrokes at all.
+
+`enter boom` works the same way — the Return is sent as a key code rather than a typed
+character, in the same script as the paste so nothing can come forward between them.
 
 ### Sending it without touching anything
 
