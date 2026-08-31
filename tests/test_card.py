@@ -44,6 +44,9 @@ def card(**kw):
     #: `reposition` does arithmetic on it now that the pill's width can dock.
     c.pill.pill_w = ui.PILL_W
     c.pill.work = WORK
+    # The panel band's height comes off the pill now that they share a window,
+    # so a Mock pill would otherwise answer `panel_h()` with a Mock.
+    c.pill.band_h = lambda: ui.PANEL_H
     c.pill.x, c.pill.y = 900, 560
     c.pill.session = mock.Mock(can_take_reply=True, auto_ask_in=None)
     c.canvas = MeasuringCanvas()
@@ -55,11 +58,12 @@ def card(**kw):
     c._h = ui.CARD_MIN_H
     c._pinned_h = 0
     c._countdown = None
+    #: What `reposition` asked for. It used to be a `geometry` string, because this was
+    #: a window; it is a `place` call now, because the card is a band inside the pill's
+    #: one window. The record is kept because tests read the height back out of it.
     c.placed = []
-    c.geometry = c.placed.append
-    c.deiconify = lambda: None
-    c.attributes = lambda *a, **kw: None
-    c.withdraw = lambda: None
+    c.place = lambda **kw: c.placed.append(f"{kw['width']}x{kw['height']}+0+0")
+    c.place_forget = lambda: None
     for name, value in kw.items():
         setattr(c, name, value)
     return c
@@ -720,7 +724,9 @@ class TestAnAnswerThatLandsAfterTheSwitch(unittest.TestCase):
         self.assertEqual(c._answer, "you add it with a migration")
         c.deiconify.assert_not_called()
         c.show()
-        c.deiconify.assert_called_once()
+        # It used to `deiconify` a window of its own. There is one window now, and a
+        # band that has been given a place in it is a band that is showing.
+        self.assertTrue(c.placed)
 
     @staticmethod
     def raised(call) -> bool:

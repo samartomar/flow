@@ -605,6 +605,7 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         #: is an unpackable that raises, which is the loud failure this would rather have
         #: than a fixture silently laying out against a screen of no particular size.
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_H
         b.canvas = MeasuringCanvas()
         b._text, b._sent, b._partial, b._note = text, "", "", note
         b._editor = None
@@ -674,6 +675,7 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
         b.pill.session = mock.Mock(**fields)
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_H
         b.canvas = MeasuringCanvas()
         b._text = "Meeting on Tuesday afternoon."
         b._sent = b._partial = b._note = ""
@@ -751,6 +753,7 @@ class TestTheWayBackSitsBesideTheFact(unittest.TestCase):
         )
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_H
         b.canvas = MeasuringCanvas()
         b._text = "Meeting on Tuesday afternoon."
         b._sent = b._partial = b._note = ""
@@ -840,6 +843,7 @@ class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
         )
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_H
         b.canvas = MeasuringCanvas()
         b._text = "seconds, send the question. No auto-ask to press it yourself."
         b._sent, b._partial, b._note = "", partial, note
@@ -957,6 +961,7 @@ class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
         b.pill = mock.Mock()
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_H
         b.pill.session = mock.Mock(mode="dictate", editing=True, can_rescue=False,
                                    can_take_reply=False, auto_ask_in=None)
         b.canvas = MeasuringCanvas()
@@ -1123,6 +1128,7 @@ class TestClickingTheDraftOpensEdit(unittest.TestCase):
         b.pill = mock.Mock()
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_H
         b.pill.session = mock.Mock(mode="dictate", editing=False, can_rescue=False,
                                    can_take_reply=False, auto_ask_in=None)
         b.canvas = MeasuringCanvas()

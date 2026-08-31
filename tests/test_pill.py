@@ -35,6 +35,12 @@ class Canvas:
 
     def delete(self, *a, **kw) -> None: ...
 
+    #: `_sync_shell` places this canvas at the foot of a window whose top edge moves
+    #: when a panel opens. Recorded rather than ignored, so a test can check the row
+    #: really is at the bottom of whatever height the shell currently is.
+    def place(self, **kw) -> None:
+        self.placed = kw
+
     #: `_sync_dock` resizes the canvas when a panel docks or goes away. Accepted and
     #: recorded rather than ignored, so a test can tell a widened pill from a moved one.
     def configure(self, **kw) -> None:
@@ -1180,130 +1186,90 @@ def docker(*, showing=True, panel_w=ui.BUBBLE_W, window=None, x=1047, docked_w=u
     return p
 
 
-class TestTheDockIsCheckedRatherThanAssumed(unittest.TestCase):
-    """The pill and the panel above it share one column, and stay sharing it.
+class TestTheShellIsOneWindow(unittest.TestCase):
+    """`_sync_shell`, which is what `_sync_dock` became when the dock stopped existing.
 
-    `scripts/reel.py` found them not sharing it: the pill 420 px wide at the x a
-    205 px pill sits at, hanging 215 px off the screen and unjoined from the panel it
-    is docked to, held there for five seconds because the width already matched and
-    nothing looked again.
+    The pill and its panel used to be two windows kept adjacent by hand, and
+    `scripts/reel.py` once caught them **215 px apart, for five seconds**: the resize had
+    landed and the matching move had not, and the pill's remembered width then answered
+    "nothing to do" on every frame after. That failure needs two windows to be possible.
+    There is one now, and all that arithmetic has collapsed into a height.
 
-    Pinned to `"corner"`, because holding the right edge is *corner* placement's rule
-    and not the dock's: the pill is anchored to the screen edge it sits against, and
-    growing away from it is the only direction there is. Centred placement has no
-    anchored edge and re-centres instead — `TestTheDockRecentresWhenThereIsNoEdge`
-    below is the same class of check for it.
-    """
-
-    def setUp(self):
-        self.addCleanup(ui.apply_place, ui.PLACE_DEFAULT)
-        ui.apply_place("corner")
-
-    def test_a_panel_appearing_moves_the_left_edge_and_holds_the_right(self):
-        p = docker()
-        p._sync_dock()
-        p.geometry.assert_called_once_with(f"{ui.BUBBLE_W}x{ui.PILL_H}+832+608")
-        self.assertEqual(p.x + ui.BUBBLE_W, 1047 + ui.PILL_W)  # the right edge did not move
-
-    def test_nothing_is_asked_for_twice_when_the_window_already_agrees(self):
-        p = docker(docked_w=ui.BUBBLE_W, x=832, window=(ui.BUBBLE_W, 832, 608))
-        p._sync_dock()
-        p.geometry.assert_not_called()
-
-    def test_a_move_that_did_not_land_is_asked_for_again(self):
-        # The reel's finding, staged: the resize took and the move did not, so the
-        # window is at the bare-pill x while the pill's own state says it docked.
-        # Before this was checked, `w == self._docked_w` returned here and the pill
-        # stayed off the screen edge for as long as the panel was up.
-        p = docker(docked_w=ui.BUBBLE_W, x=832, window=(ui.BUBBLE_W, 1047, 608))
-        p._sync_dock()
-        p.geometry.assert_called_once_with(f"{ui.BUBBLE_W}x{ui.PILL_H}+832+608")
-
-    def test_the_recovery_does_not_move_the_pill_a_second_time(self):
-        # Re-asking must re-send the *same* geometry, never re-run the relative
-        # arithmetic — that would walk the pill one panel-width left per frame.
-        p = docker(docked_w=ui.BUBBLE_W, x=832, window=(ui.BUBBLE_W, 1047, 608))
-        for _ in range(5):
-            p._sync_dock()
-        self.assertEqual(p.x, 832)
-        self.assertEqual({c.args for c in p.geometry.call_args_list},
-                         {(f"{ui.BUBBLE_W}x{ui.PILL_H}+832+608",)})
-
-    def test_the_panel_going_away_leaves_the_width_alone(self):
-        """It used to take the width back, and taking it back was the thing to stop.
-
-        The pill was `PILL_W` while nothing was docked and the panel's width while
-        something was, so it jumped 205 -> 420 the instant a draft appeared and back
-        again when it went — the most visible motion on the screen, on every utterance.
-        `Pill.pill_w` answers the panel's width unconditionally now, so a panel coming
-        and going costs no resize and no move at all.
-        """
-        p = docker(showing=False, docked_w=ui.BUBBLE_W, x=832)
-        p._sync_dock()
-        self.assertEqual(p.x, 832)
-        p.geometry.assert_not_called()
-
-
-class TestTheDockRecentresWhenThereIsNoEdge(unittest.TestCase):
-    """The same dock under centred placement, where holding an edge is the bug.
-
-    Found by running the shipped placement against the dock rather than by reading it:
-    the pill is 205 px and the panel 420, and holding the right edge put the pair
-    **107 px left of centre the moment a draft appeared** — visibly, on every utterance,
-    because a draft appearing is the single most common thing that happens.
-
-    Corner placement is anchored to the screen edge it sits against, so growing away
-    from that edge is the only direction there is. Centred placement has no anchored
-    edge, and the width it should be centred on is the *new* one.
+    What the two classes here used to cover — holding the right edge in corner placement,
+    re-centring on the new width in bottom placement, the 107 px lurch when a draft
+    appeared — is gone with the width change that caused it. The pill is the panel's
+    width whether a panel is up or not.
     """
 
     def setUp(self):
         self.addCleanup(ui.apply_place, ui.PLACE_DEFAULT)
         ui.apply_place("bottom")
 
-    def centre_of(self, p, w):
-        return p._placed(w)[0]
+    def asked(self, p):
+        w, _, rest = p.geometry.call_args.args[0].partition("x")
+        h, _, _pos = rest.partition("+")
+        return int(w), int(h)
 
-    def test_a_panel_appearing_recentres_on_the_new_width(self):
-        p = docker(x=538, docked_w=ui.PILL_W)
-        p._sync_dock()
-        self.assertEqual(p.x, self.centre_of(p, ui.BUBBLE_W))
+    def test_a_panel_opening_grows_the_window_upward(self):
+        p = docker(showing=True)
+        p._sync_shell()
+        self.assertEqual(self.asked(p), (ui.BUBBLE_W, ui.PANEL_H + ui.PILL_H))
 
-    def test_the_panel_going_away_moves_nothing(self):
-        # There is no narrower width to recentre on any more: the pill is the panel's
-        # width whether a panel is up or not.
-        p = docker(showing=False, docked_w=ui.BUBBLE_W, x=430)
-        p._sync_dock()
-        self.assertEqual(p.x, self.centre_of(p, ui.BUBBLE_W))
+    def test_and_the_foot_does_not_move_when_it_does(self):
+        """The whole of "the controls stay where they are", as arithmetic.
 
-    def test_the_stack_stays_put_across_an_open_and_a_close(self):
-        # The round trip, which is now a round trip to nowhere. A pill upgrading from an
-        # old profile still gets centred on the panel width once, and then a panel
-        # opening and closing leaves it exactly where that put it.
-        p = docker(x=538, docked_w=ui.PILL_W)
-        p._sync_dock()
-        settled = p.x
-        self.assertEqual(settled, self.centre_of(p, ui.BUBBLE_W))
-        p.bubble = mock.Mock(width=ui.BUBBLE_W, _visible=False)
-        p.window_geometry = mock.Mock(return_value=(ui.BUBBLE_W, p.x, 608))
-        p._sync_dock()
-        self.assertEqual(p.x, settled)
+        Send, the meter and the chip row are laid out from the bottom of the window. A
+        shell that grew downward — or that centred its growth — would move every one of
+        them every time a draft appeared, which is the motion this work exists to end.
+        """
+        idle = docker(showing=False)
+        idle._sync_shell()
+        opened = docker(showing=True)
+        opened._sync_shell()
+        self.assertEqual(idle.y + idle._shell_h, opened.y + opened._shell_h)
 
-    def test_it_is_still_clamped_onto_the_screen(self):
-        # The clamp survives the branch. A panel wider than the display would otherwise
-        # be centred to a negative x.
-        p = docker(x=538, docked_w=ui.PILL_W, panel_w=4000)
-        p._sync_dock()
-        self.assertGreaterEqual(p.x, p.work[0])
+    def test_an_idle_pill_is_just_the_row(self):
+        p = docker(showing=False)
+        p._sync_shell()
+        self.assertEqual(p._shell_h, ui.PILL_H)
 
-    def test_corner_placement_is_untouched_by_any_of_this(self):
-        # The two branches are different rules, not one rule with a flag, and the
-        # corner's is the one people have been using.
-        ui.apply_place("corner")
-        p = docker()
-        p._sync_dock()
-        self.assertEqual(p.x + ui.BUBBLE_W, 1047 + ui.PILL_W)
+    def test_nothing_is_asked_for_twice_when_the_window_already_agrees(self):
+        # Idempotent, so it can run from the frame pump and from a panel's `reposition`
+        # without either caring which got there first.
+        p = docker(showing=False, x=538)
+        p._sync_shell()
+        p.window_geometry = mock.Mock(return_value=(ui.BUBBLE_W, p.x, p.y))
+        p.geometry.reset_mock()
+        for _ in range(5):
+            p._sync_shell()
+        p.geometry.assert_not_called()
+
+    def test_a_window_that_drifted_is_asked_again(self):
+        # `reel.py`'s defect, in the only form it can still take. Compared against the
+        # *window* rather than against a remembered value: state saying the move happened
+        # is not evidence that it did.
+        p = docker(showing=True, window=(ui.BUBBLE_W, 4, 4))
+        p._sync_shell()
+        p.geometry.assert_called_once()
+
+    def test_the_shell_is_clamped_onto_the_screen(self):
+        p = docker(showing=True)
+        p.work = p.full = (0, 0, 300, 200)
+        p._sync_shell()
+        self.assertGreaterEqual(p.x, 0)
+        self.assertGreaterEqual(p.y, 0)
+        self.assertLessEqual(p.y + p._shell_h, 200)
+
+    def test_the_row_is_placed_at_the_foot_of_whatever_height_it_is(self):
+        # The canvas is the bottom band of the window, not the whole of it — which is
+        # what makes "the foot never moves" true of the pixels and not just of the frame.
+        for showing in (False, True):
+            with self.subTest(showing=showing):
+                p = docker(showing=showing)
+                p._sync_shell()
+                kw = p.canvas.place.call_args.kwargs
+                self.assertEqual(kw["y"] + kw["height"], p._shell_h)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

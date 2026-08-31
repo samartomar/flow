@@ -1576,7 +1576,12 @@ def _panel_chrome(c: tk.Canvas, w: int, h: int, radius, ring_color: str,
         # join is the one mark that makes two surfaces unmistakably two.
         c.create_line(4 + inner[0], 4, w - 4 - inner[1], 4, fill=RING_TOP, tags=tags)
     if seam == "top":
-        c.create_rectangle(0, 0, w, 4, fill=SHELL, outline="", tags=tags)
+        # Through 5, not 4. The inner ring is drawn *at* y=4, so a fill that stopped
+        # there left it standing — and a second hairline 3 px under the divider is
+        # exactly the "two surfaces that happen to touch" this is here to prevent. It
+        # went unseen while these were two windows, because a 1 px window gap was
+        # already drawing a darker line in the same place.
+        c.create_rectangle(0, 0, w, 5, fill=SHELL, outline="", tags=tags)
     elif seam == "bottom":
         c.create_rectangle(0, h - 4, w, h, fill=SHELL, outline="", tags=tags)
         c.create_line(0, h - 1, w, h - 1, fill=RING, tags=tags)
@@ -1615,7 +1620,7 @@ class Pill(tk.Tk):
     #: ran `__init__` — and so never built a `bubble`/`card` to dock to — draws exactly
     #: the idle pill this default describes, rather than recursing through `front`.
     _docked_w = PILL_W
-    _docked_above = True
+    _shell_h = PILL_H
     #: Same reason again, for `_draw`'s motion state (§07): a bare fixture draws the
     #: resting frame these describe — not hovered, not mid-collapse, opacity untouched.
     _pointer_in = False
@@ -1738,17 +1743,18 @@ class Pill(tk.Tk):
         #: went away since the last frame — and, holding the right edge fixed, by how
         #: much the left edge has to move to match. Neither panel exists yet at this
         #: point in `__init__`, so this starts at the same idle width just drawn above.
-        self._docked_w = PILL_W
-        #: Which side of the pill a docked panel is actually on, so a squared corner
-        #: lands on the shared seam rather than on the free-standing side. Set by
-        #: `Bubble.reposition`/`ConversationCard.reposition`, the one place that
-        #: already decides above-vs-below; read back by `_draw`.
-        self._docked_above = True
+        self._docked_w = self.pill_w
+        #: How tall the one window is right now — the pill row, plus a panel band when a
+        #: panel is up. Compared in `_sync_shell` so a frame that changes nothing costs
+        #: no `geometry` call.
+        self._shell_h = PILL_H
 
         self.canvas = tk.Canvas(
-            self, width=PILL_W, height=PILL_H, bg=self.bg, highlightthickness=0
+            self, width=BUBBLE_W, height=PILL_H, bg=self.bg, highlightthickness=0
         )
-        self.canvas.pack()
+        # `place`, not `pack`: this canvas is the *foot* of a window whose top edge moves
+        # when a panel opens, so it has to be positioned rather than filled.
+        self.canvas.place(x=0, y=0, width=BUBBLE_W, height=PILL_H)
 
         self.bubble = Bubble(self)
         #: P9's own surface (decisions.md 2026-08-03, "two surfaces, two jobs"). Built
@@ -3119,6 +3125,19 @@ class Pill(tk.Tk):
             if self._alive:
                 self.after(30, self._tick)
 
+    def band_h(self) -> int:
+        """How tall the panel band is: `PANEL_H`, unless the desktop is smaller.
+
+        The row's own height comes off the top of what is available, which the panels'
+        `panel_h` did not do while they were windows of their own — they only had to fit
+        the work area, and the pill fitted it separately. Sharing one window makes them
+        one sum, and a 200 px-tall display was enough to put a 224 px shell 32 px past
+        the bottom of it.
+        """
+        _left, top, _right, bottom = self.work
+        room = (bottom - top) - 2 * EDGE_AIR - PILL_H
+        return max(0, min(PANEL_H, room))
+
     def _placed(self, w: int) -> tuple[int, int]:
         """Where a stack `w` wide belongs on the current monitor, per `PLACE`.
 
@@ -3601,52 +3620,50 @@ class Pill(tk.Tk):
         # there was one to ask.
         return BUBBLE_W
 
-    def _sync_dock(self) -> None:
-        """Resize and reposition for whichever panel is up, right edge held fixed.
+    def _sync_shell(self) -> None:
+        """One window, sized for whatever band is up, with its bottom edge held still.
 
-        Idempotent and cheap once nothing has changed, so it can run from two places
-        without either caring which ran first: this pill's own frame, *and* a panel's
-        `reposition`, which needs this pill's true — already docked — position before
-        it can put itself directly above or below it. Whichever runs first leaves the
-        other with nothing left to do.
+        **This was `_sync_dock`, and the dock is gone.** The pill and its panel were two
+        windows the app kept adjacent by hand: a width they had to agree on, an
+        above-or-below decision, a `_docked_above` flag so the pill knew which corners to
+        square off, and an ordering rule saying whichever ran first left the other with
+        nothing to do. `scripts/reel.py` once caught them 215 px apart for five seconds,
+        because a resize had landed and the matching move had not — a failure only
+        possible when two windows have to be moved in two calls the compositor is free to
+        show a frame apart.
 
-        The right edge is what a bare pill has always anchored near (`right - PILL_W -
-        28` at rest), so growing to dock keeps that edge still and moves the left edge
-        to meet it — the same edge a docked panel's own width now matches exactly.
+        There is one window now, so there is nothing to keep in step. What is left is a
+        height: the pill row, plus the panel band when a panel is up.
 
-        **The move is checked, not assumed** (2026-08-09). The width change used to be
-        the only trigger, so one `geometry` call carried the whole dock and there was
-        no second chance at it: `scripts/reel.py` caught the pill 420 px wide at its
-        *bare* x, hanging 215 px past the screen edge and visibly unjoined from the
-        panel above it, for five seconds at a stretch. The pill's own state was never
-        wrong — only ever (832, 420, 420) or (1047, 205, 205) — so the resize landed
-        and the move did not, and `w == self._docked_w` then answered "nothing to do"
-        on every frame after. Comparing against the window instead of against a
-        remembered width means the next frame fixes it, whatever dropped it.
+        **The bottom edge is the anchor**, and that is the whole of "the controls do not
+        move". A panel opening grows the window *upward* — the chip row, the meter and
+        the Send button stay at the pixel they were at, because they are measured from a
+        foot that never moves. Growing downward, or centring the growth, would move every
+        control on the surface every time a draft appeared.
 
-        The position asked for is clamped into the work area, so a window manager has
-        no reason to refuse it; one that did would be re-asked every frame.
+        Idempotent and cheap once nothing has changed, so it can run from the frame pump
+        and from a panel's `reposition` without either caring which got there first.
+
+        The geometry is compared against the *window* rather than against a remembered
+        value, for the reason the dock learned the hard way: state that says the move
+        happened is not evidence that it did, and comparing against the window means the
+        next frame fixes whatever dropped it.
         """
+        h = PILL_H + (self.band_h() if getattr(self.front, "_visible", False) else 0)
         w = self.pill_w
-        if w != self._docked_w:
-            left, _top, right, _bottom = self.work
-            if PLACE == "corner":
-                # Hold the right edge and let the left one move out to meet the panel.
-                # That is the whole dock in corner placement: the pill is anchored to
-                # the screen edge it sits against, and growing away from it is the only
-                # direction there is.
-                self.x = max(left, self.x + self._docked_w - w)
-            else:
-                # Centred placement has no anchored edge, so holding one is what makes
-                # the stack lurch: the pill is 205 px and the panel 420, and keeping the
-                # right edge put the pair 107 px left of centre the moment a draft
-                # appeared — visibly, on every utterance. Re-centre on the new width.
-                self.x = self._placed(w)[0]
-            self.x = max(left, min(self.x, right - w))
-            self._docked_w = w
-            self.canvas.configure(width=w)
+        left, top, right, bottom = self.work
+        foot = self._placed(w)[1] + PILL_H  # where the pill row's bottom edge belongs
+        x = max(left, min(self._placed(w)[0], right - w))
+        y = max(top + EDGE_AIR, min(foot - h, bottom - h))
+        if (self.x, self.y, self._shell_h) != (x, y, h):
+            self.x, self.y, self._shell_h = x, y, h
+            self.canvas.place(x=0, y=h - PILL_H, width=w, height=PILL_H)
         if self.window_geometry() != (w, self.x, self.y):
-            self.geometry(f"{w}x{PILL_H}+{self.x}+{self.y}")
+            self.geometry(f"{w}x{h}+{self.x}+{self.y}")
+
+    #: Kept under the old name because every caller in the app and the suite says it, and
+    #: the two never meant different things — the dock *was* the shell, badly.
+    _sync_dock = _sync_shell
 
     def window_geometry(self) -> tuple[int, int, int]:
         """Where this window actually is, as (width, x, y).
@@ -3711,16 +3728,21 @@ class Pill(tk.Tk):
         accent = self.accent
         w = self._docked_w
         seam = None
-        if w == PILL_W:
-            radius = PILL_H // 2  # idle: the capsule this pill has always been
+        if self._shell_h == PILL_H:
+            radius = PILL_H // 2  # alone in the window: the capsule this has always been
         else:
-            # Docked: squared on the seam it shares with the panel, rounded on the
-            # free-standing side, at the panel's own 8 px — one shape language, not a
-            # capsule with a corner cut off.
-            radius = (0, 0, 8, 8) if self._docked_above else (8, 8, 0, 0)
-            # The pill is the lower surface when the panel is above it, so it is the one
-            # that draws nothing on the join — the panel's bottom carries the single line.
-            seam = "top" if self._docked_above else "bottom"
+            # Sharing the window with a panel band directly above. Squared on the join,
+            # rounded on the free-standing foot, at the panel's own 8 px — one shape
+            # language, not a capsule with a corner cut off.
+            #
+            # `_docked_above` used to decide this, because the panel was a window that
+            # could end up on either side of the pill when there was no room above. There
+            # is one window now and the band is always the top of it, so the answer is a
+            # constant and the flag that carried it is gone.
+            radius = (0, 0, 8, 8)
+            # The row is the lower surface, so it draws nothing on the join — the band's
+            # bottom carries the single line.
+            seam = "top"
         _panel_chrome(c, w, PILL_H, radius, self.ring_color, seam=seam)
 
         # Mic glyph: capsule + stand, drawn rather than fonted so there is no
@@ -4079,7 +4101,7 @@ class HelpWindow(tk.Toplevel):
                           fill=MUTED, font=("Segoe UI", 8))
 
 
-class ConversationCard(tk.Toplevel):
+class ConversationCard(tk.Frame):
     """P9's surface: a question, the answer it produced, and the turns behind them.
 
     Converse mode used to share the draft bubble, and three outside users found every
@@ -4122,7 +4144,11 @@ class ConversationCard(tk.Toplevel):
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
         self.pill = pill
-        self.bg = _shell_window(self, pill.lite, 0.0)
+        # A `Frame` inside the pill's window, not a window of its own. Everything this
+        # class draws is canvas-local and did not change; what went is the *window* -
+        # its own shell, its own shadow, its own position, and all the arithmetic that
+        # kept it touching the pill. See `Pill._sync_shell`.
+        self.bg = pill.bg
         self.configure(bg=self.bg)
         self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
         self.canvas.pack()
@@ -4159,7 +4185,7 @@ class ConversationCard(tk.Toplevel):
         self.canvas.bind("<B1-Motion>", self._drag)
         self.canvas.bind("<Enter>", self._enter, add="+")
         self.canvas.bind("<Leave>", self._leave, add="+")
-        self.withdraw()
+        self.place_forget()
 
     # -- content -----------------------------------------------------------
 
@@ -4227,11 +4253,18 @@ class ConversationCard(tk.Toplevel):
 
     def close(self) -> None:
         self._visible = False
-        park(self)
+        # Give the band back rather than parking a window offscreen. `park` existed
+        # because hiding a Toplevel on Windows cost a taskbar flicker and a restack;
+        # there is no window here to hide, only a `place` to undo, and the pill's shell
+        # shrinks to the row on the next `_sync_shell`.
+        self.place_forget()
+        self.pill._sync_shell()
 
     @property
     def showing(self) -> bool:
-        return bool(self.winfo_exists() and self.state() != "withdrawn")
+        # `state()` was a window's state, and this is no longer a window. A band is
+        # showing when it has a place in the one it lives in.
+        return bool(self.winfo_exists() and self.winfo_ismapped())
 
     def _push(self, row: tuple[str, str]) -> None:
         self._history.append(row)
@@ -4245,8 +4278,7 @@ class ConversationCard(tk.Toplevel):
     def _show(self) -> None:
         if not self._visible:
             self._visible = True
-            self.deiconify()
-            self.attributes("-alpha", 0.97)
+            self.pill._sync_shell()
         self._render()
 
     # -- scrolling ---------------------------------------------------------
@@ -4299,7 +4331,9 @@ class ConversationCard(tk.Toplevel):
         still allowed to be smaller than the shape we would like: a panel taller than the
         display it is on is not a consistent shape, it is a window off the screen.
         """
-        return min(PANEL_H, self.work_h())
+        # Asked of the pill, because the row shares this window and its height comes
+        # off the top of what the desktop has left.
+        return self.pill.band_h()
 
     @property
     def width(self) -> int:
@@ -4307,26 +4341,20 @@ class ConversationCard(tk.Toplevel):
         return CARD_W
 
     def reposition(self) -> None:
-        """Item 44's anchor, with this window's width. Above whenever above fits.
+        """Take the top band of the pill's window, or give it back.
 
-        No gap now: this window docks to the pill rather than floating near it
-        (Phase 5, decisions.md 2026-08-09) — the two meet at one hairline seam
-        instead of the 10 px of air a shadow used to go in. `_sync_dock` runs first
-        so the pill's own position already reflects the width it is about to share,
-        and `_docked_above` is set here because this is the one place that already
-        decides which side the seam is actually on.
+        **This used to place a window.** It chose above-or-below against the work area,
+        anchored to the pill's right edge, set `_docked_above` so the pill knew which of
+        its corners to square off, and called `_sync_dock` first so the pill had already
+        settled into the width the two were about to share. All of that existed to make
+        two windows look like one, and none of it survives one window: the panel is the
+        band above the pill row, at x=0, always.
         """
-        self.pill._sync_dock()
-        left, top, right, bottom = self.pill.work
-        x = self.pill.x + self.pill.pill_w - CARD_W
-        above = self.pill.y - self._h
-        below = self.pill.y + PILL_H
-        fits_below = above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR
-        self.pill._docked_above = not fits_below
-        y = below if fits_below else above
-        x = max(left + EDGE_AIR, min(x, right - CARD_W - EDGE_AIR))
-        y = max(top + EDGE_AIR, min(y, bottom - self._h - EDGE_AIR))
-        self.geometry(f"{CARD_W}x{self._h}+{x}+{y}")
+        self.pill._sync_shell()
+        if self._visible:
+            self.place(x=0, y=0, width=CARD_W, height=self._h)
+        else:
+            self.place_forget()
 
 
     # -- holding still under the hand --------------------------------------
@@ -4468,10 +4496,11 @@ class ConversationCard(tk.Toplevel):
         c.delete("body")
         # Squared on the seam it shares with the docked pill, rounded on the free
         # side — `reposition` is what decides above-vs-below, since it already has to.
-        above = getattr(self.pill, "_docked_above", True)
-        corners = (8, 8, 0, 0) if above else (0, 0, 8, 8)
+        # Always the top band of the one window now: rounded head, squared foot on the
+        # join it shares with the pill row below it.
+        corners = (8, 8, 0, 0)
         _panel_chrome(c, CARD_W, self._h, corners, self.ring_color,
-                      seam="bottom" if above else "top")
+                      seam="bottom")
 
         # -- the history, in what is left above the pinned block
         y, floor = PAD, PAD + self._view_h()
@@ -4602,7 +4631,7 @@ class ConversationCard(tk.Toplevel):
         self.pill.session.new_conversation()
 
 
-class Bubble(tk.Toplevel):
+class Bubble(tk.Frame):
     """The draft, floated above the pill (R14) with Refine / Continue / Send (R15)."""
 
     #: Copied from the pill at construction rather than read back off it, for the reason
@@ -4627,7 +4656,11 @@ class Bubble(tk.Toplevel):
         super().__init__(pill)
         self.pill = pill
         self.lite = pill.lite
-        self.bg = _shell_window(self, pill.lite, 0.0)
+        # A `Frame` inside the pill's window, not a window of its own. Everything this
+        # class draws is canvas-local and did not change; what went is the *window* -
+        # its own shell, its own shadow, its own position, and all the arithmetic that
+        # kept it touching the pill. See `Pill._sync_shell`.
+        self.bg = pill.bg
         self.configure(bg=self.bg)
         self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
         self.canvas.pack()
@@ -4674,7 +4707,7 @@ class Bubble(tk.Toplevel):
         self.canvas.bind("<Enter>", self._enter, add="+")
         self.canvas.bind("<Leave>", self._leave, add="+")
         self.canvas.bind("<Button-3>", self._context_menu)
-        self.withdraw()
+        self.place_forget()
 
     # -- content -----------------------------------------------------------
 
@@ -4749,8 +4782,7 @@ class Bubble(tk.Toplevel):
             self._note = problem
         if not self._visible:
             self._visible = True
-            self.deiconify()
-            self._float_up()
+            self.pill._sync_shell()
         self._render()
 
     def show(self, text: str) -> None:
@@ -4768,8 +4800,7 @@ class Bubble(tk.Toplevel):
         self._render()
         if not self._visible:
             self._visible = True
-            self.deiconify()
-            self._float_up()
+            self.pill._sync_shell()
 
     def show_partial(self, text: str) -> None:
         # Partials are dimmed: they contain hallucinated fragments on mid-word
@@ -4778,8 +4809,7 @@ class Bubble(tk.Toplevel):
         self._for_activity = False
         if not self._visible:
             self._visible = True
-            self.deiconify()
-            self._float_up()
+            self.pill._sync_shell()
         self._render()
 
     def note(self, msg: str, undoable: bool = False) -> None:
@@ -4796,8 +4826,7 @@ class Bubble(tk.Toplevel):
         self._for_activity = False
         if not self._visible:
             self._visible = True
-            self.deiconify()
-            self._float_up()
+            self.pill._sync_shell()
         self._render()
 
     def hide(self) -> None:
@@ -4811,7 +4840,12 @@ class Bubble(tk.Toplevel):
         self._text = self._partial = self._note = self._sent = ""
         self._note_undo = False
         self._for_activity = False
-        park(self)
+        # Give the band back rather than parking a window offscreen. `park` existed
+        # because hiding a Toplevel on Windows cost a taskbar flicker and a restack;
+        # there is no window here to hide, only a `place` to undo, and the pill's shell
+        # shrinks to the row on the next `_sync_shell`.
+        self.place_forget()
+        self.pill._sync_shell()
 
     # -- geometry ----------------------------------------------------------
 
@@ -4833,88 +4867,33 @@ class Bubble(tk.Toplevel):
         still allowed to be smaller than the shape we would like: a panel taller than the
         display it is on is not a consistent shape, it is a window off the screen.
         """
-        return min(PANEL_H, self.work_h())
+        # Asked of the pill, because the row shares this window and its height comes
+        # off the top of what the desktop has left.
+        return self.pill.band_h()
 
     @property
     def width(self) -> int:
         """This window's own width — what a docked pill takes on (`Pill.pill_w`)."""
         return BUBBLE_W
 
-    def reposition(self, lift: int = 0) -> None:
-        """Anchor above the pill, clamped inside the work area.
+    def reposition(self) -> None:
+        """Take the top band of the pill's window, or give it back.
 
-        The clamp used to be `max(8, x)` alone, which pins the left edge and lets the
-        right edge run off the display — so on a screen whose coordinates the app had
-        got wrong, the bubble hung half outside it with its buttons unreachable. Both
-        edges are bounded now, and against the work area rather than the raw screen.
+        **This used to place a window**, and it took a `lift` argument so `_float_up`
+        could animate it in. Both are gone: the panel is the band above the pill row, at
+        x=0, and there is nothing left to move it relative to.
 
-        It is only a *clamp*, and that was the gap: a window taller than the work area
-        cannot be placed inside it however carefully the position is computed, so the
-        reply path — the one item 37 deliberately did not touch — ran 795 px past the
-        bottom on an ordinary answer and 3 515 px on an artifact, at every pill corner.
-        The height is fitted in `_render` now (`work_h`), which is what makes the
-        arithmetic below a guarantee rather than a best effort.
-
-        Fitting it exposed the next thing, at the desk: with the pill dragged to the top of
-        the work area there is no "above" left, so the bubble clamped to the top edge and
-        was drawn **over the pill it is anchored to**. Nothing clipped — that is item 42's
-        guarantee and it survives — but an anchor pointing at something it covers is not
-        an anchor. Below is the fallback, and only that.
+        `_float_up` went with it. R14 asked for an appearance the eye could follow, and
+        18 px of travel earned that when the bubble was a separate window arriving beside
+        another one. Inside a single shell there is nothing to arrive *at* — the window
+        itself grows upward from a bottom edge that never moves, which is the same cue
+        with no motion under it.
         """
-        # No gap now: this window docks to the pill rather than floating near it
-        # (Phase 5, decisions.md 2026-08-09) — the two meet at one hairline seam
-        # instead of the 10 px of air a shadow used to go in. `_sync_dock` runs
-        # first so the pill's own position already reflects the width it is about
-        # to share, and `_docked_above` is set here because this is the one place
-        # that already decides which side the seam is actually on.
-        self.pill._sync_dock()
-        left, top, right, bottom = self.pill.work
-        x = self.pill.x + self.pill.pill_w - BUBBLE_W
-        above = self.pill.y - self._h
-        below = self.pill.y + PILL_H
-        # Above whenever above fits, which is every ordinary placement and is why this
-        # reads as one anchor rather than two. Below only when above has no room and below
-        # does — a fallback, not a mode. When *neither* fits, `above` goes through and the
-        # clamp below does what it has always done: a window as tall as the desktop cannot
-        # be placed clear of a pill on either side of it, and inventing a third rule for
-        # that would be pretending otherwise.
-        fits_below = above < top + EDGE_AIR and below + self._h <= bottom - EDGE_AIR
-        self.pill._docked_above = not fits_below
-        y = below if fits_below else above
-        x = max(left + EDGE_AIR, min(x, right - BUBBLE_W - EDGE_AIR))
-        y = max(top + EDGE_AIR, min(y + lift, bottom - self._h - EDGE_AIR))
-        self.geometry(f"{BUBBLE_W}x{self._h}+{x}+{y}")
-
-    def _float_up(self) -> None:
-        """Fade into place. It used to rise into place, and the rise is gone.
-
-        R14 asked for an appearance the eye could follow, and 18 px of travel over eight
-        frames was the answer for a window that also changed size on every render — one
-        more thing moving among several. With the panel a fixed shape now (`PANEL_H`),
-        the movement is the *only* thing moving, and a window that slides every time a
-        draft appears is exactly the "sore to eyes" the owner reported. The fade still
-        gives the eye its cue and costs no motion at all.
-
-        Generation-guarded. Each run schedules eight `after` callbacks, so two
-        overlapping runs would fight over the alpha — which is what a fast
-        show/hide/show cycle produces.
-        """
-        steps = 8
-        self._anim += 1
-        mine = self._anim
-
-        def step(i: int) -> None:
-            if not self._visible or mine != self._anim:
-                return
-            t = i / steps
-            ease = 1 - (1 - t) ** 3
-            self.attributes("-alpha", 0.96 * ease)
-            self.reposition()
-            if i < steps:
-                self.after(16, step, i + 1)
-
-        step(0)
-
+        self.pill._sync_shell()
+        if self._visible:
+            self.place(x=0, y=0, width=BUBBLE_W, height=self._h)
+        else:
+            self.place_forget()
 
     # -- holding still under the hand --------------------------------------
 
@@ -5313,10 +5292,11 @@ class Bubble(tk.Toplevel):
         c.delete("body")
         # Squared on the seam it shares with the docked pill, rounded on the free
         # side — `reposition` is what decides above-vs-below, since it already has to.
-        above = getattr(self.pill, "_docked_above", True)
-        corners = (8, 8, 0, 0) if above else (0, 0, 8, 8)
+        # Always the top band of the one window now: rounded head, squared foot on the
+        # join it shares with the pill row below it.
+        corners = (8, 8, 0, 0)
         _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color,
-                      seam="bottom" if above else "top")
+                      seam="bottom")
         y = PAD
         if self._sent:
             c.create_text(
@@ -5585,7 +5565,7 @@ class Bubble(tk.Toplevel):
         if surfacing:
             self._for_activity = True
             self._visible = True
-            self.deiconify()
+            self.pill._sync_shell()
         elif act is None and self._for_activity and not (
             self._text or self._partial or self._note
         ):
@@ -5594,10 +5574,9 @@ class Bubble(tk.Toplevel):
         if self._visible:
             self._render()
         if surfacing:
-            # After the render, not before: `_float_up` repositions against `self._h`,
-            # which is what the render computes. Animating first moves the window to a
-            # height it does not have yet and the rise starts with a jump.
-            self._float_up()
+            # After the render, not before: `reposition` places the band against
+            # `self._h`, which is what the render computes.
+            self.reposition()
 
     def _indicator(self, y: int) -> None:
         """The one row that says what Flow is doing, and whether it can still hear.
