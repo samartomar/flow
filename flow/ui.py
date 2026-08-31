@@ -1079,25 +1079,31 @@ SENT_LINGER_SEC = 4.0
 #: on, which leaves the pill its own room underneath.
 BODY_MAX_H = 340
 
-#: **One height, for every panel, always.** The windows used to size themselves to their
-#: contents on every render, and the owner's verdict on that was the reason this exists:
-#: "window being re-draw and adjusting it self ... multiple windows size is problem ...
-#: that cost more and sore to eyes". They were right, and the shots show it — a two-line
-#: partial made a 140 px panel and a three-line draft a 215 px one, so the panel grew and
-#: the pill docked under it moved *while you were still speaking*. Nothing that changes
-#: shape thirty times a second can be read.
+#: The tallest a panel band may be, and no longer the height it always is.
 #:
-#: 184 px, and the number was chosen by looking rather than by arithmetic. A fixed panel
-#: trades a void against elision, and both cost: at 236 px a two-line partial left a hole
-#: in the middle of the window, which reads worse than the resizing it replaced. 184 is
-#: the four body lines a dictated sentence actually comes to in `scripts/shots.py`, plus
-#: the note line and the chip row — so the common case fills it and only a long draft
-#: elides, which is machinery that already existed for the window's old ceiling and
-#: needed no changes to serve a fixed one.
+#: **This was a fixed height, and the reference says it should not be.** A demo of
+#: FluidVoice, read frame by frame, settles it: the overlay's bottom edge is at y=554 in
+#: every frame from idle through three lines of growth, and the box is *snug* around the
+#: text in each one — two lines at 0:05, two at 0:08, three at 0:11. It never holds empty
+#: space. Pinning the height bought stability at the price of a hole in the middle of the
+#: window, which is the same complaint the resizing caused, wearing different clothes.
 #:
-#: Clamped to the work area by its callers, which is the one thing that may still shrink
-#: it: a panel taller than the desktop is not a shape, it is a bug.
-PANEL_H = 184
+#: What that overlay does instead is size to its content and *debounce* the resize —
+#: `scheduleSizeAndPositionUpdate`, 80 ms, cancel-and-reschedule, with
+#: `animationBehavior = .none`. Streaming partials coalesce into one step instead of
+#: thirty resizes a second. Flow gets the same result without a timer, by snapping to
+#: whole body lines (`_settled_h`): a height that can only change when the text gains or
+#: loses a *line* changes a handful of times an utterance, and a timer that has to be
+#: cancelled correctly from a render loop is a thing to get wrong.
+PANEL_MAX_H = 184
+
+#: The shortest a band gets, so a one-word draft still has a panel rather than a sliver.
+PANEL_MIN_H = 96
+
+#: What the body font measures per line — the number `BODY_MAX_H` is already built from
+#: ("340 px is 20 lines at the 17 px the body font measures"). Named here because the
+#: band now steps by it.
+BODY_LINE_H = 17
 
 #: The live partial's own ceiling, and it needs one for the same reason the draft does:
 #: it is wrapped to the full body column, so it is a multi-line block whose length nobody
@@ -3136,7 +3142,7 @@ class Pill(tk.Tk):
         """
         _left, top, _right, bottom = self.work
         room = (bottom - top) - 2 * EDGE_AIR - PILL_H
-        return max(0, min(PANEL_H, room))
+        return max(0, min(PANEL_MAX_H, room))
 
     def _placed(self, w: int) -> tuple[int, int]:
         """Where a stack `w` wide belongs on the current monitor, per `PLACE`.
@@ -3649,7 +3655,13 @@ class Pill(tk.Tk):
         happened is not evidence that it did, and comparing against the window means the
         next frame fixes whatever dropped it.
         """
-        h = PILL_H + (self.band_h() if getattr(self.front, "_visible", False) else 0)
+        # The band's *actual* height, not the ceiling it is allowed. Asking `band_h()`
+        # here made the shell 224 px tall around a 130 px band and left the row floating
+        # 54 px below it — which the shots caught immediately, because a detached row is
+        # exactly the two-boxes look this window was merged to end.
+        front = self.front
+        band = min(self.band_h(), max(0, int(getattr(front, "_h", 0) or 0)))             if getattr(front, "_visible", False) else 0
+        h = PILL_H + band
         w = self.pill_w
         left, top, right, bottom = self.work
         foot = self._placed(w)[1] + PILL_H  # where the pill row's bottom edge belongs
@@ -4325,15 +4337,31 @@ class ConversationCard(tk.Frame):
         return bottom - top - 2 * EDGE_AIR
 
     def panel_h(self) -> int:
-        """The height this window is, always. See `PANEL_H`.
+        """The tallest this band may be. Asked of the pill, which owns the window.
 
-        A method on both panels rather than the bare constant, because the desktop is
-        still allowed to be smaller than the shape we would like: a panel taller than the
-        display it is on is not a consistent shape, it is a window off the screen.
+        The row shares that window, so the band's ceiling is what the desktop has left
+        after the row has taken its 40 px.
         """
-        # Asked of the pill, because the row shares this window and its height comes
-        # off the top of what the desktop has left.
         return self.pill.band_h()
+
+    def _settled_h(self, want: int) -> int:
+        """`want`, rounded up to a whole body line and clamped to the band's ceiling.
+
+        **The snap is what replaces FluidVoice's 80 ms debounce.** Its overlay sizes to
+        its content and coalesces the resizes on a timer; sizing to content is right and
+        the timer is a thing to get wrong from inside a render loop that already runs
+        thirty times a second. A height that can only change when the text gains or loses
+        a *line* changes a handful of times an utterance by construction — no cancelling,
+        nothing to leak, and the same absence of thrash.
+
+        The foot does not move whatever this returns: `Pill._sync_shell` grows the window
+        upward from a fixed bottom edge, so a step here moves the top edge and nothing
+        else.
+        """
+        want = max(PANEL_MIN_H, want)
+        over = want - PANEL_MIN_H
+        want = PANEL_MIN_H + -(-over // BODY_LINE_H) * BODY_LINE_H
+        return max(PANEL_MIN_H, min(want, self.pill.band_h()))
 
     @property
     def width(self) -> int:
@@ -4486,10 +4514,10 @@ class ConversationCard(tk.Frame):
         history_h = sum(h + CARD_GAP for h in self._heights)
         # Nothing moves or resizes under the hand — see `_frozen`.
         if not self._frozen():
-            # `history_h` and `_pinned_h` still decide what is drawn and what scrolls;
-            # the window is the same size either way. A card that grew with the
-            # conversation moved the pill under it on every answer.
-            self._h = self.panel_h()
+            # Snug around what is on the card, stepping a line at a time — and the pill
+            # row below it does not move when it steps, because the shell grows upward.
+            self._h = self._settled_h(
+                PAD + history_h + self._pinned_h + HELP_FOOT_BAND)
             c.configure(width=CARD_W, height=self._h)
             self.reposition()
 
@@ -4861,15 +4889,31 @@ class Bubble(tk.Frame):
         return bottom - top - 2 * EDGE_AIR
 
     def panel_h(self) -> int:
-        """The height this window is, always. See `PANEL_H`.
+        """The tallest this band may be. Asked of the pill, which owns the window.
 
-        A method on both panels rather than the bare constant, because the desktop is
-        still allowed to be smaller than the shape we would like: a panel taller than the
-        display it is on is not a consistent shape, it is a window off the screen.
+        The row shares that window, so the band's ceiling is what the desktop has left
+        after the row has taken its 40 px.
         """
-        # Asked of the pill, because the row shares this window and its height comes
-        # off the top of what the desktop has left.
         return self.pill.band_h()
+
+    def _settled_h(self, want: int) -> int:
+        """`want`, rounded up to a whole body line and clamped to the band's ceiling.
+
+        **The snap is what replaces FluidVoice's 80 ms debounce.** Its overlay sizes to
+        its content and coalesces the resizes on a timer; sizing to content is right and
+        the timer is a thing to get wrong from inside a render loop that already runs
+        thirty times a second. A height that can only change when the text gains or loses
+        a *line* changes a handful of times an utterance by construction — no cancelling,
+        nothing to leak, and the same absence of thrash.
+
+        The foot does not move whatever this returns: `Pill._sync_shell` grows the window
+        upward from a fixed bottom edge, so a step here moves the top edge and nothing
+        else.
+        """
+        want = max(PANEL_MIN_H, want)
+        over = want - PANEL_MIN_H
+        want = PANEL_MIN_H + -(-over // BODY_LINE_H) * BODY_LINE_H
+        return max(PANEL_MIN_H, min(want, self.pill.band_h()))
 
     @property
     def width(self) -> int:
@@ -5239,7 +5283,10 @@ class Bubble(tk.Frame):
             around += 16
         if self._act is not None:
             around += 20
-        body_cap = max(BODY_ELIDED_H, min(BODY_MAX_H, self._h - around))
+        # Against the band's *ceiling*, not against the height it happens to be: the
+        # height is about to be computed from this, so reading it here would let a short
+        # frame pin the body short on the next one and never grow back.
+        body_cap = max(BODY_ELIDED_H, min(BODY_MAX_H, self.panel_h() - around))
         shown, earlier, text_h = self._body_slot(body, body_cap)
         if not body:
             # `_body_slot` probes `shown or " "` so `bbox` always has something to answer
@@ -5282,10 +5329,9 @@ class Bubble(tk.Frame):
         # character artifact to 4 179 px on a 672 px desktop.
         # Nothing moves or resizes under the hand — see `_frozen`.
         if not self._frozen():
-            # `text_h` and `extra` still decide what is *drawn*; they no longer decide
-            # how big the window is. That is the whole change: the body elides into a
-            # fixed panel instead of the panel growing to fit the body.
-            self._h = self.panel_h()
+            # Snug around the draft again, stepping a line at a time rather than
+            # tracking every frame — see `_settled_h`.
+            self._h = self._settled_h(text_h + extra + 74)
             c.configure(width=BUBBLE_W, height=self._h)
             self.reposition()
 

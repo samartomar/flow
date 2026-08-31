@@ -678,7 +678,7 @@ class TestTheStackFollowsThePointersMonitor(unittest.TestCase):
         # The panels are placed *from* the pill, so moving it is the whole move — but
         # only for a window somebody can see.
         p = self.pill(self.ONE)
-        p.bubble = mock.Mock(_visible=True, width=ui.BUBBLE_W)
+        p.bubble = mock.Mock(_visible=True, width=ui.BUBBLE_W, _h=ui.PANEL_MAX_H)
         with mock.patch.object(ui, "_pointer_monitor", return_value=self.TWO):
             p._sync_monitor()
         p.bubble.reposition.assert_called_once()
@@ -1174,8 +1174,10 @@ def docker(*, showing=True, panel_w=ui.BUBBLE_W, window=None, x=1047, docked_w=u
     p = ui.Pill.__new__(ui.Pill)
     p.canvas = mock.Mock()
     p.session = mock.Mock(mode=DICTATE)
-    p.bubble = mock.Mock(width=panel_w, _visible=showing)
-    p.card = mock.Mock(width=panel_w, _visible=False)
+    # `_h` is a real int: the shell is sized from the band's actual height now, so a
+    # Mock there would put a Mock into the arithmetic.
+    p.bubble = mock.Mock(width=panel_w, _visible=showing, _h=ui.PANEL_MAX_H)
+    p.card = mock.Mock(width=panel_w, _visible=False, _h=ui.PANEL_MAX_H)
     p.work = (0, 0, 1280, 720)
     p.full = (0, 0, 1280, 720)
     p.x, p.y = x, 608
@@ -1211,9 +1213,19 @@ class TestTheShellIsOneWindow(unittest.TestCase):
         return int(w), int(h)
 
     def test_a_panel_opening_grows_the_window_upward(self):
+        # The band reports its own height now that it is snug around its content, so the
+        # shell is the row plus whatever that is — bounded by the ceiling.
         p = docker(showing=True)
         p._sync_shell()
-        self.assertEqual(self.asked(p), (ui.BUBBLE_W, ui.PANEL_H + ui.PILL_H))
+        self.assertEqual(self.asked(p), (ui.BUBBLE_W, ui.PANEL_MAX_H + ui.PILL_H))
+
+    def test_the_shell_follows_the_band_rather_than_its_ceiling(self):
+        # A shell sized to the ceiling leaves the row floating below a shorter band,
+        # which is the detached-boxes look the merge exists to end. Caught in a shot.
+        p = docker(showing=True)
+        p.bubble._h = 130
+        p._sync_shell()
+        self.assertEqual(self.asked(p), (ui.BUBBLE_W, 130 + ui.PILL_H))
 
     def test_and_the_foot_does_not_move_when_it_does(self):
         """The whole of "the controls stay where they are", as arithmetic.

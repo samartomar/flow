@@ -605,7 +605,7 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         #: is an unpackable that raises, which is the loud failure this would rather have
         #: than a fixture silently laying out against a screen of no particular size.
         b.pill.work = WORK
-        b.pill.band_h = lambda: ui.PANEL_H
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text, b._sent, b._partial, b._note = text, "", "", note
         b._editor = None
@@ -625,22 +625,20 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
             f"the note runs to y={note_bottom} and the chips start at y={chips_top}",
         )
 
-    def test_the_room_comes_out_of_the_body_now_that_the_window_cannot_grow(self):
-        """It used to grow. The panel is a fixed shape now (`PANEL_H`), so it cannot.
+    def test_the_bubble_grows_to_make_room_rather_than_clipping(self):
+        """The other way to stop an overlap is to cut the text off, and for an error
+        message that is the same defect wearing a different hat.
 
-        The property under test never was "the window gets taller" — it was "a long note
-        is neither clipped nor sitting on the chips", which the sibling test above
-        asserts directly. What changed is where the room comes from: the body gives it
-        up, because the body is the one thing on this window that can be windowed and
-        say so. The note itself is still drawn whole, which is the half that matters —
-        errors are the longest strings this shows and the ones it is least acceptable to
-        hide.
+        Briefly untrue, while the panel was a fixed height — the room came out of the
+        body instead. The band is snug around its content again (`_settled_h`), so this
+        is back to what it always asserted, and the foot still does not move: the shell
+        grows upward.
         """
         short = self._bubble("ok")
         short._render()
         long_ = self._bubble(self.ERROR)
         long_._render()
-        self.assertEqual(long_._h, short._h)
+        self.assertGreater(long_._h, short._h)
         drawn = next(i for i in long_.canvas.items if "WinError 2" in i["text"])
         self.assertEqual(drawn["text"], self.ERROR, "the note must not be truncated")
 
@@ -675,7 +673,7 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
         b.pill.session = mock.Mock(**fields)
         b.pill.accent = "#000000"
         b.pill.work = WORK
-        b.pill.band_h = lambda: ui.PANEL_H
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text = "Meeting on Tuesday afternoon."
         b._sent = b._partial = b._note = ""
@@ -753,7 +751,7 @@ class TestTheWayBackSitsBesideTheFact(unittest.TestCase):
         )
         b.pill.accent = "#000000"
         b.pill.work = WORK
-        b.pill.band_h = lambda: ui.PANEL_H
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text = "Meeting on Tuesday afternoon."
         b._sent = b._partial = b._note = ""
@@ -843,7 +841,7 @@ class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
         )
         b.pill.accent = "#000000"
         b.pill.work = WORK
-        b.pill.band_h = lambda: ui.PANEL_H
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text = "seconds, send the question. No auto-ask to press it yourself."
         b._sent, b._partial, b._note = "", partial, note
@@ -873,16 +871,15 @@ class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
             f"the partial runs to y={bottom} and the chips start at y={chips_top}",
         )
 
-    def test_the_window_is_the_same_size_whatever_the_partial_is(self):
-        # It used to grow for a long partial, which meant the window changed shape while
-        # you were still speaking — the motion the fixed panel exists to end. The
-        # partial's own cap and the body's are what keep it off the note; the sibling
-        # test above asserts that directly.
+    def test_the_bubble_grows_rather_than_clipping(self):
+        # Grows in whole-line steps rather than continuously (`_settled_h`), and upward,
+        # so a partial arriving while you speak moves the top edge and leaves every
+        # control where it was.
         one = self._bubble("part key towel control")
         one._render()
         many = self._bubble(self.PARTIAL)
         many._render()
-        self.assertEqual(many._h, one._h)
+        self.assertGreater(many._h, one._h)
 
     def test_a_partial_past_the_cap_keeps_its_tail(self):
         # Bounded like the draft is, and windowed the same way round: this is the
@@ -961,7 +958,7 @@ class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
         b.pill = mock.Mock()
         b.pill.accent = "#000000"
         b.pill.work = WORK
-        b.pill.band_h = lambda: ui.PANEL_H
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.pill.session = mock.Mock(mode="dictate", editing=True, can_rescue=False,
                                    can_take_reply=False, auto_ask_in=None)
         b.canvas = MeasuringCanvas()
@@ -1128,7 +1125,7 @@ class TestClickingTheDraftOpensEdit(unittest.TestCase):
         b.pill = mock.Mock()
         b.pill.accent = "#000000"
         b.pill.work = WORK
-        b.pill.band_h = lambda: ui.PANEL_H
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.pill.session = mock.Mock(mode="dictate", editing=False, can_rescue=False,
                                    can_take_reply=False, auto_ask_in=None)
         b.canvas = MeasuringCanvas()

@@ -52,7 +52,7 @@ def bubble(text: str = "", **kw):
     b.pill.work = WORK
     # The panel band's height comes off the pill now that they share a window,
     # so a Mock pill would otherwise answer `panel_h()` with a Mock.
-    b.pill.band_h = lambda: ui.PANEL_H
+    b.pill.band_h = lambda: ui.PANEL_MAX_H
     b.pill.session = mock.Mock(
         mode="dictate", editing=False, can_rescue=False, can_take_reply=False,
         auto_ask_in=None,
@@ -341,14 +341,23 @@ class TestTheBubbleIsABandInThePillsWindow(unittest.TestCase):
         return put[-1]
 
     def test_it_takes_the_full_width_at_the_top_of_the_window(self):
-        self.assertEqual(self.band(bubble(draft(1_000))),
-                         {"x": 0, "y": 0, "width": ui.BUBBLE_W, "height": ui.PANEL_H})
+        band = self.band(bubble(draft(1_000)))
+        self.assertEqual((band["x"], band["y"], band["width"]), (0, 0, ui.BUBBLE_W))
+        self.assertLessEqual(band["height"], ui.PANEL_MAX_H)
 
-    def test_a_draft_fifty_times_longer_takes_exactly_the_same_band(self):
-        # The whole point of the fixed panel, restated where it is most visible: the
-        # band a 1k draft asks for and the one a 50k draft asks for are the same object.
-        self.assertEqual(self.band(bubble(draft(1_000))),
-                         self.band(bubble(draft(50_000))))
+    def test_a_draft_past_the_ceiling_stops_at_the_ceiling(self):
+        # The band is snug around its content again, so this is no longer "every draft
+        # gets the same band" — it is "no draft gets more than the desktop has left".
+        # A 1k draft and a 50k one both overflow, so both stop in the same place.
+        self.assertEqual(self.band(bubble(draft(1_000)))["height"],
+                         self.band(bubble(draft(50_000)))["height"])
+
+    def test_a_short_draft_takes_less_than_a_long_one(self):
+        # What the fixed height cost and this gets back: no empty space inside the
+        # window. FluidVoice's overlay is snug around two lines and then three; a demo
+        # of it, read frame by frame, is why this changed back.
+        self.assertLess(self.band(bubble("a note"))["height"],
+                        self.band(bubble(draft(50_000)))["height"])
 
     def test_a_hidden_bubble_gives_its_band_back(self):
         # `place_forget` rather than parking a window offscreen: there is no window to

@@ -46,7 +46,7 @@ def card(**kw):
     c.pill.work = WORK
     # The panel band's height comes off the pill now that they share a window,
     # so a Mock pill would otherwise answer `panel_h()` with a Mock.
-    c.pill.band_h = lambda: ui.PANEL_H
+    c.pill.band_h = lambda: ui.PANEL_MAX_H
     c.pill.x, c.pill.y = 900, 560
     c.pill.session = mock.Mock(can_take_reply=True, auto_ask_in=None)
     c.canvas = MeasuringCanvas()
@@ -456,16 +456,19 @@ class TestTheAnswerShowsItsHead(unittest.TestCase):
                   for n in (6_000, 12_000)]
         self.assertLess(counts[0], counts[1])
 
-    def test_the_answer_no_longer_sizes_the_card(self):
-        """It did, and that was the complaint. The card is one shape now.
+    def test_the_answer_sizes_the_card_again(self):
+        """It did; then it did not for two commits; now it does, and that is right.
 
-        A card that grew with its answer moved its own top edge on every reply, and the
-        owner's verdict on that family of motion was "sore to eyes". The answer still
-        decides what is *shown* — `more_line` above proves the head window still reports
-        what it left out — but not how big the window is.
+        Fixing the height stopped the card moving and left a hole in it instead. A
+        FluidVoice demo read frame by frame settled the argument: that overlay's bottom
+        edge is at y=554 in every frame while the box is snug around two lines, then
+        three. Snug is what a reader wants; what must not move is the *foot*, and
+        `Pill._sync_shell` grows the shell upward so the pill row never does.
+
+        Stepping by a whole body line (`_settled_h`) is what keeps it from thrashing.
         """
-        self.assertEqual(self.answered(prose(4_000))._h,
-                         self.answered(prose(200))._h)
+        self.assertGreater(self.answered(prose(4_000))._h,
+                           self.answered(prose(200))._h)
 
 
 class TestTheExitsCarryTheWholeAnswer(unittest.TestCase):
