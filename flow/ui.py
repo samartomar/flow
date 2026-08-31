@@ -154,6 +154,35 @@ def toplevel_hwnd(win) -> int:
     return _user32.GetParent(win.winfo_id()) or 0
 
 
+def _mac_window_style(win) -> bool:
+    """Aqua's answer to `overrideredirect` + `WS_EX_NOACTIVATE`, in one call.
+
+    `overrideredirect(True)` is what strips the title bar on Windows and X11. On Aqua it
+    is not enough on its own — reported from a real Mac as a pill sitting there with its
+    close and maximize buttons showing — because Tk maps a Toplevel to a real
+    `NSWindow` whose style mask is set from the *window class*, not from the redirect
+    flag. `MacWindowStyle` is the supported way to choose that class, and `plain` is the
+    one with no frame at all.
+
+    `noActivates` is the second half and the more important one: it is Aqua's
+    `WS_EX_NOACTIVATE`. Without it, clicking the pill pulls focus away from whatever the
+    user is dictating into — which on Windows is the defect that made every paste land
+    in the wrong window, and there is no reason to ship it on a Mac having fixed it once
+    already.
+
+    Named `::tk::unsupported::` by Tk itself, which is why this is wrapped and reported
+    rather than trusted: it is the interface Aqua actually offers and it may not be
+    there. A False here costs a title bar, not a session.
+    """
+    try:
+        win.update_idletasks()
+        win.tk.call("::tk::unsupported::MacWindowStyle", "style",
+                    win._w, "plain", "noActivates")
+        return True
+    except tk.TclError:
+        return False
+
+
 def _no_activate(win) -> bool:
     """Take `win` out of the activation chain, and report whether it took.
 
@@ -161,7 +190,14 @@ def _no_activate(win) -> bool:
     so a call that did nothing and a call that worked hand back the same plausible
     number, and there is no other way to tell them apart. The one thing this window
     style has to be is true.
+
+    Off Windows this is `_mac_window_style`'s job, which does both halves at once
+    because Aqua sets the frame and the activation policy from the same window class.
     """
+    if sys.platform == "darwin":
+        return _mac_window_style(win)
+    if sys.platform != "win32":
+        return False
     try:
         # The wrapper has to exist before it can be styled, and this is what creates it.
         win.update_idletasks()
@@ -214,6 +250,69 @@ def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:
     return rect.left, rect.top, rect.right, rect.bottom
 
 
+#: `_tk_work_area`'s answer, measured once. A module global because the measurement
+#: costs a window and `_sync_monitor` asks every frame — measuring per frame would open
+#: and destroy a Toplevel thirty times a second.
+_TK_WORK: tuple | None = None
+
+
+def _tk_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int]:
+    """The usable area, measured by asking the window manager to maximise something.
+
+    Reported from a Mac: the pill sat under the Dock. `_work_area` degrades to the whole
+    screen off Windows, so bottom-centre placement stood the stack on the very bottom
+    edge — behind the Dock on a default macOS desktop, behind the panel on a
+    bottom-taskbar Linux.
+
+    **Measured rather than asked, because asking does not work.** `wm_maxsize` is the
+    obvious call and it is useless: on Windows it answers with the whole screen even
+    with a taskbar present, so a fallback built on it would have been wrong in exactly
+    the way it was meant to fix. What *is* reliable is maximising a window and looking
+    at where the window manager put it — it has to honour its own panels to do that.
+    Checked against `SystemParametersInfoW` on Windows, where the two agree exactly on
+    left, right and bottom.
+
+    The probe is transparent while it is measured, so nothing flashes on screen.
+
+    **`top` is taken as reported and is a title bar too low.** `winfo_rooty` is the
+    client area, and the frame inset differs between a normal window and a maximised one
+    — measuring the inset first and subtracting it made the answer worse, not better
+    (−8 against a true 0). It is left alone because `top` feeds one thing, the ceiling
+    in `bottom_centre`, where being conservative by a title bar costs nothing. The three
+    edges that place the stack are exact.
+    """
+    global _TK_WORK
+    if _TK_WORK is not None:
+        return _TK_WORK
+    fallback = (0, 0, sw, sh)
+    probe = None
+    try:
+        probe = tk.Toplevel(win)
+        probe.attributes("-alpha", 0.0)
+        probe.geometry("200x120+80+80")
+        probe.state("zoomed")
+        probe.update_idletasks()
+        x, y = probe.winfo_rootx(), probe.winfo_rooty()
+        w, h = probe.winfo_width(), probe.winfo_height()
+        found = (x, y, x + w, y + h)
+    except (tk.TclError, AttributeError, ValueError):
+        # `zoomed` is documented for Windows and X11 and may not exist on this build.
+        # The whole screen is the honest answer then: wrong by a Dock, rather than
+        # wrong by whatever a broken measurement returned.
+        found = fallback
+    finally:
+        if probe is not None:
+            try:
+                probe.destroy()
+            except tk.TclError:
+                pass
+    if not (found[2] > found[0] and found[3] > found[1]
+            and found[2] - found[0] <= sw and found[3] - found[1] <= sh):
+        found = fallback
+    _TK_WORK = found
+    return found
+
+
 #: `MonitorFromPoint`'s "nearest monitor" flag, for a cursor that is briefly nowhere —
 #: between two displays, or on a monitor that has just been unplugged.
 _MONITOR_DEFAULTTONEAREST = 2
@@ -228,7 +327,7 @@ class _MONITORINFO(ctypes.Structure):
     ]
 
 
-def _pointer_monitor(sw: int, sh: int) -> tuple[tuple, tuple]:
+def _pointer_monitor(sw: int, sh: int, win=None) -> tuple[tuple, tuple]:
     """`(full, work)` for the monitor under the mouse, each `(left, top, right, bottom)`.
 
     **Two rectangles, because FluidVoice places against two.** `positionWindow` centres
@@ -264,7 +363,10 @@ def _pointer_monitor(sw: int, sh: int) -> tuple[tuple, tuple]:
                     return full, work
     except (AttributeError, OSError):
         pass
-    work = _work_area(sw, sh)
+    # Off Windows there is no `MonitorFromPoint` and no `rcWork`, so the two rectangles
+    # collapse into the one Tk can answer for. `win` is optional because the fallback
+    # has to keep working for the callers that have no window yet.
+    work = _tk_work_area(win, sw, sh) if win is not None else _work_area(sw, sh)
     return work, work
 
 
@@ -1445,7 +1547,7 @@ class Pill(tk.Tk):
         #: places against — `full` for centring, `work` for standing on. Refreshed from
         #: the pointer's monitor in `_sync_monitor`; see `_pointer_monitor`.
         self.full, self.work = _pointer_monitor(
-            self.winfo_screenwidth(), self.winfo_screenheight())
+            self.winfo_screenwidth(), self.winfo_screenheight(), self)
         self.x, self.y = self._placed(PILL_W)
         self.geometry(f"{PILL_W}x{PILL_H}+{self.x}+{self.y}")
         #: The width last drawn, so `_sync_dock` can tell whether a panel appeared or
@@ -2812,7 +2914,7 @@ class Pill(tk.Tk):
         work unconditionally would be a `geometry` call per frame forever.
         """
         full, work = _pointer_monitor(
-            self.winfo_screenwidth(), self.winfo_screenheight())
+            self.winfo_screenwidth(), self.winfo_screenheight(), self)
         if (full, work) == (self.full, self.work):
             return
         self.full, self.work = full, work

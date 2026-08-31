@@ -737,6 +737,127 @@ class TestAHiddenPanelIsParkedRatherThanUnmapped(unittest.TestCase):
         self.assertTrue(win.geometry.call_args[0][0].startswith("420x1+"))
 
 
+class TestTheWorkAreaOffWindows(unittest.TestCase):
+    """`_tk_work_area`, which exists because a Mac put the pill under the Dock.
+
+    `_work_area` degrades to the whole screen off Windows, so bottom-centre placement
+    stood the stack on the very bottom edge — behind the Dock on macOS, behind the panel
+    on a bottom-taskbar Linux.
+
+    The fix is a *measurement*: maximise a window and look at where the window manager
+    put it, since it has to honour its own panels to do that. The obvious call,
+    `wm_maxsize`, was tried first and is useless — on Windows it answers with the whole
+    screen even with a taskbar present, which is wrong in exactly the way this is meant
+    to fix.
+    """
+
+    def setUp(self):
+        # Module-level cache, so a test that measured would outlive itself.
+        self._was = ui._TK_WORK
+        ui._TK_WORK = None
+        self.addCleanup(lambda: setattr(ui, "_TK_WORK", self._was))
+
+    def fake_win(self, zoomed=(0, 23, 1280, 672)):
+        """A Tk stand-in whose `Toplevel` reports a maximised geometry."""
+        x, y, r, b = zoomed
+        probe = mock.Mock()
+        probe.winfo_rootx.return_value = x
+        probe.winfo_rooty.return_value = y
+        probe.winfo_width.return_value = r - x
+        probe.winfo_height.return_value = b - y
+        return probe
+
+    def test_it_reads_back_where_the_window_manager_put_a_maximised_window(self):
+        probe = self.fake_win()
+        with mock.patch.object(ui.tk, "Toplevel", return_value=probe):
+            self.assertEqual(ui._tk_work_area(mock.Mock(), 1280, 720),
+                             (0, 23, 1280, 672))
+
+    def test_the_probe_is_invisible_and_cleaned_up(self):
+        # Nothing may flash on screen, and a probe left alive is a stray window.
+        probe = self.fake_win()
+        with mock.patch.object(ui.tk, "Toplevel", return_value=probe):
+            ui._tk_work_area(mock.Mock(), 1280, 720)
+        probe.attributes.assert_any_call("-alpha", 0.0)
+        probe.destroy.assert_called_once()
+
+    def test_it_is_measured_once_and_then_remembered(self):
+        # `_sync_monitor` asks every frame. Measuring per frame would open and destroy a
+        # Toplevel thirty times a second.
+        probe = self.fake_win()
+        with mock.patch.object(ui.tk, "Toplevel", return_value=probe) as made:
+            for _ in range(50):
+                ui._tk_work_area(mock.Mock(), 1280, 720)
+        made.assert_called_once()
+
+    def test_a_build_without_zoomed_falls_back_to_the_whole_screen(self):
+        # `state("zoomed")` is documented for Windows and X11 and may not exist here.
+        # The whole screen is the honest answer then: wrong by a Dock, rather than wrong
+        # by whatever a broken measurement returned.
+        probe = self.fake_win()
+        probe.state.side_effect = ui.tk.TclError("bad state")
+        with mock.patch.object(ui.tk, "Toplevel", return_value=probe):
+            self.assertEqual(ui._tk_work_area(mock.Mock(), 1280, 720),
+                             (0, 0, 1280, 720))
+        probe.destroy.assert_called_once()
+
+    def test_a_nonsense_measurement_is_refused(self):
+        # A window manager that hands back something larger than the screen, or inside
+        # out, has not answered the question.
+        for bad in ((0, 0, 4000, 672), (0, 0, 0, 0), (500, 0, 100, 672)):
+            with self.subTest(bad=bad):
+                ui._TK_WORK = None
+                with mock.patch.object(ui.tk, "Toplevel",
+                                       return_value=self.fake_win(bad)):
+                    self.assertEqual(ui._tk_work_area(mock.Mock(), 1280, 720),
+                                     (0, 0, 1280, 720))
+
+    def test_the_bottom_edge_is_the_one_that_has_to_be_right(self):
+        # It is what bottom-centre placement stands on, and getting it wrong is the
+        # whole bug: 672 here against a screen of 720 is a 48 px Dock found.
+        with mock.patch.object(ui.tk, "Toplevel", return_value=self.fake_win()):
+            work = ui._tk_work_area(mock.Mock(), 1280, 720)
+        _x, y = ui.bottom_centre(ui.PILL_W, ui.PILL_H, (0, 0, 1280, 720), work,
+                                 ui.PANEL_BOTTOM_OFFSET)
+        self.assertLessEqual(y + ui.PILL_H, 672)
+
+
+class TestTheMacWindowStyle(unittest.TestCase):
+    """Aqua's `overrideredirect` + `WS_EX_NOACTIVATE`, which is one call and unsupported.
+
+    Reported from a real Mac: the pill sat there with its close and maximize buttons
+    showing. `overrideredirect(True)` is not enough on Aqua, because Tk maps a Toplevel
+    to an `NSWindow` whose style comes from the window *class*.
+    """
+
+    def test_it_asks_for_a_plain_window_that_does_not_activate(self):
+        # Both halves matter. `plain` is the frameless class; `noActivates` is what
+        # stops a click on the pill pulling focus off whatever is being dictated into —
+        # the defect that made every paste land in the wrong window on Windows.
+        win = mock.Mock()
+        self.assertTrue(ui._mac_window_style(win))
+        args = win.tk.call.call_args[0]
+        self.assertEqual(args[0], "::tk::unsupported::MacWindowStyle")
+        self.assertIn("plain", args)
+        self.assertIn("noActivates", args)
+
+    def test_an_unsupported_build_costs_a_title_bar_and_not_a_session(self):
+        # Tk calls the interface `::tk::unsupported::` itself, so it may not be there.
+        win = mock.Mock()
+        win.tk.call.side_effect = ui.tk.TclError("no such command")
+        self.assertFalse(ui._mac_window_style(win))
+
+    def test_no_activate_routes_to_it_on_a_mac_and_refuses_elsewhere(self):
+        # One name for "take this window out of the activation chain", answered by
+        # whichever platform API can actually do it.
+        win = mock.Mock()
+        with mock.patch.object(ui.sys, "platform", "darwin"):
+            self.assertTrue(ui._no_activate(win))
+            win.tk.call.assert_called_once()
+        with mock.patch.object(ui.sys, "platform", "linux"):
+            self.assertFalse(ui._no_activate(mock.Mock()))
+
+
 class TestMix(unittest.TestCase):
     def test_the_ends_are_exact(self):
         self.assertEqual(ui._mix(ui.HEARING, ui.CARD_ACCENT, 0.0), ui.HEARING)
