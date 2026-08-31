@@ -188,6 +188,42 @@ def _no_activate(win) -> bool:
         return False
 
 
+def _bare_window(win) -> None:
+    """Take the frame off, by the means the platform will accept.
+
+    `overrideredirect` is how this is done everywhere, and on Aqua it is the cause of
+    both faults reported from a Mac: click the app you want to dictate into and Flow's
+    window vanishes, and clicking Send does nothing. A probe of six variants split on
+    exactly this line — every window without it kept its place when another app came
+    forward and had its button reached by a click; every window with it was deaf and
+    gone. Which is a fair description of what it means: a window the window manager has
+    been told to stop managing.
+
+    Tk 9 on Aqua has a frameless window that is still a window. A style mask is the set
+    of bits an NSWindow is built from, and the one that puts a title bar on it is
+    `titled` — so a mask with *no* bits is bare, and nothing else about the window has
+    been given away. Measured on a Mac at 0 px of decoration against the control's 28,
+    and its button was reached from the background.
+
+    The obvious-looking alternative, an `NSPanel` with the `nonactivatingpanel` bit, is
+    not available: Tk answers `cannot change the class after the mac window is created`
+    even for a window that has never been mapped, and a `Toplevel` built with
+    `class_="NSPanel"` is not one either — that argument names a Tk class, not an
+    NSWindow one. It is also not needed. Nonactivating is about not stealing focus, and
+    these windows do not take focus in the first place.
+
+    Falls back rather than fails: `-stylemask` arrived in Tk 9, and a Mac on 8.6 should
+    get the old behaviour rather than a window with a title bar on it.
+    """
+    if sys.platform == "darwin":
+        try:
+            win.wm_attributes("-stylemask", "")
+            return
+        except tk.TclError:
+            pass  # Tk 8.6: no style masks. `overrideredirect` is all there is.
+    win.overrideredirect(True)
+
+
 def _shell_window(win, lite: bool, alpha: float) -> str:
     """Apply the window attributes every Flow window shares, and return its background.
 
@@ -204,8 +240,9 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     An invariant a caller has to know about is one a caller can miss, and this one is
     cheap to enforce where it is true.
 
-    **`overrideredirect` is the whole of it on Aqua too, and two attempts to help it were
-    both harm.** A Mac reported the pill wearing a title bar, and the cause was not this
+    **On Aqua it is `_bare_window` that does this**, and not with `overrideredirect`:
+    that line is what made Flow's windows there both deaf to clicks and gone the moment
+    another app came forward. Two earlier attempts to help it were both harm.** A Mac reported the pill wearing a title bar, and the cause was not this
     line failing — it was `MacWindowStyle` being asked for *afterwards*, which put a
     frame back on and took the window out of the activation chain, so Send stopped taking
     clicks. Removing that call was the fix. A withdraw-and-remap cycle added alongside it,
@@ -216,7 +253,7 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     The background is returned rather than left to the caller so a window cannot be given
     one that contradicts what was applied to it.
     """
-    win.overrideredirect(True)
+    _bare_window(win)
     win.attributes("-topmost", True)
     win.attributes("-alpha", alpha)
     if lite or sys.platform != "win32":

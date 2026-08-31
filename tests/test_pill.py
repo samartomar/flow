@@ -769,15 +769,64 @@ class TestTheWindowsOnlyAttributes(unittest.TestCase):
         win.attributes.assert_any_call("-transparentcolor", ui.TRANSPARENT)
         win.attributes.assert_any_call("-toolwindow", True)
 
-    def test_the_shared_three_are_asked_for_everywhere(self):
+    def test_the_shared_two_are_asked_for_everywhere(self):
         for platform in ("darwin", "win32", "linux"):
             with self.subTest(platform=platform):
                 win = mock.Mock()
                 with mock.patch.object(sys, "platform", platform):
                     ui._shell_window(win, lite=True, alpha=0.5)
-                win.overrideredirect.assert_called_once_with(True)
                 win.attributes.assert_any_call("-topmost", True)
                 win.attributes.assert_any_call("-alpha", 0.5)
+
+
+class TestTakingTheFrameOff(unittest.TestCase):
+    """`_bare_window`, and why Aqua does not get `overrideredirect`.
+
+    Two faults reported from a Mac - click the app you want to dictate into and Flow's
+    window vanishes, and clicking Send does nothing - and one cause. Six variants were
+    put on screen and the results split on exactly this line: every window without
+    `overrideredirect` kept its place when another app came forward and had its button
+    reached by a click, and every window with it was deaf and gone.
+
+    A style mask with no bits is the replacement. `titled` is the bit that puts a title
+    bar on, so a mask with none is bare, and nothing else about the window has been given
+    away. Measured at 0 px of decoration on a Mac against the control's 28.
+    """
+
+    def test_aqua_asks_for_an_empty_style_mask_and_not_overrideredirect(self):
+        win = mock.Mock()
+        with mock.patch.object(sys, "platform", "darwin"):
+            ui._bare_window(win)
+        win.wm_attributes.assert_called_once_with("-stylemask", "")
+        win.overrideredirect.assert_not_called()
+
+    def test_everywhere_else_is_unchanged(self):
+        # `-stylemask` is an Aqua attribute. Windows and X11 have never needed it, and
+        # `overrideredirect` is not the cause of anything there.
+        for platform in ("win32", "linux"):
+            with self.subTest(platform=platform):
+                win = mock.Mock()
+                with mock.patch.object(sys, "platform", platform):
+                    ui._bare_window(win)
+                win.overrideredirect.assert_called_once_with(True)
+                win.wm_attributes.assert_not_called()
+
+    def test_a_mac_on_tk_8_6_falls_back_rather_than_wearing_a_title_bar(self):
+        # `-stylemask` arrived in Tk 9. Older builds should get the behaviour they
+        # always had, which is imperfect but not a window with a frame on it.
+        win = mock.Mock()
+        win.wm_attributes.side_effect = ui.tk.TclError("bad attribute")
+        with mock.patch.object(sys, "platform", "darwin"):
+            ui._bare_window(win)
+        win.overrideredirect.assert_called_once_with(True)
+
+    def test_every_window_flow_owns_goes_through_it(self):
+        # The pill, the bubble, the card and the help panel all build their shell here,
+        # and a window that missed this would be the one wearing a frame.
+        win = mock.Mock()
+        with mock.patch.object(sys, "platform", "darwin"),                 mock.patch.object(ui, "_bare_window") as bare:
+            ui._shell_window(win, lite=True, alpha=0.9)
+        bare.assert_called_once_with(win)
 
 
 class TestTheWorkAreaOnAqua(unittest.TestCase):
