@@ -97,7 +97,17 @@ class TestTheLayoutStopsGrowingWithTheDraft(unittest.TestCase):
     def test_a_draft_that_fits_is_drawn_whole(self):
         # The other half, and the one that makes this a window rather than a truncation:
         # nothing changes for the drafts people actually dictate.
-        b = bubble(draft(400))
+        #
+        # 400 characters until the panel became a fixed shape (`PANEL_H`). "Fits" is a
+        # smaller number now — the window no longer grows to whatever the draft asks for,
+        # so what fits is what fits in 184 px, and more drafts window. The window still
+        # says so, which is what the class next door asserts.
+        #
+        # 40 rather than the ~200 the same panel holds on a real desktop: this fixture
+        # has no Plex face installed, Tk substitutes, and the substitute measures several
+        # times taller per line. The number is the fixture's, not the product's — the
+        # shots in `scripts/shots.py` show three full lines in the same 184 px.
+        b = bubble(draft(40))
         b._render()
         self.assertEqual(drawn_body(b), b._text)
 
@@ -178,16 +188,28 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
             b.canvas.band(b._text[-40:])[1], b._h - ui.PAD - ui.CHIP_H,
             f"the body runs past the chip row of a {b._h} px window")
 
-    def test_and_takes_the_room_back_when_the_hand_leaves(self):
+    def test_and_there_is_no_room_to_take_back_any_more(self):
+        """This asserted the window grew once the hand left. It cannot: `PANEL_H`.
+
+        The freeze was built to stop the window resizing under a hand reaching for a
+        chip, and a fixed shape makes that unreachable rather than guarded — the stronger
+        version of the same guarantee. What still catches up is the *content*, which is
+        what the caller actually wanted to see.
+        """
         b = bubble(draft(300))
         b._render()
         b._pointer_in = True
         b._text = draft(30_000)
         b._render()
-        frozen_h = b._h
+        frozen_h, frozen_body = b._h, drawn_body(b)
         b._pointer_in = False
         b._render()
-        self.assertGreater(b._h, frozen_h)
+        self.assertEqual(b._h, frozen_h)
+        # The body does not move either, and that is not a weaker check than it looks:
+        # the draft is windowed to its *tail*, so a 300-character draft and a 30 000-
+        # character one lay out the same last lines. Freezing had one observable effect
+        # and it was the height.
+        self.assertEqual(drawn_body(b), frozen_body)
 
     def test_five_chips_at_once_stay_inside_the_bubble(self):
         # Draft held, `can_rescue` true, dictate mode: Refine, Continue, Edit, Was a
@@ -220,7 +242,8 @@ class TestWhatWasLeftOutIsSaidSoFar(unittest.TestCase):
         self.assertRegex(self._elision(b), r"^… \d+ earlier lines$")
 
     def test_a_draft_that_fits_says_nothing(self):
-        b = bubble(draft(400))
+        # See the sibling test for why 40 and not 400: a substituted font measures taller.
+        b = bubble(draft(40))
         b._render()
         self.assertEqual(self._elision(b), "")
 
@@ -461,13 +484,21 @@ def along_the_top() -> dict[str, tuple[int, int]]:
 #: count — while the 50 000-character one holds at 415, because that row is capped
 #: by `BODY_MAX_H` rather than by how the text wraps, and a cap does not move with
 #: the column it bounds.
+#: Re-recorded when the panel became a fixed shape (`ui.PANEL_H`), and the new table says
+#: the change out loud better than any prose could: **every row is the same 420x184**, at
+#: three placements and across a draft that differs by fifty times its length. It used to
+#: read 398 for a 1k draft and 415 for a 50k one — a window that changed size with the
+#: text in it, which is the motion this table now proves is gone.
+#:
+#: Still a golden table and still doing its original job: any *further* change to
+#: placement has to justify itself against these numbers.
 GEOMETRY_BEFORE = {
-    ("1k draft", "bottom-left"): "420x398+8+234",
-    ("1k draft", "bottom-right"): "420x398+852+234",
-    ("1k draft", "mid-left"): "420x398+8+8",
-    ("50k draft", "bottom-left"): "420x415+8+217",
-    ("50k draft", "bottom-right"): "420x415+852+217",
-    ("50k draft", "mid-left"): "420x415+8+8",
+    ("1k draft", "bottom-left"): "420x184+8+448",
+    ("1k draft", "bottom-right"): "420x184+852+448",
+    ("1k draft", "mid-left"): "420x184+8+152",
+    ("50k draft", "bottom-left"): "420x184+8+448",
+    ("50k draft", "bottom-right"): "420x184+852+448",
+    ("50k draft", "mid-left"): "420x184+8+152",
 }
 
 
@@ -645,7 +676,14 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         b._render()
         frozen = b._h
         b._leave()
-        self.assertNotEqual(b._h, frozen, "the window never caught up")
+        # The window is a fixed shape now (`PANEL_H`), so "caught up" cannot mean "is a
+        # different size" any more. What it means is that the note held back while the
+        # hand was here is on the canvas once it has gone — which is the thing anybody
+        # cared about, and was only ever inferred from the height.
+        self.assertEqual(b._h, frozen)
+        self.assertTrue(any("microphone overflowed" in i["text"]
+                            for i in b.canvas.items if "text" in i),
+                        "the note never caught up")
 
     def test_a_countdown_does_not_resize_its_own_chip(self):
         # Chip width followed the label, so `Ask` -> `Ask 4s` -> `Ask` moved the hit

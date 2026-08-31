@@ -1229,11 +1229,19 @@ class TestTheDockIsCheckedRatherThanAssumed(unittest.TestCase):
         self.assertEqual({c.args for c in p.geometry.call_args_list},
                          {(f"{ui.BUBBLE_W}x{ui.PILL_H}+832+608",)})
 
-    def test_the_panel_going_away_takes_the_width_back(self):
+    def test_the_panel_going_away_leaves_the_width_alone(self):
+        """It used to take the width back, and taking it back was the thing to stop.
+
+        The pill was `PILL_W` while nothing was docked and the panel's width while
+        something was, so it jumped 205 -> 420 the instant a draft appeared and back
+        again when it went — the most visible motion on the screen, on every utterance.
+        `Pill.pill_w` answers the panel's width unconditionally now, so a panel coming
+        and going costs no resize and no move at all.
+        """
         p = docker(showing=False, docked_w=ui.BUBBLE_W, x=832)
         p._sync_dock()
-        self.assertEqual(p.x, 1047)
-        p.geometry.assert_called_once_with(f"{ui.PILL_W}x{ui.PILL_H}+1047+608")
+        self.assertEqual(p.x, 832)
+        p.geometry.assert_not_called()
 
 
 class TestTheDockRecentresWhenThereIsNoEdge(unittest.TestCase):
@@ -1261,20 +1269,25 @@ class TestTheDockRecentresWhenThereIsNoEdge(unittest.TestCase):
         p._sync_dock()
         self.assertEqual(p.x, self.centre_of(p, ui.BUBBLE_W))
 
-    def test_the_panel_going_away_recentres_on_the_pill(self):
+    def test_the_panel_going_away_moves_nothing(self):
+        # There is no narrower width to recentre on any more: the pill is the panel's
+        # width whether a panel is up or not.
         p = docker(showing=False, docked_w=ui.BUBBLE_W, x=430)
         p._sync_dock()
-        self.assertEqual(p.x, self.centre_of(p, ui.PILL_W))
+        self.assertEqual(p.x, self.centre_of(p, ui.BUBBLE_W))
 
-    def test_the_stack_stays_centred_across_an_open_and_a_close(self):
-        # The round trip, because an off-by-one in either direction accumulates: a pill
-        # that came back a few pixels off would drift across a session.
+    def test_the_stack_stays_put_across_an_open_and_a_close(self):
+        # The round trip, which is now a round trip to nowhere. A pill upgrading from an
+        # old profile still gets centred on the panel width once, and then a panel
+        # opening and closing leaves it exactly where that put it.
         p = docker(x=538, docked_w=ui.PILL_W)
         p._sync_dock()
+        settled = p.x
+        self.assertEqual(settled, self.centre_of(p, ui.BUBBLE_W))
         p.bubble = mock.Mock(width=ui.BUBBLE_W, _visible=False)
         p.window_geometry = mock.Mock(return_value=(ui.BUBBLE_W, p.x, 608))
         p._sync_dock()
-        self.assertEqual(p.x, 538)
+        self.assertEqual(p.x, settled)
 
     def test_it_is_still_clamped_onto_the_screen(self):
         # The clamp survives the branch. A panel wider than the display would otherwise

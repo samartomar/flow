@@ -1079,6 +1079,26 @@ SENT_LINGER_SEC = 4.0
 #: on, which leaves the pill its own room underneath.
 BODY_MAX_H = 340
 
+#: **One height, for every panel, always.** The windows used to size themselves to their
+#: contents on every render, and the owner's verdict on that was the reason this exists:
+#: "window being re-draw and adjusting it self ... multiple windows size is problem ...
+#: that cost more and sore to eyes". They were right, and the shots show it — a two-line
+#: partial made a 140 px panel and a three-line draft a 215 px one, so the panel grew and
+#: the pill docked under it moved *while you were still speaking*. Nothing that changes
+#: shape thirty times a second can be read.
+#:
+#: 184 px, and the number was chosen by looking rather than by arithmetic. A fixed panel
+#: trades a void against elision, and both cost: at 236 px a two-line partial left a hole
+#: in the middle of the window, which reads worse than the resizing it replaced. 184 is
+#: the four body lines a dictated sentence actually comes to in `scripts/shots.py`, plus
+#: the note line and the chip row — so the common case fills it and only a long draft
+#: elides, which is machinery that already existed for the window's old ceiling and
+#: needed no changes to serve a fixed one.
+#:
+#: Clamped to the work area by its callers, which is the one thing that may still shrink
+#: it: a panel taller than the desktop is not a shape, it is a bug.
+PANEL_H = 184
+
 #: The live partial's own ceiling, and it needs one for the same reason the draft does:
 #: it is wrapped to the full body column, so it is a multi-line block whose length nobody
 #: chose. Five lines at the 14 px `FONT_NOTE` measures.
@@ -3569,8 +3589,17 @@ class Pill(tk.Tk):
         empty draft shows nothing), and an idle pill must not claim a panel's width it
         is not actually sitting under.
         """
-        front = self.front
-        return front.width if getattr(front, "_visible", False) else PILL_W
+        # The panel width, unconditionally, and that is the point. This used to answer
+        # `PILL_W` while nothing was docked, so the pill jumped 205 -> 420 the moment a
+        # draft appeared and back again when it went — the most visible motion on the
+        # screen, on every single utterance. One width, whatever is happening.
+        #
+        # Read from the constant rather than through `self.front`, which is what it did
+        # while the answer depended on which panel was up. It does not any more: the
+        # bubble and the card are the same width by construction (`apply_panel_width`
+        # sets both), and reaching through a window meant this could be asked before
+        # there was one to ask.
+        return BUBBLE_W
 
     def _sync_dock(self) -> None:
         """Resize and reposition for whichever panel is up, right edge held fixed.
@@ -4263,6 +4292,15 @@ class ConversationCard(tk.Toplevel):
         _left, top, _right, bottom = self.pill.work
         return bottom - top - 2 * EDGE_AIR
 
+    def panel_h(self) -> int:
+        """The height this window is, always. See `PANEL_H`.
+
+        A method on both panels rather than the bare constant, because the desktop is
+        still allowed to be smaller than the shape we would like: a panel taller than the
+        display it is on is not a consistent shape, it is a window off the screen.
+        """
+        return min(PANEL_H, self.work_h())
+
     @property
     def width(self) -> int:
         """This window's own width — what a docked pill takes on (`Pill.pill_w`)."""
@@ -4400,7 +4438,11 @@ class ConversationCard(tk.Toplevel):
         # which is arithmetic rather than a constant — the same bargain `Bubble._render`
         # strikes, and the reason a 12 000-character artifact cannot size this window
         # past the bottom of the display.
-        spare = (self.work_h() - PAD - HELP_FOOT_BAND - q_h - CARD_GAP
+        # Against the panel, not against the desktop. This asked `work_h()` while the
+        # card was free to grow to it; with the card a fixed shape that let the answer be
+        # sized for a 672 px window and drawn into a 184 px one, and the top of the card
+        # — the "agent" label — was cut off by it.
+        spare = (self.panel_h() - PAD - HELP_FOOT_BAND - q_h - CARD_GAP
                  - BODY_ELIDED_H - (note_h + 4 if self._note else 0))
         shown, more, a_h = "", 0, 0
         if self._answer:
@@ -4416,10 +4458,10 @@ class ConversationCard(tk.Toplevel):
         history_h = sum(h + CARD_GAP for h in self._heights)
         # Nothing moves or resizes under the hand — see `_frozen`.
         if not self._frozen():
-            self._h = min(
-                max(CARD_MIN_H, PAD + history_h + self._pinned_h + HELP_FOOT_BAND),
-                self.work_h(),
-            )
+            # `history_h` and `_pinned_h` still decide what is drawn and what scrolls;
+            # the window is the same size either way. A card that grew with the
+            # conversation moved the pill under it on every answer.
+            self._h = self.panel_h()
             c.configure(width=CARD_W, height=self._h)
             self.reposition()
 
@@ -4784,6 +4826,15 @@ class Bubble(tk.Toplevel):
         _left, top, _right, bottom = self.pill.work
         return bottom - top - 2 * EDGE_AIR
 
+    def panel_h(self) -> int:
+        """The height this window is, always. See `PANEL_H`.
+
+        A method on both panels rather than the bare constant, because the desktop is
+        still allowed to be smaller than the shape we would like: a panel taller than the
+        display it is on is not a consistent shape, it is a window off the screen.
+        """
+        return min(PANEL_H, self.work_h())
+
     @property
     def width(self) -> int:
         """This window's own width — what a docked pill takes on (`Pill.pill_w`)."""
@@ -4835,12 +4886,18 @@ class Bubble(tk.Toplevel):
         self.geometry(f"{BUBBLE_W}x{self._h}+{x}+{y}")
 
     def _float_up(self) -> None:
-        """R14: rise into place rather than appearing, so the eye follows it.
+        """Fade into place. It used to rise into place, and the rise is gone.
 
-        Generation-guarded. Each run schedules eight `after` callbacks that each move
-        the window, so two overlapping runs fight over the position and the bubble
-        visibly jitters between two places — which is what a fast show/hide/show cycle
-        produces.
+        R14 asked for an appearance the eye could follow, and 18 px of travel over eight
+        frames was the answer for a window that also changed size on every render — one
+        more thing moving among several. With the panel a fixed shape now (`PANEL_H`),
+        the movement is the *only* thing moving, and a window that slides every time a
+        draft appears is exactly the "sore to eyes" the owner reported. The fade still
+        gives the eye its cue and costs no motion at all.
+
+        Generation-guarded. Each run schedules eight `after` callbacks, so two
+        overlapping runs would fight over the alpha — which is what a fast
+        show/hide/show cycle produces.
         """
         steps = 8
         self._anim += 1
@@ -4852,7 +4909,7 @@ class Bubble(tk.Toplevel):
             t = i / steps
             ease = 1 - (1 - t) ** 3
             self.attributes("-alpha", 0.96 * ease)
-            self.reposition(lift=int(18 * (1 - ease)))
+            self.reposition()
             if i < steps:
                 self.after(16, step, i + 1)
 
@@ -5190,16 +5247,20 @@ class Bubble(tk.Toplevel):
         # `BODY_ELIDED_H` is counted in unconditionally here: a capped body always has
         # something above it to report, and guessing the other way is how a line lands
         # on a control.
-        body_cap = BODY_MAX_H
-        if self._frozen():
-            around = 74 + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
-            if partial_h:
-                around += partial_h + PARTIAL_GAP
-            if self._sent:
-                around += 16
-            if self._act is not None:
-                around += 20
-            body_cap = max(BODY_ELIDED_H, min(BODY_MAX_H, self._h - around))
+        # Unconditional now, and it used to run only while `_frozen()`. That gate was
+        # right when the window sized itself to the body: the room left in it was a hard
+        # number only while something was stopping it from growing. The window is a fixed
+        # shape now (`PANEL_H`), so the room left in it is *always* a hard number, and a
+        # body still asking for `BODY_MAX_H` would draw 340 px of text through the note
+        # and the chip row of a 184 px panel.
+        around = 74 + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
+        if partial_h:
+            around += partial_h + PARTIAL_GAP
+        if self._sent:
+            around += 16
+        if self._act is not None:
+            around += 20
+        body_cap = max(BODY_ELIDED_H, min(BODY_MAX_H, self._h - around))
         shown, earlier, text_h = self._body_slot(body, body_cap)
         if not body:
             # `_body_slot` probes `shown or " "` so `bbox` always has something to answer
@@ -5242,7 +5303,10 @@ class Bubble(tk.Toplevel):
         # character artifact to 4 179 px on a 672 px desktop.
         # Nothing moves or resizes under the hand — see `_frozen`.
         if not self._frozen():
-            self._h = min(max(96, text_h + extra + 74), self.work_h())
+            # `text_h` and `extra` still decide what is *drawn*; they no longer decide
+            # how big the window is. That is the whole change: the body elides into a
+            # fixed panel instead of the panel growing to fit the body.
+            self._h = self.panel_h()
             c.configure(width=BUBBLE_W, height=self._h)
             self.reposition()
 

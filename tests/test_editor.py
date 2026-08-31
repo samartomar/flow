@@ -624,14 +624,22 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
             f"the note runs to y={note_bottom} and the chips start at y={chips_top}",
         )
 
-    def test_the_bubble_grew_to_make_room_rather_than_clipping(self):
-        # The other way to stop an overlap is to cut the text off, and for an error
-        # message that is the same defect wearing a different hat.
+    def test_the_room_comes_out_of_the_body_now_that_the_window_cannot_grow(self):
+        """It used to grow. The panel is a fixed shape now (`PANEL_H`), so it cannot.
+
+        The property under test never was "the window gets taller" — it was "a long note
+        is neither clipped nor sitting on the chips", which the sibling test above
+        asserts directly. What changed is where the room comes from: the body gives it
+        up, because the body is the one thing on this window that can be windowed and
+        say so. The note itself is still drawn whole, which is the half that matters —
+        errors are the longest strings this shows and the ones it is least acceptable to
+        hide.
+        """
         short = self._bubble("ok")
         short._render()
         long_ = self._bubble(self.ERROR)
         long_._render()
-        self.assertGreater(long_._h, short._h)
+        self.assertEqual(long_._h, short._h)
         drawn = next(i for i in long_.canvas.items if "WinError 2" in i["text"])
         self.assertEqual(drawn["text"], self.ERROR, "the note must not be truncated")
 
@@ -861,12 +869,16 @@ class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
             f"the partial runs to y={bottom} and the chips start at y={chips_top}",
         )
 
-    def test_the_bubble_grew_rather_than_clipping(self):
+    def test_the_window_is_the_same_size_whatever_the_partial_is(self):
+        # It used to grow for a long partial, which meant the window changed shape while
+        # you were still speaking — the motion the fixed panel exists to end. The
+        # partial's own cap and the body's are what keep it off the note; the sibling
+        # test above asserts that directly.
         one = self._bubble("part key towel control")
         one._render()
         many = self._bubble(self.PARTIAL)
         many._render()
-        self.assertGreater(many._h, one._h)
+        self.assertEqual(many._h, one._h)
 
     def test_a_partial_past_the_cap_keeps_its_tail(self):
         # Bounded like the draft is, and windowed the same way round: this is the

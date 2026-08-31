@@ -452,9 +452,16 @@ class TestTheAnswerShowsItsHead(unittest.TestCase):
                   for n in (6_000, 12_000)]
         self.assertLess(counts[0], counts[1])
 
-    def test_the_answer_still_sizes_the_card(self):
-        self.assertGreater(self.answered(prose(4_000))._h,
-                           self.answered(prose(200))._h)
+    def test_the_answer_no_longer_sizes_the_card(self):
+        """It did, and that was the complaint. The card is one shape now.
+
+        A card that grew with its answer moved its own top edge on every reply, and the
+        owner's verdict on that family of motion was "sore to eyes". The answer still
+        decides what is *shown* — `more_line` above proves the head window still reports
+        what it left out — but not how big the window is.
+        """
+        self.assertEqual(self.answered(prose(4_000))._h,
+                         self.answered(prose(200))._h)
 
 
 class TestTheExitsCarryTheWholeAnswer(unittest.TestCase):
