@@ -592,6 +592,22 @@ comes back unbiased. Those are real differences, and changing what Flow hears wi
 being asked would be the wrong default. The startup line always says which engine you
 got and why.
 
+**When something looks wrong on a Mac**, one command answers it:
+
+```bash
+uv run --with pillow python scripts/mac_report.py
+```
+
+It drives the real windows, screenshots them against a neutral backdrop, renders the
+numbers beside them, and writes a single `~/flow-mac-report.png` — platform and Tk build,
+what each work-area method answers, where the stack is therefore placed and by how much
+it misses centre, and whether the native engine is ready. One file, and the geometry in
+it is exact rather than a photo of a screen.
+
+macOS asks for **Screen Recording** the first time, because that is the permission a
+screenshot of other windows needs. The report says so out loud if the capture came back
+black, rather than leaving you with an empty picture.
+
 Before wiring it into anything, you can judge it on your own voice:
 
 ```bash
