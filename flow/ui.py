@@ -42,7 +42,7 @@ from .lexicon import (
 )
 from .notes import Notes
 from .profile import path_key, resolve_workspace
-from .refine import available
+from .refine import EFFORT_DEFAULT, EFFORTS, available
 from .session import CONVERSE, DICTATE, Session, State
 from .stats import today_note
 from .thread import MAX_TURNS as THREAD_MAX_TURNS
@@ -2254,6 +2254,57 @@ class Pill(tk.Tk):
             )
         parent.add_cascade(label=f"Chord ({chord.describe()})", menu=sub)
 
+    def _effort_menu(self, parent: tk.Menu) -> None:
+        """How hard the agent CLI may think, where it offers the choice.
+
+        Lowest by default, and that is a judgement rather than a saving: these calls are
+        a *rewrite* — take what was dictated and make it read like a written prompt — and
+        effort buys deliberation the task has no use for, paid for in the one currency
+        that counts here, which is the user watching a spinner between finishing a
+        sentence and having their words.
+
+        Offered anyway, per level, because "make it think harder about my prompt" is a
+        reasonable thing to want from a model you know.
+        """
+        current = getattr(self.session, "cli_effort", EFFORT_DEFAULT)
+        sub = _dark_menu(parent)
+        for level in EFFORTS:
+            sub.add_command(
+                label=level + ("   (current)" if level == current else ""),
+                command=lambda v=level: self.session.set_cli_effort(v),
+            )
+        parent.add_cascade(label=f"Effort ({current})", menu=sub)
+
+    def _model_menu(self, parent: tk.Menu) -> None:
+        """Which model to ask the CLI for, from the names that have been used before.
+
+        **The menu is a list of what somebody has already typed, and cannot be anything
+        else.** No CLI will enumerate its models — `codex exec --help` says `-m, --model
+        <MODEL>` and stops — so the names cannot be discovered, and Flow has no text
+        field anywhere to type one into. Settings is a menu, not a dialog, and the
+        docstring above refuses a page for exactly this reason.
+
+        So `--cli-model` is how a name arrives, once, and it is remembered; from then on
+        it is a click. The menu hides itself entirely until there is a second thing to
+        choose between, the same rule the CLI picker follows.
+        """
+        known = tuple(getattr(getattr(self.session, "profile", None), "cli_models", ()))
+        current = getattr(self.session, "cli_model", "")
+        if not known:
+            return
+        sub = _dark_menu(parent)
+
+        def choice(label: str, value: str) -> None:
+            sub.add_command(
+                label=label + ("   (current)" if value == current else ""),
+                command=lambda v=value: self.session.set_cli_model(v),
+            )
+
+        choice("The CLI's own default", "")
+        for name in known:
+            choice(name, name)
+        parent.add_cascade(label=f"Model ({current or 'default'})", menu=sub)
+
     def _settings_menu(self, parent: tk.Menu) -> None:
         """Everything somebody sets once, in one place they can find it twice.
 
@@ -2291,6 +2342,8 @@ class Pill(tk.Tk):
             for candidate in clis:
                 choice(candidate.name, candidate)
             sub.add_cascade(label="Agent CLI", menu=picker)
+        self._effort_menu(sub)
+        self._model_menu(sub)
         self._workspace_menu(sub)
         if getattr(self.session, "speaker", None) is not None:
             sub.add_command(

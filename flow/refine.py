@@ -21,7 +21,7 @@ import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 #: R11: never hand the CLI an unbounded draft. Past this, only the tail is sent.
 MAX_CHARS = 2000
@@ -211,6 +211,24 @@ class Cli:
     #: for everything that already fits, which is most things — see `ui.Pill.MARKER_MAX`
     #: for the wall and `CANDIDATES` for the one entry that has hit it.
     marker: str = ""
+    #: The flag that names a model, or empty where this CLI has not been measured to take
+    #: one. Read out of each CLI's own `--help` on a machine that has it, on 2026-08-31:
+    #: `-m, --model <MODEL>` for codex, `--model <model>` for claude, `--model <MODEL>`
+    #: for kiro-cli. The same discipline `verified` carries — a flag nobody has seen a
+    #: CLI print is a guess.
+    model_flag: str = ""
+    #: The flag that sets reasoning effort, or empty where this CLI does not offer one.
+    #: claude and kiro-cli both print `(low, medium, high, xhigh, max)` beside it. codex
+    #: has none: its only route is `-c model_reasoning_effort=…`, a config key that does
+    #: not appear in its help, and writing one down from memory is the thing `verified`
+    #: exists to forbid.
+    effort_flag: str = ""
+    #: Where in `argv` a tuning flag may be inserted. Not the end: codex's argv finishes
+    #: with `-`, the positional that tells it the prompt is on stdin, and a flag after it
+    #: would be read as its value. Not the front either, because `exec` and `chat` are
+    #: subcommands and a flag before them belongs to a different parser. So each entry
+    #: says where its own flags start, which is immediately after its subcommand.
+    tune_at: int = 1
 
 
 #: Order is the preference order — codex first, per R10.
@@ -290,11 +308,14 @@ class Cli:
 #: shapes, not worked around here.
 CANDIDATES: tuple[Cli, ...] = (
     Cli("codex", ("codex", "exec", "--skip-git-repo-check", "-s", "read-only",
-                  "-c", "project_doc_max_bytes=0", "-"), stdin_ok=True),
-    Cli("claude", ("claude", "--safe-mode", "-p"), stdin_ok=True),
+                  "-c", "project_doc_max_bytes=0", "-"), stdin_ok=True,
+        model_flag="-m", tune_at=2),
+    Cli("claude", ("claude", "--safe-mode", "-p"), stdin_ok=True,
+        model_flag="--model", effort_flag="--effort"),
     Cli("kiro-cli", ("kiro-cli", "chat", "--no-interactive", "--trust-tools="),
         probe=(r"%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe",),
-        timeout_sec=60.0, marker="kiro"),
+        timeout_sec=60.0, marker="kiro",
+        model_flag="--model", effort_flag="--effort", tune_at=2),
     Cli("opencode", ("opencode",), verified=False),
     Cli("copilot", ("copilot",), verified=False),
     Cli("gemini", ("gemini",), verified=False),
@@ -388,6 +409,52 @@ def trusted(path: str | None) -> str | None:
     return path
 
 
+#: The effort levels claude and kiro-cli both enumerate beside `--effort`, in the order
+#: they print them. Read out of their own `--help` rather than written from memory, and
+#: identical across the two, which is the only reason one list can serve both.
+EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+
+#: The level Flow asks for when nobody has said otherwise, and deliberately the cheapest.
+#:
+#: These calls are a *rewrite* — take what was dictated and make it read like a written
+#: prompt — not a reasoning problem. Effort buys deliberation this task has no use for,
+#: and pays for it in the one currency that matters here: the user is watching a spinner
+#: between finishing a sentence and having it. The measured slowest verified call was
+#: 35.8 s at whatever the CLI's own default was.
+#:
+#: Anyone who disagrees for their own model can say so — `--cli-effort`, or the settings
+#: menu — and every level the CLIs offer is reachable from both.
+EFFORT_DEFAULT = "low"
+
+
+def tuned(cli: Cli, model: str = "", effort: str = EFFORT_DEFAULT) -> Cli:
+    """`cli` with a model and an effort level asked for, where it accepts them.
+
+    A **new `Cli`** rather than an argument threaded through four call layers. `Cli` is
+    frozen and its argv is a tuple, so a tuned copy is the same kind of thing as the
+    original and every caller below — `resolve`, `_invoke`, `_clean`, the marker the pill
+    draws — goes on working without knowing this happened.
+
+    Silently ignores what a CLI has not been measured to take. That is the point of
+    `model_flag` and `effort_flag` being per-entry: a user who picks a model while codex
+    is answering should get codex answering, not a crash and not an invented flag. What
+    they asked for is still recoverable — the name is on the profile and applies the
+    moment a CLI that takes one is chosen.
+
+    Inserted at `tune_at`, which is after the subcommand and before codex's trailing `-`.
+    See that field for why neither end of the argv would do.
+    """
+    extra: list[str] = []
+    if effort and effort != "default" and cli.effort_flag:
+        extra += [cli.effort_flag, effort]
+    if model and cli.model_flag:
+        extra += [cli.model_flag, model]
+    if not extra:
+        return cli
+    at = max(1, min(cli.tune_at, len(cli.argv)))
+    return replace(cli, argv=cli.argv[:at] + tuple(extra) + cli.argv[at:])
+
+
 def resolve(cli: Cli) -> str | None:
     """Where this CLI actually is, or None. The one answer detection and launch share.
 
@@ -447,6 +514,8 @@ def _invoke_any(
     cwd: str | None = None,
     cancel: threading.Event | None = None,
     skipped: list[str] | None = None,
+    model: str = "",
+    effort: str = EFFORT_DEFAULT,
 ) -> tuple[str | None, str, Cli | None]:
     """Run `prompt`, falling through the preference order until one CLI answers.
 
@@ -505,7 +574,11 @@ def _invoke_any(
     """
     timeout = sane_timeout(timeout)
     if cli is not None:
-        out, reason = _invoke(cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel)
+        out, reason = _invoke(tuned(cli, model, effort), prompt, timeout=timeout,
+                              cwd=cwd, cancel=cancel)
+        # The *untuned* entry goes back to the caller. What answered is still codex, and
+        # the pill's marker, the trace and `_clean`'s per-CLI stripping all key off that
+        # identity — a tuned copy is the same CLI with a flag on it, not another one.
         return out, reason, cli
 
     candidates = available()
@@ -525,8 +598,12 @@ def _invoke_any(
             # fallback was built to end.
             reasons.append(f"no time left to try {candidate.name}")
             break
-        out, reason = _invoke(candidate, prompt, timeout=timeout, cwd=cwd,
-                              cancel=cancel, cap=left)
+        # Tuned here rather than at the pin, so a fallback is asked for the same model
+        # and effort as the first choice. A walk that quietly reverted to a CLI's own
+        # defaults the moment the first candidate failed would be slowest exactly when
+        # the user is already waiting longest.
+        out, reason = _invoke(tuned(candidate, model, effort), prompt, timeout=timeout,
+                              cwd=cwd, cancel=cancel, cap=left)
         if out is not None:
             if skipped is not None:
                 skipped.extend(reasons)
@@ -951,6 +1028,8 @@ def refine(
     cancel: threading.Event | None = None,
     skipped: list[str] | None = None,
     app: str = "",
+    model: str = "",
+    effort: str = EFFORT_DEFAULT,
 ) -> tuple[str | None, str]:
     """Apply a semantic instruction to `text`.
 
@@ -1000,7 +1079,8 @@ def refine(
         )
 
     out, reason, chosen = _invoke_any(
-        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel, skipped=skipped
+        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel, skipped=skipped,
+        model=model, effort=effort,
     )
     if out is None:
         return None, reason
@@ -1029,6 +1109,8 @@ def ask(
     cancel: threading.Event | None = None,
     artifact: bool = False,
     skipped: list[str] | None = None,
+    model: str = "",
+    effort: str = EFFORT_DEFAULT,
 ) -> tuple[str | None, str]:
     """P9: put a question to the agent CLI and return its answer.
 
@@ -1067,7 +1149,8 @@ def ask(
         )
 
     out, reason, chosen = _invoke_any(
-        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel, skipped=skipped
+        cli, prompt, timeout=timeout, cwd=cwd, cancel=cancel, skipped=skipped,
+        model=model, effort=effort,
     )
     if out is None:
         return None, reason

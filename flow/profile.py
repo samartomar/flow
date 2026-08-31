@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Sequence
 
 from . import edits
+from .refine import EFFORT_DEFAULT, EFFORTS
 
 
 # -- per-field validation ---------------------------------------------------
@@ -222,6 +223,11 @@ PLACE_DEFAULT = "bottom"
 #: Mac, and this one is read on every launch including Lite's.
 GESTURE_DEFAULT = "hold"
 
+#: How many model names the settings menu will remember. A ceiling rather than a
+#: judgement: this list is only ever appended to, by hand, one name at a time, and a menu
+#: is not a place for an unbounded list.
+CLI_MODEL_CAP = 12
+
 
 def path_key(path: str | None) -> str | None:
     """One identity for one folder, however it was spelled.
@@ -402,6 +408,16 @@ class Profile:
         #: paragraph or a pair of hands that cannot hold two keys down. Judged in
         #: `flow/hotkey.py`, which knows what the words mean.
         self.gesture: str = GESTURE_DEFAULT
+        #: Which model to ask the agent CLI for, "" meaning whatever it defaults to, and
+        #: how hard to let it think. Both apply to whichever CLI answers - `refine.tuned`
+        #: drops either for a CLI not measured to accept it.
+        self.cli_model: str = ""
+        self.cli_effort: str = EFFORT_DEFAULT
+        #: Every model name that has been set, in the order they were first used. The
+        #: settings menu has no text field to type one into and is not getting one, so
+        #: this list *is* the menu: a name arrives once through `--cli-model` and is a
+        #: click from then on.
+        self.cli_models: tuple[str, ...] = ()
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -482,6 +498,13 @@ class Profile:
         self.panel = take("panel", _text, PANEL_DEFAULT)
         self.place = take("place", _text, PLACE_DEFAULT)
         self.gesture = take("gesture", _text, GESTURE_DEFAULT)
+        self.cli_model = take("cli_model", _text, "")
+        self.cli_effort = take("cli_effort", _text, EFFORT_DEFAULT)
+        if self.cli_effort not in EFFORTS:
+            self.cli_effort = EFFORT_DEFAULT
+        self.cli_models = tuple(
+            take("cli_models", lambda v, _d=None: _text_list(v, CLI_MODEL_CAP), [])
+        )
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
         # `stored=[]` because JSON has no set: `save` writes this one as a sorted list,
@@ -520,6 +543,9 @@ class Profile:
             "panel": self.panel,
             "place": self.place,
             "gesture": self.gesture,
+            "cli_model": self.cli_model,
+            "cli_effort": self.cli_effort,
+            "cli_models": list(self.cli_models),
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's

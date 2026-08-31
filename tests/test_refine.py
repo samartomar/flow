@@ -1510,3 +1510,99 @@ class TestThePromptLeavesTheProcessListing(unittest.TestCase):
 
     def test_the_one_that_was_not_measured_still_carries_it_on_the_argv(self):
         self.assertFalse(refine_mod.named("kiro-cli").stdin_ok)
+
+class TestTuning(unittest.TestCase):
+    """`tuned`, which is how a model and an effort level reach the CLI.
+
+    Both flags were read out of each CLI's own `--help` on a machine that has all three,
+    on 2026-08-31, the same discipline `verified` carries for the invocation shapes
+    themselves. codex prints `-m, --model <MODEL>` and no effort flag at all; claude and
+    kiro-cli print `--model` and `--effort (low, medium, high, xhigh, max)`.
+    """
+
+    def cli(self, name: str) -> refine_mod.Cli:
+        found = refine_mod.named(name)
+        assert found is not None
+        return found
+
+    def test_effort_is_asked_for_by_default_and_it_is_the_cheapest(self):
+        # These calls are a rewrite, not a reasoning problem, and the user is watching a
+        # spinner while they run.
+        argv = refine_mod.tuned(self.cli("kiro-cli")).argv
+        self.assertIn("--effort", argv)
+        self.assertEqual(argv[argv.index("--effort") + 1], "low")
+        self.assertEqual(refine_mod.EFFORT_DEFAULT, "low")
+
+    def test_the_levels_are_the_ones_both_clis_print(self):
+        self.assertEqual(refine_mod.EFFORTS, ("low", "medium", "high", "xhigh", "max"))
+
+    def test_the_model_goes_in_with_the_flag_that_cli_takes(self):
+        self.assertIn(("-m", "gpt-5"), self.pairs("codex", model="gpt-5"))
+        self.assertIn(("--model", "gpt-5"), self.pairs("claude", model="gpt-5"))
+        self.assertIn(("--model", "gpt-5"), self.pairs("kiro-cli", model="gpt-5"))
+
+    def pairs(self, name, **kw):
+        argv = refine_mod.tuned(self.cli(name), **kw).argv
+        return list(zip(argv, argv[1:]))
+
+    def test_codex_is_not_given_an_effort_flag_it_does_not_have(self):
+        # Its only route is `-c model_reasoning_effort=...`, a config key that does not
+        # appear in its help. Writing one down from memory is what `verified` forbids.
+        self.assertNotIn("--effort", refine_mod.tuned(self.cli("codex"), effort="max").argv)
+
+    def test_the_flags_land_after_the_subcommand(self):
+        # `exec` and `chat` are subcommands; a flag before them belongs to a different
+        # parser and the call fails to start.
+        for name, sub in (("codex", "exec"), ("kiro-cli", "chat")):
+            with self.subTest(name):
+                argv = refine_mod.tuned(self.cli(name), model="m").argv
+                self.assertEqual(argv[1], sub)
+
+    def test_codex_keeps_the_stdin_marker_last(self):
+        """The trap that decided `tune_at`.
+
+        codex's argv finishes with `-`, the positional saying the prompt is on stdin. A
+        flag appended after it is read as its value, and the prompt is never sent.
+        """
+        argv = refine_mod.tuned(self.cli("codex"), model="gpt-5").argv
+        self.assertEqual(argv[-1], "-")
+
+    def test_nothing_is_invented_for_a_cli_that_takes_neither(self):
+        # A user who picks a model while an unverified CLI answers should get that CLI
+        # answering, not a crash and not a guessed flag.
+        plain = self.cli("gemini")
+        self.assertIs(refine_mod.tuned(plain, model="gpt-5", effort="max"), plain)
+
+    def test_asking_for_nothing_returns_the_very_same_object(self):
+        codex = self.cli("codex")
+        self.assertIs(refine_mod.tuned(codex, effort="default"), codex)
+
+    def test_a_tuned_cli_is_still_that_cli(self):
+        # `_clean`'s per-CLI stripping, the pill's marker and the trace all key off the
+        # name. A tuned copy is the same CLI with a flag on it, not another one.
+        kiro = self.cli("kiro-cli")
+        copy = refine_mod.tuned(kiro, model="gpt-5")
+        self.assertEqual(copy.name, kiro.name)
+        self.assertEqual(copy.marker, kiro.marker)
+        self.assertEqual(copy.timeout_sec, kiro.timeout_sec)
+        self.assertEqual(copy.stdin_ok, kiro.stdin_ok)
+        self.assertEqual(copy.argv[0], kiro.argv[0])
+
+    def test_a_fallback_is_asked_for_the_same_model(self):
+        """A walk that reverted to the CLI's own defaults the moment the first candidate
+        failed would be slowest exactly when the user is already waiting longest."""
+        seen = []
+
+        def record(cli, prompt, **kw):
+            seen.append(cli.argv)
+            return (None, "nope") if len(seen) == 1 else ("done", "")
+
+        clis = [self.cli("claude"), self.cli("kiro-cli")]
+        with mock.patch.object(refine_mod, "available", return_value=clis), \
+                mock.patch.object(refine_mod, "_invoke", side_effect=record):
+            refine_mod._invoke_any(None, "hi", timeout=1.0, model="gpt-5", effort="max")
+        self.assertEqual(len(seen), 2)
+        for argv in seen:
+            self.assertIn("gpt-5", argv)
+            self.assertIn("max", argv)
+

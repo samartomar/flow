@@ -28,7 +28,7 @@ from .asr import CUDA_MODEL, DEVICE, FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
-from .refine import CANDIDATES, available, named, unverified, unverified_note
+from .refine import CANDIDATES, EFFORT_DEFAULT, EFFORTS, available, named, unverified, unverified_note
 from .session import AUTO_ASK_SEC, Session
 from .stats import TYPING_WPM
 from .stats import report as stats_report
@@ -329,6 +329,19 @@ def main(argv: list[str] | None = None) -> int:
              f"({', '.join(c.name for c in CANDIDATES if c.verified)})",
     )
     ap.add_argument(
+        "--cli-model", default=None, metavar="NAME",
+        # The only way a model name gets into Flow: the settings menu has no text field
+        # and is not growing one, so a name arrives here once, is remembered, and is a
+        # click from then on. Not validated against a list because no CLI will print one
+        # - `codex exec --help` says `-m, --model <MODEL>` and stops there.
+        help="ask the agent CLI for this model (remembered; blank clears it)",
+    )
+    ap.add_argument(
+        "--cli-effort", default=None, choices=EFFORTS, metavar="LEVEL",
+        help=f"how hard the CLI may think, where it offers the choice "
+             f"({', '.join(EFFORTS)}; default {EFFORT_DEFAULT})",
+    )
+    ap.add_argument(
         "--cli-timeout", type=_timeout_arg, default=REFINE_TIMEOUT_SEC, metavar="SEC",
         help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f})",
     )
@@ -481,12 +494,29 @@ def main(argv: list[str] | None = None) -> int:
             f"{final_name} for finals{engine_why}")
 
     from .diag import Diag
-    from .profile import Profile, resolve_workspace
+    from .profile import CLI_MODEL_CAP, Profile, resolve_workspace
 
     # Tied to the same flag as the profile, and deliberately: --no-profile means
     # "write nothing about me this session", and a trace is a thing written about
     # somebody even when it holds none of their words.
     profile = None if args.no_profile else Profile()
+    # Written to the profile before the session reads it, so `--cli-model` is a *setting*
+    # and not a one-run override: the settings menu has no way to type a name, so a flag
+    # that vanished at exit would leave the menu permanently empty. `--cli-model ""`
+    # clears it, which is why this tests for None rather than truthiness.
+    if profile is not None and args.cli_model is not None:
+        profile.cli_model = args.cli_model.strip()
+        if profile.cli_model and profile.cli_model not in profile.cli_models:
+            profile.cli_models = (*profile.cli_models, profile.cli_model)[-CLI_MODEL_CAP:]
+        profile.save()
+    if profile is not None and args.cli_effort is not None:
+        profile.cli_effort = args.cli_effort
+        profile.save()
+    if profile is not None:
+        if profile.cli_model:
+            say(f"model: {profile.cli_model}")
+        say(f"effort: {profile.cli_effort} (where the CLI offers the choice)")
+
     diag = None if args.no_profile else Diag()
     learned = profile.learned_terms if profile is not None else None
     if profile is not None and profile.calibrated:

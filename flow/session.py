@@ -52,6 +52,7 @@ from .phonetic import MATCH_THRESHOLD, similarity
 from .profile import path_key
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import MAX_CHARS as REFINE_MAX_CHARS
+from .refine import EFFORT_DEFAULT, EFFORTS
 from .refine import app_note, ask, available, refine, tail_sent
 from .thread import ASK_CONTEXT_CHARS, Thread
 
@@ -859,6 +860,12 @@ class Session:
         #: launch. `getattr` because a profile is optional and the fakes predate the
         #: field.
         self.auto_ask = bool(getattr(profile, "auto_ask", True))
+        #: Which model to ask the agent CLI for, and how hard to make it think. Taken
+        #: from the profile so a choice made once survives a restart, and defaulted to
+        #: the CLI's own model and the cheapest effort — see `refine.EFFORT_DEFAULT`.
+        self.cli_model: str = str(getattr(profile, "cli_model", "") or "")
+        self.cli_effort: str = str(getattr(profile, "cli_effort", "")
+                                   or EFFORT_DEFAULT)
         #: When the draft last stopped changing. None means nothing is pending.
         self._settled_at: float | None = None
         #: P8. What Flow has measured and learned about this person, on this machine.
@@ -2926,6 +2933,40 @@ class Session:
         self._emit("note", f"agent CLI: {cli.name}" if cli is not None
                    else "agent CLI: automatic, in preference order")
 
+    def set_cli_model(self, model: str) -> None:
+        """Which model the agent CLI should use, or "" for whatever it defaults to.
+
+        Applies to whichever CLI answers, including a fallback — `refine.tuned` drops it
+        for any CLI not measured to take a `--model`, so a name set for one is simply
+        ignored by another rather than breaking it.
+
+        Remembered as well as applied. There is no way to type a model name into the
+        settings menu — Flow has no text field anywhere and the settings docstring
+        refuses to grow a dialog — so the list of names somebody has used is the menu,
+        and it is built from what has been set here.
+        """
+        model = model.strip()
+        self.cli_model = model
+        if self.profile is not None:
+            self.profile.cli_model = model
+            if model and model not in self.profile.cli_models:
+                self.profile.cli_models = (*self.profile.cli_models, model)
+            self.profile.save()
+        self._emit("note", f"model: {model}" if model else "model: the CLI's own default")
+
+    def set_cli_effort(self, effort: str) -> None:
+        """How hard the CLI should think, lowest by default.
+
+        These calls are a rewrite rather than a reasoning problem, and the user is
+        watching a spinner while they run — see `refine.EFFORT_DEFAULT`. Anyone who
+        wants deliberation from their own model can have it, per level, from here.
+        """
+        self.cli_effort = effort
+        if self.profile is not None:
+            self.profile.cli_effort = effort
+            self.profile.save()
+        self._emit("note", f"effort: {effort}")
+
     def toggle_auto_ask(self) -> bool:
         self.auto_ask = not self.auto_ask
         # Saved now rather than at the next Send, for the reason `set_voice` gives: this
@@ -3024,6 +3065,7 @@ class Session:
                 before, instruction, cwd=self._refine_cwd, polish=polish,
                 context=context, cancel=self._cancel,
                 cli=self._cli, timeout=self._cli_timeout,
+                model=self.cli_model, effort=self.cli_effort,
                 skipped=passed_over, app=app,
             )
             with self._refine_lock:
@@ -3306,6 +3348,7 @@ class Session:
             result = ask(framed, cwd=self._refine_cwd, context=context,
                          cancel=self._cancel, artifact=artifact,
                          cli=self._cli, timeout=self._cli_timeout,
+                         model=self.cli_model, effort=self.cli_effort,
                          skipped=passed_over)
             with self._ask_lock:
                 # Written after `ask` returns and read under this lock, which is what

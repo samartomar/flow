@@ -179,6 +179,34 @@ screen is the CLI that will be called, not the first one on PATH.
 `codex` now measures 6.6–8.5 s here for a one-word answer, so a long question can breach
 it.
 
+### Which model, and how hard it thinks
+
+**Effort is `low` unless you say otherwise**, and that is the setting most worth knowing
+about. These calls are a *rewrite* — take what was dictated and make it read like a
+written prompt — not a reasoning problem, and the whole time one runs you are watching a
+spinner between finishing a sentence and having your words. **Effort** in the right-click
+menu offers every level the CLIs do: `low`, `medium`, `high`, `xhigh`, `max`.
+
+It reaches the CLIs that offer the choice, which is `claude` and `kiro-cli`. `codex` has
+no effort flag — its only route is a config key that does not appear in its help, and
+Flow will not write down a flag nobody has seen it print.
+
+Choosing a **model** takes one run of `--cli-model`:
+
+```
+uv run python -m flow --cli-model gpt-5.6-luna
+```
+
+After that it is a click, under **Model** in the same menu, alongside every other name
+you have used and **The CLI's own default**. It has to arrive by flag once because no CLI
+will list its models — `codex exec --help` says `-m, --model <MODEL>` and stops — and
+Flow has no text field to type one into. Settings is a menu, not a dialog.
+
+Both apply to whichever CLI answers, including a fallback: a walk that reverted to the
+CLI's own defaults the moment the first candidate failed would be slowest exactly when
+you are already waiting longest. A model name means nothing to a CLI that takes no
+`--model`, and is dropped for that CLI rather than breaking the call.
+
 ## Running it
 
 ```bash
@@ -237,6 +265,8 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--voice X` | voice for spoken replies: a name, part of one, or `male`/`female` |
 | `--no-auto-ask` | in converse mode, wait for the Ask button instead of a pause |
 | `--cli NAME` | pin the agent CLI (`codex` or `claude`) instead of trying each in turn |
+| `--cli-model NAME` | ask the CLI for this model; remembered, and blank clears it |
+| `--cli-effort LEVEL` | how hard the CLI may think: `low`, `medium`, `high`, `xhigh`, `max` (default `low`) |
 | `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
 | `--cwd PATH` | the project converse-mode questions are asked from; overrides the stored `workspace` ([P9](#converse-mode-p9)) |
 | `--lite` | clipboard-out mode: Send copies the draft instead of pasting it, and no hotkeys are registered (automatic off Windows — see [Install](#install)) |
