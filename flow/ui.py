@@ -1097,7 +1097,29 @@ BODY_MAX_H = 340
 #: whole body lines (`_settled_h`): a height that can only change when the text gains or
 #: loses a *line* changes a handful of times an utterance, and a timer that has to be
 #: cancelled correctly from a render loop is a thing to get wrong.
-PANEL_MAX_H = 184
+#: The settings strip's own height, including the air under it.
+#:
+#: **It appears with the panel and never at rest.** The owner asked for the settings that
+#: matter to be reachable without a right-click — "Dictate and Converse for sure Then
+#: workspace and voices" — and the choice of *when* was left to me. With a draft up is
+#: the answer: those three only mean anything once there is something to send, and an
+#: always-on strip would cost 22 px of the idle row, which is the one part of this
+#: surface everybody has said they like small.
+#:
+#: FluidVoice does not pay this either — its `Dictate / AI Prompt / Actions` bar belongs
+#: to the app being dictated into, not to the overlay.
+SETTINGS_H = 22
+
+#: How far apart the read-only values sit from each other.
+SETTINGS_GAP = 14
+
+#: 184 was the ceiling before the settings strip existed, and the strip is furniture
+#: rather than content — so it goes *on top of* the ceiling rather than out of the
+#: content's share. Taking it out of the share is what the tests caught: the live
+#: partial, whose own `PARTIAL_MAX_H` is a flat 70 px, ran through the note and the chip
+#: row on a panel pegged at 184 because everything above it had grown by 22 and it had
+#: not been told.
+PANEL_MAX_H = 184 + SETTINGS_H
 
 #: The shortest a band gets, so a one-word draft still has a panel rather than a sliver.
 PANEL_MIN_H = 96
@@ -1554,6 +1576,78 @@ def _mix(a: str, b: str, t: float) -> str:
     return "#%02X%02X%02X" % tuple(
         round(int(a[i:i + 2], 16) + (int(b[i:i + 2], 16) - int(a[i:i + 2], 16)) * t)
         for i in (1, 3, 5)
+    )
+
+
+def _settings_row(c: tk.Canvas, pill, w: int, y: int, tags="body") -> int:
+    """The controls worth reaching without a right-click. Returns the height it took.
+
+    Three things, and the split between them is deliberate. **Mode is a control**: it
+    changes what Send does, it is the thing somebody switches mid-task, and it costs a
+    right-click and two menu levels today. **Workspace and voice are values**: their
+    worth is being *visible* — knowing which project Ask is running in without opening
+    anything — and they open the menu that already exists rather than growing a second
+    implementation of it.
+
+    Everything here is a chip or a label with a hit region, drawn the way `_lay_out`
+    draws the row at the foot, so there is one shape language on the surface and one way
+    a thing on it is clicked.
+    """
+    session = getattr(pill, "session", None)
+    if session is None:
+        return 0
+    converse = getattr(session, "mode", DICTATE) != DICTATE
+    label = "Converse" if converse else "Dictate"
+    mid = y + SETTINGS_H // 2 - 4
+
+    # The mode, as a chip that acts. `v` rather than a real chevron: the strip is drawn
+    # in the same ASCII-safe font the rest of this surface uses, and a glyph that falls
+    # back to a box would be a control that looks broken.
+    text = f"{label}  v"
+    width = chip_w("mode", text)
+    _round_rect(c, PAD, y, PAD + width, y + SETTINGS_H - 4, 9,
+                fill=CHIP, outline="", tags=("settings-mode", tags))
+    c.create_text(PAD + width / 2, mid, text=text, fill=CODE, font=FONT_CHIP,
+                  tags=("settings-mode", tags))
+    c.tag_bind("settings-mode", "<Button-1>",
+               lambda _e: getattr(session, "toggle_mode", lambda: None)())
+
+    # The values. Truncated from the left for the workspace, because the tail of a path
+    # is the part that names the project and the head is the part everybody shares.
+    x = PAD + width + SETTINGS_GAP
+    for name, value, opener in _settings_values(pill, session):
+        if not value:
+            continue
+        shown = f"{name} {value}"
+        tag = f"settings-{name.strip(':')}"
+        item = c.create_text(x, mid, anchor="w", text=shown, fill=MUTED,
+                             font=FONT_NOTE, tags=(tag, tags))
+        bounds = c.bbox(item)
+        if bounds is not None:
+            if bounds[2] > w - PAD:
+                # Out of room. Dropped rather than clipped: half a path is a worse
+                # answer than no path, and the menu still has it.
+                c.delete(item)
+                break
+            x = bounds[2] + SETTINGS_GAP
+        if opener is not None:
+            c.tag_bind(tag, "<Button-1>", lambda _e, f=opener: f())
+    return SETTINGS_H
+
+
+def _settings_values(pill, session):
+    """`(name, value, opener)` for each read-only value on the strip."""
+    workspace = getattr(session, "workspace", "") or ""
+    if workspace:
+        workspace = os.path.basename(str(workspace).rstrip("/" + chr(92))) or str(workspace)
+    speaker = getattr(session, "speaker", None)
+    voice = ""
+    if speaker is not None:
+        voice = "muted" if getattr(session, "muted", False) else (
+            getattr(speaker, "name", "") or "on")
+    return (
+        ("workshop:", workspace, getattr(pill, "_menu_workspace", None)),
+        ("voice:", voice, getattr(pill, "_menu_voice", None)),
     )
 
 
@@ -2497,6 +2591,32 @@ class Pill(tk.Tk):
     #: equal it: every entry in the list went through `normpath`, and this is not a
     #: path anybody's `--cwd` resolves to.
     WORKSPACE_NOT_SET = "(not set)"
+
+    def _popup_menu(self, build) -> None:
+        """Post one of the settings submenus on its own, under the pointer.
+
+        The strip's values open the menu that already exists rather than growing a second
+        implementation of the same list — the workspace recents and the voice list are
+        both built with a tick showing the current choice, and two of anything is two
+        things to keep in step.
+
+        `build` is one of the `_*_menu` methods, which add a cascade to a parent. A
+        throwaway parent is that cascade's home for the moment it is on screen.
+        """
+        parent = _dark_menu(self)
+        build(parent)
+        if parent.index("end") is None:
+            return  # nothing to choose between — see each builder's early return
+        try:
+            parent.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
+        finally:
+            parent.grab_release()
+
+    def _menu_workspace(self) -> None:
+        self._popup_menu(self._workspace_menu)
+
+    def _menu_voice(self) -> None:
+        self._popup_menu(self._voice_menu)
 
     def _workspace_menu(self, parent: tk.Menu) -> None:
         """Where questions are asked from, as a list of places already chosen.
@@ -5415,7 +5535,10 @@ class Bubble(tk.Frame):
         # shape now (`PANEL_H`), so the room left in it is *always* a hard number, and a
         # body still asking for `BODY_MAX_H` would draw 340 px of text through the note
         # and the chip row of a 184 px panel.
-        around = 74 + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
+        # `SETTINGS_H` is in here for the reason everything else is: the body's budget is
+        # what is left after the fixed furniture, and a strip the height did not know
+        # about would be a strip drawn over the first line of the draft.
+        around = 74 + SETTINGS_H + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
         if partial_h:
             around += partial_h + PARTIAL_GAP
         if self._sent:
@@ -5470,7 +5593,7 @@ class Bubble(tk.Frame):
         if not self._frozen():
             # Snug around the draft again, stepping a line at a time rather than
             # tracking every frame — see `_settled_h`.
-            self._h = self._settled_h(text_h + extra + 74)
+            self._h = self._settled_h(text_h + extra + 74 + SETTINGS_H)
             c.configure(width=BUBBLE_W, height=self._h)
             self.reposition()
 
@@ -5483,6 +5606,9 @@ class Bubble(tk.Frame):
         _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color,
                       seam="bottom")
         y = PAD
+        # Above the words, because it describes what will happen to them. See
+        # `SETTINGS_H` for why it lives here and not on the idle row.
+        y += _settings_row(c, self.pill, BUBBLE_W, y)
         if self._sent:
             c.create_text(
                 PAD, y, anchor="nw", text="sent", fill=MUTED,

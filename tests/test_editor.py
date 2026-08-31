@@ -638,7 +638,13 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         short._render()
         long_ = self._bubble(self.ERROR)
         long_._render()
-        self.assertGreater(long_._h, short._h)
+        # `assertGreaterEqual`, not `assertGreater`, and the reason is `_settled_h`: the
+        # band steps by a whole body line, so a note that grew by 14 px can land in the
+        # same 17 px bucket as the one before it. That is the point of the snap — the
+        # window stops changing size for every small thing — and the property this test
+        # is really about is the next two lines, which is that the note is drawn whole.
+        # The sibling test above asserts it clears the chips.
+        self.assertGreaterEqual(long_._h, short._h)
         drawn = next(i for i in long_.canvas.items if "WinError 2" in i["text"])
         self.assertEqual(drawn["text"], self.ERROR, "the note must not be truncated")
 

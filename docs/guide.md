@@ -884,6 +884,24 @@ that holds what was just sent, so it is somewhere you are already looking.
 
 The clipboard is restored about 0.6 s after the paste, so Flow does not permanently own it.
 
+### The strip above the draft
+
+Three things sit above the words whenever a panel is up, so the settings that matter
+mid-task do not cost a right-click:
+
+**Dictate ⌄** / **Converse ⌄** — a chip, and clicking it switches. This is the one that
+changes what Send does, and it is the one people switch mid-task.
+
+**workshop:** and **voice:** — values rather than controls. Their worth is being visible
+— knowing which project Ask is running in without opening anything — and clicking either
+opens the same list the right-click menu has, tick and all. The workspace is shown by the
+last part of its path, because that is the part that names the project.
+
+**It appears with the panel and never at rest.** Those three only mean anything once
+there is something to send, and an always-on strip would cost 22 px of the idle row,
+which is the part of this surface worth keeping small. FluidVoice does not pay it either
+— its bar belongs to the app being dictated into, not to the overlay.
+
 ### Hiding it
 
 **Settings → Hide to tray** parks the window and leaves an icon in the Windows
