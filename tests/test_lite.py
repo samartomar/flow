@@ -333,6 +333,9 @@ class TestLiteHasNoTarget(unittest.TestCase):
         self.assertIsNone(pill.paste_target)
         asked.assert_not_called()
 
+    @unittest.skipUnless(sys.platform == "win32",
+                         "full mode resolves the foreground window through inject.py, "
+                         "which binds user32 at import")
     def test_full_mode_still_tracks_it(self):
         import flow.ui as ui
 

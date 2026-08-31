@@ -445,7 +445,15 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
         path = self.dir / "profile.json"
         path.write_text(json.dumps({"schema": 1, "hotkeys": hotkeys}), encoding="utf-8")
         out = io.StringIO()
+        # `available()` is patched out, and not only for speed. It reaches
+        # `shutil.which`, and `shutil.which` reads `sys.platform` - which this
+        # helper has just lied about. On a real macOS runner that sends the stdlib
+        # down its Windows branch, where `_winapi` is None: `AttributeError:
+        # 'NoneType' object has no attribute 'NeedCurrentDirectoryForExePath'`,
+        # raised from a line no part of Flow wrote. Which agent CLI happens to be
+        # installed has nothing to do with what this class asserts.
         with mock.patch.object(sys, "platform", platform), \
+                mock.patch.object(mod, "available", return_value=[]), \
                 mock.patch.object(flow.profile, "DEFAULT_PATH", path), \
                 mock.patch.object(flow.diag, "Diag"), \
                 mock.patch.object(mod, "Session"), \
