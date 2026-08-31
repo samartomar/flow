@@ -265,6 +265,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--voice X` | voice for spoken replies: a name, part of one, or `male`/`female` |
 | `--no-auto-ask` | in converse mode, wait for the Ask button instead of a pause |
 | `--cli NAME` | pin the agent CLI (`codex` or `claude`) instead of trying each in turn |
+| `--no-warm` | do not load the model at startup; wait until it is first needed |
 | `--cli-model NAME` | ask the CLI for this model; remembered, and blank clears it |
 | `--cli-effort LEVEL` | how hard the CLI may think: `low`, `medium`, `high`, `xhigh`, `max` (default `low`) |
 | `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |

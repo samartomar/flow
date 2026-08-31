@@ -342,6 +342,12 @@ def main(argv: list[str] | None = None) -> int:
              f"({', '.join(c.name for c in CANDIDATES if c.verified)})",
     )
     ap.add_argument(
+        "--no-warm", action="store_true",
+        # For a launcher that starts with the machine, where paying a model load at login
+        # is the wrong trade — and for measuring the cold path on purpose.
+        help="do not load the model at startup; wait until it is first needed",
+    )
+    ap.add_argument(
         "--cli-model", default=None, metavar="NAME",
         # The only way a model name gets into Flow: the settings menu has no text field
         # and is not growing one, so a name arrives here once, is remembered, and is a
@@ -787,6 +793,18 @@ def main(argv: list[str] | None = None) -> int:
         settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
         lite=lite,
     )
+    # **Loaded now, not at the first word.** "loading the model" used to be the first
+    # thing a fresh Flow said back, in the bubble, while somebody was already speaking —
+    # and the load lands *inside* that first utterance rather than in front of it, so the
+    # first partial measured 1 230 ms against ~570 ms for the four behind it. The chord's
+    # press-down has warmed the models since push-to-talk shipped, which covers the
+    # second use and not the first.
+    #
+    # After the pill is built and before the loop runs, so the window is on screen while
+    # the disk does its work rather than after it. `warm()` returns immediately — it is
+    # single-flight and does its loading on a thread of its own — so nothing here waits.
+    if not args.no_warm:
+        session.warm()
     try:
         pill.mainloop()
     except KeyboardInterrupt:

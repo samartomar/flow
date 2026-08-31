@@ -526,3 +526,29 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestTheModelIsLoadedBeforeItIsAskedFor(unittest.TestCase):
+    """"loading the model" used to be the first thing a fresh Flow said back.
+
+    It said it in the bubble, while somebody was already speaking, because the load lands
+    *inside* the first utterance rather than in front of it — first partial 1 230 ms
+    against ~570 ms for the four behind it. The chord's press-down has warmed the models
+    since push-to-talk shipped, which covers the second use and not the first.
+    """
+
+    def test_startup_warms_the_session(self):
+        _code, _out, _pill, session = launch("win32")
+        session.return_value.warm.assert_called_once()
+
+    def test_it_happens_off_windows_too(self):
+        # The load is the same load and the wait is the same wait; nothing about it is
+        # platform-shaped.
+        _code, _out, _pill, session = launch("darwin")
+        session.return_value.warm.assert_called_once()
+
+    def test_no_warm_leaves_it_for_the_first_word(self):
+        # For a launcher that starts with the machine, where paying a model load at
+        # login is the wrong trade — and for measuring the cold path on purpose.
+        _code, _out, _pill, session = launch("win32", ["--no-warm"])
+        session.return_value.warm.assert_not_called()
+
