@@ -257,3 +257,45 @@ class TestTheFramePumpLeavesAHiddenWindowAlone(unittest.TestCase):
         p = pill()
         self.assertEqual(p.width, ui.BUBBLE_W)
 
+class TestEveryWin32NameResolves(unittest.TestCase):
+    """The bug this class exists for: `user32.PostMessage` does not exist.
+
+    There is no bare `PostMessage` export — the name is a C macro resolving to the A or
+    W variant — so `ctypes` raised `AttributeError: function 'PostMessage' not found`.
+    It raised *at click time*, inside the tray thread, after the menu had been chosen
+    from and before anything acted on the choice: right-clicking the icon showed a menu
+    that then did nothing. Nothing in the test suite could have caught it, because
+    nothing named the function until somebody clicked.
+
+    So the suite names them all. This walks the module's own source for every `user32`
+    call it makes and asks Windows whether each one is really there — a spelling check
+    that costs nothing and would have failed the moment the typo was written.
+    """
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: user32")
+    def test_every_user32_function_the_module_names_exists(self):
+        import ctypes
+        import pathlib
+        import re
+
+        source = pathlib.Path(tray.__file__).read_text(encoding="utf-8")
+        named = {a or b for a, b in
+                 re.findall(r"user32\.(\w+)|u\.(\w+)\.", source)}
+        self.assertIn("PostMessageW", named, "the source no longer calls what it did")
+        user32 = ctypes.windll.user32
+        missing = sorted(n for n in named if not hasattr(user32, n))
+        self.assertEqual(missing, [], f"user32 has no {missing}")
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: shell32")
+    def test_the_shell_call_exists_too(self):
+        self.assertTrue(hasattr(tray._shell(), "Shell_NotifyIconW"))
+
+    def test_a_click_that_raises_does_not_escape_into_windows(self):
+        """Windows called us. An exception unwinding into its stack is undefined at
+        best, and a tray that silently stops answering is the failure this file exists
+        to prevent — so it is caught, and said out loud."""
+        icon = tray.Tray("probe")
+        with mock.patch.object(icon, "_popup", side_effect=RuntimeError("boom")):
+            self.assertEqual(
+                icon._on_message(0, tray._WM_TRAY, 0, tray._WM_RBUTTONUP), 0)
+

@@ -29,6 +29,7 @@ official. It is a line to change when Flow has artwork.
 
 import ctypes
 import queue
+import sys
 import threading
 from ctypes import wintypes
 
@@ -133,6 +134,8 @@ def _declare() -> None:
                                  ctypes.c_int, ctypes.c_int, wintypes.HWND,
                                  wintypes.LPVOID]
     u.DestroyWindow.argtypes = [wintypes.HWND]
+    u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+                               wintypes.WPARAM, wintypes.LPARAM]
     ctypes.windll.kernel32.GetModuleHandleW.restype = wintypes.HINSTANCE
     ctypes.windll.kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 
@@ -250,10 +253,17 @@ class Tray:
         """
         if message == _WM_TRAY:
             event = lparam & 0xFFFF
-            if event in (_WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
-                self.events.put(SHOW)
-            elif event == _WM_RBUTTONUP:
-                self._popup()
+            try:
+                if event in (_WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
+                    self.events.put(SHOW)
+                elif event == _WM_RBUTTONUP:
+                    self._popup()
+            except Exception as exc:  # pragma: no cover - belt for a callback
+                # Nothing may escape a ctypes callback: Windows called us, and an
+                # exception unwinding into its stack is undefined at best. Printed
+                # rather than swallowed, because a tray that silently stops answering
+                # is the failure this file exists to prevent.
+                print(f"flow: tray click failed: {exc}", file=sys.stderr, flush=True)
             return 0
         if message == _WM_DESTROY:
             ctypes.windll.user32.PostQuitMessage(0)
@@ -283,7 +293,12 @@ class Tray:
             chosen = user32.TrackPopupMenu(
                 menu, _TPM_RETURNCMD | _TPM_RIGHTBUTTON,
                 point.x, point.y, 0, self.hwnd, None)
-            user32.PostMessage(self.hwnd, 0, 0, 0)
+            # `PostMessageW`, with the W. There is no bare `PostMessage` export in
+            # user32 — the name is a macro in C that resolves to one of the two — so
+            # asking for it raised `AttributeError: function 'PostMessage' not found`
+            # *after* the menu had been chosen from and before anything acted on the
+            # choice. Right-clicking the icon showed the menu and then did nothing.
+            user32.PostMessageW(self.hwnd, 0, 0, 0)
         finally:
             user32.DestroyMenu(menu)
         if chosen == _ID_SHOW:
@@ -303,6 +318,4 @@ def available() -> bool:
     desktop environment offers, and neither is `Shell_NotifyIcon` — so this says no
     rather than pretending, and the caller keeps its window on screen.
     """
-    import sys
-
     return sys.platform == "win32"
