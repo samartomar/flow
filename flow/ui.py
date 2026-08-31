@@ -251,12 +251,18 @@ def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:
 _TK_WORK: tuple | None = None
 
 
-#: How far down an Aqua window asked for `+0+0` can plausibly land. A 14-inch MacBook
-#: Pro measured 58: a menu bar at 30, plus the 28 px of title bar between a window's
-#: frame and the client area `winfo_rooty` reports. Anything past this was not clamped
-#: by a menu bar at all — the window manager honoured the request literally, as Windows
-#: does — and the number means nothing here.
+#: How far down an Aqua window asked for `+0+0` can plausibly be pushed by the menu bar:
+#: 30 px on an ordinary display, more on a notched one. Past this, the window manager
+#: honoured the request literally — as Windows does — and the number means nothing here.
 _AQUA_MENU_MAX = 80
+
+#: How tall an Aqua title bar can plausibly be. 28 px measured; the cap is loose because
+#: it only has to separate "a title bar" from "the window went somewhere else entirely".
+_AQUA_TITLE_MAX = 60
+
+#: Where the probe is put to measure its own title bar — far enough down that no menu bar
+#: can be clamping it, so the whole difference from what was asked for is decoration.
+_AQUA_FREE_Y = 300
 
 
 def _aqua_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int] | None:
@@ -275,56 +281,71 @@ def _aqua_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int] | None:
     present, which is why `_tk_work_area` measures instead of asking — this is the one
     platform where the shortcut is the *better* instrument, not a lazier one.
 
-    `maxsize` gives a size and no origin, and the height it is missing is split between
-    a menu bar at the top and a Dock at the bottom, which it does not break down. So the
-    origin is measured separately: Aqua will not place a titled window under the menu
-    bar, so where a window asked for `+0+0` actually lands is the top of the usable area.
-    The bottom — the edge that matters, the one the pill stands on — is then
-    `top + height`.
+    **Everything is measured from one probe, and that is the point.** `maxsize` gives a
+    size and no origin, so the origin has to come from somewhere else — and the first
+    version took it from a probe while taking the size from the caller's window. Those
+    are not the same window. `maxsize` is a maximum *content* size, so it is short by
+    whatever decoration its window wears: 735 from a titled probe against 763 from the
+    `overrideredirect` pill, on the same display, differing by exactly the 28 px title
+    bar. Adding one window's origin to another's size counted that title bar twice and
+    put the work area 28 px too low — the pill moved off the Dock and back onto it.
 
-    Measured on a 14-inch MacBook Pro, Tk 9.0.3, a 1352x878 screen: `maxsize` 1352x735,
-    a `+0+0` window landing at y 58, so the Dock's top edge is 793 and the Dock is 85 px
-    tall. Both of those are Tk asking Tk, so they were checked against something that is
-    not: `defaults read com.apple.dock tilesize` on the same machine says 69, and 69 plus
-    Apple's padding is the 85 this leaves. `top` is a title bar low for the same reason
-    it is on Windows — `winfo_rooty` is the client area — and costs nothing, because it
-    feeds only the ceiling in `bottom_centre`. The bottom edge is exact.
+    So one probe answers all three, and its own decoration cancels out:
 
-    **Nothing here is trusted without a shape check.** If `maxsize` answers with the
-    whole screen it has told us nothing, and if the `+0+0` probe comes back somewhere a
-    menu bar could not be, it was honoured literally rather than clamped. Either way
-    this returns None and the caller carries on to the maximise probe, so the worst case
-    is exactly today's behaviour rather than a new way to be wrong.
+      **its title bar** — asked for a y far below any menu bar, so the whole difference
+      between what was asked and where the client area landed is decoration.
+
+      **the menu bar** — asked for `+0+0`, where Aqua refuses to put a titled window;
+      where it lands, less the title bar just measured, is the top of the visible frame.
+
+      **the visible frame's height** — `maxsize` plus that same title bar, which is what
+      turns a content size back into a frame size.
+
+    Measured on a 14-inch MacBook Pro, Tk 9.0.3, a 1352x878 screen: a 28 px title bar, a
+    `+0+0` client top of 58 giving a menu bar of 30, and `maxsize` 1352x735 giving a
+    frame height of 763. The Dock's top edge is 30 + 763 = 793 and the Dock is 85 px
+    tall. All three are Tk asking Tk, so they were checked against something that is not:
+    `defaults read com.apple.dock tilesize` on the same machine says 69, and 69 plus
+    Apple's padding is the 85 this leaves.
+
+    **Nothing is trusted without a shape check.** A `maxsize` of the whole screen has
+    told us nothing; a title bar or a menu bar outside the range one can be is a window
+    manager that honoured a request literally rather than clamping it, as Windows does.
+    Any of those and this returns None and the caller falls through to the maximise
+    probe, so the worst case is exactly the old behaviour rather than a new way to be
+    wrong.
     """
-    try:
-        mw, mh = win.maxsize()
-    except (tk.TclError, AttributeError, TypeError, ValueError):
-        return None
-    if not (0 < mw <= sw and 0 < mh < sh):
-        return None  # it answered with the whole screen: it does not know either
-
-    top = 0
     probe = None
     try:
         probe = tk.Toplevel(win)
         probe.attributes("-alpha", 0.0)
+
+        probe.geometry(f"200x120+80+{_AQUA_FREE_Y}")
+        probe.update_idletasks()
+        title = probe.winfo_rooty() - _AQUA_FREE_Y
+        if not 0 <= title <= _AQUA_TITLE_MAX:
+            return None
+
         probe.geometry("200x120+0+0")
         probe.update_idletasks()
-        landed = probe.winfo_rooty()
-        if 0 <= landed <= _AQUA_MENU_MAX:
-            top = landed
-    except (tk.TclError, AttributeError, ValueError):
-        pass
+        top = probe.winfo_rooty() - title
+        if not 0 <= top <= _AQUA_MENU_MAX:
+            return None
+
+        mw, mh = probe.maxsize()
+    except (tk.TclError, AttributeError, TypeError, ValueError):
+        return None
     finally:
         if probe is not None:
             try:
                 probe.destroy()
             except tk.TclError:
                 pass
-    if top + mh > sh:
-        # The two measurements disagree about the display. Better to know nothing.
-        return None
-    return 0, top, mw, top + mh
+
+    height = mh + title
+    if not (0 < mw <= sw and 0 < height < sh and top + height <= sh):
+        return None  # it answered with the whole screen, or the parts disagree
+    return 0, top, mw, top + height
 
 
 def _tk_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int]:

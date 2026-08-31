@@ -19,7 +19,10 @@ Three Aqua-specific candidates are asked here instead of guessed at:
   **wm attributes -fullscreen** - the whole screen including the menu bar, as a control:
   if this and `zoomed` agree, `zoomed` is being treated as fullscreen.
 
-Between the first two, `bottom = top + maxsize_height` is the Dock's top edge.
+Every measurement comes from a window with the same decoration, which matters:
+`maxsize` is a maximum *content* size, so it is short by whatever title bar its
+window wears. Taking the origin from one window and the size from another counted
+a 28 px title bar twice and put the answer 28 px too low.
 
     uv run python scripts/mac_area_probe.py
 """
@@ -56,9 +59,20 @@ def probe(name, setup):
 
 
 probe("zoomed (today's probe)", lambda w: w.state("zoomed"))
-_x, top, _w, _h = probe("asked for +0+0", lambda w: w.geometry("200x120+0+0"))
+_x, free, _w, _h = probe("asked for +80+300", lambda w: w.geometry("200x120+80+300"))
+_x, clamped, _w, _h = probe("asked for +0+0", lambda w: w.geometry("200x120+0+0"))
 probe("fullscreen (control)", lambda w: w.attributes("-fullscreen", True))
 
-print(f"\n  so the usable area is    (0, {top}, {mw}, {top + mh})")
-print(f"  and the Dock starts at   y = {top + mh}   ({sh - (top + mh)} px tall)")
+# `maxsize` is a maximum *content* size, so it is short by the decoration of the
+# window that answered it - 735 from a titled window against 763 from an
+# `overrideredirect` one on the same display. Every part of this comes from one
+# probe so the title bar appears on both sides and cancels; mixing two windows
+# counted it twice and put the answer 28 px too low.
+title = free - 300
+top = clamped - title
+bottom = top + mh + title
+print(f"\n  title bar                {title} px   (from +80+300, below any menu bar)")
+print(f"  menu bar                 {top} px   (from +0+0, less that title bar)")
+print(f"  so the usable area is    (0, {top}, {mw}, {bottom})")
+print(f"  and the Dock starts at   y = {bottom}   ({sh - bottom} px tall)")
 root.destroy()
