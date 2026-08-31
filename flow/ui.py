@@ -196,11 +196,19 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     rectangle where the app should be — and `-toolwindow` does not exist off Windows at
     all. Asking for either is a `TclError` before anything is drawn.
 
+    **`overrideredirect` is the whole of it on Aqua too, and two attempts to help it were
+    both harm.** A Mac reported the pill wearing a title bar, and the cause was not this
+    line failing — it was `MacWindowStyle` being asked for *afterwards*, which put a
+    frame back on and took the window out of the activation chain, so Send stopped taking
+    clicks. Removing that call was the fix. A withdraw-and-remap cycle added alongside it,
+    to "force Aqua to rebuild the NSWindow", was solving a problem the style call had
+    created — and on a real machine it left the window hidden after the remap. Both are
+    gone. What is left is the line that was always doing the work.
+
     The background is returned rather than left to the caller so a window cannot be given
     one that contradicts what was applied to it.
     """
     win.overrideredirect(True)
-    _mac_reframe(win)
     win.attributes("-topmost", True)
     win.attributes("-alpha", alpha)
     if lite:
@@ -208,41 +216,6 @@ def _shell_window(win, lite: bool, alpha: float) -> str:
     win.attributes("-transparentcolor", TRANSPARENT)
     win.attributes("-toolwindow", True)
     return TRANSPARENT
-
-
-def _mac_reframe(win) -> None:
-    """Make Aqua build the window again, so `overrideredirect` reaches its NSWindow.
-
-    Reported from a Mac: the pill sat there with a title bar and three traffic lights
-    while the panels above it were correctly bare. The difference is that `Pill` **is**
-    the root window — `class Pill(tk.Tk)` — and the panels are Toplevels. Aqua builds the
-    root's NSWindow when it is first mapped, which has already happened by the time
-    anything asks for a redirect, and a redirect does not restyle a window that exists.
-    Withdrawing and remapping forces the rebuild.
-
-    **Not `MacWindowStyle`.** `plain` sounds frameless and is not — a Toplevel given only
-    that style comes up decorated, which `scripts/mac_frame_probe.py` settled on a real
-    machine. Its `noActivates` half was worse: it took the windows out of the activation
-    chain, and a window that never activates does not take clicks, so Send stopped
-    working. `_no_activate` says why the whole app depends on that not happening here.
-
-    Only for a window already on screen. The panels are withdrawn when this runs and
-    deiconifying them would put two empty surfaces in front of the user. Geometry is put
-    back because a window returning from a withdraw has been placed by whoever remapped
-    it, not by whoever positioned it.
-    """
-    if sys.platform != "darwin":
-        return
-    try:
-        if not win.winfo_ismapped():
-            return
-        where = win.geometry()
-        win.withdraw()
-        win.overrideredirect(True)
-        win.deiconify()
-        win.geometry(where)
-    except tk.TclError:
-        pass
 
 
 def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:

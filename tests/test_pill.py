@@ -857,85 +857,58 @@ class TestTheWorkAreaOffWindows(unittest.TestCase):
 
 
 class TestTheMacFrame(unittest.TestCase):
-    """Stripping the root window's frame on Aqua, and what must not be asked for to do it.
+    """What strips the frame on Aqua, asserted as the absence of two wrong answers.
 
-    Reported from a Mac: the pill had a title bar and three traffic lights while the
-    panels above it were bare. `Pill` **is** the root (`class Pill(tk.Tk)`), the panels
-    are Toplevels, and Aqua builds the root's NSWindow before anything asks for a
-    redirect.
+    A Mac reported the pill wearing a title bar and three traffic lights while the
+    panels above it were bare, and two fixes were tried before the right one. Both are
+    pinned here because both looked correct and each broke something else:
 
-    Two wrong answers were tried before this one, and both are asserted against here
-    because both looked right: `MacWindowStyle plain` is not frameless, and its
-    `noActivates` half broke clicking Send.
+      **`MacWindowStyle plain` is not frameless.** `plain` is a window *class*, and a
+      Toplevel given only that style comes up decorated - settled on a real machine by
+      `scripts/mac_frame_probe.py`. Asked for on a mapped window it put the frame back.
+
+      **`noActivates` is worse.** It takes the window out of the activation chain, and a
+      window that never activates does not take clicks: Send stopped working. `_menu`
+      already depended on the opposite, and says so.
+
+    What was left after removing both is the line that had been doing the work all
+    along, which is why this class asserts an absence rather than a mechanism.
     """
 
-    def win(self, mapped=True):
-        w = mock.Mock()
-        w.winfo_ismapped.return_value = mapped
-        w.geometry.return_value = "205x40+538+608"
-        return w
-
-    def test_a_mapped_window_is_remapped_to_force_the_rebuild(self):
-        w = self.win()
-        with mock.patch.object(ui.sys, "platform", "darwin"):
-            ui._mac_reframe(w)
-        w.withdraw.assert_called_once()
-        w.overrideredirect.assert_called_once_with(True)
-        w.deiconify.assert_called_once()
-
-    def test_the_position_survives_the_remap(self):
-        # A window that comes back has been placed by whoever remapped it, not by
-        # whoever positioned it.
-        w = self.win()
-        with mock.patch.object(ui.sys, "platform", "darwin"):
-            ui._mac_reframe(w)
-        w.geometry.assert_called_with("205x40+538+608")
-
-    def test_a_withdrawn_window_is_not_put_on_screen_by_it(self):
-        # The panels are withdrawn when this runs at startup. Deiconifying them would
-        # put two empty surfaces in front of the user.
-        w = self.win(mapped=False)
-        with mock.patch.object(ui.sys, "platform", "darwin"):
-            ui._mac_reframe(w)
-        w.withdraw.assert_not_called()
-        w.deiconify.assert_not_called()
-
-    def test_it_does_nothing_at_all_off_a_mac(self):
-        w = self.win()
-        for platform in ("win32", "linux"):
-            with self.subTest(platform=platform):
-                w.reset_mock()
-                with mock.patch.object(ui.sys, "platform", platform):
-                    ui._mac_reframe(w)
-                w.withdraw.assert_not_called()
+    def source(self) -> str:
+        return (Path(__file__).resolve().parent.parent
+                / "flow" / "ui.py").read_text(encoding="utf-8")
 
     def test_nothing_asks_aqua_for_a_window_class(self):
-        # `MacWindowStyle plain` sounds frameless and is not - a Toplevel given only
-        # that style comes up decorated, which a real Mac settled. Asserted over the
-        # source because the mistake is *making the call at all*, and a mock cannot
-        # notice a call that is no longer there.
-        #
-        # The name still appears twice in prose, explaining why it is not used. Those
-        # comments are the point of this test, not a violation of it - so what is
-        # checked is the invocation, which is the only form that can do damage.
-        source = (Path(__file__).resolve().parent.parent
-                  / "flow" / "ui.py").read_text(encoding="utf-8")
-        for line in source.splitlines():
+        # Asserted over the source because the mistake is *making the call at all*, and
+        # a mock cannot notice a call that is no longer there. The name still appears in
+        # prose explaining why it is not used - those comments are the point of this
+        # test, so what is checked is the invocation.
+        for line in self.source().splitlines():
             stripped = line.strip()
             if stripped.startswith("#") or stripped.startswith("*"):
                 continue
             with self.subTest(line=stripped[:60]):
                 self.assertNotIn("::tk::unsupported::", line)
 
+    def test_no_window_is_withdrawn_and_remapped_to_restyle_it(self):
+        # The second wrong answer. It was solving a problem the first one created, and
+        # on a real Mac it left the window hidden after the remap - shown, then gone.
+        self.assertNotIn("_mac_reframe", self.source())
+
     def test_no_activate_refuses_off_windows_because_the_app_depends_on_it(self):
         # `_menu` borrows the foreground on Windows precisely because a non-activating
-        # window gets no input for its popup, and says Lite needs none of that. Asking
-        # Aqua for `noActivates` took the windows out of the activation chain and Send
-        # stopped taking clicks.
+        # window gets no input for its popup, and states that Lite needs none of that.
+        # Asking Aqua for the equivalent broke Send.
         for platform in ("darwin", "linux"):
             with self.subTest(platform=platform):
                 with mock.patch.object(ui.sys, "platform", platform):
                     self.assertFalse(ui._no_activate(mock.Mock()))
+
+    def test_the_shell_still_asks_for_the_one_thing_that_works(self):
+        win = mock.Mock()
+        ui._shell_window(win, lite=True, alpha=0.94)
+        win.overrideredirect.assert_called_once_with(True)
 
 
 class TestMix(unittest.TestCase):
