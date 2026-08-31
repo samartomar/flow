@@ -155,32 +155,48 @@ def toplevel_hwnd(win) -> int:
 
 
 def _mac_window_style(win) -> bool:
-    """Aqua's answer to `overrideredirect` + `WS_EX_NOACTIVATE`, in one call.
+    """Aqua's `WS_EX_NOACTIVATE`, without letting it put a title bar back on.
 
-    `overrideredirect(True)` is what strips the title bar on Windows and X11. On Aqua it
-    is not enough on its own — reported from a real Mac as a pill sitting there with its
-    close and maximize buttons showing — because Tk maps a Toplevel to a real
-    `NSWindow` whose style mask is set from the *window class*, not from the redirect
-    flag. `MacWindowStyle` is the supported way to choose that class, and `plain` is the
-    one with no frame at all.
+    **`MacWindowStyle plain` is not frameless, and believing it was is what put a title
+    bar and three traffic lights on the pill.** `plain` is a window *class*, and
+    `scripts/mac_frame_probe.py` settled what it looks like on a real Mac: a Toplevel
+    given the style and nothing else comes up decorated, while one given only
+    `overrideredirect(True)` comes up bare. The call reports `ok` either way — it
+    succeeds at doing the wrong thing.
 
-    `noActivates` is the second half and the more important one: it is Aqua's
-    `WS_EX_NOACTIVATE`. Without it, clicking the pill pulls focus away from whatever the
-    user is dictating into — which on Windows is the defect that made every paste land
-    in the wrong window, and there is no reason to ship it on a Mac having fixed it once
-    already.
+    So `overrideredirect` is what strips the frame here as it does everywhere else, and
+    this exists for `noActivates` alone — the half that keeps a click on the pill from
+    pulling focus off whatever is being dictated into. It is asked for *first* and the
+    redirect is re-asserted after, so the class can never win.
 
-    Named `::tk::unsupported::` by Tk itself, which is why this is wrapped and reported
-    rather than trusted: it is the interface Aqua actually offers and it may not be
-    there. A False here costs a title bar, not a session.
+    **The root window needs the frame knocked off twice.** Aqua builds its `NSWindow`
+    when it is first mapped, and a redirect asked for afterwards does not restyle what
+    already exists — which is why `Bubble` and `ConversationCard` were bare while the
+    pill, which *is* the root (`class Pill(tk.Tk)`), was not. Withdrawing and remapping
+    forces the rebuild. Only for a window that is already on screen: the panels are
+    withdrawn at this point in startup and deiconifying them would put two empty
+    surfaces in front of the user.
+
+    Named `::tk::unsupported::` by Tk itself, which is why this is wrapped rather than
+    trusted. A False costs the focus behaviour, not a session.
     """
+    styled = True
     try:
         win.update_idletasks()
         win.tk.call("::tk::unsupported::MacWindowStyle", "style",
                     win._w, "plain", "noActivates")
-        return True
+    except tk.TclError:
+        styled = False
+    try:
+        if win.winfo_ismapped():
+            win.withdraw()
+            win.overrideredirect(True)
+            win.deiconify()
+        else:
+            win.overrideredirect(True)
     except tk.TclError:
         return False
+    return styled
 
 
 def _no_activate(win) -> bool:

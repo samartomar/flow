@@ -832,27 +832,52 @@ class TestTheMacWindowStyle(unittest.TestCase):
     to an `NSWindow` whose style comes from the window *class*.
     """
 
-    def test_it_asks_for_a_plain_window_that_does_not_activate(self):
-        # Both halves matter. `plain` is the frameless class; `noActivates` is what
-        # stops a click on the pill pulling focus off whatever is being dictated into —
-        # the defect that made every paste land in the wrong window on Windows.
+    def test_it_asks_for_no_activates_and_then_takes_the_frame_off_again(self):
+        # The order is the fix. `plain` is a window *class* and it is **not** frameless —
+        # a Mac showed a Toplevel given only the style coming up decorated. So the
+        # redirect is re-asserted after the style, and the class can never win.
         win = mock.Mock()
+        win.winfo_ismapped.return_value = False
         self.assertTrue(ui._mac_window_style(win))
         args = win.tk.call.call_args[0]
         self.assertEqual(args[0], "::tk::unsupported::MacWindowStyle")
-        self.assertIn("plain", args)
         self.assertIn("noActivates", args)
+        win.overrideredirect.assert_called_once_with(True)
 
-    def test_an_unsupported_build_costs_a_title_bar_and_not_a_session(self):
-        # Tk calls the interface `::tk::unsupported::` itself, so it may not be there.
+    def test_a_window_already_on_screen_is_remapped_to_force_the_rebuild(self):
+        # The root window's NSWindow is built when it is first mapped, and a redirect
+        # asked for afterwards does not restyle what already exists. That is why the
+        # panels were bare and the pill — which *is* the root — was not.
         win = mock.Mock()
+        win.winfo_ismapped.return_value = True
+        ui._mac_window_style(win)
+        win.withdraw.assert_called_once()
+        win.deiconify.assert_called_once()
+
+    def test_a_withdrawn_window_is_not_put_on_screen_by_the_fix(self):
+        # `_no_activate` runs over all three windows at startup, and the panels are
+        # withdrawn at that point. Deiconifying them would put two empty surfaces in
+        # front of the user.
+        win = mock.Mock()
+        win.winfo_ismapped.return_value = False
+        ui._mac_window_style(win)
+        win.withdraw.assert_not_called()
+        win.deiconify.assert_not_called()
+
+    def test_the_frame_still_comes_off_when_the_style_call_is_unavailable(self):
+        # Tk calls it `::tk::unsupported::` itself. Losing it should cost the focus
+        # behaviour, not put a title bar back on the pill.
+        win = mock.Mock()
+        win.winfo_ismapped.return_value = False
         win.tk.call.side_effect = ui.tk.TclError("no such command")
         self.assertFalse(ui._mac_window_style(win))
+        win.overrideredirect.assert_called_once_with(True)
 
     def test_no_activate_routes_to_it_on_a_mac_and_refuses_elsewhere(self):
         # One name for "take this window out of the activation chain", answered by
         # whichever platform API can actually do it.
         win = mock.Mock()
+        win.winfo_ismapped.return_value = False
         with mock.patch.object(ui.sys, "platform", "darwin"):
             self.assertTrue(ui._no_activate(win))
             win.tk.call.assert_called_once()
