@@ -79,7 +79,7 @@ def build(force: bool = False) -> Path:
     except (OSError, subprocess.SubprocessError) as exc:
         raise NotAvailable(f"no Swift toolchain: {exc}") from exc
     if which.returncode != 0:
-        raise NotAvailable("no Swift toolchain — run: xcode-select --install")
+        raise NotAvailable("no Swift toolchain - run: xcode-select --install")
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     try:
         # `-parse-as-library` is required, not tuning: a single-file executable is
@@ -96,7 +96,8 @@ def build(force: bool = False) -> Path:
     return BINARY
 
 
-def available() -> tuple[bool, str]:
+def available(compile_if_missing: bool = True,
+              timeout: float = 60.0) -> tuple[bool, str]:
     """`(usable, why not)` for this machine, without starting a session on it.
 
     Runs the helper's own `--probe`, which is the only honest check: the engine exists
@@ -104,13 +105,32 @@ def available() -> tuple[bool, str]:
     which needs Dictation enabled so macOS has downloaded the offline model — and the
     user has granted the permission. Anything less is a guess that fails later, in the
     middle of somebody's first sentence.
+
+    **`compile_if_missing=False` is what `--engine auto` uses, and it is not a
+    micro-optimisation.** Measured in CI: with this asked unconditionally at startup, the
+    macOS suite went from 35 seconds to 643. Every launch on a Mac without Whisper models
+    was compiling Swift and then sitting on `--probe` until the timeout, because the
+    probe waits for an authorization dialog that a headless machine never answers — and a
+    user's first launch would have done exactly the same thing, for a full minute, before
+    showing a pill.
+
+    So the rule is: **`auto` uses what is ready, and asking for the engine by name is
+    what builds it.** Once `--engine native` has been run once the binary is there, and
+    `auto` finds it from then on.
     """
+    if not compile_if_missing and sys.platform == "darwin" and not BINARY.exists():
+        return False, ("not built yet - run once with --engine native to compile it")
     try:
         binary = build()
     except NotAvailable as exc:
         return False, str(exc)
     try:
-        probe = _run([str(binary), "--probe"], 60.0)
+        probe = _run([str(binary), "--probe"], timeout)
+    except subprocess.TimeoutExpired:
+        # Almost always the permission dialog, unanswered. Named as itself rather than
+        # as a generic failure, because the fix is a click and the user should hear so.
+        return False, ("probe timed out - grant Speech Recognition under "
+                       "System Settings > Privacy & Security")
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"probe failed: {exc}"
     if probe.returncode != 0:

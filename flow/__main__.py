@@ -182,7 +182,10 @@ def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
     # auto. Ask the cheap question first: are the models here?
     if _models_present(partial_name, final_name):
         return "whisper", ""
-    ok, why = native_available()
+    # `compile_if_missing=False`, and a short probe. A launch is not the place to
+    # discover how slow `swiftc` is, and the probe blocks on a permission dialog that
+    # nobody has been shown yet — measured at a full minute per launch before this.
+    ok, why = native_available(compile_if_missing=False, timeout=10.0)
     if ok:
         return "native", " (whisper models not found on this machine)"
     return "whisper", f" (not found locally, and no native engine: {why})"

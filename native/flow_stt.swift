@@ -85,7 +85,7 @@ func makeRecognizer() -> SFSpeechRecognizer {
     // The whole point. Without this the audio goes to Apple's servers, which is a
     // different product from the one Flow is: local by construction.
     guard rec.supportsOnDeviceRecognition else {
-        die("on-device recognition unavailable — enable Dictation in System Settings "
+        die("on-device recognition unavailable - enable Dictation in System Settings "
             + "so macOS downloads the offline model", 5)
     }
     // Off the main queue, deliberately. `transcribe` waits on a semaphore for the

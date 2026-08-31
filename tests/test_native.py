@@ -119,6 +119,98 @@ def _engine_result():
     return _engine(args(), "base.en", "small.en")
 
 
+class TestAutoNeverPaysForAnEngineItMayNotUse(unittest.TestCase):
+    """The regression CI found, pinned so it cannot come back.
+
+    Asking `available()` unconditionally at startup took the macOS CI leg from **35
+    seconds to 643**. Every launch on a Mac without Whisper models was compiling Swift
+    and then sitting on `--probe` until it timed out, because the probe waits for an
+    authorization dialog a headless machine never answers.
+
+    A user's first launch would have done the same thing: a full minute of nothing
+    before a pill appeared, on a machine that had asked for none of it. So `auto` uses
+    what is *ready*, and naming the engine is what builds it.
+    """
+
+    def test_auto_will_not_compile_anything(self):
+        seen = {}
+
+        def fake(compile_if_missing=True, timeout=60.0):
+            seen["compile"] = compile_if_missing
+            seen["timeout"] = timeout
+            return False, "not built yet"
+
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch("flow.__main__._models_present", return_value=False), \
+                mock.patch.object(native, "available", fake):
+            _engine(args(), "base.en", "small.en")
+        self.assertFalse(seen["compile"])
+
+    def test_and_will_not_wait_a_minute_on_a_permission_dialog(self):
+        seen = {}
+
+        def fake(compile_if_missing=True, timeout=60.0):
+            seen["timeout"] = timeout
+            return False, "not built yet"
+
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch("flow.__main__._models_present", return_value=False), \
+                mock.patch.object(native, "available", fake):
+            _engine(args(), "base.en", "small.en")
+        self.assertLessEqual(seen["timeout"], 15.0)
+
+    def test_naming_the_engine_is_what_builds_it(self):
+        # The other half of the rule. Somebody who typed `--engine native` has asked for
+        # the compile and is willing to wait for it.
+        seen = {}
+
+        def fake(compile_if_missing=True, timeout=60.0):
+            seen["compile"] = compile_if_missing
+            return True, ""
+
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(native, "available", fake):
+            self.assertEqual(_engine(args("native"), "base.en", "small.en")[0],
+                             "native")
+        self.assertTrue(seen["compile"])
+
+    def test_an_unbuilt_helper_says_how_to_build_it(self):
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(Path, "exists", return_value=False):
+            ok, why = native.available(compile_if_missing=False)
+        self.assertFalse(ok)
+        self.assertIn("--engine native", why)
+
+    def test_a_probe_that_hangs_is_named_as_the_dialog_it_is(self):
+        # "probe failed: TimeoutExpired" is true and useless. The fix is a click, and
+        # the sentence should say so.
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(Path, "exists", return_value=True), \
+                mock.patch.object(native, "_run",
+                                  side_effect=subprocess.TimeoutExpired("probe", 10)):
+            ok, why = native.available(timeout=10.0)
+        self.assertFalse(ok)
+        self.assertIn("Speech Recognition", why)
+
+    def test_every_reason_survives_the_console_the_startup_line_prints_to(self):
+        # `say()` writes to a cp437 console on Windows, and these strings reach it
+        # through `_engine`. An em dash here is a launch that dies on its own
+        # explanation — which is exactly how this was found.
+        for reason in ("not built yet", "no Swift toolchain", "probe timed out"):
+            with self.subTest(reason=reason):
+                pass
+        import inspect
+
+        source = inspect.getsource(native)
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or '"' not in line:
+                continue
+            for chunk in line.split('"')[1::2]:
+                with self.subTest(chunk=chunk[:40]):
+                    chunk.encode("cp437")
+
+
 class TestTheModelPresenceCheckNeverDownloads(unittest.TestCase):
     """It is asked *because* the network may be unusable; it must not use it."""
 
