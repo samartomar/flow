@@ -243,6 +243,71 @@ def _work_area(sw: int, sh: int) -> tuple[int, int, int, int]:
 _TK_WORK: tuple | None = None
 
 
+#: How much of the screen an Aqua menu bar can plausibly take. 25 px on an ordinary
+#: display, 38 on a notched one; anything outside this is not a menu bar and the probe
+#: that reported it is measuring something else.
+_AQUA_MENU_MAX = 80
+
+
+def _aqua_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int] | None:
+    """The visible frame on macOS, or None if this build cannot say.
+
+    **The maximise probe does not work here.** `state("zoomed")` on Aqua neither raises
+    nor maximises — a Mac reported it answering with the whole 1352x878 screen, so
+    `_tk_work_area` fell back to the screen, `bottom_centre` stood the pill 24 px above
+    878, and the pill spent its life inside a 69 px Dock. The close-up in the report was
+    a picture of Dock icons.
+
+    `wm maxsize` is the call that knows, and only on this platform: Tk's Aqua port
+    answers it from `[NSScreen visibleFrame]`, which is the screen less the menu bar and
+    the Dock. On Windows the same call answers with the whole screen even with a taskbar
+    present, which is why `_tk_work_area` measures instead of asking — this is the one
+    platform where the shortcut is the *better* instrument, not a lazier one.
+
+    `maxsize` gives a size and no origin, and the height it is missing is split between
+    a menu bar at the top and a Dock at the bottom, which it does not break down. So the
+    origin is measured separately: Aqua will not place a titled window under the menu
+    bar, so where a window asked for `+0+0` actually lands is the top of the usable area.
+    The bottom — the edge that matters, the one the pill stands on — is then
+    `top + height`.
+
+    **Nothing here is trusted without a shape check.** If `maxsize` answers with the
+    whole screen it has told us nothing, and if the `+0+0` probe comes back somewhere a
+    menu bar could not be, it was honoured literally rather than clamped. Either way
+    this returns None and the caller carries on to the maximise probe, so the worst case
+    is exactly today's behaviour rather than a new way to be wrong.
+    """
+    try:
+        mw, mh = win.maxsize()
+    except (tk.TclError, AttributeError, TypeError, ValueError):
+        return None
+    if not (0 < mw <= sw and 0 < mh < sh):
+        return None  # it answered with the whole screen: it does not know either
+
+    top = 0
+    probe = None
+    try:
+        probe = tk.Toplevel(win)
+        probe.attributes("-alpha", 0.0)
+        probe.geometry("200x120+0+0")
+        probe.update_idletasks()
+        landed = probe.winfo_rooty()
+        if 0 <= landed <= _AQUA_MENU_MAX:
+            top = landed
+    except (tk.TclError, AttributeError, ValueError):
+        pass
+    finally:
+        if probe is not None:
+            try:
+                probe.destroy()
+            except tk.TclError:
+                pass
+    if top + mh > sh:
+        # The two measurements disagree about the display. Better to know nothing.
+        return None
+    return 0, top, mw, top + mh
+
+
 def _tk_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int]:
     """The usable area, measured by asking the window manager to maximise something.
 
@@ -259,6 +324,11 @@ def _tk_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int]:
     Checked against `SystemParametersInfoW` on Windows, where the two agree exactly on
     left, right and bottom.
 
+    **macOS is the exception and is handled before any of this**, in `_aqua_work_area`:
+    there the maximise is accepted and ignored, and `wm maxsize` — useless on Windows —
+    is the call that knows where the Dock is. That path returns None unless what it
+    measured has the shape of a real work area, so this measurement stays the fallback.
+
     The probe is transparent while it is measured, so nothing flashes on screen.
 
     **`top` is taken as reported and is a title bar too low.** `winfo_rooty` is the
@@ -271,6 +341,11 @@ def _tk_work_area(win, sw: int, sh: int) -> tuple[int, int, int, int]:
     global _TK_WORK
     if _TK_WORK is not None:
         return _TK_WORK
+    if sys.platform == "darwin":
+        aqua = _aqua_work_area(win, sw, sh)
+        if aqua is not None:
+            _TK_WORK = aqua
+            return aqua
     fallback = (0, 0, sw, sh)
     asked_w, asked_h = 200, 120
     probe = None
