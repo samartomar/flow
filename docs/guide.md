@@ -595,7 +595,7 @@ got and why.
 Before wiring it into anything, you can judge it on your own voice:
 
 ```bash
-swiftc -O -o flow-stt native/flow_stt.swift
+swiftc -O -parse-as-library -o flow-stt native/flow_stt.swift
 ./flow-stt --file some-recording.wav
 ```
 

@@ -116,7 +116,7 @@ jobs:
       # `-warnings-as-errors` because this file is edited by people who cannot run it.
       # A warning here is the only signal that reaches them before a user does.
       - name: compile the macOS decoder
-        run: xcrun swiftc -O -warnings-as-errors -o /tmp/flow-stt native/flow_stt.swift
+        run: xcrun swiftc -O -parse-as-library -warnings-as-errors -o /tmp/flow-stt native/flow_stt.swift
 
       # It links against AVFoundation and Speech, so a binary that builds but cannot
       # resolve a symbol is still a broken helper. Asking it for its usage line proves

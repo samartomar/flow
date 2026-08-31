@@ -551,7 +551,9 @@ class TestWhereThePanelOpens(unittest.TestCase):
         # A repaint is not a place to handle a Win32 failure. `_NoHands` is this
         # module's own idea of "nothing happened", and the fallback has to land
         # somewhere drawable rather than at (0, 0) with no size.
-        with mock.patch.object(ui.ctypes, "windll", ui._NoHands()):
+        # `create=True` because `ctypes.windll` does not exist off Windows at all, and
+        # this test asserts the degradation that matters most *on* those platforms.
+        with mock.patch.object(ui.ctypes, "windll", ui._NoHands(), create=True):
             full, work = ui._pointer_monitor(1280, 720)
         self.assertEqual(full, work)
         self.assertGreater(full[2], full[0])
@@ -711,7 +713,7 @@ class TestAHiddenPanelIsParkedRatherThanUnmapped(unittest.TestCase):
         self.assertGreater(bottom, top)
 
     def test_it_degrades_to_the_screen_rather_than_raising(self):
-        with mock.patch.object(ui.ctypes, "windll", ui._NoHands()):
+        with mock.patch.object(ui.ctypes, "windll", ui._NoHands(), create=True):
             self.assertEqual(ui._virtual_desktop(1280, 720), (0, 0, 1280, 720))
 
     def test_parking_moves_the_window_and_never_unmaps_it(self):

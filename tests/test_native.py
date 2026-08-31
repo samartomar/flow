@@ -167,15 +167,25 @@ class TestTheModelPresenceCheckNeverDownloads(unittest.TestCase):
 
 
 class TestItRefusesOffAMacWithAReason(unittest.TestCase):
+    """Pinned to a non-Mac platform rather than reading the runner's.
+
+    These assert the *refusal*, and on a macOS runner there is nothing to refuse — it
+    would go and build a real binary instead, which is a different test and a slow one.
+    The suite runs on both platforms, so a test that means one thing on Windows and
+    another on macOS is a test that is only half run wherever it passes.
+    """
+
     def test_build_names_the_platform(self):
-        with self.assertRaises(native.NotAvailable) as caught:
-            native.build()
+        with mock.patch.object(sys, "platform", "win32"):
+            with self.assertRaises(native.NotAvailable) as caught:
+                native.build()
         self.assertIn("macOS", str(caught.exception))
 
     def test_available_answers_false_and_why_rather_than_raising(self):
         # `available()` is called during startup. A raise there is a launch that dies
         # over a feature the machine was never going to have.
-        ok, why = native.available()
+        with mock.patch.object(sys, "platform", "win32"):
+            ok, why = native.available()
         self.assertFalse(ok)
         self.assertTrue(why)
 

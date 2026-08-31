@@ -12,7 +12,13 @@
 //  download at all: the models belong to the OS.
 //
 //  Build:
-//      swiftc -O -o flow-stt native/flow_stt.swift
+//      swiftc -O -parse-as-library -o flow-stt native/flow_stt.swift
+//
+//  `-parse-as-library` is not optional and not decoration. A single-file executable is
+//  treated as a script, and `@main` and script mode are mutually exclusive — the
+//  compiler says so in as many words. The alternative was renaming this to `main.swift`
+//  and going back to top-level statements; the flag keeps the file named after what it
+//  is, and every caller that builds it passes the flag (`flow/native.py`, CI, the guide).
 //
 //  Two ways to run it, and the first exists so the second is worth doing:
 //
@@ -163,7 +169,10 @@ func serve(_ rec: SFSpeechRecognizer) {
         guard count > 0, count < 30 * Int(SAMPLE_RATE) * 60 else { return }
         guard let payload = readExactly(input, count * 4) else { return }
         var samples = [Float](repeating: 0, count: count)
-        samples.withUnsafeMutableBytes { dst in
+        // `_ =` because `withUnsafeMutableBytes` hands back whatever the closure
+        // returns, here `copyBytes`' byte count, and this leg builds with
+        // `-warnings-as-errors` so an ignored result is a failure rather than a note.
+        _ = samples.withUnsafeMutableBytes { dst in
             payload.copyBytes(to: dst.bindMemory(to: UInt8.self))
         }
         let line = transcribe(rec, samples).replacingOccurrences(of: "\n", with: " ")

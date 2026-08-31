@@ -82,8 +82,10 @@ def build(force: bool = False) -> Path:
         raise NotAvailable("no Swift toolchain — run: xcode-select --install")
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        built = _run(["xcrun", "swiftc", "-O", "-o", str(BINARY), str(SOURCE)],
-                     BUILD_TIMEOUT_SEC)
+        # `-parse-as-library` is required, not tuning: a single-file executable is
+        # parsed as a script, and `@main` cannot coexist with script mode.
+        built = _run(["xcrun", "swiftc", "-O", "-parse-as-library",
+                      "-o", str(BINARY), str(SOURCE)], BUILD_TIMEOUT_SEC)
     except (OSError, subprocess.SubprocessError) as exc:
         raise NotAvailable(f"build failed: {exc}") from exc
     if built.returncode != 0 or not BINARY.exists():
