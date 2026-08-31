@@ -1,26 +1,34 @@
-"""Which window configuration on Aqua stays visible and still takes a click.
+"""Which window configuration on Aqua is bare, stays up, and still takes a click.
 
-Two faults reported from a Mac, and they are the same fault: click the app you want to
-dictate into and Flow's window disappears, and clicking Send does nothing. That is what a
-borderless `overrideredirect` NSWindow does when its application is no longer frontmost —
-the window server orders it out, and a click on a background app's window is spent
-activating that app rather than pressing what was under the cursor.
+Reported from a Mac: click the app you want to dictate into and Flow's window vanishes,
+and clicking Send does nothing.
 
-macOS has an answer for exactly this and it is what FluidVoice's overlay is: an NSPanel
-with the *nonactivating* style, which floats above other apps and accepts a click without
-taking focus. Tk 9 exposes it as `wm attributes -class` and `-stylemask`, which is how
-Flow's own crash named them — Tk 8.6 refused `-transparentcolor` and listed what this
-build does accept, and those two were in the list.
+**The first run of this probe found the cause, and it was not the one it was written to
+test.** Four variants, two with `overrideredirect` and two without. The two without were
+the two whose buttons a click reached, and the two without were the two still on screen
+after clicking another app. `overrideredirect` on Aqua makes a window both deaf and
+fugitive, and it is the one line Flow uses on every window it owns.
 
-**This probe assumes nothing about their vocabulary.** It asks for a deliberately
-nonsense value first, because Tk answers that with the legal ones. So a run is useful
-even if every guess below is wrong.
+The NSPanel class this was really written to test never applied at all - Tk answered
+`cannot change the class after the mac window is created`, even on a withdrawn window -
+so the panel was never the variable.
+
+That leaves the question `overrideredirect` was there to answer: it is what takes the
+title bar off. Tk's own complaint listed the way out. Asked for a nonsense style bit it
+enumerated the real ones - `titled, closable, miniaturizable, resizable,
+fullsizecontentview, utility, nonactivatingpanel, docmodal` - and a style mask *without*
+`titled` is a window with no title bar that was never made deaf to begin with.
+
+**A title bar is measured here, not looked at.** Ask for a window at a known y; how far
+below that the client area lands is the decoration on it, and zero means bare. Same
+arithmetic `_aqua_work_area` uses to find the menu bar. `winfo_viewable` is not trusted
+for the disappearing - it reported all four windows healthy while two of them were gone
+from the screen - so that one bit is the only thing left worth a human glance.
 
     uv run python scripts/mac_float_probe.py
 
-It prints what it is doing, waits while you click another application, records which
-windows survived that, and then logs which buttons a click actually reached. Paste the
-whole output back — no judgement calls, no photographs.
+Click another application when it says to, note which numbers vanish, then click every
+button. Paste the output.
 """
 
 import sys
@@ -28,11 +36,13 @@ import tkinter as tk
 
 AWAY_SEC = 8
 CLICK_SEC = 25
-W, H = 360, 62
+ASK_Y = 220
+W, H = 420, 58
 
 root = tk.Tk()
 root.withdraw()
-log: list[str] = []
+log: list[int] = []
+decor: dict[int, int] = {}
 
 
 def vocabulary(name: str) -> None:
@@ -51,82 +61,83 @@ for attribute in ("-class", "-stylemask"):
     vocabulary(attribute)
 
 
-def window(n: int, title: str, setup) -> tk.Toplevel:
-    """One variant, built while unmapped because a class cannot be changed after.
+def mask(win, *flags):
+    """A style mask with no `titled` bit is a window with no title bar."""
+    win.wm_attributes("-stylemask", " ".join(flags))
+
+
+def window(n: int, title: str, setup, cls=None) -> tk.Toplevel:
+    """One variant, configured while unmapped, then measured for decoration.
 
     Whatever `setup` raises is printed and the window is still shown - a variant that
-    could not be configured is a *result*, and it should be on screen wearing the reason
-    so that what is seen and what is printed cannot come apart.
+    could not be configured is a *result*, and it belongs on screen wearing its reason so
+    that what is seen and what is printed cannot come apart.
     """
-    win = tk.Toplevel(root)
+    win = tk.Toplevel(root, class_=cls) if cls else tk.Toplevel(root)
     win.withdraw()
     note = "ok"
     try:
         setup(win)
     except tk.TclError as exc:
         note = f"FAILED ({exc})"
-    win.geometry(f"{W}x{H}+40+{40 + n * (H + 16)}")
+    asked = ASK_Y + n * (H + 14)
+    win.geometry(f"{W}x{H}+40+{asked}")
     win.configure(bg="#12141a")
     tk.Label(win, text=f"{n}  {title}", bg="#12141a", fg="#e6e8ee",
-             font=("Helvetica", 12)).pack(side="left", padx=10)
+             font=("Helvetica", 11)).pack(side="left", padx=10)
     tk.Button(win, text=f"click {n}", highlightbackground="#12141a",
-              command=lambda: log.append(f"button {n} was reached")).pack(
-        side="right", padx=10)
+              command=lambda: log.append(n)).pack(side="right", padx=10)
     win.deiconify()
     win.attributes("-topmost", True)
-    print(f"  {n} {title:<44} {note}")
+    win.update_idletasks()
+    decor[n] = win.winfo_rooty() - asked
+    print(f"  {n} {title:<44} title bar {decor[n]:>3} px   {note}")
     return win
 
 
-def panel(win, *flags):
-    win.wm_attributes("-class", "nspanel")
-    if flags:
-        win.wm_attributes("-stylemask", " ".join(flags))
-
-
-print("\nVariants:")
+print("\nVariants (title bar measured, not looked at):")
 made = {
-    1: window(1, "overrideredirect (what Flow does today)",
+    1: window(1, "nothing asked for (the control)", lambda w: None),
+    2: window(2, "overrideredirect (what Flow does today)",
               lambda w: w.overrideredirect(True)),
-    2: window(2, "nspanel, nonactivatingpanel",
-              lambda w: panel(w, "nonactivatingpanel")),
-    3: window(3, "nspanel, nonactivatingpanel + utility",
-              lambda w: panel(w, "nonactivatingpanel", "utility")),
-    4: window(4, "overrideredirect + nspanel, nonactivatingpanel",
-              lambda w: (w.overrideredirect(True), panel(w, "nonactivatingpanel"))),
+    3: window(3, "stylemask {} - no bits at all", lambda w: mask(w)),
+    4: window(4, "stylemask {fullsizecontentview}",
+              lambda w: mask(w, "fullsizecontentview")),
+    5: window(5, "stylemask {} on a Toplevel made as NSPanel",
+              lambda w: mask(w), cls="NSPanel"),
+    6: window(6, "stylemask {nonactivatingpanel} as NSPanel",
+              lambda w: mask(w, "nonactivatingpanel"), cls="NSPanel"),
 }
 
 
 def survey() -> None:
-    """What is still on screen now that this app is not the frontmost one."""
-    print(f"\nAfter {AWAY_SEC}s in the background:")
+    print(f"\nAfter {AWAY_SEC}s in the background, Tk claims:")
     for n, win in made.items():
         try:
-            print(f"  {n}  viewable={bool(win.winfo_viewable())} "
-                  f"mapped={bool(win.winfo_ismapped())} "
-                  f"at ({win.winfo_rootx()}, {win.winfo_rooty()})")
+            print(f"  {n}  viewable={bool(win.winfo_viewable())}")
         except tk.TclError as exc:
             print(f"  {n}  gone ({exc})")
+    print("  (Tk said all four were healthy last time while two were off the screen,\n"
+          "   so please say which numbers you can actually still see.)")
     print(f"\nNow click every button once, in any order. {CLICK_SEC}s.")
     root.after(CLICK_SEC * 1000, finish)
 
 
 def finish() -> None:
-    print("\nButtons a click actually reached:")
+    print("\nResults:")
     for n in made:
-        hit = f"button {n} was reached" in log
-        print(f"  {n}  {'reached' if hit else 'NOTHING GOT THROUGH'}")
-    print("\nThe variant that is both still visible above and reached here is the one "
-          "Flow should\nbe built from. Paste all of this back.")
+        print(f"  {n}  title bar {decor.get(n, -1):>3} px   "
+              f"{'CLICK REACHED IT' if n in log else 'nothing got through'}")
+    print("\nWanted: title bar 0 px, still on screen, and the click reaching it.\n"
+          "Paste all of this back, with which numbers stayed visible.")
     root.destroy()
 
 
 print(f"""
-Four windows are on screen down the left.
+Six windows are on screen down the left.
 
   **Click another application now** - Finder, a browser, anything - and leave Flow in
-  the background. This is the whole test: these windows are meant to survive that, and
-  today's configuration does not.
+  the background. Note which numbers disappear.
 
 Recording in {AWAY_SEC}s.""")
 root.after(AWAY_SEC * 1000, survey)
