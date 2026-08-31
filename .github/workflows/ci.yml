@@ -88,3 +88,46 @@ jobs:
       # does first and no unit test does.
       - name: the entry point starts
         run: uv run flow --help
+
+  # The one part of Flow that is not Python, on the only runner that can compile it.
+  #
+  # `native/flow_stt.swift` is the macOS on-device decoder — the answer for machines that
+  # cannot reach huggingface.co, where faster-whisper's weights are the only official
+  # copy. It is written on Windows, where there is no Swift toolchain, so without this
+  # leg the compiler is a person on a laptop pasting errors back. The first version was
+  # exactly that and shipped with a hard one in it: Swift allows top-level statements
+  # only in a file called `main.swift`, and this is not one.
+  #
+  # Compile only, and that is the honest limit of what CI can say here. Actually
+  # *running* it needs a granted Speech Recognition permission and an on-device model
+  # that only arrives when a human enables Dictation — neither of which a headless runner
+  # has, and faking them would make this leg green about something it never checked.
+  # `--probe` would exit 2 on the runner for exactly that reason, which is the right
+  # answer and a useless test.
+  helper:
+    name: swift helper compiles
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: swiftc version
+        run: xcrun swiftc --version
+
+      # `-warnings-as-errors` because this file is edited by people who cannot run it.
+      # A warning here is the only signal that reaches them before a user does.
+      - name: compile the macOS decoder
+        run: xcrun swiftc -O -warnings-as-errors -o /tmp/flow-stt native/flow_stt.swift
+
+      # It links against AVFoundation and Speech, so a binary that builds but cannot
+      # resolve a symbol is still a broken helper. Asking it for its usage line proves
+      # the dynamic linker is satisfied without needing a microphone or a permission.
+      - name: it links and runs far enough to refuse
+        run: |
+          set +e
+          out=$(/tmp/flow-stt --nonsense 2>&1)
+          code=$?
+          echo "$out"
+          # 1 is `die("usage: ...")`. Anything else — a link failure, a crash, or a
+          # silent success on an argument that is not valid — is a broken build.
+          if [ "$code" -ne 1 ]; then echo "expected exit 1, got $code"; exit 1; fi
+          case "$out" in *usage*) ;; *) echo "expected a usage line"; exit 1 ;; esac
