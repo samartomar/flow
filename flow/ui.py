@@ -1642,6 +1642,10 @@ class Pill(tk.Tk):
     #: reason `lite` is: a fixture built with `__new__` must not recurse into `self.tk`.
     _hidden = False
     _tray = None
+    #: Where the window was when it was hidden, as (x, foot). Restored on the way back,
+    #: because somebody who dragged Flow to the left of their screen did not ask for it
+    #: to reappear in the middle.
+    _home = None
     #: Same reason again, for `_draw`'s motion state (§07): a bare fixture draws the
     #: resting frame these describe — not hovered, not mid-collapse, opacity untouched.
     _pointer_in = False
@@ -3118,6 +3122,9 @@ class Pill(tk.Tk):
             self._flash = FLASH_FRAMES
             self.front.note("the notification area would not take an icon")
             return False
+        # Where it was, as (x, foot) — the foot rather than the top, because that is
+        # the edge the shell is anchored by and the one a reopened panel measures from.
+        self._home = (self.x, self.y + self._shell_h)
         self._hidden = True
         park(self)
         return True
@@ -3131,6 +3138,9 @@ class Pill(tk.Tk):
         if not self._hidden:
             return
         self._hidden = False
+        if self._home is not None:
+            x, foot = self._home
+            self.x, self.y = x, foot - self._shell_h
         self._sync_shell()
         self.deiconify()
         self.lift()
@@ -3223,6 +3233,17 @@ class Pill(tk.Tk):
         finally:
             if self._alive:
                 self.after(30, self._tick)
+
+    @property
+    def width(self) -> int:
+        """This window's width, under the name `park` and the panels both use.
+
+        The pill had no `width` while the panels did, so `park(self)` — the call that
+        hides this window — reached `tk.Misc.__getattr__` and went looking for a Tcl
+        command. "Hide to tray" did nothing at all, twice over: this, and a `_sync_shell`
+        that put the window straight back.
+        """
+        return self.pill_w
 
     def band_h(self) -> int:
         """How tall the panel band is: `PANEL_H`, unless the desktop is smaller.
@@ -3755,13 +3776,27 @@ class Pill(tk.Tk):
         # here made the shell 224 px tall around a 130 px band and left the row floating
         # 54 px below it — which the shots caught immediately, because a detached row is
         # exactly the two-boxes look this window was merged to end.
+        # Parked, with an icon standing in for it. Re-asserting geometry here is what
+        # dragged it straight back on screen the moment it was hidden — the frame pump
+        # runs thirty times a second and this used to win every one of them.
+        if self._hidden:
+            return
         front = self.front
         band = min(self.band_h(), max(0, int(getattr(front, "_h", 0) or 0)))             if getattr(front, "_visible", False) else 0
         h = PILL_H + band
         w = self.pill_w
         left, top, right, bottom = self.work
-        foot = self._placed(w)[1] + PILL_H  # where the pill row's bottom edge belongs
-        x = max(left, min(self._placed(w)[0], right - w))
+        # **Where it is, not where it belongs.** This asked `_placed` for both, on every
+        # frame, which meant a drag was undone before the hand had left the mouse: the
+        # pill snapped back to centre and could not be moved at all. `_sync_dock` never
+        # had the fault because it only recomputed x when the *width* changed, which was
+        # rare; recomputing unconditionally is what the merge introduced.
+        #
+        # `_placed` is still the answer at startup and whenever the pointer changes
+        # monitor — `_sync_monitor` asks it there, which is the one place a reposition is
+        # actually wanted.
+        foot = self.y + self._shell_h
+        x = max(left, min(self.x, right - w))
         y = max(top + EDGE_AIR, min(foot - h, bottom - h))
         if (self.x, self.y, self._shell_h) != (x, y, h):
             self.x, self.y, self._shell_h = x, y, h

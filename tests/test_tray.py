@@ -30,6 +30,11 @@ def pill(**kw):
     p.session = mock.Mock(mode=ui.DICTATE)
     p.bubble = mock.Mock()
     p.card = mock.Mock()
+    # Real ints: hiding remembers where the window was, and `tk.Misc.__getattr__` turns
+    # a missing one into a Tcl lookup rather than an AttributeError.
+    p.x, p.y = 430, 608
+    p._shell_h = ui.PILL_H
+    p._home = None
     p._tray_events = queue.Queue()
     p._tray = None
     p._hidden = False
@@ -196,3 +201,59 @@ class TestTheModule(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+class TestItComesBackWhereYouLeftIt(unittest.TestCase):
+    """Somebody who dragged Flow to the left of their screen did not ask for it to
+    reappear in the middle."""
+
+    def hidden(self):
+        p = pill(x=40, y=600)
+        icon = mock.Mock(**{"start.return_value": True})
+        with mock.patch.object(tray, "available", return_value=True),                 mock.patch.object(tray, "Tray", return_value=icon),                 mock.patch.object(ui, "park"):
+            p.hide_to_tray()
+        return p
+
+    def test_the_position_is_remembered_across_the_hide(self):
+        p = self.hidden()
+        self.assertEqual(p._home, (40, 600 + ui.PILL_H))
+
+    def test_and_restored_on_the_way_back(self):
+        p = self.hidden()
+        p.x, p.y = 9999, 9999          # where `park` left it
+        p.show_from_tray()
+        self.assertEqual((p.x, p.y), (40, 600))
+
+    def test_the_foot_is_what_is_remembered_not_the_top(self):
+        # The shell is anchored by its bottom edge, so a panel that was open when it was
+        # hidden — and closed by the time it comes back — must not move the controls.
+        p = pill(x=40, y=500, _shell_h=ui.PILL_H + 140)
+        icon = mock.Mock(**{"start.return_value": True})
+        with mock.patch.object(tray, "available", return_value=True),                 mock.patch.object(tray, "Tray", return_value=icon),                 mock.patch.object(ui, "park"):
+            p.hide_to_tray()
+        foot = 500 + ui.PILL_H + 140
+        p._shell_h = ui.PILL_H
+        p.show_from_tray()
+        self.assertEqual(p.y + p._shell_h, foot)
+
+
+class TestTheFramePumpLeavesAHiddenWindowAlone(unittest.TestCase):
+    """The second half of why "Hide to tray" did nothing.
+
+    `_sync_shell` re-asserts the window's geometry, and it runs thirty times a second. It
+    used to win every one of them, so a parked window was back on screen before the next
+    frame had drawn.
+    """
+
+    def test_sync_shell_returns_immediately_while_hidden(self):
+        p = pill(_hidden=True)
+        p.geometry = mock.Mock()
+        p.canvas = mock.Mock()
+        ui.Pill._sync_shell(p)
+        p.geometry.assert_not_called()
+
+    def test_the_pill_has_a_width_under_the_name_park_uses(self):
+        # `park(self)` reads `win.width`. The panels had one and the pill did not, so the
+        # call went to `tk.Misc.__getattr__` and looked for a Tcl command.
+        p = pill()
+        self.assertEqual(p.width, ui.BUBBLE_W)
+
