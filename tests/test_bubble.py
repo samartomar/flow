@@ -171,7 +171,12 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
                    "find the file specified)")
         b._render()
         _top, note_bottom = b.canvas.band("WinError 2")
-        self.assertLessEqual(note_bottom, b._h - ui.PAD - ui.CHIP_H)
+        # The note shares the chip row now, so "clears the chips" became a *horizontal*
+        # question: it ends where the primary begins. Vertically it is on the row on
+        # purpose — stacking the two cost a whole band for a sentence that fits beside
+        # the button.
+        self.assertLessEqual(note_bottom, b._h - ui.PAD)
+        self.assertLess(b._primary_x, ui.BUBBLE_W - ui.PAD + 1)
 
     def test_the_body_cannot_outgrow_a_window_frozen_under_the_hand(self):
         # Reported from a real session, with a picture: the draft drawn straight

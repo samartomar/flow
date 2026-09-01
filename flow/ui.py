@@ -1198,6 +1198,10 @@ PANEL_MIN_H = 96
 #: band now steps by it.
 BODY_LINE_H = 17
 
+#: What one line of `FONT_NOTE` measures. The note shares the chip row now, so this is
+#: what decides where its baseline sits in a 26 px chip and how much a second line costs.
+NOTE_LINE_H = 14
+
 #: The live partial's own ceiling, and it needs one for the same reason the draft does:
 #: it is wrapped to the full body column, so it is a multi-line block whose length nobody
 #: chose. Five lines at the 14 px `FONT_NOTE` measures.
@@ -1864,6 +1868,22 @@ def _glyph_new(c, x, y, colour, tags) -> None:
     c.create_line(x + 8, y + 5, x + 8, y + 9, fill=colour, width=2, tags=tags)
     c.create_line(x + 6, y + 7, x + 10, y + 7, fill=colour, width=2, tags=tags)
 
+
+#: One hue per command, the four from the design canvas: `oklch(0.80 0.12 H)` at 85,
+#: 200, 340 and 130. Shipped grey first, on a rule I invented — colour for settings, grey
+#: for actions — and the reply was to point at the canvas: "This is what you build this is
+#: what you promise". Fair. A design agreed and then quietly narrowed is worse than one
+#: never shown.
+COMMAND_COLOURS = {
+    "Refine": "#E1B75C",
+    "Continue": "#43D5DC",
+    "Edit": "#F19FD6",
+    "Was a command": "#A4CD79",
+    "Cancel": "#F19FD6",
+    "Use this": "#43D5DC",
+    "Copy": "#E1B75C",
+    "New conversation": "#A4CD79",
+}
 
 #: Key -> glyph. A command with no entry here keeps its word, which is the honest
 #: fallback: a mark nobody can read is worse than a label that is merely longer.
@@ -5206,7 +5226,8 @@ class ConversationCard(tk.Frame):
                 _round_rect(c, x2 - COMMAND_H, PAD, x2, PAD + COMMAND_H,
                             COMMAND_H // 2, fill=CHIP, outline="", tags=(tag, "chips"))
                 glyph(c, x2 - COMMAND_H + (COMMAND_H - ICON_SIZE) / 2,
-                      PAD + (COMMAND_H - ICON_SIZE) / 2, CODE, (tag, "chips"))
+                      PAD + (COMMAND_H - ICON_SIZE) / 2,
+                      COMMAND_COLOURS.get(key, CODE), (tag, "chips"))
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
         key, label, cmd = specs[0]  # Ask, and it is always first
@@ -5260,6 +5281,10 @@ class Bubble(tk.Frame):
     #: quietly run every Lite branch in tests that are about the full body. Same class-
     #: attribute default as `Pill.lite`, and for the same `__getattr__` reason.
     lite = False
+
+    #: Where the primary chip starts, so the note can end before it — they share a row.
+    #: The default is the right edge, which is what an empty row means.
+    _primary_x = BUBBLE_W - PAD
 
     #: Declared on the class as well as assigned in `__init__`, for the reason `lite` is:
     #: `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on an
@@ -5847,7 +5872,9 @@ class Bubble(tk.Frame):
         # under it: two items sharing a row have to agree who owns which half, and the
         # one that can wrap is the one that should be told.
         undo_w = UNDO_W if self._note_undo else 0
-        note_w = BUBBLE_W - 2 * PAD - (undo_w + 8 if undo_w else 0)
+        # Ends where the primary chip begins, because they share a row now.
+        note_right = getattr(self, "_primary_x", BUBBLE_W - PAD) - CHIP_GAP
+        note_w = max(60, note_right - PAD - (undo_w + 8 if undo_w else 0))
         note_h = self._probe_h(self._note, FONT_NOTE, note_w) if self._note else 0
         # Measured for the same reason and never was — see `_partial_slot`. `shown_partial`
         # is what gets drawn below, so the number the window is sized by and the text it is
@@ -5873,7 +5900,10 @@ class Bubble(tk.Frame):
         # about would be a strip drawn over the first line of the draft.
         # `COMMAND_BAND` joined the furniture when the secondaries moved to the corner.
         # A band the height did not know about is a band drawn over the first line.
-        around = 74 + COMMAND_BAND + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
+        # A one-line note is free: it sits *on* the chip row rather than above it, so
+        # only the lines past the first cost the panel anything.
+        around = (74 + COMMAND_BAND + BODY_ELIDED_H
+                  + (max(0, note_h - NOTE_LINE_H) + 4 if note_h else 0))
         if partial_h:
             around += partial_h + PARTIAL_GAP
         if self._sent:
@@ -5998,7 +6028,12 @@ class Bubble(tk.Frame):
             # `_lay_out`'s `PAD + CHIP_H` were two numbers that had to agree and nothing
             # made them. `sw` is what makes a second line grow up into the space the
             # measurement above just reserved, instead of down onto the chips.
-            note_baseline = self._h - PAD - CHIP_H - 4
+            # On the chip row, not above it. The design put the note and Send on one
+            # line — "This is what you build this is what you promise" — and stacking
+            # them cost a whole band for a sentence that fits beside the button.
+            # Centred on the row: its bottom is half the difference between the chip's
+            # height and a line of note text.
+            note_baseline = self._h - PAD - (CHIP_H - NOTE_LINE_H) / 2
             c.create_text(
                 PAD, note_baseline, anchor="sw", text=self._note,
                 fill=MUTED, font=FONT_NOTE, width=note_w, tags="body")
@@ -6009,7 +6044,7 @@ class Bubble(tk.Frame):
                 # this one has none, but going through it keeps one rule for one job.
                 tag = chip_tag(UNDO_LABEL)
                 c.create_text(
-                    BUBBLE_W - PAD, note_baseline, anchor="se", text=UNDO_LABEL,
+                    note_right, note_baseline, anchor="se", text=UNDO_LABEL,
                     fill=CODE, font=FONT_NOTE, tags=(tag, "body"))
                 c.tag_bind(tag, "<Button-1>", lambda _e: self._undo_edit())
 
@@ -6101,6 +6136,11 @@ class Bubble(tk.Frame):
         # Waiting on the CLI dims the row rather than hiding it — same geometry, same
         # hit regions, just not the thing to reach for while nothing here can act yet.
         dim = bool(self._act is not None and self._act.waiting)
+        # Published before the early return, because the note shares this row now and has
+        # to know where it ends — and a frame that skips the rebuild still draws the note.
+        primary = next((s for s in specs if s[0] in self.PRIMARY_KEYS), None)
+        self._primary_x = (BUBBLE_W - PAD - chip_w(primary[0], primary[1])
+                           if primary else BUBBLE_W - PAD)
         key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent, dim)
         if key_now == self._chips_drawn or (self._frozen() and self._chips_drawn):
             return
@@ -6145,7 +6185,8 @@ class Bubble(tk.Frame):
                             fill=CHIP, outline="", tags=(tag, "chips"))
                 glyph(c, x2 - COMMAND_H + (COMMAND_H - ICON_SIZE) / 2,
                       y1 + (COMMAND_H - ICON_SIZE) / 2,
-                      DISABLED if dim else CODE, (tag, "chips"))
+                      DISABLED if dim else COMMAND_COLOURS.get(key, CODE),
+                      (tag, "chips"))
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
         # -- the primary, alone at the foot, exactly where it always was ---------------

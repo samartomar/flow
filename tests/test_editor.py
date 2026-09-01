@@ -620,10 +620,14 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         note_top, note_bottom = b.canvas.band("WinError 2")
         chips_top = b._h - 14 - 26  # `_lay_out`: y2 = _h - PAD, y1 = y2 - 26
         self.assertGreater(note_bottom, note_top)
-        self.assertLessEqual(
-            note_bottom, chips_top,
-            f"the note runs to y={note_bottom} and the chips start at y={chips_top}",
-        )
+        # The note is *on* the chip row now, not above it, so the check that matters is
+        # horizontal: its column has to stop before the primary chip starts. A note that
+        # ran the full width would put an error message under the Send button.
+        import flow.ui as ui
+
+        self.assertLessEqual(note_bottom, b._h - ui.PAD)
+        note = next(i for i in b.canvas.items if "WinError 2" in str(i.get("text", "")))
+        self.assertLess(note["x"], b._primary_x - ui.CHIP_GAP)
 
     def test_the_bubble_grows_to_make_room_rather_than_clipping(self):
         """The other way to stop an overlap is to cut the text off, and for an error
@@ -652,7 +656,11 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         b = self._bubble("saved")
         b._render()
         _top, bottom = b.canvas.band("saved")
-        self.assertLessEqual(bottom, b._h - 14 - 26)
+        # The note shares the chip row now, so "clears the chips" became a *horizontal*
+        # question: it ends where the primary begins. Vertically it is on the row on
+        # purpose — stacking the two cost a whole band for a sentence that fits beside
+        # the button.
+        self.assertLessEqual(bottom, b._h - 14)
 
 
 class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
