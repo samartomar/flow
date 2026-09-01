@@ -1122,6 +1122,35 @@ APP_SLOT_GAP = 10
 #: and ten characters of it measure under 60.
 APP_NAME_CHARS = 10
 
+#: The shell's corner radius.
+#:
+#: 8 px until somebody looked at it beside the thing it is modelled on and said "the
+#: window currently it's square box". They were right: at 420x224 an 8 px corner is a
+#: rounded rectangle in name only, and FluidVoice's overlay — the reference this surface
+#: has been chasing all along — is visibly a soft-cornered slab.
+#:
+#: `PAD` stayed at 14, which was worth checking rather than assuming: at this radius the
+#: curve only bites the first ~5 px of each edge, and the body's first line and the row's
+#: app name both start below and right of that. The mock-up moved padding to 16 because
+#: its corner is drawn by CSS on the frame itself; here the chrome is drawn *inside* the
+#: canvas and the arc never reaches the text.
+PANEL_R = 18
+
+#: One hue per row icon, all at the same chroma and lightness in oklch so no control
+#: shouts louder than another: `oklch(0.80 0.12 H)` at 85, 200 and 340.
+#:
+#: **Deliberately clear of every hue that already means something here.** Green is
+#: capturing, blue is waiting, violet is the conversation card and red is an error — a
+#: settings gear in Flow's green would read as "listening", which is the one thing a
+#: control must never do. So the three sit in gaps the state palette does not use.
+#:
+#: The mic and the meter beside them stay on `accent`, because those two *are* the state
+#: readout. Colour on the row means "this is a control"; colour on the meter means "this
+#: is what Flow is doing".
+ICON_SETTINGS = "#E1B75C"  # gold
+ICON_VOICE = "#43D5DC"     # cyan
+ICON_MODE = "#F19FD6"      # pink
+
 #: Room for the three icons that sit between the meter and the status word: settings,
 #: voice, mode.
 #:
@@ -1626,22 +1655,49 @@ def app_label(process: str) -> str:
     return stem
 
 
+#: The gear's three radii, as fractions of `ICON_SIZE`: the tooth tip, the body it sits
+#: on, and the hole in the middle.
+_GEAR_TIP, _GEAR_BODY, _GEAR_HUB = 0.47, 0.34, 0.14
+
+#: Half a tooth, in radians, at the body and at the tip. Narrower at the tip is what
+#: makes a tooth a tooth rather than a spoke.
+_GEAR_WIDE, _GEAR_NARROW = 0.21, 0.13
+
+
 def _gear(c: tk.Canvas, cx: float, cy: float, colour: str, tags) -> None:
     """A settings gear, drawn rather than fonted.
 
     Same reasoning as the mic glyph beside it: a font that is missing, substituted or
     scaled differently turns a control into a box, and the one thing every control on
-    this row has to be is recognisable. Eight teeth as short radial spokes, because at
-    sixteen pixels a toothed outline reads as a smudge and spokes read as a gear.
+    this row has to be is recognisable.
+
+    **The first version was spokes on a ring and it read as a sun.** Eight lines poking
+    out of a circle is what an asterisk looks like; a gear is a solid body with
+    *trapezoidal* teeth and a hole through the middle, and at sixteen pixels the hole is
+    what carries it. So: eight tapered quads on a filled disc, then the hub punched back
+    out in `SHELL`. Nothing here composites — the canvas has no alpha — so punching a
+    hole means drawing the background colour over the middle, which is exact as long as
+    the row's fill is the one behind it.
     """
-    r = ICON_SIZE / 2
+    size = ICON_SIZE
     for i in range(8):
         a = math.pi * i / 4
-        c.create_line(cx + math.cos(a) * (r - 4), cy + math.sin(a) * (r - 4),
-                      cx + math.cos(a) * r, cy + math.sin(a) * r,
-                      fill=colour, width=2, tags=tags)
-    c.create_oval(cx - r + 3, cy - r + 3, cx + r - 3, cy + r - 3,
-                  outline=colour, width=2, tags=tags)
+        corners = []
+        for radius, half in ((_GEAR_BODY, _GEAR_WIDE), (_GEAR_TIP, _GEAR_NARROW)):
+            for side in (-1, 1):
+                angle = a + side * half
+                corners.append((cx + math.cos(angle) * radius * size,
+                                cy + math.sin(angle) * radius * size))
+        # body-left, body-right, tip-right, tip-left: a quad walked in order, so the
+        # tooth is a trapezoid rather than a bow tie.
+        c.create_polygon(*corners[0], *corners[1], *corners[3], *corners[2],
+                         fill=colour, outline=colour, tags=tags)
+    body = _GEAR_BODY * size
+    c.create_oval(cx - body, cy - body, cx + body, cy + body,
+                  fill=colour, outline=colour, tags=tags)
+    hub = _GEAR_HUB * size
+    c.create_oval(cx - hub, cy - hub, cx + hub, cy + hub,
+                  fill=SHELL, outline=SHELL, tags=tags)
 
 
 def _speaker(c: tk.Canvas, cx: float, cy: float, colour: str, muted: bool, tags) -> None:
@@ -1705,17 +1761,17 @@ def _row_icons(c: tk.Canvas, pill, x: float, mid: float, tags="row") -> float:
     def hit(tag: str, command) -> None:
         c.tag_bind(tag, "<Button-1>", lambda _e: command())
 
-    _gear(c, x + ICON_SIZE / 2, mid, MUTED, ("row-gear", tags))
+    _gear(c, x + ICON_SIZE / 2, mid, ICON_SETTINGS, ("row-gear", tags))
     hit("row-gear", getattr(pill, "open_settings", lambda: None))
     x += ICON_SIZE + ICON_GAP
 
     if getattr(session, "speaker", None) is not None:
-        _speaker(c, x + ICON_SIZE / 2, mid, MUTED,
+        _speaker(c, x + ICON_SIZE / 2, mid, ICON_VOICE,
                  bool(getattr(session, "muted", False)), ("row-voice", tags))
         hit("row-voice", getattr(session, "toggle_speech", lambda: None))
         x += ICON_SIZE + ICON_GAP
 
-    _mode_glyph(c, x + ICON_SIZE / 2, mid, MUTED, converse, ("row-mode", tags))
+    _mode_glyph(c, x + ICON_SIZE / 2, mid, ICON_MODE, converse, ("row-mode", tags))
     hit("row-mode", getattr(session, "toggle_mode", lambda: None))
     return x + ICON_SIZE + ICON_GAP
 
@@ -4096,7 +4152,7 @@ class Pill(tk.Tk):
             # could end up on either side of the pill when there was no room above. There
             # is one window now and the band is always the top of it, so the answer is a
             # constant and the flag that carried it is gone.
-            radius = (0, 0, 8, 8)
+            radius = (0, 0, PANEL_R, PANEL_R)
             # The row is the lower surface, so it draws nothing on the join — the band's
             # bottom carries the single line.
             seam = "top"
@@ -4899,7 +4955,7 @@ class ConversationCard(tk.Frame):
         # side — `reposition` is what decides above-vs-below, since it already has to.
         # Always the top band of the one window now: rounded head, squared foot on the
         # join it shares with the pill row below it.
-        corners = (8, 8, 0, 0)
+        corners = (PANEL_R, PANEL_R, 0, 0)
         _panel_chrome(c, CARD_W, self._h, corners, self.ring_color,
                       seam="bottom")
 
@@ -5716,7 +5772,7 @@ class Bubble(tk.Frame):
         # side — `reposition` is what decides above-vs-below, since it already has to.
         # Always the top band of the one window now: rounded head, squared foot on the
         # join it shares with the pill row below it.
-        corners = (8, 8, 0, 0)
+        corners = (PANEL_R, PANEL_R, 0, 0)
         _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color,
                       seam="bottom")
         y = PAD
