@@ -889,8 +889,9 @@ The clipboard is restored about 0.6 s after the paste, so Flow does not permanen
 Three marks sit between the meter and the status word, so the settings that matter
 mid-task do not cost a right-click:
 
-**⚙** opens the settings menu — the same one the right-click builds, not a second copy of
-it.
+**⚙** opens the settings list itself — the same entries the right-click builds, not a
+second copy of them, and without the `Settings` cascade in front of them. A shortcut
+that costs an extra hover is not a shortcut.
 
 **🔊** toggles spoken replies, and wears a slash when they are muted. It is absent when
 nothing can speak (`--no-speak`, or no voice engine), because an icon that toggles

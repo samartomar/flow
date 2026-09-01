@@ -2485,6 +2485,20 @@ class Pill(tk.Tk):
         invites options to be added to it.
         """
         sub = _dark_menu(parent)
+        self._settings_items(sub)
+        parent.add_cascade(label="Settings", menu=sub)
+
+    def _settings_items(self, sub: tk.Menu) -> None:
+        """Everything under Settings, filled into a menu somebody else owns.
+
+        Split out from `_settings_menu` so the gear on the row can post *this* rather
+        than a menu whose only entry is a `Settings` cascade — which is what it did, and
+        what the owner saw: "Remove the layer settings as clicking on icon it can open
+        directly". A shortcut that costs an extra hover is not a shortcut.
+
+        The right-click still gets the cascade, because there it sits among Mode, Draft
+        and Help and has to be one of them.
+        """
         self._gesture_menu(sub)
         self._trigger_menu(sub)
         self._panel_menu(sub)
@@ -2534,7 +2548,6 @@ class Pill(tk.Tk):
                 command=self.session.toggle_auto_ask,
             )
         sub.add_command(label="Open settings folder", command=self._open_settings)
-        parent.add_cascade(label="Settings", menu=sub)
 
     def _trigger_menu(self, parent: tk.Menu) -> None:
         """The word that presses Send, as a list rather than a text box.
@@ -2611,12 +2624,12 @@ class Pill(tk.Tk):
     def open_settings(self) -> None:
         """Post the settings menu on its own, from the gear on the row.
 
-        The same menu the right-click builds, not a second one: everything in it is a
+        The same items the right-click builds, not a second set: everything in them is a
         dispatcher onto the session or the profile, and two of anything is two things to
-        keep in step. The gear is a shortcut to it, which is the whole of what was asked
-        for — "on click on just open settings menu and all good".
+        keep in step. What the gear skips is the *cascade* — posting `_settings_menu`
+        gave a menu whose only row was `Settings >`, so the shortcut cost an extra hover.
         """
-        self._popup_menu(self._settings_menu)
+        self._popup_menu(self._settings_items)
 
     def _popup_menu(self, build) -> None:
         """Post one of the settings submenus on its own, under the pointer.
@@ -2637,12 +2650,6 @@ class Pill(tk.Tk):
             parent.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
         finally:
             parent.grab_release()
-
-    def _menu_workspace(self) -> None:
-        self._popup_menu(self._workspace_menu)
-
-    def _menu_voice(self) -> None:
-        self._popup_menu(self._voice_menu)
 
     def _workspace_menu(self, parent: tk.Menu) -> None:
         """Where questions are asked from, as a list of places already chosen.

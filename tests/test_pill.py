@@ -1348,11 +1348,24 @@ class TestTheRowIcons(unittest.TestCase):
         return drawn
 
     def test_the_gear_opens_the_settings_menu(self):
-        # The same menu the right-click builds, not a second one: everything in it is a
-        # dispatcher onto the session or the profile.
+        # The same items the right-click builds, not a second set: everything in them is
+        # a dispatcher onto the session or the profile.
         c, p, _x = self.row()
         self.fire(c, "row-gear")
         p.open_settings.assert_called_once()
+
+    def test_the_gear_posts_the_items_and_not_a_settings_cascade(self):
+        """A shortcut that costs an extra hover is not a shortcut.
+
+        `open_settings` posted `_settings_menu`, which *adds a cascade* to whatever it is
+        given — so the gear opened a menu whose only row was `Settings >`, and the whole
+        list was one hover further away than the right-click had it.
+        """
+        p = ui.Pill.__new__(ui.Pill)
+        posted = []
+        p._popup_menu = posted.append
+        ui.Pill.open_settings(p)
+        self.assertEqual(posted, [p._settings_items])
 
     def test_the_mode_glyph_switches_the_mode(self):
         c, p, _x = self.row()
