@@ -948,6 +948,16 @@ did not synthesise keystrokes at all.
 `enter boom` works the same way — the Return is sent as a key code rather than a typed
 character, in the same script as the paste so nothing can come forward between them.
 
+**Flow never presses Return for you in a terminal.** A draft ending in a newline does not
+paste into a shell, it *runs* — so the trailing newline is stripped whenever the frontmost
+app is a terminal, exactly as it is on Windows. The app is identified by its bundle id,
+with a fallback on any process name containing "term", because a terminal missed by both
+costs the guarantee.
+
+Multiple lines into a terminal print a warning naming it. Windows *refuses* that paste,
+on a measured list of which terminals implement bracketed paste; nothing has measured a
+macOS terminal, so this says what might happen rather than acting on a guess.
+
 ### Sending it without touching anything
 
 Two words press Send, so the last step of the loop does not need the mouse:

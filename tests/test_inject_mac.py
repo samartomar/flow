@@ -21,9 +21,10 @@ import flow.inject_mac as inject_mac
 class Ran:
     """Records the child processes `paste` would start, and answers for them."""
 
-    def __init__(self, front="TextEdit", clipboard="old text", fail=None, reason=""):
+    def __init__(self, front="TextEdit", clipboard="old text", fail=None, reason="",
+                 bundle="com.apple.TextEdit"):
         self.calls: list[tuple[list[str], str | None]] = []
-        self.front, self.clipboard = front, clipboard
+        self.front, self.clipboard, self.bundle = front, clipboard, bundle
         self.fail, self.reason = fail, reason
 
     def __call__(self, argv, stdin=None):
@@ -34,7 +35,7 @@ class Ran:
         if tool == "pbpaste":
             return True, self.clipboard
         if tool == "osascript" and "frontmost" in argv[-1]:
-            return True, self.front
+            return True, f"{self.front}|{self.bundle}"
         return True, ""
 
     @property
@@ -226,3 +227,93 @@ class TheStartupLine(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+class TestATerminalNeverRunsWhatWasDictated(unittest.TestCase):
+    """The guard `inject.py` has had since 2026-08-03, on the platform that had none.
+
+    A draft ending in a newline does not paste into a shell — it *runs*. Windows resolves
+    its target and strips that newline; `inject_mac` aimed at whatever was frontmost and
+    pasted it verbatim, so somebody dictating into a Mac terminal could have their words
+    execute. It was live for as long as the paste path was.
+    """
+
+    def setUp(self):
+        inject_mac.take_warnings()
+        self.addCleanup(inject_mac.take_warnings)
+
+    def test_a_trailing_newline_is_stripped_for_a_terminal(self):
+        payload, _why = inject_mac.prepare("ls -la\n", "Terminal", "com.apple.Terminal")
+        self.assertEqual(payload, "ls -la")
+
+    def test_and_kept_everywhere_else(self):
+        # Stripping it in an editor would be Flow editing a draft to fit a guess.
+        payload, _why = inject_mac.prepare("hello\n", "Notes", "com.apple.Notes")
+        self.assertEqual(payload, "hello\n")
+
+    def test_every_shipped_identifier_is_recognised(self):
+        for bundle in inject_mac.TERMINAL_IDS:
+            with self.subTest(bundle=bundle):
+                self.assertTrue(inject_mac.is_terminal("", bundle))
+
+    def test_a_terminal_not_on_the_list_is_still_caught_by_name(self):
+        """The fallback, and the asymmetry that earns it: a list too eager costs a
+        trailing newline somebody has to press Return for, and one too shy costs a line
+        that runs."""
+        self.assertTrue(inject_mac.is_terminal("Some New Term", "com.unknown.thing"))
+        self.assertFalse(inject_mac.is_terminal("Notes", "com.apple.Notes"))
+
+    def test_multiple_lines_into_a_terminal_are_reported(self):
+        # Warned rather than refused: Windows refuses on a *measured* list of which
+        # terminals bracket pastes, and nothing here has measured a single macOS one.
+        _payload, why = inject_mac.prepare("a\nb\n", "iTerm2", "com.googlecode.iterm2")
+        self.assertIn("iTerm2", why)
+        self.assertIn("each line", why)
+
+    def test_one_line_into_a_terminal_says_nothing(self):
+        _payload, why = inject_mac.prepare("ls\n", "Terminal", "com.apple.Terminal")
+        self.assertEqual(why, "")
+
+    def test_the_paste_uses_the_stripped_payload(self):
+        ran = Ran(front="Terminal", bundle="com.apple.Terminal")
+        with mock.patch.object(inject_mac, "_run", ran), \
+                mock.patch.object(inject_mac, "_restore_later"):
+            self.assertTrue(inject_mac.paste("ls -la\n"))
+        self.assertEqual(ran.copied(), ["ls -la"])
+
+    def test_and_the_hazard_reaches_the_user(self):
+        ran = Ran(front="Terminal", bundle="com.apple.Terminal")
+        with mock.patch.object(inject_mac, "_run", ran), \
+                mock.patch.object(inject_mac, "_restore_later"):
+            inject_mac.paste("one\ntwo\n")
+        self.assertTrue([w for w in inject_mac.take_warnings() if "each line" in w])
+
+    def test_a_draft_that_was_only_a_newline_is_not_pasted(self):
+        # Stripped to nothing is nothing to send, and an empty clipboard write followed
+        # by a Cmd-V would paste whatever was there before.
+        ran = Ran(front="Terminal", bundle="com.apple.Terminal")
+        with mock.patch.object(inject_mac, "_run", ran):
+            self.assertFalse(inject_mac.paste("\n"))
+        self.assertEqual(ran.copied(), [])
+
+
+class TestTheFrontmostQuery(unittest.TestCase):
+    def test_it_asks_once_for_both_facts(self):
+        # Each osascript is a process launch and this one is on the path of every send.
+        ran = Ran()
+        with mock.patch.object(inject_mac, "_run", ran):
+            self.assertEqual(inject_mac.frontmost(),
+                             ("TextEdit", "com.apple.TextEdit"))
+        self.assertEqual(len([c for c, _s in ran.calls if c[0] == "osascript"]), 1)
+
+    def test_the_separator_is_not_a_line_break(self):
+        """AppleScript string literals cannot contain a raw line break, so joining the
+        two facts with one is a script that does not compile."""
+        ran = Ran()
+        with mock.patch.object(inject_mac, "_run", ran):
+            inject_mac.frontmost()
+        self.assertIn(chr(38) + ' "|" ' + chr(38), ran.calls[0][0][-1])
+
+    def test_a_refusal_answers_with_two_empty_strings(self):
+        ran = Ran(fail="frontmost", reason="(-1719)")
+        with mock.patch.object(inject_mac, "_run", ran):
+            self.assertEqual(inject_mac.frontmost(), ("", ""))

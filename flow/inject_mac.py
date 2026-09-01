@@ -48,6 +48,31 @@ SCRIPT_TIMEOUT_SEC = 10.0
 #: prose, which is localised.
 DENIED_CODES = ("-1719", "1002", "-25211")
 
+#: Bundle identifiers of the terminals a dictated line must never be allowed to *run*
+#: in. `inject.py` classifies its target by window class or process name and this is the
+#: same rule on the platform that has neither: `prepare` there strips a draft's trailing
+#: newline for a terminal, because a trailing newline in a shell does not paste, it runs.
+#: macOS had no such guard at all until now — the whole of `inject_mac` aimed at whatever
+#: was frontmost and pasted it verbatim.
+#:
+#: **These are identifiers, not invocation shapes.** They come from each app's own
+#: documentation rather than from a measurement here, which is a weaker warrant than this
+#: repository usually accepts — so the match falls back to the process *name* containing
+#: "term", and a terminal missed by both costs the guarantee rather than breaking the
+#: paste. A list that is too eager costs a trailing newline somebody has to press Enter
+#: for; too shy costs a line that runs. The asymmetry is the reason for the fallback.
+TERMINAL_IDS = frozenset({
+    "com.apple.Terminal",
+    "com.googlecode.iterm2",
+    "io.alacritty",
+    "net.kovidgoyal.kitty",
+    "com.github.wez.wezterm",
+    "co.zeit.hyper",
+    "org.tabby",
+    "com.mitchellh.ghostty",
+    "dev.warp.Warp-Stable",
+})
+
 #: Names a frontmost process can have when the thing in front is Flow itself. Flow
 #: pasting into its own draft box is the one outcome that would destroy the text being
 #: sent, and `ui._bare_window` is what should make it impossible — this is the belt to
@@ -110,12 +135,57 @@ def permission_note() -> str:
             "clipboard, so Cmd-V works in the meantime.")
 
 
-def frontmost() -> str:
-    """The name of the app that will receive the paste, or "" if it cannot be asked."""
-    ok, out = _run(["osascript", "-e",
-                    'tell application "System Events" to get name of first process '
-                    "whose frontmost is true"])
-    return out.strip() if ok else ""
+def frontmost() -> tuple[str, str]:
+    """`(name, bundle id)` of the app that will receive the paste, or `("", "")`.
+
+    Both in one `osascript`, because each call is a process launch and this one is on the
+    path of every send. The bundle id is what identifies a terminal; the name is what a
+    warning has to be readable with, and what the Flow-has-the-focus check reads.
+    """
+    # `|` rather than a newline between the two: AppleScript string literals cannot
+    # contain a raw line break, so joining them with one is a script that does not
+    # compile. A pipe cannot appear in a bundle identifier, and a name carrying one still
+    # splits correctly because only the *last* field is the identifier.
+    script = chr(10).join([
+        'tell application "System Events"',
+        "set p to first process whose frontmost is true",
+        'get (name of p) & "|" & (bundle identifier of p)',
+        "end tell",
+    ])
+    ok, out = _run(["osascript", "-e", script])
+    if not ok:
+        return "", ""
+    name, _, bundle = out.strip().rpartition("|")
+    return (name.strip(), bundle.strip()) if name else (bundle.strip(), "")
+
+
+def is_terminal(name: str, bundle: str) -> bool:
+    """Whether a paste into this app can execute what it lands on."""
+    return bundle in TERMINAL_IDS or "term" in (name or "").lower()
+
+
+def prepare(text: str, name: str, bundle: str) -> tuple[str, str]:
+    """`(payload, warning)` for pasting `text` into that app. `inject.prepare`'s rule.
+
+    **Never submit for the user.** A draft ending in a newline pastes as text plus
+    Return, which in a shell runs it. The trailing newline is stripped for a terminal;
+    the user presses Return when they mean to.
+
+    **Say when the lines may run on arrival.** Windows knows which terminals implement
+    bracketed paste, from a measured list, and refuses outright for the ones that do not.
+    Nothing here has measured a single macOS terminal, so this warns rather than refuses
+    and does not claim which behaviour this one has — a refusal built on a guess would
+    block a paste that was always safe.
+    """
+    if not is_terminal(name, bundle):
+        return text, ""
+    payload = text.rstrip(chr(13) + chr(10))
+    if chr(10) in payload:
+        return payload, (
+            f"{name or 'this terminal'} may run each line as it arrives, if it does "
+            "not bracket pastes"
+        )
+    return payload, ""
 
 
 def get_clipboard_text() -> str | None:
@@ -175,10 +245,20 @@ def paste(
     if not text:
         return False
 
-    # Asked before anything is touched, so the refusal costs no clipboard.
-    front = frontmost()
-    if front.lower() in FLOW_NAMES:
-        _warn(f"not pasted: {front} had the focus, not the window you were aiming at")
+    # Asked before anything is touched, so the refusal costs no clipboard — and asked
+    # *once*, because the answer decides both whether to paste at all and what to paste.
+    name, bundle = frontmost()
+    if name.lower() in FLOW_NAMES:
+        _warn(f"not pasted: {name} had the focus, not the window you were aiming at")
+        return False
+
+    # P7's guarantee, on the platform that had none: a draft ending in a newline does not
+    # paste into a shell, it runs. Classified before the clipboard is touched, the same
+    # order `inject.paste` uses and for the same reason.
+    text, hazard = prepare(text, name, bundle)
+    if hazard:
+        _warn(hazard)
+    if not text:
         return False
 
     previous = get_clipboard_text() if restore_clipboard else None
