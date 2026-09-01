@@ -405,7 +405,10 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         b.pill.session.can_rescue = True
         b._render()
         self.assertNotEqual(self.chips(b), was)
-        self.assertIn("Was a command", [i["text"] for i in b.canvas.items])
+        # By its tag, not its word: the secondaries are marks in the corner now, so
+        # there is no label to look for — only the hit region a click has to land on.
+        tags = {t for i in b.canvas.items for t in (i.get("tags") or ())}
+        self.assertIn(ui.chip_tag("Was a command"), tags)
 
     def test_nothing_moves_or_resizes_under_the_pointer(self):
         # `_visible`, because a window nobody can see is a window nobody is pointing at

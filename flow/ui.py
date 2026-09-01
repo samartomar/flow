@@ -1167,7 +1167,28 @@ ICON_MODE = "#F19FD6"      # pink
 ICON_SIZE = 16
 ICON_GAP = 12
 
-PANEL_MAX_H = 184
+#: A glyph for every secondary command, so the row of words above the draft becomes a
+#: cluster of marks in the corner.
+#:
+#: **They sit in a band of their own, above the text and right-aligned, not beside it.**
+#: The first sketch put them next to the words, and drawing it made the flaw plain: a
+#: cluster of four takes ~134 px, and a body column beside it loses a third of its width
+#: on *every* line — the opposite of what moving them was supposed to buy. A band costs
+#: 34 px of height once, and the draft keeps all 392 px of its column.
+#:
+#: Every glyph is drawn, like the mic and the meter: a font that is missing or
+#: substituted turns a control into a box.
+COMMAND_H = 26
+COMMAND_GAP = 6
+
+#: What the cluster costs the panel: the band, plus the air under it.
+COMMAND_BAND = COMMAND_H + 8
+
+#: The band of command marks is furniture, not content, so it goes *on top of* the
+#: ceiling rather than out of the draft's share — the same call `SETTINGS_H` needed, and
+#: the same failure if it is not made: the live partial's own cap is a flat 70 px, and on
+#: a panel pegged at the old ceiling it runs straight through the note and the foot.
+PANEL_MAX_H = 184 + COMMAND_BAND
 
 #: The shortest a band gets, so a one-word draft still has a panel rather than a sliver.
 PANEL_MIN_H = 96
@@ -1739,6 +1760,123 @@ def _mode_glyph(c: tk.Canvas, cx: float, cy: float, colour: str, converse: bool,
         for i, width in enumerate((r * 2, r * 2, r * 1.2)):
             y = cy - r + 3 + i * 5
             c.create_line(cx - r, y, cx - r + width, y, fill=colour, width=2, tags=tags)
+
+
+def command_x(slot: int, right: float = None) -> float:
+    """The right edge of the command mark in `slot`, counting from the rightmost as 0.
+
+    Laid out right-to-left from the panel's right edge, and that is the whole reason this
+    is a function worth naming. The set of secondaries changes constantly — Edit and
+    Was a command come and go with what was said — so a cluster grown from the *left*
+    would shift every mark under the hand each time the set changed. Anchored on the
+    right, the rightmost mark is at a fixed address whatever is beside it, which is the
+    argument the primary chip already won at the foot.
+    """
+    if right is None:
+        right = BUBBLE_W - PAD
+    return right - slot * (COMMAND_H + COMMAND_GAP)
+
+
+def _glyph_refine(c, x, y, colour, tags) -> None:
+    """A wand with a spark at its tip: this rewrites what you said.
+
+    The first attempt was a stroke and two dots, and at sixteen pixels that reads as a
+    slash with specks on it. A four-point spark — two crossed strokes, the vertical
+    longer — is what carries "magic" at this size, so the wand got shorter to make room
+    for it.
+    """
+    c.create_line(x + 2.5, y + 13.5, x + 9, y + 7, fill=colour, width=2, tags=tags)
+    c.create_line(x + 11.5, y + 1.5, x + 11.5, y + 8.5, fill=colour, width=2, tags=tags)
+    c.create_line(x + 8, y + 5, x + 15, y + 5, fill=colour, width=2, tags=tags)
+
+
+def _glyph_continue(c, x, y, colour, tags) -> None:
+    """A plus: keep going, and add to what is there."""
+    c.create_line(x + 8, y + 3, x + 8, y + 13, fill=colour, width=2, tags=tags)
+    c.create_line(x + 3, y + 8, x + 13, y + 8, fill=colour, width=2, tags=tags)
+
+
+def _glyph_edit(c, x, y, colour, tags) -> None:
+    """A pencil, nib down-left.
+
+    The body is drawn as a thick stroke and the nib as a triangle *past* its end, which
+    is the whole difference between a pencil and a diagonal line — the first version put
+    a 2 px nib on a 2 px stroke and the two merged.
+    """
+    c.create_line(x + 5.5, y + 10.5, x + 12, y + 4, fill=colour, width=3, tags=tags)
+    c.create_line(x + 10.5, y + 2.5, x + 13.5, y + 5.5, fill=colour, width=2, tags=tags)
+    c.create_polygon(x + 2, y + 14, x + 3.4, y + 9.4, x + 6.6, y + 12.6,
+                     fill=colour, outline=colour, tags=tags)
+
+
+def _glyph_command(c, x, y, colour, tags) -> None:
+    """The command loop — the owner's suggestion, and the right one.
+
+    "for command universally we can use ⌘". It is the mark everybody already reads as
+    *this was an instruction, not text*, which is exactly what the chip meant.
+
+    Four open loops on the corners of a square, which is the knot itself: each arc
+    starts and ends *on* the square's edges, so the two read as one continuous line.
+
+    **The stroke is thinner than every other mark here, and that is the whole trick.** At
+    2 px on a 6 px loop the hole is 2 px across and the glyph renders as a smudge — it
+    did, twice, once as arcs and once as closed rings. 1.4 px on a 6.8 px loop leaves 4 px
+    of air, which is what makes it read as ⌘ rather than as four blobs.
+
+    Tk's arc angles are degrees counterclockwise from 3 o'clock. Each loop's 90° gap
+    faces the square, so the top-left starts at 0 and sweeps 270 (east round to south),
+    leaving the south-east quadrant open for the corner it joins.
+    """
+    r, ring = 3.4, 1.4
+    for cx, cy, start_deg in ((5, 5, 0), (11, 5, 270), (5, 11, 90), (11, 11, 180)):
+        c.create_arc(x + cx - r, y + cy - r, x + cx + r, y + cy + r,
+                     start=start_deg, extent=270, style=tk.ARC,
+                     outline=colour, width=ring, tags=tags)
+    c.create_rectangle(x + 5, y + 5, x + 11, y + 11,
+                       outline=colour, width=ring, fill="", tags=tags)
+
+
+def _glyph_cancel(c, x, y, colour, tags) -> None:
+    c.create_line(x + 4, y + 4, x + 12, y + 12, fill=colour, width=2, tags=tags)
+    c.create_line(x + 12, y + 4, x + 4, y + 12, fill=colour, width=2, tags=tags)
+
+
+def _glyph_take(c, x, y, colour, tags) -> None:
+    """An arrow down into a line: put this answer into the draft."""
+    c.create_line(x + 8, y + 2, x + 8, y + 9, fill=colour, width=2, tags=tags)
+    c.create_line(x + 4.5, y + 6, x + 8, y + 9.5, fill=colour, width=2, tags=tags)
+    c.create_line(x + 11.5, y + 6, x + 8, y + 9.5, fill=colour, width=2, tags=tags)
+    c.create_line(x + 3, y + 13, x + 13, y + 13, fill=colour, width=2, tags=tags)
+
+
+def _glyph_copy(c, x, y, colour, tags) -> None:
+    """Two sheets, the near one offset — the mark every OS uses for copy."""
+    c.create_rectangle(x + 2.5, y + 2.5, x + 9.5, y + 9.5,
+                       outline=colour, width=2, fill="", tags=tags)
+    c.create_rectangle(x + 6.5, y + 6.5, x + 13.5, y + 13.5,
+                       outline=colour, width=2, fill=SHELL, tags=tags)
+
+
+def _glyph_new(c, x, y, colour, tags) -> None:
+    """A speech bubble with a plus: start the conversation again."""
+    _round_rect(c, x + 2, y + 3, x + 14, y + 11, 3, fill="", outline=colour, tags=tags)
+    c.create_line(x + 5, y + 11, x + 4, y + 14, fill=colour, width=2, tags=tags)
+    c.create_line(x + 8, y + 5, x + 8, y + 9, fill=colour, width=2, tags=tags)
+    c.create_line(x + 6, y + 7, x + 10, y + 7, fill=colour, width=2, tags=tags)
+
+
+#: Key -> glyph. A command with no entry here keeps its word, which is the honest
+#: fallback: a mark nobody can read is worse than a label that is merely longer.
+COMMAND_GLYPHS = {
+    "Refine": _glyph_refine,
+    "Continue": _glyph_continue,
+    "Edit": _glyph_edit,
+    "Was a command": _glyph_command,
+    "Cancel": _glyph_cancel,
+    "Use this": _glyph_take,
+    "Copy": _glyph_copy,
+    "New conversation": _glyph_new,
+}
 
 
 def _row_icons(c: tk.Canvas, pill, x: float, mid: float, tags="row") -> float:
@@ -4219,8 +4357,15 @@ class Pill(tk.Tk):
         # and dictation". Only when there is room — a narrow pill would otherwise draw
         # them over the status word, and the word is the thing that says whether Flow is
         # listening.
-        if w >= PILL_W + shift + 3 * (ICON_SIZE + ICON_GAP):
-            _row_icons(c, self, METER_X + METER_W + LABEL_GAP + shift, mid)
+        # Against the right edge, beside the status word, rather than trailing the meter.
+        # Asked for that way — "settings and three icon aligh to right near help" — and
+        # it is the better address: the meter's right edge is where the *bars* end, which
+        # moves with nothing but is read as part of the meter, while the right edge is
+        # the one landmark on this row that never moves at all.
+        icons_w = 3 * ICON_SIZE + 2 * ICON_GAP
+        icons_x = w - LABEL_PAD - LABEL_SLOT_W - LABEL_GAP - icons_w
+        if icons_x >= METER_X + METER_W + shift + LABEL_GAP:
+            _row_icons(c, self, icons_x, mid)
         self._draw_label(c, w, mid, accent)
 
     def _row_shift(self) -> int:
@@ -4726,7 +4871,7 @@ class ConversationCard(tk.Frame):
 
     def _view_h(self) -> int:
         """What is left for the history once the pinned block and chips have theirs."""
-        return max(0, self._h - PAD - self._pinned_h - HELP_FOOT_BAND)
+        return max(0, self._h - PAD - COMMAND_BAND - self._pinned_h - HELP_FOOT_BAND)
 
     def _max_top(self) -> int:
         height = 0
@@ -4927,7 +5072,7 @@ class ConversationCard(tk.Frame):
         # card was free to grow to it; with the card a fixed shape that let the answer be
         # sized for a 672 px window and drawn into a 184 px one, and the top of the card
         # — the "agent" label — was cut off by it.
-        spare = (self.panel_h() - PAD - HELP_FOOT_BAND - q_h - CARD_GAP
+        spare = (self.panel_h() - PAD - COMMAND_BAND - HELP_FOOT_BAND - q_h - CARD_GAP
                  - BODY_ELIDED_H - (note_h + 4 if self._note else 0))
         shown, more, a_h = "", 0, 0
         if self._answer:
@@ -4946,7 +5091,7 @@ class ConversationCard(tk.Frame):
             # Snug around what is on the card, stepping a line at a time — and the pill
             # row below it does not move when it steps, because the shell grows upward.
             self._h = self._settled_h(
-                PAD + history_h + self._pinned_h + HELP_FOOT_BAND)
+                PAD + COMMAND_BAND + history_h + self._pinned_h + HELP_FOOT_BAND)
             c.configure(width=CARD_W, height=self._h)
             self.reposition()
 
@@ -4960,7 +5105,8 @@ class ConversationCard(tk.Frame):
                       seam="bottom")
 
         # -- the history, in what is left above the pinned block
-        y, floor = PAD, PAD + self._view_h()
+        # Below the command band, which is furniture the history must not run under.
+        y, floor = PAD + COMMAND_BAND, PAD + COMMAND_BAND + self._view_h()
         self._top = min(self._top, self._max_top())
         drawn = self._top
         for i in range(self._top, len(self._history)):
@@ -5040,22 +5186,39 @@ class ConversationCard(tk.Frame):
             return
         self._chips_drawn = key_now
         c.delete("chips")
-        x = PAD
+
+        # The same shape the bubble takes: the secondaries as marks in the top-right
+        # corner, the primary alone at the foot. Two surfaces that laid their controls
+        # out differently would be two things to learn, and the whole point of moving
+        # them was one pattern — "commands to icon in pattern adopted for seemless
+        # experience".
+        for slot, (key, label, cmd) in enumerate(reversed(specs[1:])):
+            glyph = COMMAND_GLYPHS.get(key)
+            tag = chip_tag(key)
+            x2 = command_x(slot, CARD_W - PAD)
+            if glyph is None:
+                width = chip_w(key, label)
+                _round_rect(c, x2 - width, PAD, x2, PAD + COMMAND_H, 13,
+                            fill=CHIP, outline="", tags=(tag, "chips"))
+                c.create_text(x2 - width / 2, PAD + COMMAND_H / 2, text=label,
+                              fill=CODE, font=FONT_CHIP, tags=(tag, "chips"))
+            else:
+                _round_rect(c, x2 - COMMAND_H, PAD, x2, PAD + COMMAND_H,
+                            COMMAND_H // 2, fill=CHIP, outline="", tags=(tag, "chips"))
+                glyph(c, x2 - COMMAND_H + (COMMAND_H - ICON_SIZE) / 2,
+                      PAD + (COMMAND_H - ICON_SIZE) / 2, CODE, (tag, "chips"))
+            c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
+
+        key, label, cmd = specs[0]  # Ask, and it is always first
+        width = chip_w(key, label)
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
-        for key, label, cmd in specs:
-            w = chip_w(key, label)
-            primary = key == "Ask"
-            tag = chip_tag(key)
-            _round_rect(c, x, y1, x + w, y2, 13,
-                        fill=PRIMARY_FILL if primary else CHIP,
-                        outline="", tags=(tag, "chips"))
-            c.create_text(x + w / 2, (y1 + y2) / 2, text=label,
-                          fill=PRIMARY_TEXT if primary else CODE,
-                          font=FONT_CHIP_PRIMARY if primary else FONT_CHIP,
-                          tags=(tag, "chips"))
-            c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
-            x += w + 8
+        tag = chip_tag(key)
+        _round_rect(c, CARD_W - PAD - width, y1, CARD_W - PAD, y2, 13,
+                    fill=PRIMARY_FILL, outline="", tags=(tag, "chips"))
+        c.create_text(CARD_W - PAD - width / 2, (y1 + y2) / 2, text=label,
+                      fill=PRIMARY_TEXT, font=FONT_CHIP_PRIMARY, tags=(tag, "chips"))
+        c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
     def tick_countdown(self) -> None:
         """Repaint when the auto-ask number changes, and only then."""
@@ -5708,7 +5871,9 @@ class Bubble(tk.Frame):
         # `SETTINGS_H` is in here for the reason everything else is: the body's budget is
         # what is left after the fixed furniture, and a strip the height did not know
         # about would be a strip drawn over the first line of the draft.
-        around = 74 + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
+        # `COMMAND_BAND` joined the furniture when the secondaries moved to the corner.
+        # A band the height did not know about is a band drawn over the first line.
+        around = 74 + COMMAND_BAND + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
         if partial_h:
             around += partial_h + PARTIAL_GAP
         if self._sent:
@@ -5763,7 +5928,7 @@ class Bubble(tk.Frame):
         if not self._frozen():
             # Snug around the draft again, stepping a line at a time rather than
             # tracking every frame — see `_settled_h`.
-            self._h = self._settled_h(text_h + extra + 74)
+            self._h = self._settled_h(text_h + extra + 74 + COMMAND_BAND)
             c.configure(width=BUBBLE_W, height=self._h)
             self.reposition()
 
@@ -5775,7 +5940,7 @@ class Bubble(tk.Frame):
         corners = (PANEL_R, PANEL_R, 0, 0)
         _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color,
                       seam="bottom")
-        y = PAD
+        y = PAD + COMMAND_BAND
         if self._sent:
             c.create_text(
                 PAD, y, anchor="nw", text="sent", fill=MUTED,
@@ -5941,47 +6106,63 @@ class Bubble(tk.Frame):
             return
         self._chips_drawn = key_now
         c.delete("chips")
-        widths = [chip_w(key, label) for key, label, _c in specs]
+
         # The *last* primary, so a row is still laid out sensibly if one ever carries two.
         pinned = max((i for i, (k, _l, _c) in enumerate(specs)
                       if k in self.PRIMARY_KEYS), default=None)
-        # Dimming greys the primary's fill but must not move it: a row that reflowed
-        # every time a CLI call started would undo the whole point of a fixed address.
         heads = [i for i in range(len(specs)) if i != pinned]
-        gap = chip_row_gap(
-            [widths[i] for i in heads],
-            BUBBLE_W - PAD - (widths[pinned] + CHIP_GAP if pinned is not None else 0),
-        )
-        y2 = self._h - PAD
-        y1 = y2 - CHIP_H
 
-        def draw(i: int, x: float) -> None:
+        # -- the secondaries, as a cluster of marks in the top-right corner ------------
+        #
+        # They were a row of words along the foot, sharing it with the primary. Asked for
+        # as icons — "those commands to go as icon on top right and send" — and the move
+        # earns more than tidiness: the foot now holds one control, so the one thing you
+        # cannot take back has a row to itself.
+        #
+        # Right-aligned and laid out right-to-left, so the *rightmost* mark is at a fixed
+        # address whatever the set is. The set changes constantly — Edit and Was a command
+        # come and go with what was said — and a cluster that grew leftward from the left
+        # edge would move every icon under the hand each time.
+        right = BUBBLE_W - PAD
+        for slot, i in enumerate(reversed(heads)):
             key, label, cmd = specs[i]
-            primary = key in self.PRIMARY_KEYS and not dim
+            glyph = COMMAND_GLYPHS.get(key)
             tag = chip_tag(key)
-            _round_rect(
-                c, x, y1, x + widths[i], y2, 13,
-                fill=PRIMARY_FILL if primary else CHIP, outline="",
-                tags=(tag, "chips"),
-            )
-            c.create_text(
-                x + widths[i] / 2, (y1 + y2) / 2, text=label,
-                fill=DISABLED if dim else (PRIMARY_TEXT if primary else CODE),
-                font=FONT_CHIP_PRIMARY if primary else FONT_CHIP,
-                tags=(tag, "chips"),
-            )
+            x2 = command_x(slot, right)
+            y1 = PAD
+            if glyph is None:
+                # No mark for this one, so it keeps its word. A glyph nobody can read is
+                # worse than a label that is merely longer.
+                width = chip_w(key, label)
+                _round_rect(c, x2 - width, y1, x2, y1 + COMMAND_H, 13,
+                            fill=CHIP, outline="", tags=(tag, "chips"))
+                c.create_text(x2 - width / 2, y1 + COMMAND_H / 2, text=label,
+                              fill=DISABLED if dim else CODE, font=FONT_CHIP,
+                              tags=(tag, "chips"))
+                right -= width - COMMAND_H  # this one is wider than a slot
+            else:
+                _round_rect(c, x2 - COMMAND_H, y1, x2, y1 + COMMAND_H, COMMAND_H // 2,
+                            fill=CHIP, outline="", tags=(tag, "chips"))
+                glyph(c, x2 - COMMAND_H + (COMMAND_H - ICON_SIZE) / 2,
+                      y1 + (COMMAND_H - ICON_SIZE) / 2,
+                      DISABLED if dim else CODE, (tag, "chips"))
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
-        x = PAD
-        for i in heads:
-            draw(i, x)
-            x += widths[i] + gap
+        # -- the primary, alone at the foot, exactly where it always was ---------------
         if pinned is not None:
-            # Never left of where the secondaries actually ended: with a row too wide to
-            # fit, honouring the pin would draw the primary *over* them. Overlapping
-            # chips are two hit regions in one place, which is worse than a row that
-            # ends early — and `chip_row_gap` has already floored the gap at 0 by then.
-            draw(pinned, max(x, BUBBLE_W - PAD - widths[pinned]))
+            key, label, cmd = specs[pinned]
+            width = chip_w(key, label)
+            y2 = self._h - PAD
+            y1 = y2 - CHIP_H
+            tag = chip_tag(key)
+            lit = not dim
+            _round_rect(c, BUBBLE_W - PAD - width, y1, BUBBLE_W - PAD, y2, 13,
+                        fill=PRIMARY_FILL if lit else CHIP, outline="",
+                        tags=(tag, "chips"))
+            c.create_text(BUBBLE_W - PAD - width / 2, (y1 + y2) / 2, text=label,
+                          fill=PRIMARY_TEXT if lit else DISABLED,
+                          font=FONT_CHIP_PRIMARY, tags=(tag, "chips"))
+            c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
     def tick_countdown(self) -> None:
         """Repaint when the auto-ask number changes, and only then.

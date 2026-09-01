@@ -721,15 +721,31 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
         b._render()
         self.assertAlmostEqual(self._right_edge(b, "Send"), settled, delta=1)
 
-    def test_the_secondaries_still_start_at_the_left_pad(self):
-        # Pinned right is not centred or spread: the row still reads left to right.
+    def test_the_rightmost_command_mark_has_a_fixed_address_too(self):
+        """The secondaries left the foot and became marks in the top-right corner, and
+        the same argument followed them.
+
+        The set changes constantly — Edit and Was a command come and go with what was
+        said — so the cluster is laid out right-to-left from the panel's right edge.
+        Grown the other way it would shift every mark under the hand each time the set
+        changed, which is the defect the primary's fixed address exists to prevent.
+        """
         import flow.ui as ui
 
-        b = self._bubble()
-        b._render()
-        it = next(i for i in b.canvas.items if i["text"] == "Refine")
-        self.assertAlmostEqual(it["x"] - ui.chip_w("Refine", "Refine") / 2,
-                               ui.PAD, delta=1)
+        self.assertEqual(ui.command_x(0), ui.BUBBLE_W - ui.PAD)
+        # Slot 0 does not care how many are beside it — that is the property.
+        self.assertEqual(ui.command_x(0), ui.command_x(0, ui.BUBBLE_W - ui.PAD))
+        step = ui.COMMAND_H + ui.COMMAND_GAP
+        self.assertEqual(ui.command_x(1), ui.command_x(0) - step)
+        self.assertEqual(ui.command_x(3), ui.command_x(0) - 3 * step)
+
+    def test_the_cluster_never_reaches_the_left_pad(self):
+        # Four marks is the most the bubble ever shows at once — Refine, Continue, Edit,
+        # Was a command — and they have to leave the draft's column alone.
+        import flow.ui as ui
+
+        leftmost = ui.command_x(3) - ui.COMMAND_H
+        self.assertGreater(leftmost, ui.BUBBLE_W / 2)
 
 
 class TestTheWayBackSitsBesideTheFact(unittest.TestCase):

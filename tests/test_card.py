@@ -69,6 +69,27 @@ def card(**kw):
     return c
 
 
+def commands(c) -> list[str]:
+    """Which commands are on the card, by their click binding rather than by their word.
+
+    The secondaries are marks in the top-right corner now, so only the primary still
+    carries a label — a check that looked for text would report `Use this` as vanished
+    when it had merely stopped being a sentence. Read off `tag_bind` rather than off the
+    drawn items, because which primitives a fixture records varies by glyph: `Copy` draws
+    rectangles and `Use this` draws lines, so tag-spotting made one visible and the other
+    not. The binding is the hit region, which is what these tests are actually about.
+    """
+    keys = ("Ask", "Use this", "Copy", "New conversation")
+    bound = {tag for tag, _seq, _fn in c.canvas.bindings}
+    return [k for k in keys if ui.chip_tag(k) in bound]
+
+
+def primary_label(c) -> str:
+    """The word on the one command that still has one."""
+    return next((i["text"] for i in c.canvas.items
+                 if str(i.get("text", "")).startswith("Ask")), "")
+
+
 def drawn(c) -> list[str]:
     """Every string that reached the canvas as visible text, probes excluded.
 
@@ -253,39 +274,39 @@ class TestTheWindowStaysInsideTheDesktop(unittest.TestCase):
         c = card()
         c.ask("q")
         c.answer(prose(12_000))
-        chips = [i for i in c.canvas.items
-                 if i["text"] in ("Ask", "Use this", "Copy", "New conversation")]
-        self.assertEqual(len(chips), 4)
-        for chip in chips:
-            self.assertLess(chip["y"], c._h, chip["text"])
-            self.assertGreater(chip["y"], 0, chip["text"])
+        self.assertEqual(len(commands(c)), 4)
+        # Every command's mark is inside the window: the primary at the foot, the three
+        # secondaries in the band at the top.
+        for key in ("Ask", "Use this", "Copy", "New conversation"):
+            ys = [i["y"] for i in c.canvas.items
+                  if ui.chip_tag(key) in (i.get("tags") or ()) and "y" in i]
+            for y in ys:
+                self.assertLess(y, c._h, key)
+                self.assertGreaterEqual(y, 0, key)
 
 
 class TestTheChips(unittest.TestCase):
-    def labels(self, c) -> list[str]:
-        keys = ("Ask", "Use this", "Copy", "New conversation")
-        return [i["text"] for i in c.canvas.items
-                if any(i["text"].startswith(k) for k in keys)]
+
 
     def test_ask_is_there_before_anything_has_been_asked(self):
         c = card()
         c.show()
-        self.assertIn("Ask", self.labels(c))
+        self.assertIn("Ask", commands(c))
 
     def test_the_countdown_rides_on_the_ask_chip(self):
         c = card()
         c.pill.session.auto_ask_in = 2.4
         c.ask("q")
-        self.assertIn("Ask 3s", self.labels(c))
+        self.assertEqual(primary_label(c), "Ask 3s")
 
     def test_use_this_and_copy_appear_only_with_an_answer(self):
         c = card()
         c.ask("q")
-        self.assertNotIn("Use this", self.labels(c))
-        self.assertNotIn("Copy", self.labels(c))
+        self.assertNotIn("Use this", commands(c))
+        self.assertNotIn("Copy", commands(c))
         c.answer("an answer")
-        self.assertIn("Use this", self.labels(c))
-        self.assertIn("Copy", self.labels(c))
+        self.assertIn("Use this", commands(c))
+        self.assertIn("Copy", commands(c))
 
     def test_copy_carries_the_whole_answer_and_not_the_head_that_is_drawn(self):
         # Item 45's promise, restated on this surface: the window is a view, not a
