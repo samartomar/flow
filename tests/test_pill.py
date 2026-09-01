@@ -1421,3 +1421,79 @@ class TestTheRowIcons(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+class TestTheWindowFlowIsAimedAt(unittest.TestCase):
+    """The name of the app that will receive the paste, at the left of the row.
+
+    Asked for as an *icon* — "if i am on notepad i see notepad icon and when i am on
+    claude ide i see claude icon" — and the name is the half that costs nothing.
+    `_track_target` already resolves the foreground process for the paste, on the edge
+    rather than per frame, so `session.target_app` is already sitting there reading
+    `claude.exe`. The picture needs `ExtractIconExW`, `GetIconInfo` and `GetDIBits` to
+    get pixels into a `PhotoImage`, which is a different size of job.
+    """
+
+    def drawn(self, target="notepad.exe", lite=False):
+        p = pill(armed=True, lite=lite)
+        p.session.target_app = target
+        p._draw()
+        return p
+
+    def test_the_name_is_drawn_at_the_left_of_the_row(self):
+        p = self.drawn()
+        self.assertIn("Notepad", [text for _x, _y, text, _f in p.canvas.texts])
+
+    def test_the_extension_goes_and_a_bare_stem_gets_a_capital(self):
+        self.assertEqual(ui.app_label("notepad.exe"), "Notepad")
+
+    def test_a_name_its_author_capitalised_is_left_alone(self):
+        # `Code` and `WindowsTerminal` keep the shape they were given.
+        self.assertEqual(ui.app_label("Code.exe"), "Code")
+
+    def test_a_long_name_is_cut_at_the_end_not_the_start(self):
+        """The opposite of what the draft body does, for the opposite reason: a draft is
+        windowed to its tail because the newest words are the ones being spoken, while an
+        application is recognised by its head."""
+        shown = ui.app_label("WindowsTerminal.exe")
+        self.assertTrue(shown.startswith("WindowsTe"), shown)
+        self.assertEqual(len(shown), ui.APP_NAME_CHARS)
+
+    def test_a_non_string_target_is_no_name(self):
+        # `target_app` is "" until the first foreground window resolves, and a Mock in
+        # any fixture that builds a pill with `__new__`.
+        self.assertEqual(ui.app_label(mock.Mock()), "")
+        self.assertEqual(ui.app_label(""), "")
+
+    def test_the_slot_is_the_same_width_whatever_the_name_is(self):
+        """A slot that sized itself to the name would shift the mic, the meter and every
+        icon each time you changed window — the motion this surface spent a night
+        removing."""
+        short = self.drawn("vi.exe")
+        long_ = self.drawn("WindowsTerminal.exe")
+        self.assertEqual(short._row_shift(), long_._row_shift())
+
+    def test_the_meter_moves_over_to_make_room(self):
+        bare = self.drawn("")
+        named = self.drawn("notepad.exe")
+        self.assertEqual(named._row_shift() - bare._row_shift(),
+                         ui.APP_SLOT_W + ui.APP_SLOT_GAP)
+        self.assertGreater(min(r[0] for r in named.canvas.rects),
+                           min(r[0] for r in bare.canvas.rects))
+
+    def test_lite_reserves_nothing_because_it_tracks_nothing(self):
+        # `_track_target` returns early in Lite, so `target_app` never fills — the row on
+        # a Mac is exactly what it always was.
+        self.assertEqual(self.drawn("notepad.exe", lite=True)._row_shift(), 0)
+
+    def test_no_target_reserves_nothing_either(self):
+        self.assertEqual(self.drawn("")._row_shift(), 0)
+
+    def test_the_marching_dots_move_with_the_meter(self):
+        """`_draw_dots` takes the meter's place and is called without the shift, so one
+        computed and the other not would draw the dots under the app name."""
+        p = self.drawn()
+        p.canvas.ovals.clear()
+        p._draw_dots(p.canvas, ui.PILL_H // 2, "#FFFFFF")
+        self.assertGreater(min(o[0] for o in p.canvas.ovals),
+                           ui.METER_X + ui.APP_SLOT_W)
+

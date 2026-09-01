@@ -1097,6 +1097,31 @@ BODY_MAX_H = 340
 #: whole body lines (`_settled_h`): a height that can only change when the text gains or
 #: loses a *line* changes a handful of times an utterance, and a timer that has to be
 #: cancelled correctly from a render loop is a thing to get wrong.
+#: The slot at the left of the row that names the window Flow is aimed at.
+#:
+#: **The name first, the icon later.** Asked for as an icon — "if i am on notepad i see
+#: notepad icon and when i am on claude ide i see claude icon" — and the name is the half
+#: that costs nothing: `_track_target` already resolves the foreground process for the
+#: paste, on the edge rather than per frame, so `session.target_app` is sitting there
+#: reading `claude.exe`. The picture needs `ExtractIconExW`, then `GetIconInfo` and
+#: `GetDIBits` to get pixels into a `PhotoImage`, which is a different size of job.
+#:
+#: **Fixed width, so nothing moves.** A slot that sized itself to the name would shift
+#: the mic, the meter and every icon each time you changed window — which is the motion
+#: this surface spent a night removing. Names longer than it fits are cut, because a
+#: layout that stays still is worth more than the tail of a process name.
+#:
+#: Reserved only where there is something to put in it: Lite does not track the
+#: foreground window at all, so on a Mac the row is exactly what it was.
+APP_SLOT_W = 72
+APP_SLOT_GAP = 10
+
+#: How many characters fit. Counted rather than measured, because `_draw` runs thirty
+#: times a second and `bbox` on every frame to bound a string that changes a few times an
+#: hour is a poor trade. Ten is conservative at the 11 px note font — the slot is 72 px
+#: and ten characters of it measure under 60.
+APP_NAME_CHARS = 10
+
 #: Room for the three icons that sit between the meter and the status word: settings,
 #: voice, mode.
 #:
@@ -1571,6 +1596,34 @@ def _mix(a: str, b: str, t: float) -> str:
         round(int(a[i:i + 2], 16) + (int(b[i:i + 2], 16) - int(a[i:i + 2], 16)) * t)
         for i in (1, 3, 5)
     )
+
+
+def app_label(process: str) -> str:
+    """`claude.exe` -> `Claude`. What the row shows for the window Flow is aimed at.
+
+    The extension goes because it is noise in a name; the capital is added only when the
+    stem is entirely lower case, so `Code` and `WindowsTerminal` keep the shape their
+    authors gave them and `notepad` gets the one it deserves.
+
+    Cut at the end, not the start. That is the opposite of what the draft body does, and
+    for the opposite reason: a draft is windowed to its tail because the newest words are
+    the ones being spoken, while an application is recognised by its *head* —
+    `WindowsTe…` is obviously Windows Terminal and `…sTerminal` is obviously
+    nothing.
+    """
+    # A non-string is no name. `session.target_app` is `""` until the first foreground
+    # window resolves, and a `Mock` in any fixture that builds a pill with `__new__` —
+    # neither of which should reach the string operations below.
+    if not isinstance(process, str):
+        return ""
+    stem = process.rsplit(".", 1)[0].strip()
+    if not stem:
+        return ""
+    if stem.islower():
+        stem = stem[:1].upper() + stem[1:]
+    if len(stem) > APP_NAME_CHARS:
+        return stem[:APP_NAME_CHARS - 1] + "…"
+    return stem
 
 
 def _gear(c: tk.Canvas, cx: float, cy: float, colour: str, tags) -> None:
@@ -4049,9 +4102,19 @@ class Pill(tk.Tk):
             seam = "top"
         _panel_chrome(c, w, PILL_H, radius, self.ring_color, seam=seam)
 
+        # The window Flow is aimed at, named at the left of the row. A fixed-width slot
+        # whether or not the name fills it, so changing window moves nothing — see
+        # `APP_SLOT_W`. Zero in Lite, which tracks no foreground window, so the row there
+        # is exactly what it always was.
+        shift = self._row_shift()
+        if shift:
+            c.create_text(PAD, PILL_H // 2, anchor="w",
+                          text=app_label(self.session.target_app),
+                          fill=MUTED, font=FONT_NOTE)
+
         # Mic glyph: capsule + stand, drawn rather than fonted so there is no
         # dependency on an emoji font being present and correctly sized.
-        cx, cy = 22, PILL_H // 2
+        cx, cy = 22 + shift, PILL_H // 2
         c.create_oval(cx - 4, cy - 9, cx + 4, cy + 1, fill=accent, outline=accent)
         c.create_arc(
             cx - 7, cy - 5, cx + 7, cy + 6, start=180, extent=180,
@@ -4083,7 +4146,7 @@ class Pill(tk.Tk):
             shade = accent if lvl > 0.04 else MUTED
             for i in range(BARS):
                 h = self._bar_half_height(i, lvl)
-                x = METER_X + i * (BAR_W + BAR_GAP)
+                x = METER_X + shift + i * (BAR_W + BAR_GAP)
                 # Rounded caps, radius half the bar width — FluidVoice draws its bars as
                 # `RoundedRectangle(cornerRadius: barWidth / 2)`, and at four pixels wide
                 # that is the difference between a meter and a bar chart. Squared off
@@ -4100,9 +4163,20 @@ class Pill(tk.Tk):
         # and dictation". Only when there is room — a narrow pill would otherwise draw
         # them over the status word, and the word is the thing that says whether Flow is
         # listening.
-        if w >= PILL_W + 3 * (ICON_SIZE + ICON_GAP):
-            _row_icons(c, self, METER_X + METER_W + LABEL_GAP, mid)
+        if w >= PILL_W + shift + 3 * (ICON_SIZE + ICON_GAP):
+            _row_icons(c, self, METER_X + METER_W + LABEL_GAP + shift, mid)
         self._draw_label(c, w, mid, accent)
+
+    def _row_shift(self) -> int:
+        """How far the mic, the meter and the icons move right for the app-name slot.
+
+        Its own method because `_draw_dots` needs the same number and is called without
+        it — the marching dots occupy the meter's place, so a shift applied to one and
+        not the other would draw them under the app name.
+        """
+        if self.lite or not app_label(getattr(self.session, "target_app", "")):
+            return 0
+        return APP_SLOT_W + APP_SLOT_GAP
 
     def _draw_dots(self, c: tk.Canvas, mid: int, accent: str) -> None:
         """Three marching dots in the slot the meter vacates (§07).
@@ -4115,7 +4189,7 @@ class Pill(tk.Tk):
         binary-transparent and have nothing to composite against. See `_mix`.
         """
         span = 2 * DOT_R
-        x = METER_X + (METER_W - (3 * span + 2 * DOT_GAP)) // 2
+        x = METER_X + self._row_shift() + (METER_W - (3 * span + 2 * DOT_GAP)) // 2
         for i in range(3):
             dx = x + i * (span + DOT_GAP) + DOT_R
             c.create_oval(dx - DOT_R, mid - DOT_R, dx + DOT_R, mid + DOT_R,

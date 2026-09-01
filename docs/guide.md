@@ -884,6 +884,18 @@ that holds what was just sent, so it is somewhere you are already looking.
 
 The clipboard is restored about 0.6 s after the paste, so Flow does not permanently own it.
 
+### Where it is aimed
+
+The left of the row names the window the paste is going into — `Notepad`, `Claude`,
+`Code`. It comes free: Flow already resolves the foreground process to decide whether the
+target is a terminal, on the edge rather than every frame, so nothing extra is asked for.
+
+The slot is a fixed width whether or not the name fills it, so changing window moves
+nothing else on the row. Long names are cut at the end, because an application is
+recognised by the start of its name.
+
+Absent in Lite, which does not track a foreground window at all.
+
 ### The icons on the row
 
 Three marks sit between the meter and the status word, so the settings that matter
