@@ -1097,29 +1097,23 @@ BODY_MAX_H = 340
 #: whole body lines (`_settled_h`): a height that can only change when the text gains or
 #: loses a *line* changes a handful of times an utterance, and a timer that has to be
 #: cancelled correctly from a render loop is a thing to get wrong.
-#: The settings strip's own height, including the air under it.
+#: Room for the three icons that sit between the meter and the status word: settings,
+#: voice, mode.
 #:
-#: **It appears with the panel and never at rest.** The owner asked for the settings that
-#: matter to be reachable without a right-click — "Dictate and Converse for sure Then
-#: workspace and voices" — and the choice of *when* was left to me. With a draft up is
-#: the answer: those three only mean anything once there is something to send, and an
-#: always-on strip would cost 22 px of the idle row, which is the one part of this
-#: surface everybody has said they like small.
+#: **They were a strip above the draft first, and the strip was wrong.** Written from
+#: "Dictate and Converse for sure Then workspace and voices", it put a chip and two
+#: labels across the top of the panel — and seeing it, the owner's answer was "Not
+#: looking good instead after progress bar add settings icon ... and top you can remove
+#: it". They were right. Words that name a setting are a *sentence about* the app; the
+#: row is where the app already says what it is doing, with a drawn mic and a drawn
+#: meter, and three more drawn marks belong there rather than in a band of prose.
 #:
-#: FluidVoice does not pay this either — its `Dictate / AI Prompt / Actions` bar belongs
-#: to the app being dictated into, not to the overlay.
-SETTINGS_H = 22
+#: It also costs nothing when idle, which the strip could not: the row is on screen
+#: either way.
+ICON_SIZE = 16
+ICON_GAP = 12
 
-#: How far apart the read-only values sit from each other.
-SETTINGS_GAP = 14
-
-#: 184 was the ceiling before the settings strip existed, and the strip is furniture
-#: rather than content — so it goes *on top of* the ceiling rather than out of the
-#: content's share. Taking it out of the share is what the tests caught: the live
-#: partial, whose own `PARTIAL_MAX_H` is a flat 70 px, ran through the note and the chip
-#: row on a panel pegged at 184 because everything above it had grown by 22 and it had
-#: not been told.
-PANEL_MAX_H = 184 + SETTINGS_H
+PANEL_MAX_H = 184
 
 #: The shortest a band gets, so a one-word draft still has a panel rather than a sliver.
 PANEL_MIN_H = 96
@@ -1579,76 +1573,98 @@ def _mix(a: str, b: str, t: float) -> str:
     )
 
 
-def _settings_row(c: tk.Canvas, pill, w: int, y: int, tags="body") -> int:
-    """The controls worth reaching without a right-click. Returns the height it took.
+def _gear(c: tk.Canvas, cx: float, cy: float, colour: str, tags) -> None:
+    """A settings gear, drawn rather than fonted.
 
-    Three things, and the split between them is deliberate. **Mode is a control**: it
-    changes what Send does, it is the thing somebody switches mid-task, and it costs a
-    right-click and two menu levels today. **Workspace and voice are values**: their
-    worth is being *visible* — knowing which project Ask is running in without opening
-    anything — and they open the menu that already exists rather than growing a second
-    implementation of it.
+    Same reasoning as the mic glyph beside it: a font that is missing, substituted or
+    scaled differently turns a control into a box, and the one thing every control on
+    this row has to be is recognisable. Eight teeth as short radial spokes, because at
+    sixteen pixels a toothed outline reads as a smudge and spokes read as a gear.
+    """
+    r = ICON_SIZE / 2
+    for i in range(8):
+        a = math.pi * i / 4
+        c.create_line(cx + math.cos(a) * (r - 4), cy + math.sin(a) * (r - 4),
+                      cx + math.cos(a) * r, cy + math.sin(a) * r,
+                      fill=colour, width=2, tags=tags)
+    c.create_oval(cx - r + 3, cy - r + 3, cx + r - 3, cy + r - 3,
+                  outline=colour, width=2, tags=tags)
 
-    Everything here is a chip or a label with a hit region, drawn the way `_lay_out`
-    draws the row at the foot, so there is one shape language on the surface and one way
-    a thing on it is clicked.
+
+def _speaker(c: tk.Canvas, cx: float, cy: float, colour: str, muted: bool, tags) -> None:
+    """A speaker, with a slash through it when replies are muted.
+
+    The slash rather than a different colour or a missing icon: "off" has to be legible
+    without remembering what "on" looked like, and an icon that disappears when a setting
+    is off is a setting nobody can find their way back to.
+    """
+    r = ICON_SIZE / 2
+    c.create_rectangle(cx - r, cy - 3, cx - r + 4, cy + 3,
+                       fill=colour, outline=colour, tags=tags)
+    c.create_polygon(cx - r + 4, cy - 3, cx - 1, cy - r, cx - 1, cy + r,
+                     cx - r + 4, cy + 3, fill=colour, outline=colour, tags=tags)
+    if muted:
+        c.create_line(cx + 1, cy - 5, cx + r, cy + 5, fill=colour, width=2, tags=tags)
+    else:
+        for i in (0, 1):
+            c.create_arc(cx - 1 + i * 4, cy - 5 - i * 3, cx + 5 + i * 4, cy + 5 + i * 3,
+                         start=-60, extent=120, style=tk.ARC,
+                         outline=colour, width=2, tags=tags)
+
+
+def _mode_glyph(c: tk.Canvas, cx: float, cy: float, colour: str, converse: bool,
+                tags) -> None:
+    """Lines of text for dictate, a speech bubble for converse.
+
+    The two modes differ in *where the words go* — into the window you were in, or to an
+    agent that answers — so the marks are "text" and "a reply", not two abstractions
+    somebody has to learn.
+    """
+    r = ICON_SIZE / 2
+    if converse:
+        _round_rect(c, cx - r, cy - r + 1, cx + r, cy + r - 4, 4,
+                    fill="", outline=colour, tags=tags)
+        c.create_line(cx - 2, cy + r - 4, cx - 4, cy + r, fill=colour, width=2,
+                      tags=tags)
+    else:
+        for i, width in enumerate((r * 2, r * 2, r * 1.2)):
+            y = cy - r + 3 + i * 5
+            c.create_line(cx - r, y, cx - r + width, y, fill=colour, width=2, tags=tags)
+
+
+def _row_icons(c: tk.Canvas, pill, x: float, mid: float, tags="row") -> float:
+    """Settings, voice and mode, between the meter and the status word.
+
+    Returns the x the caller may draw from next. Each is a hit region as well as a mark:
+    the gear opens the same menu a right-click opens, the speaker toggles replies, and
+    the mode glyph switches Dictate and Converse — the two settings the owner named as
+    worth reaching without a right-click, plus the way to everything else.
+
+    Voice is drawn only where something can speak. An icon that toggles nothing is worse
+    than an absent one, and `session.speaker` is None whenever `--no-speak` or a missing
+    voice engine has made replies impossible.
     """
     session = getattr(pill, "session", None)
     if session is None:
-        return 0
+        return x
     converse = getattr(session, "mode", DICTATE) != DICTATE
-    label = "Converse" if converse else "Dictate"
-    mid = y + SETTINGS_H // 2 - 4
 
-    # The mode, as a chip that acts. `v` rather than a real chevron: the strip is drawn
-    # in the same ASCII-safe font the rest of this surface uses, and a glyph that falls
-    # back to a box would be a control that looks broken.
-    text = f"{label}  v"
-    width = chip_w("mode", text)
-    _round_rect(c, PAD, y, PAD + width, y + SETTINGS_H - 4, 9,
-                fill=CHIP, outline="", tags=("settings-mode", tags))
-    c.create_text(PAD + width / 2, mid, text=text, fill=CODE, font=FONT_CHIP,
-                  tags=("settings-mode", tags))
-    c.tag_bind("settings-mode", "<Button-1>",
-               lambda _e: getattr(session, "toggle_mode", lambda: None)())
+    def hit(tag: str, command) -> None:
+        c.tag_bind(tag, "<Button-1>", lambda _e: command())
 
-    # The values. Truncated from the left for the workspace, because the tail of a path
-    # is the part that names the project and the head is the part everybody shares.
-    x = PAD + width + SETTINGS_GAP
-    for name, value, opener in _settings_values(pill, session):
-        if not value:
-            continue
-        shown = f"{name} {value}"
-        tag = f"settings-{name.strip(':')}"
-        item = c.create_text(x, mid, anchor="w", text=shown, fill=MUTED,
-                             font=FONT_NOTE, tags=(tag, tags))
-        bounds = c.bbox(item)
-        if bounds is not None:
-            if bounds[2] > w - PAD:
-                # Out of room. Dropped rather than clipped: half a path is a worse
-                # answer than no path, and the menu still has it.
-                c.delete(item)
-                break
-            x = bounds[2] + SETTINGS_GAP
-        if opener is not None:
-            c.tag_bind(tag, "<Button-1>", lambda _e, f=opener: f())
-    return SETTINGS_H
+    _gear(c, x + ICON_SIZE / 2, mid, MUTED, ("row-gear", tags))
+    hit("row-gear", getattr(pill, "open_settings", lambda: None))
+    x += ICON_SIZE + ICON_GAP
 
+    if getattr(session, "speaker", None) is not None:
+        _speaker(c, x + ICON_SIZE / 2, mid, MUTED,
+                 bool(getattr(session, "muted", False)), ("row-voice", tags))
+        hit("row-voice", getattr(session, "toggle_speech", lambda: None))
+        x += ICON_SIZE + ICON_GAP
 
-def _settings_values(pill, session):
-    """`(name, value, opener)` for each read-only value on the strip."""
-    workspace = getattr(session, "workspace", "") or ""
-    if workspace:
-        workspace = os.path.basename(str(workspace).rstrip("/" + chr(92))) or str(workspace)
-    speaker = getattr(session, "speaker", None)
-    voice = ""
-    if speaker is not None:
-        voice = "muted" if getattr(session, "muted", False) else (
-            getattr(speaker, "name", "") or "on")
-    return (
-        ("workshop:", workspace, getattr(pill, "_menu_workspace", None)),
-        ("voice:", voice, getattr(pill, "_menu_voice", None)),
-    )
+    _mode_glyph(c, x + ICON_SIZE / 2, mid, MUTED, converse, ("row-mode", tags))
+    hit("row-mode", getattr(session, "toggle_mode", lambda: None))
+    return x + ICON_SIZE + ICON_GAP
 
 
 def _panel_chrome(c: tk.Canvas, w: int, h: int, radius, ring_color: str,
@@ -2591,6 +2607,16 @@ class Pill(tk.Tk):
     #: equal it: every entry in the list went through `normpath`, and this is not a
     #: path anybody's `--cwd` resolves to.
     WORKSPACE_NOT_SET = "(not set)"
+
+    def open_settings(self) -> None:
+        """Post the settings menu on its own, from the gear on the row.
+
+        The same menu the right-click builds, not a second one: everything in it is a
+        dispatcher onto the session or the profile, and two of anything is two things to
+        keep in step. The gear is a shortcut to it, which is the whole of what was asked
+        for — "on click on just open settings menu and all good".
+        """
+        self._popup_menu(self._settings_menu)
 
     def _popup_menu(self, build) -> None:
         """Post one of the settings submenus on its own, under the pointer.
@@ -4062,6 +4088,13 @@ class Pill(tk.Tk):
                 else:
                     c.create_rectangle(x, mid - h, x + BAR_W, mid + h,
                                        fill=shade, outline="")
+        # After the meter and before the word, which is where the owner asked for them:
+        # "after progress bar add settings icon ... next to that create icon for voice
+        # and dictation". Only when there is room — a narrow pill would otherwise draw
+        # them over the status word, and the word is the thing that says whether Flow is
+        # listening.
+        if w >= PILL_W + 3 * (ICON_SIZE + ICON_GAP):
+            _row_icons(c, self, METER_X + METER_W + LABEL_GAP, mid)
         self._draw_label(c, w, mid, accent)
 
     def _draw_dots(self, c: tk.Canvas, mid: int, accent: str) -> None:
@@ -5538,7 +5571,7 @@ class Bubble(tk.Frame):
         # `SETTINGS_H` is in here for the reason everything else is: the body's budget is
         # what is left after the fixed furniture, and a strip the height did not know
         # about would be a strip drawn over the first line of the draft.
-        around = 74 + SETTINGS_H + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
+        around = 74 + BODY_ELIDED_H + (note_h + 4 if note_h else 0)
         if partial_h:
             around += partial_h + PARTIAL_GAP
         if self._sent:
@@ -5593,7 +5626,7 @@ class Bubble(tk.Frame):
         if not self._frozen():
             # Snug around the draft again, stepping a line at a time rather than
             # tracking every frame — see `_settled_h`.
-            self._h = self._settled_h(text_h + extra + 74 + SETTINGS_H)
+            self._h = self._settled_h(text_h + extra + 74)
             c.configure(width=BUBBLE_W, height=self._h)
             self.reposition()
 
@@ -5606,9 +5639,6 @@ class Bubble(tk.Frame):
         _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color,
                       seam="bottom")
         y = PAD
-        # Above the words, because it describes what will happen to them. See
-        # `SETTINGS_H` for why it lives here and not on the idle row.
-        y += _settings_row(c, self.pill, BUBBLE_W, y)
         if self._sent:
             c.create_text(
                 PAD, y, anchor="nw", text="sent", fill=MUTED,

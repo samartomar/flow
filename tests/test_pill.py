@@ -32,6 +32,15 @@ class Canvas:
         self.ovals: list[tuple[float, float, float, float, str]] = []
         self.rects: list[tuple[float, float, float, float, str]] = []
         self.lines: list[tuple[tuple, str]] = []
+        #: (tag, sequence, callback) per `tag_bind`. The row grew hit regions when the
+        #: settings, voice and mode icons moved onto it, and a click that reaches nothing
+        #: is the failure worth asserting against.
+        self.bindings: list[tuple] = []
+        self.polys: list[tuple] = []
+        self.arcs: list[tuple] = []
+
+    def tag_bind(self, tag, sequence, callback) -> None:
+        self.bindings.append((tag, sequence, callback))
 
     def delete(self, *a, **kw) -> None: ...
 
@@ -46,9 +55,11 @@ class Canvas:
     def configure(self, **kw) -> None:
         self.width = kw.get("width", getattr(self, "width", None))
 
-    def create_polygon(self, *a, **kw) -> None: ...
+    def create_polygon(self, *a, **kw) -> None:
+        self.polys.append((a, kw.get("fill", "")))
 
-    def create_arc(self, *a, **kw) -> None: ...
+    def create_arc(self, *a, **kw) -> None:
+        self.arcs.append((a, kw.get("outline", "")))
 
     def create_oval(self, x1, y1, x2, y2, **kw) -> None:
         self.ovals.append((x1, y1, x2, y2, kw.get("fill", "")))
@@ -1303,6 +1314,96 @@ class TestTheShellIsOneWindow(unittest.TestCase):
                 p._sync_shell()
                 kw = p.canvas.place.call_args.kwargs
                 self.assertEqual(kw["y"] + kw["height"], p._shell_h)
+
+
+class TestTheRowIcons(unittest.TestCase):
+    """Settings, voice and mode, between the meter and the status word.
+
+    **These were a strip of words above the draft first.** Written from "Dictate and
+    Converse for sure Then workspace and voices", it put a chip and two labels across the
+    top of the panel — and on seeing it the owner's answer was "Not looking good instead
+    after progress bar add settings icon ... and top you can remove it". Words that name
+    a setting are a sentence *about* the app; the row is where the app already says what
+    it is doing with a drawn mic and a drawn meter, and three more drawn marks belong
+    there. It costs nothing at rest, too, which the strip could not — the row is on
+    screen either way.
+    """
+
+    def row(self, **session):
+        c = Canvas()
+        p = ui.Pill.__new__(ui.Pill)
+        p.session = mock.Mock(**{"mode": DICTATE, "speaker": None, "muted": False,
+                                 **session})
+        p.open_settings = mock.Mock()
+        return c, p, ui._row_icons(c, p, 100, 20)
+
+    def fire(self, c, tag):
+        next(fn for t, seq, fn in c.bindings
+             if t == tag and seq == "<Button-1>")(None)
+
+    def tags(self, c):
+        drawn = set()
+        for item in c.ovals + c.rects:
+            drawn |= set(item[-1] if isinstance(item[-1], tuple) else ())
+        return drawn
+
+    def test_the_gear_opens_the_settings_menu(self):
+        # The same menu the right-click builds, not a second one: everything in it is a
+        # dispatcher onto the session or the profile.
+        c, p, _x = self.row()
+        self.fire(c, "row-gear")
+        p.open_settings.assert_called_once()
+
+    def test_the_mode_glyph_switches_the_mode(self):
+        c, p, _x = self.row()
+        self.fire(c, "row-mode")
+        p.session.toggle_mode.assert_called_once()
+
+    def test_the_speaker_toggles_replies(self):
+        c, p, _x = self.row(speaker=mock.Mock())
+        self.fire(c, "row-voice")
+        p.session.toggle_speech.assert_called_once()
+
+    def test_there_is_no_speaker_icon_when_nothing_can_speak(self):
+        # An icon that toggles nothing is worse than an absent one. `speaker` is None
+        # under `--no-speak` and wherever the voice engine is missing.
+        c, _p, _x = self.row(speaker=None)
+        self.assertFalse([b for b in c.bindings if b[0] == "row-voice"])
+
+    def test_and_it_is_there_when_something_can(self):
+        c, _p, _x = self.row(speaker=mock.Mock())
+        self.assertTrue([b for b in c.bindings if b[0] == "row-voice"])
+
+    def test_muting_changes_the_mark_rather_than_removing_it(self):
+        # "Off" has to be legible without remembering what "on" looked like, and an icon
+        # that vanishes when a setting is off is a setting nobody finds their way back to.
+        loud, _p, _x = self.row(speaker=mock.Mock(), muted=False)
+        quiet, _p2, _x2 = self.row(speaker=mock.Mock(), muted=True)
+        self.assertTrue([b for b in quiet.bindings if b[0] == "row-voice"])
+        self.assertNotEqual(len(loud.lines), len(quiet.lines))
+
+    def test_a_pill_with_no_session_draws_nothing(self):
+        # Fixtures build pills with `__new__`, and a row that assumed a session would
+        # take the whole surface down with it.
+        c = Canvas()
+        p = ui.Pill.__new__(ui.Pill)
+        p.session = None
+        self.assertEqual(ui._row_icons(c, p, 100, 20), 100)
+        self.assertEqual(c.bindings, [])
+
+    def test_they_are_skipped_on_a_pill_too_narrow_to_hold_them(self):
+        """The status word is the thing that says whether Flow is listening, and three
+        icons drawn over it would cost more than they add."""
+        p = ui.Pill.__new__(ui.Pill)
+        p.canvas = Canvas()
+        p.session = mock.Mock(mode=DICTATE, speaker=None, muted=False)
+        p._docked_w = ui.PILL_W
+        p._shell_h = ui.PILL_H
+        p._flash = 0
+        p.armed = False
+        p._meter_level = 0.0
+        ui.Pill._draw(p)
+        self.assertFalse([b for b in p.canvas.bindings if b[0].startswith("row-")])
 
 
 if __name__ == "__main__":  # pragma: no cover

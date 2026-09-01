@@ -884,23 +884,25 @@ that holds what was just sent, so it is somewhere you are already looking.
 
 The clipboard is restored about 0.6 s after the paste, so Flow does not permanently own it.
 
-### The strip above the draft
+### The icons on the row
 
-Three things sit above the words whenever a panel is up, so the settings that matter
+Three marks sit between the meter and the status word, so the settings that matter
 mid-task do not cost a right-click:
 
-**Dictate ⌄** / **Converse ⌄** — a chip, and clicking it switches. This is the one that
-changes what Send does, and it is the one people switch mid-task.
+**⚙** opens the settings menu — the same one the right-click builds, not a second copy of
+it.
 
-**workshop:** and **voice:** — values rather than controls. Their worth is being visible
-— knowing which project Ask is running in without opening anything — and clicking either
-opens the same list the right-click menu has, tick and all. The workspace is shown by the
-last part of its path, because that is the part that names the project.
+**🔊** toggles spoken replies, and wears a slash when they are muted. It is absent when
+nothing can speak (`--no-speak`, or no voice engine), because an icon that toggles
+nothing is worse than an absent one.
 
-**It appears with the panel and never at rest.** Those three only mean anything once
-there is something to send, and an always-on strip would cost 22 px of the idle row,
-which is the part of this surface worth keeping small. FluidVoice does not pay it either
-— its bar belongs to the app being dictated into, not to the overlay.
+**≡ / 💬** switches Dictate and Converse: lines of text for dictate, a speech bubble for
+converse. The two modes differ in *where the words go*, so the marks are "text" and
+"a reply" rather than two abstractions to learn.
+
+They are drawn rather than fonted, like the mic beside them — a font that is missing or
+substituted turns a control into a box. On a pill too narrow to hold them they are
+skipped, because the status word is what says whether Flow is listening.
 
 ### Hiding it
 
