@@ -21,7 +21,34 @@ import time
 from collections import deque
 
 import numpy as np
-import sounddevice as sd
+
+
+class _LazySounddevice:
+    """`sounddevice`, imported the first time anything here asks for it.
+
+    Measured 172 ms at import on this machine — PortAudio initialises and enumerates
+    every host API the moment the module loads — and `flow.session` imports this file
+    before the pill exists, so that cost was paid on the path that puts the window on
+    screen. A `Mic` is constructed at startup but opens nothing; the first attribute
+    read here is the first time a stream is opened or a device is listed, which is
+    after the window is up.
+
+    A proxy rather than an import inside each method so the name stays a module
+    attribute: `tests/test_resilience.py` patches `audio.sd` with a fake, and that has
+    to keep working.
+    """
+
+    _module = None
+
+    def __getattr__(self, name: str):
+        if _LazySounddevice._module is None:
+            import sounddevice
+
+            _LazySounddevice._module = sounddevice
+        return getattr(_LazySounddevice._module, name)
+
+
+sd = _LazySounddevice()
 
 from . import SAMPLE_RATE
 
@@ -440,6 +467,17 @@ class SpeechGate:
                 self._quiet_blocks = 0
                 return False, True
         return False, False
+
+    @property
+    def quiet_blocks(self) -> int:
+        """How many blocks of quiet the open gate has heard in a row.
+
+        Zero whenever the gate is shut or the last block was loud. Read by
+        `Session._pump_audio` to act on a spoken send trigger the *partial* decoder has
+        already heard, once the speaker has stopped — well before the hangover would
+        close the gate and a final decode would say the same word again, slower.
+        """
+        return self._quiet_blocks if self.speaking else 0
 
     def take_preroll(self) -> list[np.ndarray]:
         """The quiet blocks captured just before the gate opened, oldest first.

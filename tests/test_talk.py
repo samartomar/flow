@@ -38,6 +38,16 @@ from flow.hotkey import Chord  # noqa: E402
 from flow.session import BLOCK, Session  # noqa: E402
 
 
+def let_linger_expire(session: Session) -> None:
+    """Wind the lingering stream's clock past `MIC_LINGER_SEC` and pump once.
+
+    A release stops *reading* the microphone and leaves the stream open for the next
+    hold — see `MIC_LINGER_SEC` — and `pump_results` is what closes it a minute later.
+    """
+    session._linger_until = 0.0
+    session.pump_results()
+
+
 class FakeMic:
     """Counts opens and closes, because the gesture is judged on them.
 
@@ -237,12 +247,43 @@ class TestTheHoldOpensAndTheReleaseCloses(unittest.TestCase):
         self.h = Harness()
         self.addCleanup(self.h.session.close)
 
-    def test_the_press_opens_the_microphone_and_the_release_closes_it(self):
+    def test_the_press_opens_the_microphone_and_the_release_stops_reading_it(self):
         self.h.press()
         self.assertTrue(self.h.mic.active)
         self.assertTrue(self.h.pill.armed)
         self.h.speak().release()
+        # Nothing reads it now — the session is not capturing — but the stream itself
+        # is held open for the next hold, so that one starts at the first word rather
+        # than 111-266 ms after it (`MIC_LINGER_SEC`).
+        self.assertFalse(self.h.session._mic_started)
+        self.assertTrue(self.h.session._mic_lingering)
+        self.assertTrue(self.h.mic.active)
+        let_linger_expire(self.h.session)
         self.assertFalse(self.h.mic.active)
+        self.assertFalse(self.h.session._mic_lingering)
+
+    def test_the_next_hold_reuses_the_stream_the_last_one_left_open(self):
+        # The whole point of the linger: a second press inside the minute is a drain
+        # and a flag, not `Pa_Terminate`, `Pa_Initialize` and a new stream.
+        self.h.press().speak().release()
+        self.assertEqual(self.h.mic.starts, 1)
+        self.h.press()
+        self.assertEqual(self.h.mic.starts, 1)
+        self.assertEqual(self.h.mic.stops, 0)
+        self.assertTrue(self.h.session._mic_started)
+        self.assertFalse(self.h.session._mic_lingering)
+
+    def test_what_arrived_while_nobody_was_reading_is_not_the_next_hold(self):
+        # Blocks the lingering stream captured between two holds belong to nobody: the
+        # next hold starts from its own press, and the queue's own overflow while it was
+        # unread is not announced as audio the user lost.
+        self.h.press().speak().release()
+        self.h.mic._blocks = [np.zeros(BLOCK, dtype=np.float32)] * 5
+        self.h.mic.dropped = 40
+        self.h.press()
+        self.assertEqual(self.h.mic._blocks, [])
+        self.h.frame()
+        self.assertFalse(any("overflowed" in n for n in self.h.notes))
 
     def test_the_press_warms_before_it_captures(self):
         # The reason the warm is a separate word. By the time capture is open the models
@@ -288,8 +329,13 @@ class TestTheChordGivesBackExactlyWhatItTook(unittest.TestCase):
 
     def test_and_a_hold_that_opened_it_closes_it(self):
         self.h.press().speak().release()
-        self.assertEqual(self.h.mic.stops, 1)
         self.assertFalse(self.h.pill.armed)
+        self.assertFalse(self.h.session._mic_started)
+        # Closed by the session on its own once no hold comes back — and by *this*
+        # session, which is what "gives back what it took" now means: the toggle
+        # hotkey's session above is never lingered, because it never released.
+        let_linger_expire(self.h.session)
+        self.assertEqual(self.h.mic.stops, 1)
 
 
 class TestWhatWasSaidSurvivesEveryPath(unittest.TestCase):
@@ -430,8 +476,10 @@ class TestTheTwoTimeoutsAreNotHypothetical(unittest.TestCase):
         self.h.press().speak(2.0)
         self.h.pill._ptt_since -= ui.PTT_MAX_HOLD_SEC + 1
         self.h.frame()
-        self.assertFalse(self.h.mic.active)
+        self.assertFalse(self.h.session._mic_started)
         self.assertIsNone(self.h.pill._ptt_since)
+        let_linger_expire(self.h.session)
+        self.assertFalse(self.h.mic.active)
 
     def test_and_keeps_what_was_said_rather_than_pasting_it(self):
         self.h.press().speak(2.0)
@@ -537,9 +585,11 @@ class TestOneHoldOwnsOneSend(unittest.TestCase):
         # The `return` in `_toggle`. Falling through would do the generation bump the
         # branch above exists to avoid.
         self.h.press().speak(2.0)
+        generation = self.h.session._capture_generation
         self.h.pill._toggle()
         self.assertIsNone(self.h.pill._ptt_since)
-        self.assertFalse(self.h.mic.active)
+        self.assertFalse(self.h.session._mic_started)
+        self.assertEqual(self.h.session._capture_generation, generation)
 
     def test_the_mode_switch_really_does_clear_it_in_the_app(self):
         # `Harness.dispatch` mirrors `Pill._frame`, so the test above could pass on the

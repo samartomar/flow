@@ -501,27 +501,54 @@ def main(argv: list[str] | None = None) -> int:
     # and somebody whose GPU quietly did not engage has no other way to tell.
     from .asr import cuda_reason, default_models, resolve_device
 
-    decode_device = resolve_device(args.decode_device)
-    # `cuda_reason()` rather than one sentence for every way this can be CPU: "no NVIDIA
-    # device" and "the runtime is not installed" are the same line to write and a
-    # completely different line to read, and only the second is something the reader can
-    # act on. It costs nothing extra — the probe has already run inside `resolve_device`
-    # and remembers its answer.
-    say(f"decoding on: {decode_device}"
-        + ("" if decode_device != "cpu" or args.decode_device == "cpu"
-           else f" ({cuda_reason()})"))
+    asked_partial = args.model or args.partial_model
+    asked_final = args.model or args.final_model
 
-    default_partial, default_final = default_models(decode_device)
-    partial_name = args.model or args.partial_model or default_partial
-    final_name = args.model or args.final_model or default_final
+    def decode_plan() -> tuple[str, str, list[str]]:
+        """Both tier names, and the startup lines that name the device and them.
+
+        **Resolving the device is what loads CUDA** — ctranslate2's import and the
+        runtime probe, 310 ms measured on this machine — and it used to run here, in
+        front of the window. The transcriber resolves the same answer on its own the
+        first time it needs one, so nothing below depends on asking now; the lines are
+        said from a thread once the pill is up. Asked before the window in exactly one
+        case: a Mac deciding `--engine auto`, which needs the names to ask whether the
+        models are on disk.
+
+        `cuda_reason()` rather than one sentence for every way this can be CPU: "no
+        NVIDIA device" and "the runtime is not installed" are the same line to write
+        and a completely different line to read, and only the second is something the
+        reader can act on.
+        """
+        decode_device = resolve_device(args.decode_device)
+        lines = [f"decoding on: {decode_device}"
+                 + ("" if decode_device != "cpu" or args.decode_device == "cpu"
+                    else f" ({cuda_reason()})")]
+        default_partial, default_final = default_models(decode_device)
+        return asked_partial or default_partial, asked_final or default_final, lines
+
+    planned = None
+    partial_name = final_name = ""
+    if sys.platform == "darwin" and args.engine == "auto":
+        planned = decode_plan()
+        partial_name, final_name, _lines = planned
     engine, engine_why = _engine(args, partial_name, final_name)
-    if engine == "native":
-        say(f"engine: macOS on-device speech{engine_why}")
-    elif partial_name == final_name:
-        say(f"model: {final_name}, for partials and finals both{engine_why}")
-    else:
-        say(f"models: {partial_name} for partials, "
-            f"{final_name} for finals{engine_why}")
+
+    def say_models() -> None:
+        """The device and model lines, from a thread, after the pill is on screen."""
+        try:
+            partial, final, lines = planned or decode_plan()
+        except Exception as exc:
+            say(f"decoding on: could not be resolved ({exc})")
+            return
+        for line in lines:
+            say(line)
+        if engine == "native":
+            say(f"engine: macOS on-device speech{engine_why}")
+        elif partial == final:
+            say(f"model: {final}, for partials and finals both{engine_why}")
+        else:
+            say(f"models: {partial} for partials, {final} for finals{engine_why}")
 
     from .diag import Diag
     from .profile import CLI_MODEL_CAP, Profile, resolve_workspace
@@ -547,7 +574,10 @@ def main(argv: list[str] | None = None) -> int:
             say(f"model: {profile.cli_model}")
         say(f"effort: {profile.cli_effort} (where the CLI offers the choice)")
 
-    diag = None if args.no_profile else Diag()
+    # `background=True`: written from a thread of its own. The trace records every
+    # partial, route and state change from the UI thread, and each write was a file
+    # open on the frame budget — see `Diag.__init__`.
+    diag = None if args.no_profile else Diag(background=True)
     learned = profile.learned_terms if profile is not None else None
     if profile is not None and profile.calibrated:
         say(f"profile: room {profile.floor_db:.1f} dB, "
@@ -581,32 +611,48 @@ def main(argv: list[str] | None = None) -> int:
     # exactly what happened the first time someone tried it. Entering converse mode is
     # the opt-in; a conversation you have to read is not the feature.
     speaker = None
-    if not args.no_speak:
+
+    def setup_speech(session) -> None:
+        """Find the voices, build the speaker, hand it to the session. On a thread.
+
+        Every line of this used to run before the pill existed, and the first line is
+        a PowerShell start-up: 439 ms measured to list the Windows voices, plus the
+        Piper and Edge imports, plus the speech host's own process start in
+        `available`. Nothing on screen depends on any of it — a reply cannot be spoken
+        before a question has been asked — so it runs beside the window rather than
+        in front of it, and `session.speaker` goes from None to a speaker when it is
+        ready. The voice icon on the pill row appears at the same moment.
+        """
         from .speak import Speaker, default_voice, installed_voices, pick
 
-        # The flag wins over the profile, and the profile over whatever is best. A
-        # saved voice that has since been uninstalled resolves to None and is said out
-        # loud rather than silently ignored — the reply would otherwise come back in a
-        # voice nobody chose, which reads as the setting not working.
-        wanted = args.voice or (profile.voice if profile is not None else None)
-        chosen = pick(wanted)
-        # `default_voice` and not None, so that a machine with a better engine installed
-        # does not fall through to `System.Speech`'s own default — which is one of the
-        # 2013 voices the menu has stopped offering. See its docstring: hiding them from
-        # the list while still speaking in them is the worst of both.
-        fallback = default_voice()
-        if wanted and chosen is None:
-            say(f"voice: {wanted!r} is not installed - using "
-                f"{fallback or 'the engine default'}")
-        chosen = chosen or fallback
-        speaker = Speaker(voice=chosen)
-        if not speaker.available:
-            say("speech: engine unavailable - replies will be silent")
-            speaker = None
-        else:
+        try:
+            # The flag wins over the profile, and the profile over whatever is best.
+            # A saved voice that has since been uninstalled resolves to None and is
+            # said out loud rather than silently ignored — the reply would otherwise
+            # come back in a voice nobody chose, which reads as the setting not
+            # working.
+            wanted = args.voice or (profile.voice if profile is not None else None)
+            chosen = pick(wanted)
+            # `default_voice` and not None, so that a machine with a better engine
+            # installed does not fall through to `System.Speech`'s own default — which
+            # is one of the 2013 voices the menu has stopped offering. See its
+            # docstring: hiding them from the list while still speaking in them is the
+            # worst of both.
+            fallback = default_voice()
+            if wanted and chosen is None:
+                say(f"voice: {wanted!r} is not installed - using "
+                    f"{fallback or 'the engine default'}")
+            chosen = chosen or fallback
+            found = Speaker(voice=chosen)
+            if not found.available:
+                say("speech: engine unavailable - replies will be silent")
+                return
             n = len(installed_voices())
             say(f"speech: on, voice {chosen or 'engine default'} "
                 f"({n} installed; --voice, or the right-click menu, to change)")
+            session.speaker = found
+        except Exception as exc:
+            say(f"speech: unavailable ({exc}) - replies will be silent")
 
     # Said whichever way it resolves, including "not set". The owner accepted that a
     # stored workspace goes stale silently when a project moves; this line is what they
@@ -623,8 +669,10 @@ def main(argv: list[str] | None = None) -> int:
         profile.save()
 
     session = Session(
+        # The asked-for names, or None: the transcriber resolves a None to the tier
+        # its device wants, the same answer `decode_plan` reaches for the startup line.
         asr=(_native_transcriber() if engine == "native" else WhisperTranscriber(
-            partial_name, final_name, lexicon=lexicon,
+            asked_partial, asked_final, lexicon=lexicon,
             baseline=profile.confidence if profile is not None else None,
             device=args.decode_device,
         )),
@@ -761,18 +809,25 @@ def main(argv: list[str] | None = None) -> int:
     quits = (f"{hotkeys.chosen['quit']} quits"
              if hotkeys is not None and "quit" in hotkeys.chosen
              else "quit from the right-click menu")
-    if diag is not None:
-        # Off the startup path on purpose: two CLI process starts and a handful of file
-        # reads, none of which anybody is waiting for. The pill is on screen in 0.40 s
-        # and this must not be part of that number.
-        import threading as _threading
+    import threading as _threading
 
+    def record_identity_later() -> None:
+        """Two CLI process starts and a handful of file reads, ten seconds from now.
+
+        Off the startup path was never enough: this used to start beside the model
+        load, and two `node` boots contending with `WhisperModel` on the same cores
+        is a slower first decode for a record nobody reads until later. The names are
+        read then rather than now, because the device — and so the tiers — is resolved
+        on its own thread after the window is up.
+        """
         from .diag import record_identity
 
-        _threading.Thread(
-            target=record_identity, args=(diag, (partial_name, final_name)),
-            daemon=True, name="identity",
-        ).start()
+        def go() -> None:
+            asr_names = getattr(session.asr, "names", None)
+            names = tuple(asr_names) if isinstance(asr_names, tuple) else ()
+            record_identity(diag, names)
+
+        _threading.Thread(target=go, daemon=True, name="identity").start()
 
     say(
         ("listening | " if args.arm else "click the pill to arm | ")
@@ -805,6 +860,13 @@ def main(argv: list[str] | None = None) -> int:
     # single-flight and does its loading on a thread of its own — so nothing here waits.
     if not args.no_warm:
         session.warm()
+    # Beside the window, not in front of it — see each one for what it used to cost.
+    _threading.Thread(target=say_models, daemon=True, name="startup-lines").start()
+    if not args.no_speak:
+        _threading.Thread(
+            target=setup_speech, args=(session,), daemon=True, name="voices").start()
+    if diag is not None:
+        pill.after(10_000, record_identity_later)
     try:
         pill.mainloop()
     except KeyboardInterrupt:

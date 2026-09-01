@@ -17,6 +17,7 @@ from typing import NamedTuple, Protocol
 
 import numpy as np
 
+from . import SAMPLE_RATE
 from .clean import invented_reason, normalise
 from .lexicon import MAX_TERMS, Lexicon, as_hotwords
 
@@ -79,6 +80,24 @@ FINAL_MODEL = "small.en"
 #: paying: the visible partial->final rewrite, where the two tiers disagreed on roughly
 #: one word in five of accented speech. One model cannot disagree with itself.
 CUDA_MODEL = "large-v3"
+
+#: The partial tier on a GPU — and the reason the split comes back one model wide.
+#:
+#: The paragraph above chose one model for both paths so the two tiers could not
+#: disagree, and the price was measured only after it shipped: **795 ms median per
+#: partial, 1 357 ms at p90** over 5 169 partials in this machine's own trace. Whisper
+#: pads every input to a 30 s window, so `large-v3`'s encoder costs the same for one
+#: word as for twenty, and a partial that lands eight tenths of a second after the words
+#: it describes is not live — it is a delayed caption. Worse, the final queues behind
+#: whichever partial is running (`DecodeWorker` has one thread), so the release paid
+#: for that partial *and then* the final.
+#:
+#: `small` — the multilingual one, so `task="translate"` still lands Hindi dictation as
+#: English — is roughly an eighth of the encoder and measured at RTF 0.070 on this GPU
+#: against `large-v3`'s 0.190. A partial→final rewrite is back, on a dim line that says
+#: it is provisional; the final is unchanged, and the words that get pasted are still
+#: `large-v3`'s.
+CUDA_PARTIAL_MODEL = "small"
 
 #: Models that do not produce a usable `no_speech_prob`, and therefore cannot be trusted
 #: to gate clean.py's hallucination filter.
@@ -271,7 +290,21 @@ def _wheel_dll_dirs() -> list[str]:
     return out
 
 
+_cuda_lock = threading.Lock()
+
+
 def cuda_ready() -> bool:
+    """`_cuda_probe`, once, however many threads ask.
+
+    The startup line and the preload both resolve the device now, on threads of their
+    own, and the probe mutates process state (`PATH`, the DLL directories) — serialised
+    so the second asker waits for the first's answer rather than probing beside it.
+    """
+    with _cuda_lock:
+        return _cuda_probe()
+
+
+def _cuda_probe() -> bool:
     """True when a decode can actually run on this machine's GPU.
 
     Three things have to line up and only the first is visible from `nvidia-smi`: a
@@ -356,11 +389,12 @@ def default_models(device: str) -> tuple[str, str]:
     """(partial, final) for a resolved device.
 
     Kept as a function rather than two more constants because the answer is not two
-    independent choices — on a GPU it is deliberately the *same* model twice, and a
-    reader who changes one half of that should have to see the other.
+    independent choices — the partial tier is chosen *for* the final it precedes, and a
+    reader who changes one half of that should have to see the other. See
+    `CUDA_PARTIAL_MODEL` for why the GPU no longer runs one model twice.
     """
     if device == "cuda":
-        return CUDA_MODEL, CUDA_MODEL
+        return CUDA_PARTIAL_MODEL, CUDA_MODEL
     return PARTIAL_MODEL, FINAL_MODEL
 
 
@@ -541,6 +575,32 @@ class WhisperTranscriber:
                     with self._lock:
                         self._loading.discard(tier)
 
+    def warmup(self) -> None:
+        """Run one throwaway decode through every loaded tier.
+
+        `load()` builds the model and nothing else, and the first real decode then pays
+        for everything the build deferred — CTranslate2's kernel selection, cuDNN's
+        autotuning on the GPU, the mel filter bank — inside the user's first sentence.
+        One second of digital silence through each tier moves that cost to the preload
+        thread, where nobody is waiting on it.
+
+        Straight to `model.transcribe`, deliberately not through `text()`: silence is
+        exactly what the hallucination guard rejects, and rejections it recorded here
+        would surface as notes about words nobody said. Best-effort — a failure here is
+        a slower first decode, not a broken session — and a tier that is not loaded is
+        skipped rather than built, because building is `load()`'s job and its lock.
+        """
+        with self._lock:
+            tiers = [(tier, m) for tier, m in self._models.items() if m is not None]
+        silence = np.zeros(SAMPLE_RATE, dtype=np.float32)
+        for tier, model in tiers:
+            try:
+                segments, _info = model.transcribe(silence, **decode_options(tier))
+                for _segment in segments:
+                    pass
+            except Exception:
+                pass
+
     def take_confidence(self) -> float | None:
         """The worst `avg_logprob` among the segments the last decode kept.
 
@@ -618,9 +678,23 @@ class WhisperTranscriber:
         """
         return as_hotwords(self.lexicon.terms()[:MAX_TERMS])
 
+    #: Read by `DecodeWorker`: this transcriber honours `cancelled` below, so a partial
+    #: that a final has overtaken can be abandoned between segments rather than run to
+    #: the end while the final waits behind it.
+    cancellable = True
+
     def text(
-        self, audio: np.ndarray, *, final: bool = False, hotwords: str = ""
+        self, audio: np.ndarray, *, final: bool = False, hotwords: str = "",
+        cancelled=None,
     ) -> str:
+        """Transcribe `audio`. `cancelled`, when given, is asked between segments.
+
+        faster-whisper decodes lazily — the generator runs the encoder on its first
+        step and one decoder pass per segment after that — so a partial the worker no
+        longer wants can stop at the next segment boundary. Whatever was decoded is
+        returned as "" and never shown: the caller has already decided the final is
+        the text that matters.
+        """
         if audio.size == 0:
             return ""
         # Only the tier being used: a partial must never wait on the finals model.
@@ -636,6 +710,10 @@ class WhisperTranscriber:
         kept = []
         worst: float | None = None
         for s in segments:
+            if cancelled is not None and cancelled():
+                with self._lock:
+                    self._confidence = None
+                return ""
             # Drop segments the model invented rather than heard, and record every one
             # with the evidence used (P2). See flow/clean.py for the measurements
             # behind the thresholds.

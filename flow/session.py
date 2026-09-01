@@ -296,6 +296,37 @@ RECENT_ANSWERED = "answer"
 #: worker-idle check below, this is what bounds partial latency.
 PARTIAL_MIN_GROWTH_SEC = 0.7
 
+#: How long `Session._available` trusts one PATH walk for the agent CLIs.
+CLI_LOOKUP_SEC = 30.0
+
+#: How long the input stream a push-to-talk release stops *reading* stays open.
+#:
+#: The release used to close the stream and the next press reopen it: `Pa_Terminate`
+#: and `Pa_Initialize`, a fresh `InputStream`, and then 111-266 ms before the first
+#: block arrived — measured on this machine — all of it on the UI thread and all of it
+#: in front of the first word. The quiet head of that word is what opened the gate,
+#: and it was already gone.
+#:
+#: So the stream lingers. Nothing reads it: `_mic_started` is False, `tick()` is not
+#: driven, the queue fills to its 256 blocks and throws the oldest away unread, and the
+#: next press drains it and starts from now. That is the same posture the idle unload
+#: has always taken with the toggle gesture — an open, unread microphone is a device
+#: handle and not a recording — and it ends on its own after a minute of no holds,
+#: from `pump_results`, which runs whether or not the pill is armed.
+MIC_LINGER_SEC = 60.0
+
+#: A spoken send trigger heard by the *partial* decoder fires once the gate has heard
+#: this many quiet blocks in a row (64 ms each) — about 200 ms of silence after the
+#: word — instead of after the 800 ms hangover and a second, final decode of the same
+#: audio. Measured on this machine that path cost 1.6-2.5 s between "boom" and the
+#: paste; this one costs the partial, which the decoder was going to run anyway.
+TRIGGER_QUIET_BLOCKS = 3
+
+#: Only a short utterance can be a trigger heard early. "boom" with its pre-roll and
+#: its silence is under two seconds; a partial of a longer one that happens to read
+#: as the trigger is a sentence still being spoken, and the final will say what it was.
+TRIGGER_MAX_SEC = 3.0
+
 #: R8: drop the models after a long quiet spell. The mic stays open — it is cheap, and
 #: keeping it means speech still wakes the session with no keypress. This is a
 #: deliberate narrowing of what docs/analysis.md §4 proposed (which released the mic
@@ -559,6 +590,12 @@ class DecodeWorker:
         self.timings: deque[tuple[str, float]] = deque(maxlen=300)
         self._busy = False
         self._alive = True
+        #: Set by `submit_final` while a partial is being decoded: that partial describes
+        #: audio the final now covers, so it is finished for nobody. A transcriber that
+        #: says it is `cancellable` is asked this between segments and stops; every
+        #: other one runs to the end and the result is discarded on arrival instead of
+        #: being shown after the final it was superseded by.
+        self._partial_stale = False
         self._thread = threading.Thread(target=self._run, daemon=True, name="decode")
         self._thread.start()
 
@@ -588,6 +625,7 @@ class DecodeWorker:
         with self._cv:
             self._finals.append((audio, utterance))
             self._partial = None  # a final supersedes a pending partial of the same audio
+            self._partial_stale = True  # ...and the one being decoded right now
             self._cv.notify()
 
     def submit_rescue(self, audio: np.ndarray, hotwords: str,
@@ -653,16 +691,29 @@ class DecodeWorker:
                 else:
                     audio, kind = self._partial, "partial"
                     self._partial = None
+                    self._partial_stale = False
                 self._busy = True
             started = time.perf_counter()
             try:
                 # `hotwords` is passed only when there is a bias to apply, so a
                 # Transcriber that predates this (every fake in the tests) still works.
+                # `cancelled` the same way: only to a transcriber that says it takes it.
                 extra = {"hotwords": hotwords} if hotwords else {}
+                if kind == "partial" and getattr(self._asr, "cancellable", False):
+                    extra["cancelled"] = lambda: self._partial_stale
                 text = self._asr.text(audio, final=(kind != "partial"), **extra)
             except Exception as exc:  # a decode failure must not kill the thread
                 text, kind = f"{type(exc).__name__}: {exc}", "error"
             elapsed = time.perf_counter() - started
+            if kind == "partial":
+                with self._cv:
+                    stale = self._partial_stale
+                if stale:
+                    # Superseded while it ran. Not a result: showing it would put a
+                    # dim line on screen *after* the final it was a preview of.
+                    with self._cv:
+                        self._busy = False
+                    continue
             # Drained here, beside the text it belongs to, and unconditionally.
             # `take_confidence` clears as it reads, and this thread does not wait for
             # the UI thread: read later and the number would belong to whichever decode
@@ -825,6 +876,8 @@ class Session:
         #: Pinning is a decision and is never second-guessed; None is a preference.
         self._cli = cli
         self._cli_timeout = cli_timeout
+        #: (when, what) — the last `refine.available()` answer, see `_available`.
+        self._clis_cache: tuple[float, list | None] = (0.0, None)
         #: (op, draft revision, result) — see `_next_op`.
         self._refine_result: (
             tuple[int, int, tuple[str | None, str], tuple[str, ...]] | None
@@ -980,6 +1033,18 @@ class Session:
         #: when the hold began against a session already capturing, which is what stops
         #: a chord from closing a microphone the toggle hotkey opened.
         self._ptt_opened = False
+        #: The stream a release left open and unread — see `MIC_LINGER_SEC` — and when
+        #: it is closed if no hold comes back for it.
+        self._mic_lingering = False
+        self._linger_until = 0.0
+        #: A send trigger the partial decoder heard, waiting for the speaker to stop —
+        #: see `_hear_trigger`. Cleared by anything that ends the utterance.
+        self._trigger_pending: str | None = None
+        #: `profile.save()` owed, paid on the next `pump_results` rather than inline.
+        #: The two places that ask — a dictation landing and a Send — are both on the
+        #: frame that pastes, and a 1.2 ms file write (tens under a virus scanner) was
+        #: sitting between the decode and the keystroke it was waiting for.
+        self._save_pending = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -1007,10 +1072,21 @@ class Session:
         # and the guard below covers the other holder of a PortAudio stream, a spoken
         # reply. `getattr` because a fake microphone has no `refresh`, which is exactly
         # what keeps the suite from terminating the real PortAudio 1 800 times.
-        again = getattr(self.mic, "refresh", None)
-        if callable(again) and not self.talking:
-            again()
-        self.mic.start()
+        if self._mic_lingering and not getattr(self.mic, "trouble", ""):
+            # A release left this stream open a moment ago (`MIC_LINGER_SEC`). What it
+            # captured in between belongs to nobody: drained, and the overflow counter
+            # rebased so the blocks the full queue threw away unread are not announced
+            # as audio the user lost.
+            self.mic.drain()
+            self._last_mic_dropped = getattr(self.mic, "dropped", 0)
+            self._mic_lingering = False
+        else:
+            if self._mic_lingering:
+                self._end_linger()
+            again = getattr(self.mic, "refresh", None)
+            if callable(again) and not self.talking:
+                again()
+            self.mic.start()
         self._mic_started = True
         # Arming is the fresh start the give-up path promises, so nothing about the last
         # incident survives into this one: a second loss is announced as a second loss,
@@ -1106,6 +1182,29 @@ class Session:
             # Surfaced through the normal event stream so the UI can show it; a raise
             # on this thread would vanish into stderr.
             self._emit("error", f"model failed to load: {exc}")
+            return
+        # One silent decode per tier, so the first real one is a decode and not the
+        # kernel selection and cuDNN autotuning the build deferred. `getattr` because
+        # the Transcriber protocol is one method wide and the fakes stop there.
+        warm = getattr(self.asr, "warmup", None)
+        if callable(warm):
+            warm()
+
+    def _end_linger(self) -> None:
+        """Close the stream a release left open. Safe against a device already gone."""
+        self._mic_lingering = False
+        try:
+            self.mic.stop()
+        except Exception:
+            pass
+
+    def _pump_linger(self) -> None:
+        if (
+            self._mic_lingering
+            and not self._mic_started
+            and time.perf_counter() >= self._linger_until
+        ):
+            self._end_linger()
 
     def pause(self) -> None:
         """Stop capturing without tearing the session down.
@@ -1116,6 +1215,8 @@ class Session:
         """
         self.mic.stop()
         self._mic_started = False
+        self._mic_lingering = False
+        self._trigger_pending = None
         # An atomic boundary, not just a stopped stream. Everything below survived a
         # pause until 2026-08-03 and arrived in the *next* transcript: `_utter` kept the
         # half-said sentence, the gate stayed open so the next arm resumed mid-utterance
@@ -1209,14 +1310,15 @@ class Session:
         pending = bool(self._utter)
         self._finalise()
         if self._ptt_opened:
-            try:
-                self.mic.stop()
-            except Exception:
-                pass  # already gone; there is nothing left to close
+            # The stream stays open and stops being read — see `MIC_LINGER_SEC` for
+            # what the reopen cost and why an unread stream is not a recording.
+            # `_pump_linger` closes it a minute from now if no hold comes back.
             self._mic_started = False
+            self._mic_lingering = True
+            self._linger_until = time.perf_counter() + MIC_LINGER_SEC
             # The hygiene `pause()` does either side of the generation bump, minus the
             # bump: a gate left open would resume the next hold mid-utterance with no
-            # onset, and blocks captured after the stop belong to nobody.
+            # onset, and blocks captured after the release belong to nobody.
             self.gate.reset()
             self.mic.drain()
             self._ptt_opened = False
@@ -1268,8 +1370,14 @@ class Session:
             # window that will not go away. The same reasoning as the bounded joins.
             pass
         self._mic_started = False
+        self._mic_lingering = False
         self._cancel.set()
         self.worker.close()
+        # The trace's own thread, if it has one: what was written in the last frames
+        # is on disk before the process is gone. Bounded inside, like the joins.
+        shut_diag = getattr(self.diag, "close", None)
+        if callable(shut_diag):
+            shut_diag()
         # `getattr` because the speaker is injected and half the harnesses pass a
         # stand-in — the same reason `profile` is read that way.
         shut = getattr(self.speaker, "close", None)
@@ -1361,9 +1469,25 @@ class Session:
         """
         cli = self._cli
         if cli is None:
-            found = available()
+            found = self._available()
             cli = found[0] if found else None
         return cli.name if cli is not None else ""
+
+    def _available(self) -> list:
+        """`refine.available()`, remembered for `CLI_LOOKUP_SEC`.
+
+        The lookup is two PATH walks across every `PATHEXT` entry — 10.2 ms measured —
+        and `_provider` runs it on the UI thread at the start of every refine and ask
+        and on every mode switch. A CLI does not appear on PATH between one frame and
+        the next; the menu re-resolves when it opens, which is the moment a newly
+        installed one is wanted.
+        """
+        now = time.perf_counter()
+        stamp, found = self._clis_cache
+        if found is None or now - stamp > CLI_LOOKUP_SEC:
+            found = available()
+            self._clis_cache = (now, found)
+        return found
 
     def _next_op(self) -> int:
         """Identity for one CLI call.
@@ -1493,10 +1617,33 @@ class Session:
         disarming while waiting is the natural thing to do — especially now that Flow
         goes deaf while it reads a reply aloud.
         """
+        # First, so a save owed by *last* frame's decode lands here — after the paste
+        # that frame went on to do — rather than in front of this frame's.
+        self._pump_saves()
         self._pump_decodes()
         self._pump_drops()
         self._pump_refine()
         self._pump_ask()
+        self._pump_linger()
+
+    def _request_save(self) -> None:
+        """Ask for `profile.save()` on the next frame. See `_save_pending`."""
+        if self.profile is not None:
+            self._save_pending = True
+
+    def _pump_saves(self) -> None:
+        if not self._save_pending:
+            return
+        self._save_pending = False
+        if self.profile is None:
+            return
+        if not self.profile.save() and not self._said_no_save:
+            # Said once, and worth saying: a profile that will not write is also losing
+            # the corrections and the calibration, which cost far more to re-create than
+            # a word count does.
+            self._said_no_save = True
+            self._emit("note", f"could not save {self.profile.path} - corrections and "
+                               "counts are not being kept")
 
     def _pump_drops(self) -> None:
         """Surface what the filter rejected (P2).
@@ -1900,6 +2047,22 @@ class Session:
             elif stopped:
                 self._finalise()
 
+        # A send trigger the partial decoder heard, once the speaker has stopped. The
+        # utterance is spent here — no final, no hangover — because the final would be
+        # a slower way of hearing the same word. See `TRIGGER_QUIET_BLOCKS`.
+        if (
+            self._trigger_pending is not None
+            and self.gate.speaking
+            and self._utter
+            and getattr(self.gate, "quiet_blocks", 0) >= TRIGGER_QUIET_BLOCKS
+        ):
+            heard, self._trigger_pending = self._trigger_pending, None
+            self._utter = []
+            self._decoded_sec = 0.0
+            self.gate.reset()
+            self._route(heard)
+            return
+
         # Ask for a partial only when the worker is free. Combined with latest-wins,
         # this is what stops partial latency from drifting behind live speech.
         if (
@@ -1910,6 +2073,25 @@ class Session:
         ):
             self._decoded_sec = self._utter_sec()
             self.worker.submit_partial(np.concatenate(self._utter))
+
+    def _hear_trigger(self, text: str) -> None:
+        """A partial that reads as a whole send trigger, while the gate is still open.
+
+        Remembered, not acted on: the speaker may not have finished — "boom" is also
+        the first syllable of a sentence about boom boxes — so `_pump_audio` waits for
+        `TRIGGER_QUIET_BLOCKS` of silence before spending the utterance on it. Anything
+        that ends the utterance first (the hangover, a release, a pause) clears it, and
+        the final decides as it always did.
+        """
+        if (
+            not self.gate.speaking
+            or not self._utter
+            or not self.draft.text
+            or self._utter_sec() > TRIGGER_MAX_SEC
+        ):
+            return
+        if plan(text, self.draft.text, self.send_words).kind == "send_trigger":
+            self._trigger_pending = text
 
     def _finalise(self) -> None:
         if not self._utter:
@@ -1931,6 +2113,7 @@ class Session:
         self.worker.submit_final(audio, record)
         self._utter = []
         self._decoded_sec = 0.0
+        self._trigger_pending = None
 
     def _pump_decodes(self) -> None:
         for kind, text, elapsed, confidence, utterance in self.worker.results():
@@ -1942,6 +2125,7 @@ class Session:
                 # otherwise pop an empty bubble open on screen.
                 if text:
                     self._emit("partial", text)
+                    self._hear_trigger(text)
             elif kind == "rescue":
                 self._finish_rescue(text, utterance)
             elif text:
@@ -2517,13 +2701,8 @@ class Session:
         if self.profile is None:
             return
         self.profile.note_dictation(words, seconds)
-        if not self.profile.save() and not self._said_no_save:
-            # Said once, and worth saying: a profile that will not write is also losing
-            # the corrections and the calibration, which cost far more to re-create than
-            # a word count does.
-            self._said_no_save = True
-            self._emit("note", f"could not save {self.profile.path} - corrections and "
-                               "counts are not being kept")
+        # Next frame, not now: this runs on the frame that is about to paste.
+        self._request_save()
 
     @property
     def can_rescue(self) -> bool:
@@ -3272,8 +3451,9 @@ class Session:
         self.thread.add(text)
         # P8: send is the natural commit point — rare, user-initiated, and the moment
         # a session's corrections have proved themselves by surviving to a handoff.
-        if self.profile is not None:
-            self.profile.save()
+        # Owed rather than paid: the caller pastes the text this returns, and the write
+        # goes after the keystroke rather than in front of it.
+        self._request_save()
         self.following_up = False
         self.gate.reset()
         self._utter = []

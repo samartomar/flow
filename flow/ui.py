@@ -682,6 +682,28 @@ _FR_PRIVATE = 0x10
 _loaded_fonts: list[str] = []
 
 
+def _timer_resolution(ms: int) -> None:
+    """Ask Windows for a `ms` timer, for the life of the process. No-op elsewhere.
+
+    Tk's `after` is a Windows timer underneath, and Windows' default resolution is
+    15.6 ms: `after(30)` fires at 31-47 ms and `after(5)` at 15.6. `timeBeginPeriod`
+    is process-wide and is what every media player and every game calls; the cost is
+    a little more timer interrupt traffic while Flow is running, which is the price of
+    a keypress being acted on when it happens rather than at the next tick.
+
+    Not undone at quit. The period is a per-process request the kernel drops when the
+    process ends, and a matching `timeEndPeriod` on the quit path would be one more
+    thing that has to run in the right order during teardown, for a resource the OS
+    already reclaims.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.WinDLL("winmm").timeBeginPeriod(ms)
+    except Exception:
+        pass
+
+
 def _load_fonts() -> None:
     """Register the bundled IBM Plex weights, process-private, before any window exists.
 
@@ -1968,7 +1990,17 @@ def _row_icons(c: tk.Canvas, pill, x: float, mid: float, tags="row") -> float:
         return x
     converse = getattr(session, "mode", DICTATE) != DICTATE
 
+    # Once per canvas, not once per frame. `tag_bind` registers a fresh Tcl command
+    # on every call and Tkinter frees none of them until the widget is destroyed
+    # (`Misc._bind` -> `_register`), so three binds on a 30 ms repaint were ~100 leaked
+    # commands a second for as long as the pill was up. A tag binding outlives the
+    # items that carry the tag, so binding once is also all a canvas ever needed.
+    bound = c.__dict__.setdefault("_flow_hit_bound", set())
+
     def hit(tag: str, command) -> None:
+        if tag in bound:
+            return
+        bound.add(tag)
         c.tag_bind(tag, "<Button-1>", lambda _e: command())
 
     _gear(c, x + ICON_SIZE / 2, mid, ICON_SETTINGS, ("row-gear", tags))
@@ -2052,6 +2084,13 @@ def _dark_menu(master, **kw) -> tk.Menu:
     )
 
 
+#: How often `Pill._fast_tick` runs while a hold or a paste wait is in flight. Five
+#: milliseconds is a queue check and two comparisons; it is not a repaint. Windows'
+#: default timer resolution is 15.6 ms, which `Pill.__init__` lowers to 1 ms for the
+#: life of the process so this — and the 30 ms frame — actually fire when asked.
+FAST_TICK_MS = 5
+
+
 class Pill(tk.Tk):
     """The always-visible control. Click to arm/disarm, drag to move."""
 
@@ -2113,7 +2152,13 @@ class Pill(tk.Tk):
     ) -> None:
         _load_fonts()  # before the first Tk window exists, or a font object beats it here
         scale = _dpi_aware()  # before the first Tk window exists, or it has no effect
+        _timer_resolution(1)  # so `after(5)` and `after(30)` mean what they say
         super().__init__()
+        #: Whether `_fast_tick` is scheduled — see `_quicken`.
+        self._fast_ticking = False
+        self._frame_no = 0
+        #: What the last repaint drew, so an identical frame draws nothing (`_draw_key`).
+        self._drawn_key = None
         self.scale = scale
         self.session = session
         self.on_send = on_send
@@ -2423,6 +2468,7 @@ class Pill(tk.Tk):
         self._ptt_since = time.perf_counter()
         self.armed = True
         self._disarmed_since = None
+        self._quicken()
         self._draw()
 
     def _talk_end(self, *, send: bool) -> None:
@@ -2454,6 +2500,8 @@ class Pill(tk.Tk):
             self._draw()
             return
         self._ptt_wait = time.perf_counter() if send else None
+        if self._ptt_wait is not None:
+            self._quicken()
         self._draw()
 
     def _pump_talk(self) -> None:
@@ -3837,44 +3885,19 @@ class Pill(tk.Tk):
 
     def _frame(self) -> None:
         self._track_target()
-        self._sync_monitor()
+        # Every fourth frame (~120 ms). The question is three ctypes calls and two Tcl
+        # ones, and the answer moves when the pointer crosses to another monitor —
+        # which a tenth of a second is fast enough to follow.
+        self._frame_no = self.__dict__.get("_frame_no", 0) + 1
+        if self._frame_no % 4 == 1:
+            self._sync_monitor()
 
         # Same rule as the hotkeys below: another thread decided, this one acts.
         self._drain_tray()
 
         # Hotkeys arrive on their own thread; Tk is only ever touched from this one.
-        if self.hotkeys is not None:
-            for name in self.hotkeys.drain():
-                if name == "toggle":
-                    self._toggle()
-                elif name == "warm":
-                    # The chord's press-down, one put ahead of `talk`, so the models load
-                    # during the hold instead of inside the first sentence.
-                    self.session.warm()
-                elif name == "talk":
-                    self._talk_start()
-                elif name == "talk-end":
-                    self._talk_end(send=True)
-                elif name == "talk-break":
-                    # Windows meant `ctrl+win+d`. Stop, keep whatever was said, paste
-                    # nothing — see `_talk_end`.
-                    self._talk_end(send=False)
-                elif name == "send":
-                    self._send()
-                elif name == "cancel":
-                    self._clear()
-                elif name == "mode":
-                    # A pending paste belongs to the mode it was spoken in. Dictate
-                    # pastes into a window and converse asks a CLI, so a wait armed in
-                    # one and fired in the other does something the user never asked
-                    # for — and the switch is one keypress away at all times. Dropped
-                    # rather than translated: the words stay in the draft, and Send in
-                    # the new mode does whatever it now means, deliberately.
-                    self._ptt_wait = None
-                    self.session.toggle_mode()
-                elif name == "quit":
-                    self.quit_app()
-                    return
+        if not self._drain_hotkeys():
+            return
 
         if self.armed:
             self.session.tick()
@@ -3915,6 +3938,96 @@ class Pill(tk.Tk):
         self._apply_idle_dim()
         self._draw()
 
+    def _drain_hotkeys(self) -> bool:
+        """Act on every hotkey that arrived since the last drain. False after a quit.
+
+        Shared by the 30 ms frame and by `_fast_tick`, which runs between frames so a
+        chord's press and release are acted on inside a few milliseconds rather than
+        at the next repaint. Whichever runs first takes the queue; the other finds it
+        empty. Tk is only ever touched from this thread either way.
+        """
+        if self.hotkeys is None:
+            return True
+        for name in self.hotkeys.drain():
+            if name == "toggle":
+                self._toggle()
+            elif name == "warm":
+                # The chord's press-down, one put ahead of `talk`, so the models load
+                # during the hold instead of inside the first sentence.
+                self.session.warm()
+            elif name == "talk":
+                self._talk_start()
+            elif name == "talk-end":
+                self._talk_end(send=True)
+            elif name == "talk-break":
+                # Windows meant `ctrl+win+d`. Stop, keep whatever was said, paste
+                # nothing — see `_talk_end`.
+                self._talk_end(send=False)
+            elif name == "send":
+                self._send()
+            elif name == "cancel":
+                self._clear()
+            elif name == "mode":
+                # A pending paste belongs to the mode it was spoken in. Dictate
+                # pastes into a window and converse asks a CLI, so a wait armed in
+                # one and fired in the other does something the user never asked
+                # for — and the switch is one keypress away at all times. Dropped
+                # rather than translated: the words stay in the draft, and Send in
+                # the new mode does whatever it now means, deliberately.
+                self._ptt_wait = None
+                self.session.toggle_mode()
+            elif name == "quit":
+                self.quit_app()
+                return False
+        return True
+
+    def _fast_tick(self) -> None:
+        """The gesture's own clock: `FAST_TICK_MS`, between the 30 ms frames.
+
+        Three things used to wait for a repaint that had nothing to do with them — the
+        chord's press, its release, and the moment the final decode landed while a
+        paste was waiting on it. Each cost up to a frame (30 ms, more on Windows' 15.6 ms
+        timer), and the three are in series. This loop does exactly those three and
+        nothing else; drawing stays on the frame, where the level meter needs it.
+
+        Only while something is in flight. A queue check every 5 ms is cheap but it is
+        not free, and an idle pill has nothing to be quick about.
+        """
+        try:
+            if not self._alive:
+                return
+            if not self._drain_hotkeys():
+                return
+            if self._ptt_wait is not None and not self.session.busy:
+                # The same three calls `_frame` makes, in the same order, for the same
+                # reason it gives: the decode's draft has to be on `session.draft`
+                # before `_pump_talk` looks for it.
+                self.session.pump_results()
+                self._pump_events()
+                self._pump_talk()
+        except Exception as exc:
+            # `_tick`'s rule: an exception here must not stop the clock, and it must
+            # be seen. The flash and the note are the frame's, and the frame is next.
+            self._flash = FLASH_FRAMES
+            traceback.print_exc()
+            try:
+                self.front.surface(f"{type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+        finally:
+            if self._alive and (self._ptt_since is not None or self._ptt_wait is not None):
+                self.after(FAST_TICK_MS, self._fast_tick)
+            else:
+                self._fast_ticking = False
+
+    def _quicken(self) -> None:
+        """Start `_fast_tick` if it is not already running."""
+        # `__dict__`, not `getattr`: a bare fixture built with `__new__` has no clock
+        # and no `after` — `tk.Misc.__getattr__` would recurse looking for either.
+        if self.__dict__.get("_fast_ticking") is False:
+            self._fast_ticking = True
+            self.after(FAST_TICK_MS, self._fast_tick)
+
     def _pump_events(self) -> None:
         """Draw everything the session said since the last frame onto the right surface.
 
@@ -3929,7 +4042,13 @@ class Pill(tk.Tk):
         # and that only runs when a draft event arrives.
         if self.session.state is not State.ASKING:
             self._asked = False
-        for ev in self.session.events():
+        events = self.session.events()
+        # Only the newest partial is drawn. Each one is a full layout of the bubble —
+        # the draft body, the partial, the note, each probed and then drawn — and two
+        # partials in one frame means the first is on screen for no frames at all.
+        newest_partial = max(
+            (i for i, ev in enumerate(events) if ev.kind == "partial"), default=None)
+        for i, ev in enumerate(events):
             if ev.kind == "draft":
                 if ev.text:
                     self._last_draft = ev.text
@@ -3951,7 +4070,8 @@ class Pill(tk.Tk):
                 # that cannot reach here: `send()` only asks in converse mode, which is
                 # the branch above.
             elif ev.kind == "partial":
-                self.front.show_partial(ev.text)
+                if i == newest_partial:
+                    self.front.show_partial(ev.text)
             elif ev.kind == "error":
                 self._flash = FLASH_FRAMES
                 self.front.note(ev.text)
@@ -4340,12 +4460,42 @@ class Pill(tk.Tk):
         name = getattr(cli, "marker", "") or cli.name.lower()
         return name if len(name) <= self.MARKER_MAX else "ASK"
 
+    def _draw_key(self) -> tuple:
+        """Everything `_draw` reads, as one comparable value.
+
+        The pill repainted on every frame whether or not anything had moved: `delete
+        ("all")` and about fifty items back — twelve smoothed polygons for the meter, the
+        glyphs, one text item per letter of the label — thirty times a second, for as
+        long as Flow was open, mostly to draw the same idle pill it drew last time. The
+        key is built from the same reads `_draw` makes, in the same guards, so a fixture
+        that can be drawn can be keyed; what changes redraws, and an idle frame costs
+        the reads and nothing else. The meter level is rounded to the thousandth, which
+        is well under a pixel of bar height.
+        """
+        session = self.session
+        mode = getattr(session, "mode", DICTATE)
+        waiting = self.waiting
+        return (
+            self.accent, self.ring_color, self._docked_w, self._shell_h,
+            self._row_shift(), getattr(session, "target_app", ""),
+            mode, self._marker() if mode != DICTATE else "",
+            tuple(round(self._dot_lit(i), 3) for i in range(3)) if waiting else None,
+            None if waiting else round(self._meter_level, 3),
+            getattr(session, "speaker", None) is not None,
+            bool(getattr(session, "muted", False)),
+            self._bar_label(),
+        )
+
     def _draw(self) -> None:
         # `self._docked_w`, already resolved by `_sync_dock` (called from `_frame`,
         # once a frame, before this) — not a fresh `self.pill_w` here, so a bare
         # fixture that only ever calls `_draw` directly still draws the idle pill its
         # class defaults describe, rather than reaching for a `bubble`/`card` it never
         # built (the same `RecursionError` risk `lite`'s class default exists for).
+        key = self._draw_key()
+        if key == self.__dict__.get("_drawn_key"):
+            return
+        self._drawn_key = key
         c = self.canvas
         c.delete("all")
         accent = self.accent
@@ -4916,6 +5066,7 @@ class ConversationCard(tk.Frame):
         # there is no window here to hide, only a `place` to undo, and the pill's shell
         # shrinks to the row on the next `_sync_shell`.
         self.place_forget()
+        self._placed_band = None
         self.pill._sync_shell()
 
     @property
@@ -5026,9 +5177,13 @@ class ConversationCard(tk.Frame):
         """
         self.pill._sync_shell()
         if self._visible:
-            self.place(x=0, y=0, width=CARD_W, height=self._h)
+            band = (CARD_W, self._h)
+            if self.__dict__.get("_placed_band") != band:
+                self.place(x=0, y=0, width=CARD_W, height=self._h)
+                self._placed_band = band
         else:
             self.place_forget()
+            self._placed_band = None
 
 
     # -- holding still under the hand --------------------------------------
@@ -5092,18 +5247,29 @@ class ConversationCard(tk.Frame):
         an answer is laid out once when it arrives, which is what makes an exact count
         affordable here and not in the draft.
         """
+        # "Laid out once when it arrives" is what the docstring promised and the code
+        # did not: this ran on every render, and the card renders on every partial of
+        # the *next* question — the whole previous answer wrapped by Tk two to five
+        # times per decode. Remembered against the answer and the cap.
+        key = (reply, cap, CARD_W)
+        cached = self.__dict__.get("_answer_slot_cache")
+        if cached is not None and cached[0] == key:
+            return cached[1]
         font = FONT_BODY
         full_h = self._probe_h(reply, font)
         if full_h <= cap:
-            return reply, 0, full_h
-        shown, shown_h = reply, full_h
-        for _ in range(BODY_PROBES):
-            shown = head_window(reply, max(1, int(len(shown) * cap * 0.95 / shown_h)))
-            shown_h = self._probe_h(shown, font)
-            if shown_h <= cap:
-                break
-        line_h = max(1, self._probe_h("M", font))
-        return shown, round(full_h / line_h) - round(shown_h / line_h), shown_h
+            out = (reply, 0, full_h)
+        else:
+            shown, shown_h = reply, full_h
+            for _ in range(BODY_PROBES):
+                shown = head_window(reply, max(1, int(len(shown) * cap * 0.95 / shown_h)))
+                shown_h = self._probe_h(shown, font)
+                if shown_h <= cap:
+                    break
+            line_h = max(1, self._probe_h("M", font))
+            out = (shown, round(full_h / line_h) - round(shown_h / line_h), shown_h)
+        self._answer_slot_cache = (key, out)
+        return out
 
     @property
     def accent(self) -> str:
@@ -5504,10 +5670,16 @@ class Bubble(tk.Frame):
         # asked for vanished before they could read it.
         self._text, self._partial, self._sent = text, "", ""
         self._for_activity = False
-        self._render()
+        # Visible *before* the render, the way `show_partial`, `show_sent` and `surface`
+        # already are. `_render` ends in `reposition`, and `reposition` only `place`s the
+        # band while `_visible` is set — so a first show from hidden used to grow the
+        # shell for a band it never placed, and the words waited for whatever rendered
+        # next. A partial or the activity row usually had, which is why nobody saw it
+        # until `scripts/selfdrive.py` showed a bare draft and found a 1x1 frame.
         if not self._visible:
             self._visible = True
             self.pill._sync_shell()
+        self._render()
 
     def show_partial(self, text: str) -> None:
         # Partials are dimmed: they contain hallucinated fragments on mid-word
@@ -5552,6 +5724,7 @@ class Bubble(tk.Frame):
         # there is no window here to hide, only a `place` to undo, and the pill's shell
         # shrinks to the row on the next `_sync_shell`.
         self.place_forget()
+        self._placed_band = None
         self.pill._sync_shell()
 
     # -- geometry ----------------------------------------------------------
@@ -5614,9 +5787,15 @@ class Bubble(tk.Frame):
         """
         self.pill._sync_shell()
         if self._visible:
-            self.place(x=0, y=0, width=BUBBLE_W, height=self._h)
+            # `place` only when the band actually changes: this runs on every render,
+            # and a partial renders on every decode.
+            band = (BUBBLE_W, self._h)
+            if self.__dict__.get("_placed_band") != band:
+                self.place(x=0, y=0, width=BUBBLE_W, height=self._h)
+                self._placed_band = band
         else:
             self.place_forget()
+            self._placed_band = None
 
     # -- holding still under the hand --------------------------------------
 
@@ -5673,6 +5852,14 @@ class Bubble(tk.Frame):
         The height returned is the height that will be *drawn*, never a clamp — a clamped
         height with taller text under it is how a note came to land on the chip row.
         """
+        # The draft does not change between one partial and the next, and this is the
+        # expensive half of every partial's render — the whole tail laid out by Tk, up
+        # to three times. Remembered against what decides it; a different draft, cap
+        # or column measures again.
+        key = (body, max_h, BUBBLE_W, BODY_TAIL_CHARS)
+        cached = self.__dict__.get("_body_slot_cache")
+        if cached is not None and cached[0] == key:
+            return cached[1]
         c = self.canvas
         shown, earlier = body_window(body, BODY_TAIL_CHARS)
         text_h = 0
@@ -5687,6 +5874,7 @@ class Bubble(tk.Frame):
             shown, earlier = body_window(
                 body, max(1, int(len(shown) * max_h * 0.95 / text_h))
             )
+        self._body_slot_cache = (key, (shown, earlier, text_h))
         return shown, earlier, text_h
 
     def _partial_slot(self, text: str) -> tuple[str, int]:
@@ -6079,7 +6267,10 @@ class Bubble(tk.Frame):
                 PAD, y, anchor="nw", text=shown, fill=MUTED if self._sent else TEXT,
                 font=FONT_BODY, width=BUBBLE_W - 2 * PAD,
                 tags="body" if self._sent else ("body", "draft"))
-            if not self._sent:
+            if not self._sent and not self.__dict__.get("_draft_bound", False):
+                # Once: a tag binding outlives the items, and every `tag_bind` leaks a
+                # Tcl command for the life of the widget (see `_row_icons`).
+                self._draft_bound = True
                 c.tag_bind("draft", "<Button-1>", lambda _e: self._edit())
             y += text_h + 6
         if partial_h:

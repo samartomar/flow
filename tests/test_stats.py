@@ -248,7 +248,10 @@ class TestOnlyWhatReachedTheDraftFromSpeechIsCounted(Counted):
         # `flow --stats` is a second process reading a file, so a total that never left
         # memory is a total it cannot see. Saved on every utterance rather than at the
         # Send that commits the learned pairs, because a session can end without one.
-        self.run_utterances(["Meeting on Tuesday."])
+        session, _asr, _mic = self.run_utterances(["Meeting on Tuesday."])
+        # One pump later, not inline: the frame that routes an utterance is the frame
+        # that may paste it, and the save is owed by that frame and paid by the next.
+        session.pump_results()
         self.assertEqual(Profile(self.dir / "profile.json").words_dictated, 3)
 
     def test_a_profile_that_will_not_write_is_said_once_and_not_every_utterance(self):

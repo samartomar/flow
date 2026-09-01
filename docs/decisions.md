@@ -6,6 +6,72 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-01 — The felt-latency pass: what the trace said, what moved, and what did not
+
+Every number here is from this machine's own `~/.flow/diag.jsonl` (6 442 decode records,
+GTX 1070, `large-v3` on CUDA) or from a measurement taken the same day.
+
+**Where the time went.** Partials p50 **795 ms**, p90 1 357 ms. Finals p50 **1 523 ms**,
+p90 2 640 ms — and finals for utterances under three seconds still p50 823 ms, because
+Whisper pads every input to a 30 s mel window and the encoder costs the same for one word
+as for twenty. The final queued behind whichever partial was running (one decode thread,
+no cancel). With the profile's `toggle` gesture the spoken send word was a second
+utterance in full: 800 ms hangover plus ~800 ms decode, 1.6–2.5 s from "boom" to the
+paste. Everything else on the release path — three 30 ms frame quantisations, a mic
+reopen per hold (111–266 ms to the first block), two `profile.save()` and three
+`Diag.write()` calls on the UI thread, the paste itself at 1–3 ms — summed to well under
+a tenth of the decode.
+
+**What moved, and the bar for each.**
+
+- *The partial tier on the GPU is `small` again* (`asr.CUDA_PARTIAL_MODEL`). The
+  one-model decision of 2026-08-05 bought "no partial→final rewrite" at 795 ms a partial;
+  a partial that lands eight tenths of a second late is a caption, not a preview. Finals
+  are unchanged. Reopen if the rewrite on accented speech is reported as worse than the
+  delay was — the trade is stated in `asr.py` beside the constant.
+- *A final makes the running partial stale* (`DecodeWorker._partial_stale`); a
+  `cancellable` transcriber stops between segments, any other's result is discarded on
+  arrival.
+- *The send word fires on the silence after it* (`Session._hear_trigger`,
+  `TRIGGER_QUIET_BLOCKS` = 3, `TRIGGER_MAX_SEC` = 3): the partial already heard it; ~200
+  ms of quiet after a short utterance spends it without a final. Reopen if a trigger ever
+  fires inside a sentence — the quiet requirement and the length cap are the two knobs.
+- *The release stops reading, not the stream* (`MIC_LINGER_SEC` = 60): the next hold
+  inside a minute captures from the press rather than from 111–266 ms after it. An open,
+  unread stream is the idle unload's posture already; if that is ever not acceptable for
+  hold mode specifically, the constant goes to zero and `talk_end` is what it was.
+- *A 5 ms clock for the gesture* (`Pill._fast_tick`, `FAST_TICK_MS`), only while a hold
+  or a paste wait is in flight, and `timeBeginPeriod(1)` for the process so `after()`
+  means what it says on Windows' 15.6 ms timer.
+- *Nothing writes a file on the frame that pastes*: the trace appends from its own thread
+  (`Diag(background=True)`, bounded, flushed at close), and the profile save is owed by
+  the routing frame and paid by the next (`Session._pump_saves`).
+- *The pill repaints only when something it draws has changed* (`Pill._draw_key`). It
+  rebuilt ~50 canvas items every 30 ms while idle — and `_row_icons` called `tag_bind`
+  three times a frame, each a Tcl command Tkinter never frees (verified against
+  `Misc._bind`): ~100 leaked a second for the life of the window. Bound once now, and the
+  bubble's `draft` tag the same.
+- *One partial render per frame, the newest; the draft body's layout and the card's
+  answer layout are cached against their inputs; `place()` only when the band changes;
+  the pointer's monitor is polled every fourth frame.*
+- *Startup*: the voice enumeration (two PowerShell starts, now one, and off the path),
+  the CUDA probe (310 ms, now on a thread after the pill), `sounddevice` imported on
+  first use (172 ms), and `record_identity` ten seconds later rather than beside the
+  model load. Pill-on-screen loses roughly a second on a stock machine.
+- *A warm decode after each model load* (`WhisperTranscriber.warmup`), so the first real
+  decode is a decode and not cuDNN's autotuning.
+
+**What did not move, and why.** `FINAL_BEAM` stays at 5: on the three `.bench` reference
+clips `large-v3` decodes 2.0 s of audio in 764 ms at beam 5 and 722 ms at beam 1 — the
+padded encoder is the floor and the beam is noise beside it. Optimistic paste (paste the
+last partial on release, reconcile with the final) was designed and not built: a paste
+cannot be taken back in a terminal, and with the cheap partial tier the residual wait is
+the final itself. **That floor is the engine's**, not this code's: FluidVoice on this
+same machine runs NVIDIA Parakeet TDT 0.6B v3 (a q8 GGUF through parakeet.cpp with a
+CUDA runtime), whose log shows ~500 ms per utterance and a 390 ms model load, and a TDT
+decoder does not pad to 30 s. A Parakeet tier behind the `Transcriber` seam is the next
+latency decision and is its own entry when it is measured, not this one.
+
 ### 2026-08-15 — The interpreter is pinned, and `trusted()` stops asking it what "absolute" means
 
 A venv built on **CPython 3.14.7** ran the suite seven red; **3.12.13** ran the same tree
