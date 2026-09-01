@@ -1556,6 +1556,37 @@ def chip_tag(key: str) -> str:
     return "chip-" + key.replace(" ", "-")
 
 
+#: The canvas tag every hover label is drawn under. One at a time, and deleted by tag
+#: rather than tracked: two tips on screen at once is a bug nobody would report.
+TIP_TAG = "cmd-tip"
+
+
+def bind_tip(c: tk.Canvas, tag: str, label: str, x: float, y: float) -> None:
+    """Name the mark tagged `tag` while the pointer is on it, right-aligned at `x, y`.
+
+    A mark earns the corner by being small, and what it costs is that it says nothing
+    until you already know it. The word comes back on hover, which is the bargain every
+    toolbar has made — asked for in as many words: "icon can have tool tip".
+
+    Drawn *on the canvas*, not in a `Toplevel`. A helper window would be a second window
+    in an app whose whole shape is one, and on Aqua an override-redirect helper is
+    exactly the fugitive window this app spent a night getting rid of. The box is drawn
+    from the text's own `bbox` and lowered under it, so the label is measured rather
+    than guessed and no font metric has to be hard-coded here.
+    """
+    def show(_e=None) -> None:
+        c.delete(TIP_TAG)
+        text = c.create_text(x, y, anchor="ne", text=label, fill=TEXT,
+                             font=FONT_NOTE, tags=TIP_TAG)
+        x1, y1, x2, y2 = c.bbox(text)
+        box = _round_rect(c, x1 - 6, y1 - 3, x2 + 6, y2 + 3, 6,
+                          fill=CHIP, outline=RING, tags=TIP_TAG)
+        c.tag_lower(box, text)
+
+    c.tag_bind(tag, "<Enter>", show)
+    c.tag_bind(tag, "<Leave>", lambda _e: c.delete(TIP_TAG))
+
+
 def body_window(text: str, budget: int) -> tuple[str, int]:
     """The last `budget` characters of `text`, and how many lines were left above them.
 
@@ -1779,6 +1810,27 @@ def command_x(slot: int, right: float = None) -> float:
     if right is None:
         right = BUBBLE_W - PAD
     return right - slot * (COMMAND_H + COMMAND_GAP)
+
+
+def command_slots(keys_labels) -> list:
+    """`(right_edge, width)` for each command mark, given the set *right-to-left*.
+
+    The same walk the cluster is drawn by, pulled out because two callers need it and a
+    second copy of it would rot: the drawing code, and whatever wants to know where the
+    cluster *starts* so it can stop before it. A command with no glyph keeps its word
+    and is wider than a slot, so the walk carries the running right edge rather than
+    computing each address from its index alone.
+    """
+    out, right = [], BUBBLE_W - PAD
+    for slot, (key, label) in enumerate(keys_labels):
+        x2 = command_x(slot, right)
+        if COMMAND_GLYPHS.get(key) is None:
+            width = chip_w(key, label)
+            right -= width - COMMAND_H
+        else:
+            width = COMMAND_H
+        out.append((x2, width))
+    return out
 
 
 def _glyph_refine(c, x, y, colour, tags) -> None:
@@ -5206,6 +5258,9 @@ class ConversationCard(tk.Frame):
             return
         self._chips_drawn = key_now
         c.delete("chips")
+        # A tip left over from a mark that is about to be redrawn would hang there with
+        # nothing under it: `<Leave>` never fires for an item that stopped existing.
+        c.delete(TIP_TAG)
 
         # The same shape the bubble takes: the secondaries as marks in the top-right
         # corner, the primary alone at the foot. Two surfaces that laid their controls
@@ -5285,6 +5340,13 @@ class Bubble(tk.Frame):
     #: Where the primary chip starts, so the note can end before it — they share a row.
     #: The default is the right edge, which is what an empty row means.
     _primary_x = BUBBLE_W - PAD
+
+    #: Where the command cluster starts, so the elided count can end before it — they
+    #: share the band. The default assumes a *full* cluster rather than an empty one:
+    #: this is only read on the frame before the row has been laid out once, and a count
+    #: clipped a few characters early there is nothing; a count drawn under the marks is
+    #: the thing this number exists to prevent.
+    _commands_x = BUBBLE_W - PAD - 4 * (COMMAND_H + COMMAND_GAP)
 
     #: Declared on the class as well as assigned in `__init__`, for the reason `lite` is:
     #: `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on an
@@ -5902,7 +5964,13 @@ class Bubble(tk.Frame):
         # A band the height did not know about is a band drawn over the first line.
         # A one-line note is free: it sits *on* the chip row rather than above it, so
         # only the lines past the first cost the panel anything.
-        around = (74 + COMMAND_BAND + BODY_ELIDED_H
+        # The elided count is free outside the editor: it sits *in* the command band,
+        # left of the marks, rather than on a line of its own above the draft — asked
+        # for in as many words, "icons should be in same row that was the idea". Inside
+        # the editor the line above the box counts what the *box* left out, which is a
+        # different number about a different thing, so that one still costs a line.
+        around = (74 + COMMAND_BAND
+                  + (BODY_ELIDED_H if self._editor is not None else 0)
                   + (max(0, note_h - NOTE_LINE_H) + 4 if note_h else 0))
         if partial_h:
             around += partial_h + PARTIAL_GAP
@@ -5938,10 +6006,6 @@ class Bubble(tk.Frame):
             # first, it read `… 2484 more lines` for a 60-line draft and drew a bar on a
             # draft that fitted — both on the render before the widget existed.
             extra += edit_h - text_h + 8 + BODY_ELIDED_H
-        elif earlier:
-            # Outside the editor this counts what the *window* left out; inside it, the
-            # line above the box counts what the *box* left out, and both are drawn.
-            extra += BODY_ELIDED_H
         if self._sent:
             extra += 16  # the "sent" label above the words
         if partial_h:
@@ -5992,10 +6056,16 @@ class Bubble(tk.Frame):
             if earlier:
                 # Said rather than implied: a window with nothing above it reads as the
                 # whole draft, and somebody would go looking for words that are there.
+                #
+                # Drawn in the command band, on the marks' own line and clear of where
+                # they start. The band was already paid for and half of it was empty air
+                # while the count had a line of its own below it — so the draft gets that
+                # line back, and the two things at the top of the panel read as one row.
                 c.create_text(
-                    PAD, y, anchor="nw", text=f"… {earlier} earlier lines", fill=MUTED,
+                    PAD, PAD + COMMAND_H / 2, anchor="w",
+                    text=f"… {earlier} earlier lines", fill=MUTED,
+                    width=max(40, self._commands_x - CHIP_GAP - PAD),
                     font=(*FONT_NOTE, "italic"), tags="body")
-                y += BODY_ELIDED_H
             # Muted once it has gone: these are no longer the words being worked on.
             #
             # `draft` is a second tag on the live text only, and it is what makes
@@ -6141,16 +6211,20 @@ class Bubble(tk.Frame):
         primary = next((s for s in specs if s[0] in self.PRIMARY_KEYS), None)
         self._primary_x = (BUBBLE_W - PAD - chip_w(primary[0], primary[1])
                            if primary else BUBBLE_W - PAD)
+        # The *last* primary, so a row is still laid out sensibly if one ever carries two.
+        pinned = max((i for i, (k, _l, _c) in enumerate(specs)
+                      if k in self.PRIMARY_KEYS), default=None)
+        heads = [i for i in range(len(specs)) if i != pinned]
+        slots = command_slots([(specs[i][0], specs[i][1]) for i in reversed(heads)])
+        # Where the cluster starts. Published for the same reason as `_primary_x`: the
+        # elided count shares the band with the marks now, it is drawn earlier in the
+        # frame, and a frame that skips the rebuild still draws it.
+        self._commands_x = min((x2 - w for x2, w in slots), default=BUBBLE_W - PAD)
         key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent, dim)
         if key_now == self._chips_drawn or (self._frozen() and self._chips_drawn):
             return
         self._chips_drawn = key_now
         c.delete("chips")
-
-        # The *last* primary, so a row is still laid out sensibly if one ever carries two.
-        pinned = max((i for i, (k, _l, _c) in enumerate(specs)
-                      if k in self.PRIMARY_KEYS), default=None)
-        heads = [i for i in range(len(specs)) if i != pinned]
 
         # -- the secondaries, as a cluster of marks in the top-right corner ------------
         #
@@ -6163,23 +6237,19 @@ class Bubble(tk.Frame):
         # address whatever the set is. The set changes constantly — Edit and Was a command
         # come and go with what was said — and a cluster that grew leftward from the left
         # edge would move every icon under the hand each time.
-        right = BUBBLE_W - PAD
-        for slot, i in enumerate(reversed(heads)):
+        for (x2, width), i in zip(slots, reversed(heads)):
             key, label, cmd = specs[i]
             glyph = COMMAND_GLYPHS.get(key)
             tag = chip_tag(key)
-            x2 = command_x(slot, right)
             y1 = PAD
             if glyph is None:
                 # No mark for this one, so it keeps its word. A glyph nobody can read is
                 # worse than a label that is merely longer.
-                width = chip_w(key, label)
                 _round_rect(c, x2 - width, y1, x2, y1 + COMMAND_H, 13,
                             fill=CHIP, outline="", tags=(tag, "chips"))
                 c.create_text(x2 - width / 2, y1 + COMMAND_H / 2, text=label,
                               fill=DISABLED if dim else CODE, font=FONT_CHIP,
                               tags=(tag, "chips"))
-                right -= width - COMMAND_H  # this one is wider than a slot
             else:
                 _round_rect(c, x2 - COMMAND_H, y1, x2, y1 + COMMAND_H, COMMAND_H // 2,
                             fill=CHIP, outline="", tags=(tag, "chips"))
@@ -6187,6 +6257,8 @@ class Bubble(tk.Frame):
                       y1 + (COMMAND_H - ICON_SIZE) / 2,
                       DISABLED if dim else COMMAND_COLOURS.get(key, CODE),
                       (tag, "chips"))
+                # The word the mark replaced, on hover, under the mark it belongs to.
+                bind_tip(c, tag, label, x2, y1 + COMMAND_H + 6)
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
         # -- the primary, alone at the foot, exactly where it always was ---------------

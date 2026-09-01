@@ -534,6 +534,8 @@ class MeasuringCanvas:
 
     def tag_raise(self, *a, **kw) -> None: ...
 
+    def tag_lower(self, *a, **kw) -> None: ...
+
     def itemconfigure(self, *a, **kw) -> None: ...
 
     def create_window(self, *a, **kw) -> None:
@@ -549,6 +551,9 @@ class MeasuringCanvas:
         item = {
             "x": x, "y": y, "text": text, "anchor": kw.get("anchor", "center"),
             "h": lines * self.LINE_H.get(size, 17), "lines": lines,
+            # The wrap budget, recorded because one item is now bounded *horizontally*
+            # by something beside it — the elided count stops before the command marks.
+            "wrap": width or 10**6,
             # Recorded because one surface draws the same slot in two colours to say
             # whose words they are — the answer in REPLY, the question in MUTED — and a
             # fake that dropped the colour could not see them swap.
@@ -746,6 +751,23 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
         step = ui.COMMAND_H + ui.COMMAND_GAP
         self.assertEqual(ui.command_x(1), ui.command_x(0) - step)
         self.assertEqual(ui.command_x(3), ui.command_x(0) - 3 * step)
+
+    def test_command_slots_walks_the_cluster_the_way_it_is_drawn(self):
+        """One walk, two callers: the marks are drawn from it and the elided count stops
+        before it. A second copy of this arithmetic is a copy that rots."""
+        import flow.ui as ui
+
+        slots = ui.command_slots([("Refine", "Refine"), ("Continue", "Continue")])
+        self.assertEqual([w for _x, w in slots], [ui.COMMAND_H, ui.COMMAND_H])
+        self.assertEqual(slots[0][0], ui.BUBBLE_W - ui.PAD)
+        self.assertEqual(slots[1][0], ui.command_x(1))
+
+        # A command with no glyph keeps its word and is wider than a slot, so everything
+        # left of it shifts by the difference — which is why the walk carries the edge.
+        wide = ui.command_slots([("Nameless", "Nameless"), ("Refine", "Refine")])
+        width = ui.chip_w("Nameless", "Nameless")
+        self.assertEqual(wide[0][1], width)
+        self.assertEqual(wide[1][0], ui.BUBBLE_W - ui.PAD - width - ui.COMMAND_GAP)
 
     def test_the_cluster_never_reaches_the_left_pad(self):
         # Four marks is the most the bubble ever shows at once — Refine, Continue, Edit,

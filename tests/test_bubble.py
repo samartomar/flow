@@ -513,3 +513,73 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         self.assertIn('tag_raise("chips")', inspect.getsource(ui.Bubble._render))
         self.assertIn('tag_raise("chips")',
                       inspect.getsource(ui.ConversationCard._render))
+
+
+class TestTheBandHoldsTheCountAndTheMarks(unittest.TestCase):
+    """`… N earlier lines` shares the command band instead of taking a line under it.
+
+    Asked for from a screenshot of the running app: "66 earlier lines and icons should
+    be in same row that was the idea". The band was already paid for and half of it was
+    empty air, so the count cost the draft a whole line for nothing.
+    """
+
+    def _elided(self, b):
+        return next(i for i in b.canvas.items if "earlier lines" in i["text"])
+
+    def test_the_count_sits_on_the_marks_row(self):
+        b = bubble(draft(50_000))
+        b._render()
+        it = self._elided(b)
+        # Centred on the band, which is where the marks are: they run from `PAD` to
+        # `PAD + COMMAND_H`.
+        self.assertEqual(it["y"], ui.PAD + ui.COMMAND_H / 2)
+        self.assertEqual(it["x"], ui.PAD)
+
+    def test_the_count_stops_before_the_cluster_starts(self):
+        # Sharing a row is only an improvement while the two do not meet: the count is
+        # wrapped to the room left of the marks, and it is one line, so it cannot.
+        b = bubble(draft(50_000))
+        b._render()
+        it = self._elided(b)
+        self.assertLessEqual(it["x"] + it["wrap"], b._commands_x)
+        self.assertEqual(it["lines"], 1)
+
+    def test_the_draft_gets_the_line_back(self):
+        # The count no longer costs the body a line, so the same draft in the same
+        # window shows one more line of what was actually said.
+        b = bubble(draft(50_000))
+        b._render()
+        lines = max(i["lines"] for i in b.canvas.items if "body" in i["tags"])
+        self.assertGreaterEqual(lines, 6)
+
+
+class TestAMarkSaysItsNameOnHover(unittest.TestCase):
+    """The word the icon replaced, on hover — "icon can have tool tip".
+
+    A mark earns the corner by being small, and the price is that it says nothing until
+    you already know it. The tip is drawn on the panel's own canvas: a helper window
+    would be a second window in an app whose whole shape is one.
+    """
+
+    def _enter(self, b, key):
+        tag = ui.chip_tag(key)
+        return next(f for t, seq, f in b.canvas.bindings
+                    if t == tag and seq == "<Enter>")
+
+    def test_hovering_a_mark_draws_its_word_and_leaving_takes_it_away(self):
+        b = bubble(draft(200))
+        b.pill.session.can_rescue = True
+        b._render()
+        self._enter(b, "Refine")()
+        self.assertTrue(any(i["text"] == "Refine" and ui.TIP_TAG in i["tags"]
+                            for i in b.canvas.items))
+        leave = next(f for t, seq, f in b.canvas.bindings
+                     if t == ui.chip_tag("Refine") and seq == "<Leave>")
+        leave(None)
+        self.assertNotIn(ui.TIP_TAG, [t for i in b.canvas.items for t in i["tags"]])
+
+    def test_the_primary_keeps_its_word_and_needs_no_tip(self):
+        b = bubble(draft(200))
+        b._render()
+        self.assertFalse(any(t == ui.chip_tag("Send") and seq == "<Enter>"
+                             for t, seq, _f in b.canvas.bindings))
