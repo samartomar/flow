@@ -230,9 +230,11 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
         b = bubble(draft(400))
         b.pill.session.can_rescue = True
         b._render()
-        sends = [i for i in b.canvas.items if i["text"] == "Send"]
-        self.assertTrue(sends, "the Send chip was not drawn")
-        right_edge = sends[0]["x"] + ui.chip_w("Send", "Send") / 2
+        # Send is a glyph chip now; its word is the tooltip, and the tip table records
+        # the chip's right edge — the one number this test is about.
+        spec = b.canvas.__dict__.get("_flow_tips", {}).get(ui.chip_tag("Send"))
+        self.assertIsNotNone(spec, "the Send chip was not drawn")
+        right_edge = spec[1]
         self.assertLessEqual(
             right_edge, ui.BUBBLE_W,
             f"Send's right edge sits at {right_edge}, past BUBBLE_W ({ui.BUBBLE_W})",
@@ -390,8 +392,15 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
 
     def chips(self, b) -> list[int]:
         """The identity of every chip item on the canvas. Identity, because the question
-        is whether they were *rebuilt* rather than whether they look the same."""
-        return [id(i) for i in b.canvas.items if "chips" in i["tags"]]
+        is whether they were *rebuilt* rather than whether they look the same.
+
+        The glyph primary draws no text, and this fixture records only rectangles and
+        text — so the chip's tip entry stands in: `bind_tip` writes a fresh tuple on
+        every rebuild and leaves it alone otherwise, which is the same fact.
+        """
+        tips = b.canvas.__dict__.get("_flow_tips", {})
+        return ([id(i) for i in b.canvas.items if "chips" in i["tags"]]
+                + [id(spec) for spec in tips.values()])
 
     def test_a_body_redraw_leaves_the_row_standing(self):
         b = bubble(draft(400))
@@ -570,8 +579,11 @@ class TestAMarkSaysItsNameOnHover(unittest.TestCase):
     # The hover word moved with the marks to the pill row, where it is shown in the
     # label slot — `tests/test_compact.py` covers it there.
 
-    def test_the_primary_keeps_its_word_and_needs_no_tip(self):
+    def test_the_primary_is_a_glyph_now_and_its_word_is_the_tip(self):
+        # Asked for by name — "send and ask can change >> & agent icon" — so the word
+        # that was on the chip is what the tip says.
         b = bubble(draft(200))
         b._render()
-        self.assertFalse(any(t == ui.chip_tag("Send") and seq == "<Enter>"
-                             for t, seq, _f in b.canvas.bindings))
+        self.assertTrue(any(t == ui.chip_tag("Send") and seq == "<Enter>"
+                            for t, seq, _f in b.canvas.bindings))
+        self.assertEqual(ui.tip_label(b.canvas, ui.chip_tag("Send")), "Send")

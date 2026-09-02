@@ -89,9 +89,9 @@ def commands(c) -> list[str]:
 
 
 def primary_label(c) -> str:
-    """The word on the one command that still has one."""
-    return next((i["text"] for i in c.canvas.items
-                 if str(i.get("text", "")).startswith("Ask")), "")
+    """The word the Ask chip would say on hover — it draws a glyph, and the countdown
+    rides in the label the tip carries."""
+    return ui.tip_label(c.canvas, ui.chip_tag("Ask"))
 
 
 def drawn(c) -> list[str]:

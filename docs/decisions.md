@@ -37,6 +37,15 @@ The sent card no longer reserves the empty band, the activity row shares the not
 line when there is no note, and the elided count is back on a line of its own above
 the draft (the band it shared is gone; the body gives that line back at the ceiling).
 
+**Send and Ask are glyphs, and the CLI's name took the app slot** (same day, from a
+screenshot of the converse card). `>>` for Send in the hearing green, an agent for Ask
+in the card's violet, the word as a tooltip above the chip and the countdown as digits
+beside the glyph; `Done`, `Cancel` and `Bring it back` keep their words. The converse
+marker had been a 6 px name under the mic, and a 34 px row has no room under the mic —
+so the app slot says where the words go in both modes: the window in dictate, the CLI in
+converse. A mark on the row says its word twice on hover: in the label slot, and as a
+tip at the foot of the panel above it, since the row's own canvas would clip one.
+
 **Why 400 and not 360.** The first proposal was 360/440/540. With the marks on the row
 the floor is the row's: app slot, mic, meter, four marks, three icons and the label sum
 to ~393 px at these sizes, and `tests/test_compact.py` adds them up against the

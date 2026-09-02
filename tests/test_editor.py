@@ -705,6 +705,10 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
     def _right_edge(self, b, label):
         import flow.ui as ui
 
+        # A glyph primary carries no word on the canvas; the tip table has its edge.
+        spec = b.canvas.__dict__.get("_flow_tips", {}).get(ui.chip_tag(label))
+        if spec is not None:
+            return spec[1]
         it = next(i for i in b.canvas.items if i["text"] == label)
         return it["x"] + ui.chip_w(label, label) / 2
 

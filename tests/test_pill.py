@@ -432,7 +432,10 @@ class TestTheModeSwitchIsContinuous(unittest.TestCase):
         mid = ui.PILL_H // 2
         half = ui._mix(ui.HEARING, ui.CARD_ACCENT, 0.5)
         self.assertEqual({f for _x, y, _t, f in p.canvas.texts if y == mid}, {half})
-        self.assertEqual({o[-1] for o in p.canvas.ovals if o[0] < ui.METER_X}, {half})
+        # The mic's capsule sits left of the meter, past the app slot the CLI's name
+        # takes in converse.
+        left = ui.METER_X + p._row_shift()
+        self.assertEqual({o[-1] for o in p.canvas.ovals if o[0] < left}, {half})
 
 
 class TestTheMeterBloomsFromItsCentre(unittest.TestCase):

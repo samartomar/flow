@@ -332,14 +332,15 @@ class RecordingCanvas:
 def markers(pill) -> list[str]:
     """Just the marker slot's text, out of everything `_draw` wrote on the canvas.
 
-    The pill has a second piece of text on it now — §02's bar label, drawn one character
+    The pill has a second piece of text on it — §02's bar label, drawn one character
     at a time because Tk has no letter-spacing — and a bare read of `canvas.texts` turns
-    `["codex"]` into `["codex", "I", "D", "L", "E"]`. The two never share a line: the
-    marker sits under the glyph at `PILL_H - 7`, the label on the centre line.
+    `["codex"]` into `["codex", "I", "D", "L", "E"]`. They share the centre line now
+    and never an x: the marker is in the app slot, anchored west at `PAD`, and the
+    label's letters sit at the far right.
     """
     import flow.ui as ui
 
-    return [t for _x, y, t in pill.canvas.texts if y != ui.PILL_H // 2]
+    return [t for x, _y, t in pill.canvas.texts if x == ui.PAD]
 
 
 CODEX = Cli("codex", ("codex", "exec"))
@@ -431,8 +432,9 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         with mock.patch.object(ui, "available", return_value=[CODEX]):
             pill._draw()
         x, y, text = pill.canvas.texts[0]
-        # Under the mic, which sits twelve left of the meter's first bar.
-        self.assertEqual((x, y), (ui.METER_X - 12, ui.PILL_H - 7), "the slot moved")
+        # In the app slot, where dictate names the window: the slot says where the
+        # words go, and in converse that is the CLI.
+        self.assertEqual((x, y), (ui.PAD, ui.PILL_H // 2), "the slot moved")
         self.assertEqual(text, "codex")
 
     def test_the_path_is_walked_once_and_not_per_frame(self):

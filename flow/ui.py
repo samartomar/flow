@@ -1613,12 +1613,8 @@ def chip_tag(key: str) -> str:
 TIP_TAG = "cmd-tip"
 
 
-def bind_tip(c: tk.Canvas, tag: str, label: str, x: float, y: float) -> None:
-    """Name the mark tagged `tag` while the pointer is on it, right-aligned at `x, y`.
-
-    A mark earns the corner by being small, and what it costs is that it says nothing
-    until you already know it. The word comes back on hover, which is the bargain every
-    toolbar has made — asked for in as many words: "icon can have tool tip".
+def draw_tip(c: tk.Canvas, label: str, x: float, y: float, anchor: str = "ne") -> None:
+    """One hover label on `c`, right-aligned at `x, y`, replacing any other.
 
     Drawn *on the canvas*, not in a `Toplevel`. A helper window would be a second window
     in an app whose whole shape is one, and on Aqua an override-redirect helper is
@@ -1626,17 +1622,50 @@ def bind_tip(c: tk.Canvas, tag: str, label: str, x: float, y: float) -> None:
     from the text's own `bbox` and lowered under it, so the label is measured rather
     than guessed and no font metric has to be hard-coded here.
     """
+    c.delete(TIP_TAG)
+    if not label:
+        return
+    text = c.create_text(x, y, anchor=anchor, text=label, fill=TEXT,
+                         font=FONT_NOTE, tags=TIP_TAG)
+    x1, y1, x2, y2 = c.bbox(text)
+    box = _round_rect(c, x1 - 6, y1 - 3, x2 + 6, y2 + 3, 6,
+                      fill=CHIP, outline=RING, tags=TIP_TAG)
+    c.tag_lower(box, text)
+
+
+def bind_tip(c: tk.Canvas, tag: str, label: str, x: float, y: float,
+             anchor: str = "ne") -> None:
+    """Name the item tagged `tag` while the pointer is on it, right-aligned at `x, y`.
+
+    A mark earns its place by being small, and what it costs is that it says nothing
+    until you already know it. The word comes back on hover, which is the bargain every
+    toolbar has made — asked for in as many words: "icon can have tool tip".
+
+    **Bound once per tag, and the label read at hover time.** Every `tag_bind` leaks a
+    Tcl command for the life of the widget (see `_row_icons`), and the chip row is
+    redrawn on every change of label — a countdown ticks once a second — so the label
+    and the place go in a table on the canvas and the one binding reads them.
+    """
+    tips = c.__dict__.setdefault("_flow_tips", {})
+    tips[tag] = (label, x, y, anchor)
+    bound = c.__dict__.setdefault("_flow_tip_bound", set())
+    if tag in bound:
+        return
+    bound.add(tag)
+
     def show(_e=None) -> None:
-        c.delete(TIP_TAG)
-        text = c.create_text(x, y, anchor="ne", text=label, fill=TEXT,
-                             font=FONT_NOTE, tags=TIP_TAG)
-        x1, y1, x2, y2 = c.bbox(text)
-        box = _round_rect(c, x1 - 6, y1 - 3, x2 + 6, y2 + 3, 6,
-                          fill=CHIP, outline=RING, tags=TIP_TAG)
-        c.tag_lower(box, text)
+        spec = tips.get(tag)
+        if spec is not None:
+            draw_tip(c, *spec)
 
     c.tag_bind(tag, "<Enter>", show)
     c.tag_bind(tag, "<Leave>", lambda _e: c.delete(TIP_TAG))
+
+
+def tip_label(c, tag: str) -> str:
+    """What the tip for `tag` would say — the chip's word, for tests and the harness."""
+    spec = c.__dict__.get("_flow_tips", {}).get(tag)
+    return spec[0] if spec else ""
 
 
 def body_window(text: str, budget: int) -> tuple[str, int]:
@@ -1971,6 +2000,85 @@ def _glyph_new(c, x, y, colour, tags) -> None:
     c.create_line(x + 5, y + 11, x + 4, y + 14, fill=colour, width=2, tags=tags)
     c.create_line(x + 8, y + 5, x + 8, y + 9, fill=colour, width=2, tags=tags)
     c.create_line(x + 6, y + 7, x + 10, y + 7, fill=colour, width=2, tags=tags)
+
+
+def _glyph_send(c, x, y, colour, tags) -> None:
+    """Two chevrons: the words go *out*, into the window Flow is aimed at."""
+    for dx in (1.5, 7.5):
+        c.create_line(x + dx, y + 3, x + dx + 5, y + 8, x + dx, y + 13,
+                      fill=colour, width=2, tags=tags)
+
+
+def _glyph_agent(c, x, y, colour, tags) -> None:
+    """A small agent — a head with two eyes and an antenna: the question goes to one."""
+    _round_rect(c, x + 2.5, y + 5.5, x + 13.5, y + 14, 3, fill="", outline=colour,
+                tags=tags)
+    c.create_line(x + 8, y + 5.5, x + 8, y + 2.5, fill=colour, width=2, tags=tags)
+    c.create_oval(x + 6.5, y + 1, x + 9.5, y + 4, fill=colour, outline=colour, tags=tags)
+    for ex in (5.5, 10.5):
+        c.create_oval(x + ex - 1, y + 8.5, x + ex + 1, y + 10.5, fill=colour,
+                      outline=colour, tags=tags)
+
+
+#: The two primaries that draw as a glyph rather than a word — asked for by name:
+#: "send and ask can change >> & agent icon. with color". The word survives as the
+#: tooltip. `Done`, `Cancel` and `Bring it back` keep their words: they are rare, and a
+#: glyph nobody has learned is worse than a label.
+PRIMARY_GLYPHS = {"Send": _glyph_send, "Ask": _glyph_agent}
+
+#: The fill behind each glyph primary: Send in the green the meter turns while Flow is
+#: hearing you, Ask in the card's own violet — the surface the answer lands on.
+PRIMARY_COLOURS = {"Send": "#7BD88F", "Ask": CARD_ACCENT}
+
+#: A glyph primary's box: wide enough to read as a button, not a mark. Plus the room
+#: for a countdown beside the glyph on the chips that carry one — reserved whether or
+#: not it is counting, so the hit region does not move under the hand (see
+#: `COUNTDOWN_WIDEST`).
+PRIMARY_W = 44
+PRIMARY_COUNT_W = 24
+
+
+def primary_w(key: str, label: str) -> int:
+    """How wide the primary chip for `key` is drawn."""
+    if key in PRIMARY_GLYPHS:
+        return PRIMARY_W + (PRIMARY_COUNT_W if key in COUNTDOWN_WIDEST else 0)
+    return chip_w(key, label)
+
+
+def draw_primary(c: tk.Canvas, key: str, label: str, x2: float, y2: float,
+                 lit: bool, tags) -> None:
+    """The one control at the foot, right edge at `x2`, bottom at `y2`.
+
+    A glyph chip for Send and Ask — coloured, the word on hover, the countdown (if
+    any) as digits beside the glyph — and a light-filled word chip for the rest.
+    """
+    width = primary_w(key, label)
+    y1 = y2 - CHIP_H
+    glyph = PRIMARY_GLYPHS.get(key)
+    if glyph is None:
+        _round_rect(c, x2 - width, y1, x2, y2, CHIP_R,
+                    fill=PRIMARY_FILL if lit else CHIP, outline="", tags=tags)
+        c.create_text(x2 - width / 2, (y1 + y2) / 2, text=label,
+                      fill=PRIMARY_TEXT if lit else DISABLED,
+                      font=FONT_CHIP_PRIMARY, tags=tags)
+        return
+    _round_rect(c, x2 - width, y1, x2, y2, CHIP_R,
+                fill=PRIMARY_COLOURS.get(key, PRIMARY_FILL) if lit else CHIP,
+                outline="", tags=tags)
+    ink = PRIMARY_TEXT if lit else DISABLED
+    count = label[len(key):].strip() if label.startswith(key) else ""
+    # The box keeps its full width whether or not the digits are showing — that is
+    # the hit region, and it must not move under the hand — but the glyph centres in
+    # whatever is not spent on them, so a chip with no countdown does not read as a
+    # button with its right half missing.
+    gx = (x2 - width + (PRIMARY_W - MARK_GLYPH) / 2 if count
+          else x2 - width / 2 - MARK_GLYPH / 2)
+    glyph(c, gx, y1 + (CHIP_H - MARK_GLYPH) / 2, ink, tags)
+    if count:
+        c.create_text(x2 - PRIMARY_COUNT_W / 2 - 2, (y1 + y2) / 2, text=count,
+                      fill=ink, font=FONT_CHIP_PRIMARY, tags=tags)
+    # The word, above the chip on hover — right-aligned on the chip's own edge.
+    bind_tip(c, tags[0], label, x2, y1 - 6, anchor="se")
 
 
 #: One hue per command, the four from the design canvas: `oklch(0.80 0.12 H)` at 85,
@@ -4556,9 +4664,15 @@ class Pill(tk.Tk):
         # is exactly what it always was.
         shift = self._row_shift()
         if shift:
+            # The slot says where the words go. In dictate that is the window Flow is
+            # aimed at; in converse it is the CLI that will answer, which used to be a
+            # 6 px marker under the mic — and a 34 px row has no room under the mic.
+            # Same slot, same question, one answer at a time.
+            converse = getattr(self.session, "mode", DICTATE) != DICTATE
             c.create_text(PAD, PILL_H // 2, anchor="w",
-                          text=app_label(self.session.target_app),
-                          fill=MUTED, font=FONT_NOTE)
+                          text=self._marker() if converse
+                          else app_label(self.session.target_app),
+                          fill=accent if converse else MUTED, font=FONT_NOTE)
 
         # Mic glyph: capsule + stand, drawn rather than fonted so there is no
         # dependency on an emoji font being present and correctly sized.
@@ -4571,16 +4685,7 @@ class Pill(tk.Tk):
             style=tk.ARC, outline=accent, width=2,
         )
         c.create_line(cx, cy + 6, cx, cy + 10, fill=accent, width=2)
-        # P9: which mode Send is in, readable at a glance. Without it, "there was no
-        # spoken reply" and "I was never in converse mode" look identical. The slot is
-        # drawn either way, so naming the CLI in it costs no pixels — and the note that
-        # says the question leaves the machine only appears at the mode switch, which is
-        # the wrong moment to still be reading it.
-        if getattr(self.session, "mode", DICTATE) != DICTATE:
-            c.create_text(
-                cx, PILL_H - 7, text=self._marker(), fill=accent,
-                font=("Segoe UI", 6, "bold"),
-            )
+        # P9's marker — which CLI would answer — is in the app slot above, in converse.
 
         mid = PILL_H // 2
         if self.waiting:
@@ -4705,6 +4810,7 @@ class Pill(tk.Tk):
                 c.tag_bind(tag, "<Button-1>", lambda _e, k=key: self._press_mark(k))
                 c.tag_bind(tag, "<Enter>", lambda _e, k=key: self._hover_mark_set(k))
                 c.tag_bind(tag, "<Leave>", lambda _e: self._hover_mark_set(None))
+            specs[key] = (label, cmd, x2)
             x2 -= width + COMMAND_GAP
         self._mark_specs = specs
 
@@ -4722,9 +4828,23 @@ class Pill(tk.Tk):
                 return
 
     def _hover_mark_set(self, key) -> None:
-        if self.__dict__.get("_hover_mark") != key:
-            self._hover_mark = key
-            self._draw()
+        """The pointer arrived on a mark, or left one.
+
+        Two things say its word: the label slot on this row (`_bar_label`), and a tip
+        on the panel above — drawn on *that* canvas, at its foot, over the mark's own
+        x, because this row is 34 px tall and a tip here would be clipped by it. A
+        mark is only ever on the row while a panel is up, so there is always a canvas
+        above it to draw on.
+        """
+        if self.__dict__.get("_hover_mark") == key:
+            return
+        self._hover_mark = key
+        surface = self.__dict__.get("card" if self.converse else "bubble")
+        tip = getattr(surface, "show_tip", None) if surface is not None else None
+        if callable(tip):
+            spec = self.__dict__.get("_mark_specs", {}).get(key) if key else None
+            tip(spec[0] if spec else "", spec[2] if spec else 0)
+        self._draw()
 
     def _row_shift(self) -> int:
         """How far the mic, the meter and the icons move right for the app-name slot.
@@ -4733,7 +4853,11 @@ class Pill(tk.Tk):
         it — the marching dots occupy the meter's place, so a shift applied to one and
         not the other would draw them under the app name.
         """
-        if self.lite or not app_label(getattr(self.session, "target_app", "")):
+        if self.lite:
+            return 0
+        if getattr(self.session, "mode", DICTATE) != DICTATE:
+            return APP_SLOT_W + APP_SLOT_GAP  # the CLI's name — see `_draw`
+        if not app_label(getattr(self.session, "target_app", "")):
             return 0
         return APP_SLOT_W + APP_SLOT_GAP
 
@@ -5161,6 +5285,10 @@ class ConversationCard(tk.Frame):
         if surface or self._visible:
             self._show()
 
+    def show_tip(self, label: str, x: float) -> None:
+        """A mark on the pill row is under the pointer: say its word at this foot."""
+        draw_tip(self.canvas, label, x, self._h - 3, anchor="se")
+
     def show_partial(self, text: str) -> None:
         """The words forming now, where the question they are becoming will sit.
 
@@ -5572,14 +5700,8 @@ class ConversationCard(tk.Frame):
         # The secondaries are marks on the pill row now — see `Bubble._lay_out` — so
         # this draws the one control that belongs to the card: Ask, alone at the foot.
         key, label, cmd = specs[0]  # Ask, and it is always first
-        width = chip_w(key, label)
-        y2 = self._h - PAD
-        y1 = y2 - CHIP_H
         tag = chip_tag(key)
-        _round_rect(c, CARD_W - PAD - width, y1, CARD_W - PAD, y2, CHIP_R,
-                    fill=PRIMARY_FILL, outline="", tags=(tag, "chips"))
-        c.create_text(CARD_W - PAD - width / 2, (y1 + y2) / 2, text=label,
-                      fill=PRIMARY_TEXT, font=FONT_CHIP_PRIMARY, tags=(tag, "chips"))
+        draw_primary(c, key, label, CARD_W - PAD, self._h - PAD, True, (tag, "chips"))
         c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
     def tick_countdown(self) -> None:
@@ -5803,6 +5925,10 @@ class Bubble(tk.Frame):
             self._visible = True
             self.pill._sync_shell()
         self._render()
+
+    def show_tip(self, label: str, x: float) -> None:
+        """A mark on the pill row is under the pointer: say its word at this foot."""
+        draw_tip(self.canvas, label, x, self._h - 3, anchor="se")
 
     def show_partial(self, text: str) -> None:
         # Partials are dimmed: they contain hallucinated fragments on mid-word
@@ -6543,7 +6669,7 @@ class Bubble(tk.Frame):
         # Published before the early return, because the note shares this row now and has
         # to know where it ends — and a frame that skips the rebuild still draws the note.
         primary = next((s for s in specs if s[0] in self.PRIMARY_KEYS), None)
-        self._primary_x = (BUBBLE_W - PAD - chip_w(primary[0], primary[1])
+        self._primary_x = (BUBBLE_W - PAD - primary_w(primary[0], primary[1])
                            if primary else BUBBLE_W - PAD)
         # The *last* primary, so a row is still laid out sensibly if one ever carries two.
         pinned = max((i for i, (k, _l, _c) in enumerate(specs)
@@ -6568,17 +6694,9 @@ class Bubble(tk.Frame):
         # -- the primary, alone at the foot, exactly where it always was ---------------
         if pinned is not None:
             key, label, cmd = specs[pinned]
-            width = chip_w(key, label)
-            y2 = self._h - PAD
-            y1 = y2 - CHIP_H
             tag = chip_tag(key)
-            lit = not dim
-            _round_rect(c, BUBBLE_W - PAD - width, y1, BUBBLE_W - PAD, y2, CHIP_R,
-                        fill=PRIMARY_FILL if lit else CHIP, outline="",
-                        tags=(tag, "chips"))
-            c.create_text(BUBBLE_W - PAD - width / 2, (y1 + y2) / 2, text=label,
-                          fill=PRIMARY_TEXT if lit else DISABLED,
-                          font=FONT_CHIP_PRIMARY, tags=(tag, "chips"))
+            draw_primary(c, key, label, BUBBLE_W - PAD, self._h - PAD, not dim,
+                         (tag, "chips"))
             c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
     def tick_countdown(self) -> None:
