@@ -212,11 +212,13 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
         frozen_h, frozen_body = b._h, drawn_body(b)
         b._pointer_in = False
         b._render()
-        self.assertEqual(b._h, frozen_h)
+        # Once the hand has gone the window may catch up — here by the one line the
+        # elided count costs a long draft — and the shell grows *upward* from a fixed
+        # foot, so catching up moves nothing the hand was near.
+        self.assertGreaterEqual(b._h, frozen_h)
         # The body does not move either, and that is not a weaker check than it looks:
         # the draft is windowed to its *tail*, so a 300-character draft and a 30 000-
-        # character one lay out the same last lines. Freezing had one observable effect
-        # and it was the height.
+        # character one lay out the same last lines.
         self.assertEqual(drawn_body(b), frozen_body)
 
     def test_five_chips_at_once_stay_inside_the_bubble(self):
@@ -406,14 +408,16 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         # that should appear has to appear.
         b = bubble(draft(400))
         b._render()
-        was = self.chips(b)
+        was = b._chips_drawn
         b.pill.session.can_rescue = True
         b._render()
-        self.assertNotEqual(self.chips(b), was)
-        # By its tag, not its word: the secondaries are marks in the corner now, so
-        # there is no label to look for — only the hit region a click has to land on.
-        tags = {t for i in b.canvas.items for t in (i.get("tags") or ())}
-        self.assertIn(ui.chip_tag("Was a command"), tags)
+        # By the row's own key rather than by item identity: with one chip left on
+        # this canvas, CPython hands a rebuilt dict the address the old one just freed.
+        self.assertNotEqual(b._chips_drawn, was)
+        # The secondaries are marks on the pill row now, published by `_lay_out` for
+        # `Pill._draw_marks` to draw — so the new command shows up in the list the pill
+        # reads, not as an item on this canvas.
+        self.assertIn("Was a command", [k for k, _l, _c in b._marks])
 
     def test_nothing_moves_or_resizes_under_the_pointer(self):
         # `_visible`, because a window nobody can see is a window nobody is pointing at
@@ -489,7 +493,7 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         widths = [ui.chip_w(k, l) for k, l in (
             ("Refine", "Refine"), ("Continue", "Continue"),
             ("Was a command", "Was a command"), ("Edit", "Edit"),
-            ("Send", "Send"), ("Done", "Done"),
+            ("Ask", "Ask"),
         )]
         gap = ui.chip_row_gap(widths, ui.BUBBLE_W - ui.PAD)
         self.assertLess(gap, ui.CHIP_GAP, "an overflowing row kept the ordinary gap")
@@ -515,38 +519,35 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
                       inspect.getsource(ui.ConversationCard._render))
 
 
-class TestTheBandHoldsTheCountAndTheMarks(unittest.TestCase):
-    """`… N earlier lines` shares the command band instead of taking a line under it.
+class TestTheCountHasALineAboveTheDraft(unittest.TestCase):
+    """`… N earlier lines` sits on a line of its own above the draft.
 
-    Asked for from a screenshot of the running app: "66 earlier lines and icons should
-    be in same row that was the idea". The band was already paid for and half of it was
-    empty air, so the count cost the draft a whole line for nothing.
+    It shared the command band for a month — "66 earlier lines and icons should be in
+    same row that was the idea" — and the band is gone with the compact pass: the marks
+    are on the pill row. The count is back above the draft, at the top padding, and the
+    body gives that line back so a draft at the ceiling never runs into the row below.
     """
 
     def _elided(self, b):
         return next(i for i in b.canvas.items if "earlier lines" in i["text"])
 
-    def test_the_count_sits_on_the_marks_row(self):
+    def test_the_count_sits_at_the_top_of_the_panel(self):
         b = bubble(draft(50_000))
         b._render()
         it = self._elided(b)
-        # Centred on the band, which is where the marks are: they run from `PAD` to
-        # `PAD + COMMAND_H`.
-        self.assertEqual(it["y"], ui.PAD + ui.COMMAND_H / 2)
+        self.assertEqual(it["y"], ui.PAD)
         self.assertEqual(it["x"], ui.PAD)
 
-    def test_the_count_stops_before_the_cluster_starts(self):
-        # Sharing a row is only an improvement while the two do not meet: the count is
-        # wrapped to the room left of the marks, and it is one line, so it cannot.
+    def test_the_count_spans_the_column_and_stays_one_line(self):
         b = bubble(draft(50_000))
         b._render()
         it = self._elided(b)
-        self.assertLessEqual(it["x"] + it["wrap"], b._commands_x)
+        self.assertEqual(it["wrap"], ui.BUBBLE_W - 2 * ui.PAD)
         self.assertEqual(it["lines"], 1)
 
-    def test_the_draft_gets_the_line_back(self):
-        # The count no longer costs the body a line, so the same draft in the same
-        # window shows one more line of what was actually said.
+    def test_the_draft_still_shows_most_of_the_band(self):
+        # Without a 34 px band above it the body has more of the panel than it did
+        # even after paying a line for the count.
         b = bubble(draft(50_000))
         b._render()
         lines = max(i["lines"] for i in b.canvas.items if "body" in i["tags"])
@@ -556,9 +557,9 @@ class TestTheBandHoldsTheCountAndTheMarks(unittest.TestCase):
 class TestAMarkSaysItsNameOnHover(unittest.TestCase):
     """The word the icon replaced, on hover — "icon can have tool tip".
 
-    A mark earns the corner by being small, and the price is that it says nothing until
-    you already know it. The tip is drawn on the panel's own canvas: a helper window
-    would be a second window in an app whose whole shape is one.
+    A mark earns its place by being small, and the price is that it says nothing until
+    you already know it. The marks are on the pill row now, and the word appears in the
+    row's label slot while the pointer is on one (`Pill._draw_marks`).
     """
 
     def _enter(self, b, key):
@@ -566,17 +567,8 @@ class TestAMarkSaysItsNameOnHover(unittest.TestCase):
         return next(f for t, seq, f in b.canvas.bindings
                     if t == tag and seq == "<Enter>")
 
-    def test_hovering_a_mark_draws_its_word_and_leaving_takes_it_away(self):
-        b = bubble(draft(200))
-        b.pill.session.can_rescue = True
-        b._render()
-        self._enter(b, "Refine")()
-        self.assertTrue(any(i["text"] == "Refine" and ui.TIP_TAG in i["tags"]
-                            for i in b.canvas.items))
-        leave = next(f for t, seq, f in b.canvas.bindings
-                     if t == ui.chip_tag("Refine") and seq == "<Leave>")
-        leave(None)
-        self.assertNotIn(ui.TIP_TAG, [t for i in b.canvas.items for t in i["tags"]])
+    # The hover word moved with the marks to the pill row, where it is shown in the
+    # label slot — `tests/test_compact.py` covers it there.
 
     def test_the_primary_keeps_its_word_and_needs_no_tip(self):
         b = bubble(draft(200))

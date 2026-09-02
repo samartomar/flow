@@ -81,7 +81,11 @@ def commands(c) -> list[str]:
     """
     keys = ("Ask", "Use this", "Copy", "New conversation")
     bound = {tag for tag, _seq, _fn in c.canvas.bindings}
-    return [k for k in keys if ui.chip_tag(k) in bound]
+    # The secondaries are marks on the pill row since the compact pass: the card
+    # publishes them in `_marks` and the pill draws and binds them. Offered is offered,
+    # whichever canvas the hit region ends up on.
+    published = {k for k, _l, _c in c.__dict__.get("_marks", ())}
+    return [k for k in keys if ui.chip_tag(k) in bound or k in published]
 
 
 def primary_label(c) -> str:
@@ -275,8 +279,8 @@ class TestTheWindowStaysInsideTheDesktop(unittest.TestCase):
         c.ask("q")
         c.answer(prose(12_000))
         self.assertEqual(len(commands(c)), 4)
-        # Every command's mark is inside the window: the primary at the foot, the three
-        # secondaries in the band at the top.
+        # Every mark this card still draws is inside the window: the primary at the
+        # foot. The three secondaries are on the pill row now and draw nothing here.
         for key in ("Ask", "Use this", "Copy", "New conversation"):
             ys = [i["y"] for i in c.canvas.items
                   if ui.chip_tag(key) in (i.get("tags") or ()) and "y" in i]

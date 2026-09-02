@@ -431,7 +431,8 @@ class TestTheConverseMarkerNamesItsCli(unittest.TestCase):
         with mock.patch.object(ui, "available", return_value=[CODEX]):
             pill._draw()
         x, y, text = pill.canvas.texts[0]
-        self.assertEqual((x, y), (22, ui.PILL_H - 7), "the slot moved")
+        # Under the mic, which sits twelve left of the meter's first bar.
+        self.assertEqual((x, y), (ui.METER_X - 12, ui.PILL_H - 7), "the slot moved")
         self.assertEqual(text, "codex")
 
     def test_the_path_is_walked_once_and_not_per_frame(self):

@@ -837,7 +837,7 @@ FONT_SANS_MEDIUM = "IBM Plex Sans Medm"
 FONT_SANS_SEMIBOLD = "IBM Plex Sans SmBld"
 FONT_MONO = "IBM Plex Mono"
 
-FONT_BODY = (FONT_SANS, -14)  # draft text, the answer, the hand editor
+FONT_BODY = (FONT_SANS, -13)  # draft text, the answer, the hand editor
 #: 11.5 px in the spec, floored rather than rounded to 12: a note is meant to read
 #: smaller than a 12 px chip label, and rounding up would erase the one pixel that
 #: says so. Also this file's one size for every muted/secondary line — a question
@@ -856,7 +856,10 @@ FONT_TRACE = (FONT_MONO, -11)
 #: the note below it. See `Bubble._partial_slot`.
 FONT_PARTIAL = (*FONT_NOTE, "italic")
 
-PILL_H = 40
+#: 34, down from 40 (2026-09-01, the compact pass). The meter is 24 px tall at full
+#: bloom and the row's marks are 20, so 40 was 8 px of air above and below a row that
+#: sits over somebody's editor all day.
+PILL_H = 34
 #: Twelve, down from eighteen (decisions.md 2026-08-09). The meter answers one question —
 #: *am I being heard* — and twelve bars answer it as well as eighteen did, in six bars
 #: less of a widget that sits over somebody's editor all day. Six of the eighteen were
@@ -896,18 +899,21 @@ BAR_MIN_H, BAR_MAX_H = 1.5, 12.0
 #: Where the meter starts and how wide it ends up — named because the bar label has to
 #: begin after it, and two places computing `BARS * (BAR_W + BAR_GAP)` is how the label
 #: would come to be drawn through the twelfth bar the day one of them changed.
-METER_X = 40
+METER_X = 30
 METER_W = BARS * (BAR_W + BAR_GAP) - BAR_GAP
 
 #: §02's `+.1em`, at an 11 px em, rounded to the pixel Tk can actually place text on.
 #: Tk has no letter-spacing, so `Pill._bar_label` positions each character itself.
-LABEL_TRACK = 1
+#: Zero since the compact pass: the §02 tracking (+.1em) cost 7 px across the slot, and
+#: the row spends that on the command marks it now carries. Plex Mono at 11 px is a
+#: monospace already; the letters sit a pitch apart without help.
+LABEL_TRACK = 0
 #: One character's advance in `FONT_TRACE`. A single number is enough because the family
 #: is monospaced — which is also why the space in `NO INPUT` needs no special case.
 LABEL_ADV = 7
 LABEL_PITCH = LABEL_ADV + LABEL_TRACK
-LABEL_GAP = 12  # between the meter's last bar and the label
-LABEL_PAD = 12  # the mock's own right padding
+LABEL_GAP = 8  # between the meter's last bar and the label
+LABEL_PAD = 8  # the mock's own right padding
 
 #: What the label says, per state (§03's mocks: `idle`, `listening`, `held`, `working`,
 #: `no input`, and §04's `speaking`). Upper-cased at 11 px mono with tracking, which is
@@ -1058,13 +1064,13 @@ PTT_PASTE_WAIT_SEC = 15.0
 #: exactly 17 px of slack across four gaps, a rule that held only until a label grew.
 #: At 420 the same row has 57 px, and the two panels that already dock to one pill at
 #: one width (Phase 5) now share the width they draw at, too.
-BUBBLE_W = 420
-PAD = 14
+BUBBLE_W = 400
+PAD = 10
 #: The chip row's height, named because two places need it: `_lay_out` draws the row and
 #: `_render` has to keep the note clear of it. It used to be a 26 in one place and a 52
 #: in the other, and nothing tied them together — which is how a note came to be drawn on
 #: top of the chips the moment it wrapped to a second line.
-CHIP_H = 26
+CHIP_H = 22
 
 #: What Lite says instead of pasting. Both name the same fact from two directions: the
 #: draft is on the clipboard and the last step belongs to the user. The second exists
@@ -1135,8 +1141,8 @@ BODY_MAX_H = 340
 #:
 #: Reserved only where there is something to put in it: Lite does not track the
 #: foreground window at all, so on a Mac the row is exactly what it was.
-APP_SLOT_W = 72
-APP_SLOT_GAP = 10
+APP_SLOT_W = 44
+APP_SLOT_GAP = 6
 
 #: How many characters fit. Counted rather than measured, because `_draw` runs thirty
 #: times a second and `bbox` on every frame to bound a string that changes a few times an
@@ -1156,7 +1162,7 @@ APP_NAME_CHARS = 10
 #: app name both start below and right of that. The mock-up moved padding to 16 because
 #: its corner is drawn by CSS on the frame itself; here the chrome is drawn *inside* the
 #: canvas and the arc never reaches the text.
-PANEL_R = 18
+PANEL_R = 12
 
 #: One hue per row icon, all at the same chroma and lightness in oklch so no control
 #: shouts louder than another: `oklch(0.80 0.12 H)` at 85, 200 and 340.
@@ -1186,8 +1192,8 @@ ICON_MODE = "#F19FD6"      # pink
 #:
 #: It also costs nothing when idle, which the strip could not: the row is on screen
 #: either way.
-ICON_SIZE = 16
-ICON_GAP = 12
+ICON_SIZE = 14
+ICON_GAP = 8
 
 #: A glyph for every secondary command, so the row of words above the draft becomes a
 #: cluster of marks in the corner.
@@ -1200,20 +1206,32 @@ ICON_GAP = 12
 #:
 #: Every glyph is drawn, like the mic and the meter: a font that is missing or
 #: substituted turns a control into a box.
-COMMAND_H = 26
-COMMAND_GAP = 6
+COMMAND_H = 20
+COMMAND_GAP = 4
+#: The command glyphs are hand-drawn on a 16 px grid (`_glyph_refine` and its siblings
+#: address pixels by number), so the box they are centred in is named separately from
+#: `ICON_SIZE`, which the row's own three icons scale by.
+MARK_GLYPH = 16
+#: Air between the meter's last bar and the first command mark on the pill row.
+MARK_AIR = 6
 
 #: What the cluster costs the panel: the band, plus the air under it.
-COMMAND_BAND = COMMAND_H + 8
+#: Zero since the compact pass: the marks live on the pill row (`Pill._draw_marks`),
+#: in the empty middle the row always had, and the band they occupied atop every
+#: panel is gone. The name stays so the arithmetic that once added it still reads.
+COMMAND_BAND = 0
 
 #: The band of command marks is furniture, not content, so it goes *on top of* the
 #: ceiling rather than out of the draft's share — the same call `SETTINGS_H` needed, and
 #: the same failure if it is not made: the live partial's own cap is a flat 70 px, and on
 #: a panel pegged at the old ceiling it runs straight through the note and the foot.
-PANEL_MAX_H = 184 + COMMAND_BAND
+#: 183 = `PANEL_MIN_H` + 7 × `BODY_LINE_H`: on the same grid `_settled_h` snaps to, so
+#: the tallest a band gets is a height the snap can actually land on rather than one it
+#: clamps to a pixel short of. It was 184 + the 34 px command band; the band is gone.
+PANEL_MAX_H = 183
 
 #: The shortest a band gets, so a one-word draft still has a panel rather than a sliver.
-PANEL_MIN_H = 96
+PANEL_MIN_H = 64
 
 #: What the body font measures per line — the number `BODY_MAX_H` is already built from
 #: ("340 px is 20 lines at the 17 px the body font measures"). Named here because the
@@ -1262,7 +1280,7 @@ PARTIAL_GAP = 6
 #: The old 56 was measured at a 352 px column — `380 - 2 * PAD`, the bubble before
 #: Phase 6 — and stayed one panel width behind until the measurement was re-taken; see
 #: `_CHARS_PER_PX`.
-BODY_CHARS_PER_LINE = 62
+BODY_CHARS_PER_LINE = 64
 
 #: The window of draft actually laid out per event, and the reason render cost stops
 #: growing: `BODY_MAX_H` holds 20 lines, this is enough characters for about 28 of them, so
@@ -1281,16 +1299,17 @@ BODY_BOUNDARY_SCAN = 200
 
 #: The panel widths on offer, and why the list starts where it does rather than lower.
 #:
-#: 420 is a **floor**, not a default somebody liked. Two measured rows put it there:
-#: the bubble's five-chip row runs to 345 px (`chip_row_gap`, which records that 380
-#: clipped Send by half a label), and the card's runs to 377 of the same 420. A "small"
-#: option would have to either drop a chip or ship a row that clips, so there is not
-#: one — this is a setting for people who want the draft easier to read, and every
-#: direction that helps with that is up.
+#: 420 was a **floor** while the chips were a row of words: the bubble's five-chip row
+#: ran to 345 px and the card's to 377. The secondaries are marks now, and since the
+#: compact pass (2026-09-01) they sit on the pill row rather than in a band of their
+#: own — so the floor is the *row's*: app slot, mic, meter, four marks, three icons and
+#: the label, which `tests/test_compact.py` adds up against the smallest width here.
+#: 400 clears it with a few pixels of air; every option above it is for reading the
+#: draft more easily, and every direction that helps with that is up.
 #:
 #: Named rather than free-form for the reason `KEYS` is: three widths that have each
 #: been drawn are worth more than an integer nobody has rendered at.
-PANEL_WIDTHS: dict[str, int] = {"regular": 420, "large": 520, "larger": 640}
+PANEL_WIDTHS: dict[str, int] = {"regular": 400, "large": 480, "larger": 580}
 PANEL_DEFAULT = "regular"
 
 #: Where the stack sits. `"bottom"` is bottom-centre of the monitor under the pointer,
@@ -1357,7 +1376,8 @@ def apply_place(name: str) -> None:
 #: Still written as `62 / 392` rather than the raw 0.1581 so the shipped width comes back
 #: exactly, and so the number a reader can check against the canvas is the one in the
 #: source.
-_CHARS_PER_PX = 62 / (420 - 2 * PAD)
+#: Re-measured 2026-09-01 at the 13 px body font: 64 characters in the 380 px column.
+_CHARS_PER_PX = 64 / (400 - 2 * PAD)
 
 #: Lines of draft handed to the canvas per layout, which is what `BODY_TAIL_CHARS`
 #: actually encodes: `BODY_MAX_H` shows 20, and about 28 are laid out so the visible
@@ -1437,16 +1457,20 @@ BODY_PROBES = 3
 #: The help window. Wider than the bubble because it has two columns and does not wrap:
 #: a row is one line, so the width is what the widest row costs rather than a taste.
 #: `HELP_RIGHT_X` is the gutter both columns are measured against in `help.MAX_*`.
-HELP_W = 600
+HELP_W = 520
 HELP_RIGHT_X = 214
-HELP_LINE_H = 19
-HELP_GAP_H = 9
+HELP_LINE_H = 17
+HELP_GAP_H = 6
 #: Extra air above a section heading, so the sections separate without a rule.
-HELP_HEAD_TOP = 7
+HELP_HEAD_TOP = 6
 HELP_HEAD_H = HELP_LINE_H + HELP_HEAD_TOP
 #: The title band and the chip row, both of which the body scrolls under rather than over.
-HELP_HEAD_BAND = 40
+HELP_HEAD_BAND = 36
 HELP_FOOT_BAND = PAD + CHIP_H + PAD
+#: What the bubble costs around its body: the top padding, the air under the text, and
+#: the foot the chip row sits in. This was the literal 74 (= 14 + 6 + 54) that every
+#: height in `Bubble._render` added, and it moves with `PAD` and `CHIP_H` now.
+BUBBLE_FRAME = PAD + 6 + HELP_FOOT_BAND
 #: Bounded like everything else (invariant 7): the sheet grows with every command added,
 #: and a window that grows with it would eventually be taller than the screen. The work
 #: area bounds it too, and usually first — measured on this machine, `SPI_GETWORKAREA`
@@ -1467,7 +1491,10 @@ HELP_FOOT_BAND = PAD + CHIP_H + PAD
 #: for the same reason: the content is what somebody came for, and a table that dropped a
 #: verb to stay under a number would leave the router holding a command the sheet does
 #: not admit to having.
-HELP_MAX_H = 1228
+#: Re-measured for the compact pass (2026-09-01) at 17 px lines and 6 px gaps: the
+#: whole sheet with all five hotkeys registered is **1 075 px**, and this sits just above
+#: it, as before.
+HELP_MAX_H = 1090
 #: Air left around the window inside the work area, so it reads as floating rather than
 #: as a panel wedged against the edges.
 HELP_MARGIN = 48
@@ -1482,11 +1509,11 @@ RECENT_LABEL_MAX = 56
 #: same pill, and 420 is what the draft's own widest state was already measured to
 #: need. Still narrow enough to anchor beside a pill in a corner of a 1280-wide work
 #: area.
-CARD_W = 420
+CARD_W = 400
 
 #: A card with nothing on it yet is still a window somebody has to be able to see and
 #: reach the chips on.
-CARD_MIN_H = 120
+CARD_MIN_H = 80
 
 #: How much of one earlier turn is laid out in the history viewport. Read from the head,
 #: because a turn is read from its beginning — the opposite of the draft, which is read
@@ -1533,6 +1560,9 @@ def chip_w(key: str, label: str) -> int:
 #: The gap between chips, when the row has room to spare — which is every row the
 #: card ever draws and most the bubble does too.
 CHIP_GAP = 8
+
+#: A chip's corner, half its height: the capsule the primary has always been.
+CHIP_R = CHIP_H // 2
 
 #: `_round_rect` draws a chip's box as a *smoothed* polygon, and the smoothing curves
 #: past its own corner points — measured on the real canvas at ~1 px a side, 2 px a
@@ -4483,6 +4513,8 @@ class Pill(tk.Tk):
             None if waiting else round(self._meter_level, 3),
             getattr(session, "speaker", None) is not None,
             bool(getattr(session, "muted", False)),
+            tuple((k, l) for k, l, _c in self._marks()),
+            self.__dict__.get("_hover_mark"),
             self._bar_label(),
         )
 
@@ -4530,7 +4562,9 @@ class Pill(tk.Tk):
 
         # Mic glyph: capsule + stand, drawn rather than fonted so there is no
         # dependency on an emoji font being present and correctly sized.
-        cx, cy = 22 + shift, PILL_H // 2
+        # Twelve left of the meter's first bar: the capsule's arc reaches 7 px either
+        # side of centre, which leaves 5 px of air before the bars.
+        cx, cy = METER_X - 12 + shift, PILL_H // 2
         c.create_oval(cx - 4, cy - 9, cx + 4, cy + 1, fill=accent, outline=accent)
         c.create_arc(
             cx - 7, cy - 5, cx + 7, cy + 6, start=180, extent=180,
@@ -4586,9 +4620,111 @@ class Pill(tk.Tk):
         # the one landmark on this row that never moves at all.
         icons_w = 3 * ICON_SIZE + 2 * ICON_GAP
         icons_x = w - LABEL_PAD - LABEL_SLOT_W - LABEL_GAP - icons_w
-        if icons_x >= METER_X + METER_W + shift + LABEL_GAP:
+        meter_right = METER_X + METER_W + shift
+        if icons_x >= meter_right + LABEL_GAP:
             _row_icons(c, self, icons_x, mid)
+        # The front surface's secondary commands, as marks between the meter and the
+        # icons — the middle this row always had and never used. See `_draw_marks`.
+        self._draw_marks(c, icons_x - ICON_GAP, meter_right + MARK_AIR, mid)
         self._draw_label(c, w, mid, accent)
+
+    #: The word the label slot shows while a mark is under the pointer. Eight
+    #: characters at most — `LABEL_SLOT_W` is sized for `NO INPUT` — so the two commands
+    #: whose names run longer get a shorter name here, and only here.
+    MARK_WORDS = {"Was a command": "COMMAND", "New conversation": "NEW CHAT",
+                  "Use this": "USE THIS"}
+
+    def _marks(self) -> list:
+        """The secondary commands the front surface is offering, or nothing.
+
+        `__dict__` throughout, not attributes: a bare fixture built with `__new__` has
+        no `bubble`, and `tk.Misc.__getattr__` recurses on the miss rather than raising
+        the `AttributeError` a default would catch. A surface that is not up offers
+        nothing — the marks are its commands, and its commands act on what it shows.
+        """
+        surface = self.__dict__.get("card" if self.converse else "bubble")
+        if surface is None or not surface.__dict__.get("_visible", False):
+            return []
+        return list(surface.__dict__.get("_marks", ()))
+
+    def _draw_marks(self, c: tk.Canvas, right: float, floor_x: float, mid: int) -> None:
+        """The command marks, right-anchored against the icons, laid out right-to-left.
+
+        They were a cluster in the top-right corner of the panel, in a band of their
+        own (`COMMAND_BAND`, 34 px on every panel), while the pill row underneath sat
+        420 px wide with 150 px of nothing between the meter and the icons. The band
+        is gone and the marks are here, at the same fixed address the cluster argued
+        for: the rightmost mark never moves whatever is beside it, so a set that changes
+        with what was said — Edit and Was a command come and go — moves nothing under
+        the hand.
+
+        **Bound once per tag, and dispatched through `_mark_specs`.** The row repaints
+        whenever anything on it changes, and a `tag_bind` per repaint leaks a Tcl
+        command each time (see `_row_icons`). The binding looks the command up at the
+        click, so a mark that means Refine on the bubble and Copy on the card is one
+        binding reading a different table.
+
+        The hover word goes in the label slot: this row is 34 px tall and a tip drawn
+        above a mark would be clipped by its own canvas, while the state word on the
+        right is the one thing here that is text already. `_bar_label` reads it.
+
+        A mark that would land on the meter is not drawn: a set too wide for the row
+        loses its leftmost members, never the rightmost — and `tests/test_compact.py`
+        asserts the widest set fits at the narrowest panel width.
+        """
+        marks = self._marks()
+        specs: dict = {}
+        dim = self.waiting
+        bound = c.__dict__.setdefault("_flow_mark_bound", set())
+        x2 = right
+        # Rightmost first — the last secondary is the one that comes and goes, and it
+        # gets the fixed address; Refine, always present, ends up on the left.
+        for key, label, cmd in reversed(marks):
+            glyph = COMMAND_GLYPHS.get(key)
+            width = COMMAND_H if glyph is not None else chip_w(key, label)
+            if x2 - width < floor_x:
+                break
+            tag = chip_tag(key)
+            specs[key] = (label, cmd)
+            y1 = mid - COMMAND_H / 2
+            if glyph is None:
+                _round_rect(c, x2 - width, y1, x2, y1 + COMMAND_H, COMMAND_H // 2,
+                            fill=CHIP, outline="", tags=(tag, "mark"))
+                c.create_text(x2 - width / 2, mid, text=label,
+                              fill=DISABLED if dim else CODE, font=FONT_CHIP,
+                              tags=(tag, "mark"))
+            else:
+                _round_rect(c, x2 - width, y1, x2, y1 + COMMAND_H, COMMAND_H // 2,
+                            fill=CHIP, outline="", tags=(tag, "mark"))
+                glyph(c, x2 - width + (COMMAND_H - MARK_GLYPH) / 2,
+                      mid - MARK_GLYPH / 2,
+                      DISABLED if dim else COMMAND_COLOURS.get(key, CODE),
+                      (tag, "mark"))
+            if tag not in bound:
+                bound.add(tag)
+                c.tag_bind(tag, "<Button-1>", lambda _e, k=key: self._press_mark(k))
+                c.tag_bind(tag, "<Enter>", lambda _e, k=key: self._hover_mark_set(k))
+                c.tag_bind(tag, "<Leave>", lambda _e: self._hover_mark_set(None))
+            x2 -= width + COMMAND_GAP
+        self._mark_specs = specs
+
+    def _press_mark(self, key: str) -> None:
+        """Run the command the front surface currently publishes under `key`.
+
+        Looked up at the click, from the surface, never from a table the repaint
+        keeps: the repaint is skipped when nothing drawn has changed, and a command can
+        change without its mark changing — the same Copy mark means "copy this answer"
+        for whichever answer is up.
+        """
+        for k, _label, cmd in self._marks():
+            if k == key:
+                cmd()
+                return
+
+    def _hover_mark_set(self, key) -> None:
+        if self.__dict__.get("_hover_mark") != key:
+            self._hover_mark = key
+            self._draw()
 
     def _row_shift(self) -> int:
         """How far the mic, the meter and the icons move right for the app-name slot.
@@ -4670,6 +4806,10 @@ class Pill(tk.Tk):
         is switched off. Asking the speaker first labelled a spoken reply `EDITING`,
         which is the opposite advice.
         """
+        hover = self.__dict__.get("_hover_mark")
+        if hover and any(k == hover for k, _l, _c in self._marks()):
+            # The mark's own word, while the pointer is on it — see `_draw_marks`.
+            return self.MARK_WORDS.get(hover, hover.upper())
         if not self.armed:
             return LABEL_OFF
         mic = getattr(self.session, "mic", None)
@@ -5094,7 +5234,7 @@ class ConversationCard(tk.Frame):
 
     def _view_h(self) -> int:
         """What is left for the history once the pinned block and chips have theirs."""
-        return max(0, self._h - PAD - COMMAND_BAND - self._pinned_h - HELP_FOOT_BAND)
+        return max(0, self._h - PAD - self._pinned_h - HELP_FOOT_BAND)
 
     def _max_top(self) -> int:
         height = 0
@@ -5310,7 +5450,7 @@ class ConversationCard(tk.Frame):
         # card was free to grow to it; with the card a fixed shape that let the answer be
         # sized for a 672 px window and drawn into a 184 px one, and the top of the card
         # — the "agent" label — was cut off by it.
-        spare = (self.panel_h() - PAD - COMMAND_BAND - HELP_FOOT_BAND - q_h - CARD_GAP
+        spare = (self.panel_h() - PAD - HELP_FOOT_BAND - q_h - CARD_GAP
                  - BODY_ELIDED_H - (note_h + 4 if self._note else 0))
         shown, more, a_h = "", 0, 0
         if self._answer:
@@ -5329,7 +5469,7 @@ class ConversationCard(tk.Frame):
             # Snug around what is on the card, stepping a line at a time — and the pill
             # row below it does not move when it steps, because the shell grows upward.
             self._h = self._settled_h(
-                PAD + COMMAND_BAND + history_h + self._pinned_h + HELP_FOOT_BAND)
+                PAD + history_h + self._pinned_h + HELP_FOOT_BAND)
             c.configure(width=CARD_W, height=self._h)
             self.reposition()
 
@@ -5343,8 +5483,7 @@ class ConversationCard(tk.Frame):
                       seam="bottom")
 
         # -- the history, in what is left above the pinned block
-        # Below the command band, which is furniture the history must not run under.
-        y, floor = PAD + COMMAND_BAND, PAD + COMMAND_BAND + self._view_h()
+        y, floor = PAD, PAD + self._view_h()
         self._top = min(self._top, self._max_top())
         drawn = self._top
         for i in range(self._top, len(self._history)):
@@ -5417,6 +5556,8 @@ class ConversationCard(tk.Frame):
             specs.append(("Copy", "Copy", self._copy_answer))
         specs.append(("New conversation", "New conversation", self._new_conversation))
         c = self.canvas
+        # The secondaries are marks on the pill row — see `Bubble._lay_out`.
+        self._marks = specs[1:]
         # Rebuilt only when the row has changed — see `Bubble._lay_out`. This card
         # renders on every partial too, so it inherits the same defect and the same fix.
         key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent)
@@ -5428,35 +5569,14 @@ class ConversationCard(tk.Frame):
         # nothing under it: `<Leave>` never fires for an item that stopped existing.
         c.delete(TIP_TAG)
 
-        # The same shape the bubble takes: the secondaries as marks in the top-right
-        # corner, the primary alone at the foot. Two surfaces that laid their controls
-        # out differently would be two things to learn, and the whole point of moving
-        # them was one pattern — "commands to icon in pattern adopted for seemless
-        # experience".
-        for slot, (key, label, cmd) in enumerate(reversed(specs[1:])):
-            glyph = COMMAND_GLYPHS.get(key)
-            tag = chip_tag(key)
-            x2 = command_x(slot, CARD_W - PAD)
-            if glyph is None:
-                width = chip_w(key, label)
-                _round_rect(c, x2 - width, PAD, x2, PAD + COMMAND_H, 13,
-                            fill=CHIP, outline="", tags=(tag, "chips"))
-                c.create_text(x2 - width / 2, PAD + COMMAND_H / 2, text=label,
-                              fill=CODE, font=FONT_CHIP, tags=(tag, "chips"))
-            else:
-                _round_rect(c, x2 - COMMAND_H, PAD, x2, PAD + COMMAND_H,
-                            COMMAND_H // 2, fill=CHIP, outline="", tags=(tag, "chips"))
-                glyph(c, x2 - COMMAND_H + (COMMAND_H - ICON_SIZE) / 2,
-                      PAD + (COMMAND_H - ICON_SIZE) / 2,
-                      COMMAND_COLOURS.get(key, CODE), (tag, "chips"))
-            c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
-
+        # The secondaries are marks on the pill row now — see `Bubble._lay_out` — so
+        # this draws the one control that belongs to the card: Ask, alone at the foot.
         key, label, cmd = specs[0]  # Ask, and it is always first
         width = chip_w(key, label)
         y2 = self._h - PAD
         y1 = y2 - CHIP_H
         tag = chip_tag(key)
-        _round_rect(c, CARD_W - PAD - width, y1, CARD_W - PAD, y2, 13,
+        _round_rect(c, CARD_W - PAD - width, y1, CARD_W - PAD, y2, CHIP_R,
                     fill=PRIMARY_FILL, outline="", tags=(tag, "chips"))
         c.create_text(CARD_W - PAD - width / 2, (y1 + y2) / 2, text=label,
                       fill=PRIMARY_TEXT, font=FONT_CHIP_PRIMARY, tags=(tag, "chips"))
@@ -5506,6 +5626,9 @@ class Bubble(tk.Frame):
     #: Where the primary chip starts, so the note can end before it — they share a row.
     #: The default is the right edge, which is what an empty row means.
     _primary_x = BUBBLE_W - PAD
+    #: The secondary commands on offer, `(key, label, command)`, for the pill row to
+    #: draw as marks — see `Pill._draw_marks`. Empty until `_lay_out` has run.
+    _marks: list = []
 
     #: Where the command cluster starts, so the elided count can end before it — they
     #: share the band. The default assumes a *full* cluster rather than an empty one:
@@ -6157,20 +6280,31 @@ class Bubble(tk.Frame):
         # for in as many words, "icons should be in same row that was the idea". Inside
         # the editor the line above the box counts what the *box* left out, which is a
         # different number about a different thing, so that one still costs a line.
-        around = (74 + COMMAND_BAND
+        # The activity row shares the note's line when there is no note — the two are
+        # never both worth a line, and the note's row was already paid for.
+        act_inline = self._act is not None and not self._note
+        around = (BUBBLE_FRAME
                   + (BODY_ELIDED_H if self._editor is not None else 0)
-                  + (max(0, note_h - NOTE_LINE_H) + 4 if note_h else 0))
+                  + (max(0, note_h - NOTE_LINE_H) + 4 if note_h > NOTE_LINE_H else 0))
         if partial_h:
             around += partial_h + PARTIAL_GAP
         if self._sent:
             around += 16
-        if self._act is not None:
+        if self._act is not None and not act_inline:
             around += 20
         # Against the band's *ceiling*, not against the height it happens to be: the
         # height is about to be computed from this, so reading it here would let a short
         # frame pin the body short on the next one and never grow back.
         body_cap = max(BODY_ELIDED_H, min(BODY_MAX_H, self.panel_h() - around))
         shown, earlier, text_h = self._body_slot(body, body_cap)
+        elided_h = 0
+        if earlier and self._editor is None:
+            # The count has a line of its own above the draft again — the band it used
+            # to share with the marks is gone — and the body gives that line back, so
+            # a draft at the ceiling does not run into the row below it.
+            elided_h = BODY_ELIDED_H
+            shown, earlier, text_h = self._body_slot(
+                body, max(BODY_ELIDED_H, body_cap - BODY_ELIDED_H))
         if not body:
             # `_body_slot` probes `shown or " "` so `bbox` always has something to answer
             # about, and that space measures a full line. Nothing draws it — the body is
@@ -6196,12 +6330,17 @@ class Bubble(tk.Frame):
             extra += edit_h - text_h + 8 + BODY_ELIDED_H
         if self._sent:
             extra += 16  # the "sent" label above the words
+        extra += elided_h
         if partial_h:
             extra += partial_h + PARTIAL_GAP
-        if self._act is not None:
+        if self._act is not None and not act_inline:
             extra += 20
         if self._note:
-            extra += note_h + 4
+            # Only the lines past the first: a one-line note sits *on* the chip row
+            # (`note_baseline` below), so it costs the panel nothing. `around` already
+            # counted it that way; this counted the whole note, and the difference was
+            # 18 px of air between every draft and its row.
+            extra += max(0, note_h - NOTE_LINE_H) + (4 if note_h > NOTE_LINE_H else 0)
         # Fitted to the desktop before anything reads it. `BODY_MAX_H` bounds what the
         # *draft* asks for; this bounds what the window may be whatever asked — which is
         # the reply path, whose full-text probe is unchanged and is what sizes a 12 000-
@@ -6210,7 +6349,7 @@ class Bubble(tk.Frame):
         if not self._frozen():
             # Snug around the draft again, stepping a line at a time rather than
             # tracking every frame — see `_settled_h`.
-            self._h = self._settled_h(text_h + extra + 74 + COMMAND_BAND)
+            self._h = self._settled_h(text_h + extra + BUBBLE_FRAME)
             c.configure(width=BUBBLE_W, height=self._h)
             self.reposition()
 
@@ -6222,7 +6361,7 @@ class Bubble(tk.Frame):
         corners = (PANEL_R, PANEL_R, 0, 0)
         _panel_chrome(c, BUBBLE_W, self._h, corners, self.ring_color,
                       seam="bottom")
-        y = PAD + COMMAND_BAND
+        y = PAD
         if self._sent:
             c.create_text(
                 PAD, y, anchor="nw", text="sent", fill=MUTED,
@@ -6244,16 +6383,13 @@ class Bubble(tk.Frame):
             if earlier:
                 # Said rather than implied: a window with nothing above it reads as the
                 # whole draft, and somebody would go looking for words that are there.
-                #
-                # Drawn in the command band, on the marks' own line and clear of where
-                # they start. The band was already paid for and half of it was empty air
-                # while the count had a line of its own below it — so the draft gets that
-                # line back, and the two things at the top of the panel read as one row.
+                # On a line of its own above the draft; `elided_h` paid for it.
                 c.create_text(
-                    PAD, PAD + COMMAND_H / 2, anchor="w",
+                    PAD, y, anchor="nw",
                     text=f"… {earlier} earlier lines", fill=MUTED,
-                    width=max(40, self._commands_x - CHIP_GAP - PAD),
+                    width=BUBBLE_W - 2 * PAD,
                     font=(*FONT_NOTE, "italic"), tags="body")
+                y += elided_h
             # Muted once it has gone: these are no longer the words being worked on.
             #
             # `draft` is a second tag on the live text only, and it is what makes
@@ -6279,10 +6415,17 @@ class Bubble(tk.Frame):
                 font=FONT_PARTIAL, width=BUBBLE_W - 2 * PAD, tags="body")
             y += partial_h + PARTIAL_GAP
         if self._act is not None:
-            # In the flow of the text rather than pinned to the foot: it belongs to what
-            # is being waited on, and the note below is about what already happened.
-            self._indicator(y)
-            y += 20
+            if act_inline:
+                # On the note's row, at the foot, beside the primary: there is no note
+                # to displace, and a wait with a line of its own above the chips was
+                # 20 px of air on every refine.
+                self._indicator(self._h - PAD - CHIP_H + (CHIP_H - NOTE_LINE_H) // 2)
+            else:
+                # In the flow of the text rather than pinned to the foot: it belongs to
+                # what is being waited on, and the note below is about what already
+                # happened.
+                self._indicator(y)
+                y += 20
         if self._note:
             # Anchored to its own bottom edge, four pixels clear of the chip row, and
             # derived from the row's geometry rather than restating it: the old `52` and
@@ -6406,51 +6549,21 @@ class Bubble(tk.Frame):
         pinned = max((i for i, (k, _l, _c) in enumerate(specs)
                       if k in self.PRIMARY_KEYS), default=None)
         heads = [i for i in range(len(specs)) if i != pinned]
-        slots = command_slots([(specs[i][0], specs[i][1]) for i in reversed(heads)])
-        # Where the cluster starts. Published for the same reason as `_primary_x`: the
-        # elided count shares the band with the marks now, it is drawn earlier in the
-        # frame, and a frame that skips the rebuild still draws it.
-        self._commands_x = min((x2 - w for x2, w in slots), default=BUBBLE_W - PAD)
+        # -- the secondaries are marks on the pill row now, not on this panel ----------
+        #
+        # They were a row of words along the foot, then a cluster of marks in the
+        # top-right corner in a band of their own. The band is gone (compact pass,
+        # 2026-09-01): the pill row underneath had an empty middle the whole cluster
+        # fits in, at the same fixed right-anchored address. Published here, drawn by
+        # `Pill._draw_marks` on the next frame, and dispatched through the pill's own
+        # table — so the foot holds one control, and the one thing you cannot take back
+        # has a row to itself.
+        self._marks = [specs[i] for i in heads]
         key_now = (tuple((k, l) for k, l, _c in specs), self._h, self.accent, dim)
         if key_now == self._chips_drawn or (self._frozen() and self._chips_drawn):
             return
         self._chips_drawn = key_now
         c.delete("chips")
-
-        # -- the secondaries, as a cluster of marks in the top-right corner ------------
-        #
-        # They were a row of words along the foot, sharing it with the primary. Asked for
-        # as icons — "those commands to go as icon on top right and send" — and the move
-        # earns more than tidiness: the foot now holds one control, so the one thing you
-        # cannot take back has a row to itself.
-        #
-        # Right-aligned and laid out right-to-left, so the *rightmost* mark is at a fixed
-        # address whatever the set is. The set changes constantly — Edit and Was a command
-        # come and go with what was said — and a cluster that grew leftward from the left
-        # edge would move every icon under the hand each time.
-        for (x2, width), i in zip(slots, reversed(heads)):
-            key, label, cmd = specs[i]
-            glyph = COMMAND_GLYPHS.get(key)
-            tag = chip_tag(key)
-            y1 = PAD
-            if glyph is None:
-                # No mark for this one, so it keeps its word. A glyph nobody can read is
-                # worse than a label that is merely longer.
-                _round_rect(c, x2 - width, y1, x2, y1 + COMMAND_H, 13,
-                            fill=CHIP, outline="", tags=(tag, "chips"))
-                c.create_text(x2 - width / 2, y1 + COMMAND_H / 2, text=label,
-                              fill=DISABLED if dim else CODE, font=FONT_CHIP,
-                              tags=(tag, "chips"))
-            else:
-                _round_rect(c, x2 - COMMAND_H, y1, x2, y1 + COMMAND_H, COMMAND_H // 2,
-                            fill=CHIP, outline="", tags=(tag, "chips"))
-                glyph(c, x2 - COMMAND_H + (COMMAND_H - ICON_SIZE) / 2,
-                      y1 + (COMMAND_H - ICON_SIZE) / 2,
-                      DISABLED if dim else COMMAND_COLOURS.get(key, CODE),
-                      (tag, "chips"))
-                # The word the mark replaced, on hover, under the mark it belongs to.
-                bind_tip(c, tag, label, x2, y1 + COMMAND_H + 6)
-            c.tag_bind(tag, "<Button-1>", lambda _e, f=cmd: f())
 
         # -- the primary, alone at the foot, exactly where it always was ---------------
         if pinned is not None:
@@ -6460,7 +6573,7 @@ class Bubble(tk.Frame):
             y1 = y2 - CHIP_H
             tag = chip_tag(key)
             lit = not dim
-            _round_rect(c, BUBBLE_W - PAD - width, y1, BUBBLE_W - PAD, y2, 13,
+            _round_rect(c, BUBBLE_W - PAD - width, y1, BUBBLE_W - PAD, y2, CHIP_R,
                         fill=PRIMARY_FILL if lit else CHIP, outline="",
                         tags=(tag, "chips"))
             c.create_text(BUBBLE_W - PAD - width / 2, (y1 + y2) / 2, text=label,

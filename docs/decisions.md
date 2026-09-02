@@ -6,6 +6,45 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-01 — The compact pass: the marks move to the pill row, and everything else pulls in
+
+Decided from a measured survey and the surface screenshots (`scripts/shots.py`), after
+the felt-latency pass the same day. Two numbers made the case: the idle pill row was
+420 px wide with ~150 px of nothing between the meter and the icons, and a three-line
+draft sat inside ~178 px of panel of which 108 px was furniture — 34 of it a band that
+existed only to hold four 26 px marks.
+
+**The marks live on the pill row** (`Pill._draw_marks`): right-anchored against the
+three icons, laid out right-to-left so the rightmost keeps a fixed address whatever
+the set is — the argument the corner cluster already made, kept. The bubble and the
+card publish their secondaries (`_marks`) and draw only the primary at the foot; the
+pill binds each tag once and dispatches through the surface's live list at the click,
+so a repaint never rebinds and a Copy that means a different answer is one binding
+reading a different list. The hover word goes in the label slot on the right (`REFINE`,
+`COMMAND`, `NEW CHAT`): a tip drawn above a 34 px row would be clipped by its own
+canvas, and the state word is the one thing on the row that is already text.
+
+**What moved, in pixels.** `PILL_H` 40 → 34; `ICON_SIZE` 16 → 14 and `ICON_GAP` 12 → 8;
+`APP_SLOT_W` 72 → 44; `METER_X` 40 → 30; label gap and pad 12 → 8; the label's +.1em
+tracking retired (7 px, spent on the marks); `PAD` 14 → 10; `CHIP_H` 26 → 22; marks
+20 px in the row, glyphs still on their 16 px grid (`MARK_GLYPH`); `PANEL_MIN_H` 96 → 64
+and `CARD_MIN_H` 120 → 80; `PANEL_MAX_H` 183, on the snap grid (`PANEL_MIN_H` + 7 lines)
+so the ceiling is a height `_settled_h` can land on; `FONT_BODY` 14 → 13 px, which
+measures the same 17 px line, so `BODY_CHARS_PER_LINE` is 64 at the 380 px column;
+`PANEL_R` 18 → 12 and chips at `CHIP_R` = 11; `PANEL_WIDTHS` 420/520/640 → 400/480/580;
+the help sheet at 520 px, 17 px lines and 6 px gaps, ceiling 1 090 from a measured 1 075.
+The sent card no longer reserves the empty band, the activity row shares the note's
+line when there is no note, and the elided count is back on a line of its own above
+the draft (the band it shared is gone; the body gives that line back at the ceiling).
+
+**Why 400 and not 360.** The first proposal was 360/440/540. With the marks on the row
+the floor is the row's: app slot, mic, meter, four marks, three icons and the label sum
+to ~393 px at these sizes, and `tests/test_compact.py` adds them up against the
+narrowest width so the floor cannot drift below the marks again. Reopen if the row
+ever has to carry a fifth mark, or if the app-name slot at 44 px proves too short for
+what people actually dictate into — the slot, the meter's bar count and the label's
+pitch are the three places the row can still give.
+
 ### 2026-09-01 — The felt-latency pass: what the trace said, what moved, and what did not
 
 Every number here is from this machine's own `~/.flow/diag.jsonl` (6 442 decode records,

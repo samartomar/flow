@@ -220,16 +220,19 @@ class TestTheBarLabelSaysWhatFlowIsDoing(unittest.TestCase):
         self.assertEqual(
             pill(State.LISTENING, mic_active=False)._bar_label(), ui.LABEL_NO_INPUT)
 
-    def test_it_is_drawn_a_character_at_a_time_with_tracking(self):
-        # Tk has no letter-spacing, so §02's `+.1em` only exists if `_draw` places each
-        # glyph itself. One `create_text` for the whole word would be 63 px, not 71.
+    def test_it_is_drawn_a_character_at_a_time_on_one_pitch(self):
+        # Tk has no letter-spacing, so `_draw` places each glyph itself and the pitch
+        # is this module's to choose. §02's `+.1em` tracking was retired by the compact
+        # pass — the 7 px it cost the slot went to the command marks the row carries —
+        # so the pitch is exactly the advance now, and a test that demanded tracking
+        # would be asking for the room back.
         p = pill(State.DRAFT, _docked_w=ui.PILL_W, _flash=0, _tint=0.0)
         p._draw()
         xs = label_xs(p)
         self.assertEqual(len(xs), len("HELD"))
         gaps = {round(b - a) for a, b in zip(xs, xs[1:])}
         self.assertEqual(gaps, {ui.LABEL_PITCH})
-        self.assertGreater(ui.LABEL_PITCH, ui.LABEL_ADV, "tracking is not being applied")
+        self.assertEqual(ui.LABEL_PITCH, ui.LABEL_ADV)
 
     def test_the_right_edge_holds_still_when_the_pill_docks(self):
         # The pill's right edge is the one `_sync_dock` pins, so it is the only place a

@@ -5,11 +5,12 @@ what the setting is *not* allowed to do, because the constants it moves were not
 by taste — each carries a measurement in its comment, and a size setting is exactly the
 kind of change that quietly invalidates one.
 
-  **It cannot go below 420.** That is a floor set by two measured rows: the bubble's
-  five-chip row runs to 345 px (`chip_row_gap` records that 380 clipped Send by half a
-  label) and the card's to 377. A panel narrower than its own chip row is a window whose
-  Send button is off the edge, and Send is the exit that must never be unreachable — so
-  the clamp is tested, not just written down.
+  **It cannot go below 400.** 420 was the floor while the chips were a row of words —
+  the bubble's five-chip row ran to 345 px and the card's to 377. The secondaries are
+  marks on the pill row now (compact pass, 2026-09-01), so the floor is the row's own
+  budget: app slot, mic, meter, four marks, three icons and the label, which
+  `test_compact.py` adds up. A panel narrower than that loses a mark, and the clamp is
+  tested, not just written down.
 
   **It cannot change what today's users see.** `regular` has to reproduce the shipped
   numbers exactly. A size setting that also silently re-flowed everybody's draft would
@@ -38,8 +39,8 @@ from flow.profile import PANEL_DEFAULT, Profile  # noqa: E402
 #: The shipped numbers, captured at import before any test moves them. Written as
 #: literals as well, because a test that compared the module to itself would pass just
 #: as happily after somebody changed all four.
-SHIPPED = {"BUBBLE_W": 420, "CARD_W": 420,
-           "BODY_CHARS_PER_LINE": 62, "BODY_TAIL_CHARS": 1750}
+SHIPPED = {"BUBBLE_W": 400, "CARD_W": 400,
+           "BODY_CHARS_PER_LINE": 64, "BODY_TAIL_CHARS": 1806}
 
 
 class PanelWidth(unittest.TestCase):
@@ -72,10 +73,9 @@ class TestTheShippedWidthIsUntouched(PanelWidth):
 
 class TestTheFloorHoldsBecauseSendMustStayReachable(PanelWidth):
     def test_a_width_below_the_floor_is_clamped_to_it(self):
-        # The measured rows are 345 px (bubble) and 377 px (card) of chips before gaps
-        # and padding. Below 420 the row either loses its gaps or loses a label, and the
-        # label it loses first is Send.
-        for asked in (0, 1, 100, 379, 419, -50):
+        # Below the floor the pill row loses its leftmost mark — Refine — before
+        # anything else; see `Pill._draw_marks`.
+        for asked in (0, 1, 100, 379, 399, -50):
             with self.subTest(asked=asked):
                 ui.apply_panel_width(asked)
                 self.assertEqual(ui.BUBBLE_W, SHIPPED["BUBBLE_W"])

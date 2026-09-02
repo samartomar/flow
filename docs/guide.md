@@ -896,29 +896,32 @@ recognised by the start of its name.
 
 Absent in Lite, which does not track a foreground window at all.
 
-### The commands, as marks in the corner
+### The commands, as marks on the pill row
 
 Refine, Continue, Edit, Was a command — and on the card, Use this, Copy and New
-conversation — are round marks in the panel's top-right corner rather than a row of words
-along the foot. `Was a command` wears **⌘**, which is the mark everybody already reads as
-*this was an instruction, not text*.
+conversation — are round marks on the pill row, between the meter and the three icons,
+rather than a row of words along the panel's foot. `Was a command` wears **⌘**, which is
+the mark everybody already reads as *this was an instruction, not text*. Rest the
+pointer on a mark and its word appears in the status slot on the right — `REFINE`,
+`EDIT`, `COMMAND` — where `HELD` or `LISTENING` normally sits.
 
 **Send is the exception, and deliberately.** It keeps the foot to itself, on the right,
 labelled. It is the one control you cannot take back, so it stays a word and stays where
 your hand already goes. `Ask` and `Done` do the same on the surfaces they belong to.
 
-The cluster is laid out right-to-left from the panel's edge, so the rightmost mark is at a
+The cluster is laid out right-to-left from the icons, so the rightmost mark is at a
 fixed address whatever else is beside it. The set changes constantly — Edit and Was a
 command come and go with what was said — and grown from the left it would shift every
 mark under your hand each time.
 
-They sit in a band of their own *above* the draft, not beside it: a cluster of four takes
-~134 px, and a text column beside it would lose a third of its width on every line.
+They used to sit in a band of their own above the draft. The row underneath had an empty
+middle the whole cluster fits in, so the band is gone and the panel is the draft, its
+note and its one button — 34 px shorter on every utterance.
 
 ### The icons on the row
 
-Three marks sit between the meter and the status word, so the settings that matter
-mid-task do not cost a right-click:
+Three icons sit right of the command marks, before the status word, so the settings
+that matter mid-task do not cost a right-click:
 
 **⚙** opens the settings list itself — the same entries the right-click builds, not a
 second copy of them, and without the `Settings` cascade in front of them. A shortcut
