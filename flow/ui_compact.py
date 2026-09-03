@@ -39,7 +39,9 @@ import ctypes
 import queue
 import sys
 import time
+import math
 import tkinter as tk
+import tkinter.font as tkfont
 import traceback
 from pathlib import Path
 
@@ -84,6 +86,7 @@ from .ui import (
     WAITING,
     _copy_to_clipboard,
     _dark_menu,
+    _mix,
     _no_activate,
     _round_rect,
     _shell_window,
@@ -266,79 +269,85 @@ SETUP_ROW_H = 42
 #: pipeline owns words; this belongs beside it, not in the pill.
 
 
-def _capsule(c: tk.Canvas, x1, y1, x2, y2, square_top=False, **kw) -> None:
-    """A true stadium, filled: two `create_arc` pieslices of diameter `h` at
-    each end plus a `create_rectangle` between them.
+def _capsule_points(x1, y1, x2, y2, square_top=False, inset=0.0) -> list:
+    """The stadium as one open point run, from its top-left to its top-right.
 
-    `_round_rect` is a smoothed polygon, and at `r = h/2` it yields a rounded
-    rectangle, not a capsule — the difference is what `.shots/01-compact-rest.png`
-    showed before this helper existed. Kept separate from `_round_rect` rather
-    than an option on it: the shipped surface depends on that shape staying
-    exactly what it is.
+    One path, sampled, rather than the arcs-plus-rectangles this drew before —
+    and the reason is in `.shots/02-compact-hearing.png` from the run before
+    this: a pieslice's *fill* and an arc's *stroke* do not rasterize onto the
+    same pixels, so the ring stood a pixel outside the body and a dark halo
+    ran around the inside of both caps, with a visible step where each
+    straight run met its arc. Fill and stroke taken from the same points
+    cannot disagree about where the edge is.
 
-    `square_top` is the foot (gen.py `.foot`: `border-radius: 0 0 17px 17px`):
-    the panel docks above, the top corners square off to meet it, and each end
-    keeps only its bottom quarter-circle.
+    `inset` pulls the path in by that many pixels, which is how a stroke that
+    centres on its path stays inside a fill that stops at it.
+
+    `square_top` is the foot (gen.py `.foot`: `border-radius: 0 0 17px 17px`)
+    — the panel docks above, so the top corners square off to meet it and only
+    the bottom quarter-circles survive. Open rather than closed because the
+    foot's border has `border-top: 0`: the caller closes the loop when it
+    wants all four sides, and does not when the seam above is somebody else's
+    line to draw.
     """
-    h = y2 - y1
+    x1, y1, x2, y2 = x1 + inset, y1 + inset, x2 - inset, y2 - inset
+    r = (y2 - y1) / 2
+    #: 24 points to the half-circle — a 7.5 degree step, which on a 17 px
+    #: radius is a 2.2 px chord: below the eye's read of a curve at this size,
+    #: and cheap enough for a 30 ms frame.
+    steps = 24
+    pts = []
     if square_top:
-        c.create_rectangle(x1, y1, x2, y2 - h / 2, **kw)
-        c.create_arc(x1, y2 - h, x1 + h, y2, start=180, extent=90,
-                     style=tk.PIESLICE, **kw)
-        c.create_arc(x2 - h, y2 - h, x2, y2, start=270, extent=90,
-                     style=tk.PIESLICE, **kw)
-        c.create_rectangle(x1 + h / 2, y2 - h / 2, x2 - h / 2, y2, **kw)
-        return
-    c.create_arc(x1, y1, x1 + h, y2, start=90, extent=180,
-                 style=tk.PIESLICE, **kw)
-    c.create_arc(x2 - h, y1, x2, y2, start=270, extent=180,
-                 style=tk.PIESLICE, **kw)
-    c.create_rectangle(x1 + h / 2, y1, x2 - h / 2, y2, **kw)
+        pts.append((x1, y1))
+        pts.append((x1, y2 - r))
+        # y grows downward, so the quarters sweep with `+ r sin a` — negating
+        # it mirrors each corner into the top half and folds the foot into a
+        # wedge, which is what `.shots/11-compact-refine-panel.png` drew.
+        for i in range(steps + 1):  # bottom-left quarter: left side to bottom
+            a = math.pi - i * (math.pi / 2) / steps
+            pts.append((x1 + r + r * math.cos(a), y2 - r + r * math.sin(a)))
+        for i in range(steps + 1):  # bottom-right quarter: bottom to right side
+            a = math.pi / 2 - i * (math.pi / 2) / steps
+            pts.append((x2 - r + r * math.cos(a), y2 - r + r * math.sin(a)))
+        pts.append((x2, y1))
+        return pts
+    cy = y1 + r
+    for i in range(steps * 2 + 1):  # the left cap, top tangent round to bottom
+        a = math.pi / 2 + i * math.pi / (steps * 2)
+        pts.append((x1 + r + r * math.cos(a), cy + r * math.sin(a)))
+    for i in range(steps * 2 + 1):  # the right cap, bottom tangent round to top
+        a = -math.pi / 2 + i * math.pi / (steps * 2)
+        pts.append((x2 - r + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
+
+
+def _flat(pts) -> list:
+    """A point list as the flat `x1, y1, x2, y2, ...` Tk takes."""
+    return [v for pt in pts for v in pt]
+
+
+def _capsule(c: tk.Canvas, x1, y1, x2, y2, square_top=False, **kw) -> None:
+    """The stadium, filled. One polygon over `_capsule_points`."""
+    c.create_polygon(_flat(_capsule_points(x1, y1, x2, y2, square_top)),
+                     **kw)
 
 
 def _capsule_ring(c: tk.Canvas, x1, y1, x2, y2, colour: str, width=1,
                   square_top=False, top=True) -> None:
-    """The stadium as a stroke: two arc outlines and the straight runs
-    between them, because a pieslice's outline also draws its radii — the
-    diameter line — and a capsule has none.
+    """The stadium as a stroke, on the same points the fill uses.
 
-    The runs sit on integer rows while the bbox stays fractional-free,
-    because the two primitives rasterize differently: an arc's stroke falls
-    *inside* its bbox, and a line's centres on its path with half-pixels
-    rounding up — a run drawn at `y1 + width/2` lands one row low (and the
-    bottom run lands off the window entirely). Measured against
-    `.shots/02-compact-hearing.png`, where both showed.
+    Inset by half the stroke, because a Tk line centres on its path: without
+    it half of every stroke falls outside the body it is meant to trace, which
+    is the halo this replaced.
 
-    `square_top` is the foot's variant: quarter arcs at the bottom corners and
-    verticals up the sides. `top` says whether the top run is drawn — gen.py's
-    `.foot` has `border-top: 0` (the seam belongs to the panel above it), but
-    a state ring is a `box-shadow` and wraps all four sides.
+    `top` says whether the run across the top is drawn — gen.py's `.foot` has
+    `border-top: 0`, the seam above being the panel's line, but a state ring
+    is a `box-shadow` and wraps all four sides.
     """
-    h = y2 - y1
-    dy = (width - 1) / 2
-    if square_top:
-        c.create_arc(x1, y2 - h, x1 + h, y2, start=180, extent=90,
-                     style=tk.ARC, outline=colour, width=width)
-        c.create_arc(x2 - h, y2 - h, x2, y2, start=270, extent=90,
-                     style=tk.ARC, outline=colour, width=width)
-        c.create_line(x1 + dy, y1, x1 + dy, y2 - h / 2,
-                      fill=colour, width=width)
-        c.create_line(x2 - 1 - dy, y1, x2 - 1 - dy, y2 - h / 2,
-                      fill=colour, width=width)
-        c.create_line(x1 + h / 2, y2 - 1 - dy, x2 - h / 2, y2 - 1 - dy,
-                      fill=colour, width=width)
-        if top:
-            c.create_line(x1, y1 + dy, x2 - 1, y1 + dy,
-                          fill=colour, width=width)
-        return
-    c.create_arc(x1, y1, x1 + h, y2, start=90, extent=180,
-                 style=tk.ARC, outline=colour, width=width)
-    c.create_arc(x2 - h, y1, x2, y2, start=270, extent=180,
-                 style=tk.ARC, outline=colour, width=width)
-    c.create_line(x1 + h / 2, y1 + dy, x2 - h / 2, y1 + dy,
-                  fill=colour, width=width)
-    c.create_line(x1 + h / 2, y2 - 1 - dy, x2 - h / 2, y2 - 1 - dy,
-                  fill=colour, width=width)
+    pts = _capsule_points(x1, y1, x2, y2, square_top, inset=width / 2)
+    if top:
+        pts = pts + [pts[0]]
+    c.create_line(_flat(pts), fill=colour, width=width)
 
 
 def _hit(rect, x, y) -> bool:
@@ -451,6 +460,11 @@ class CompactPill(tk.Tk):
     _press_xy = (0, 0)
     _press_moved = False
     _press_talking = False
+    #: Where inside the window the press landed, so a drag moves the pill by
+    #: the pointer's travel rather than snapping its corner to the cursor.
+    _drag = (0, 0)
+    #: `tkfont.Font(...).measure` per font spec, built on demand by `_measure`.
+    _fonts: dict = {}
     #: The right-click menu, built in `__init__`. None on a fixture, and
     #: `_on_menu` checks rather than assuming. `_mode_var` is the radios'
     #: tick, on the instance because a Tk variable dies with the frame that
@@ -555,6 +569,8 @@ class CompactPill(tk.Tk):
         self._press_xy = (0, 0)
         self._press_moved = False
         self._press_talking = False
+        self._drag = (0, 0)
+        self._fonts = {}
         self._last_draft = ""
         self._send_pending = False
         self.paste_target = None
@@ -633,6 +649,11 @@ class CompactPill(tk.Tk):
 
         # States.dc.html's amber case, detected once, at launch.
         self._check_workspace_gone()
+
+        # The icon goes up now, because the pill's menu no longer carries a
+        # way out — see `_start_tray`. A machine with no notification area
+        # says so by returning False, and nothing here depends on it.
+        self._start_tray()
 
         self.after(30, self._tick)
 
@@ -1045,17 +1066,59 @@ class CompactPill(tk.Tk):
             return
         self._press_at = time.perf_counter()
         self._press_xy = (getattr(e, "x_root", 0), getattr(e, "y_root", 0))
+        # The grab point, from the event's own window-relative coordinates
+        # rather than from `winfo_rootx()`. Two reasons, and either alone
+        # would decide it: `winfo_*` lags a `geometry` call by a frame (the
+        # staleness `_open_box` records), and touching Tk here recurses
+        # through `tk.Misc.__getattr__` on a `__new__`-built fixture — the
+        # RecursionError this module's class defaults exist to prevent.
+        self._drag = (getattr(e, "x", 0), getattr(e, "y", 0))
         self._press_moved = False
         self._press_talking = False
 
     def _on_motion(self, e=None) -> None:
-        """A press that travels past the slop is the window being dragged."""
-        if self._press_at is None:
+        """A press that travels past the slop drags the window.
+
+        This used to only *record* that the press had moved, which made the
+        drag slop work and left the pill nailed to wherever Tk first put it —
+        "Drag it anywhere" (Main.dc.html) was the one gesture on the canvas
+        with no code behind it.
+
+        The order is `Pill._on_motion`'s (flow/ui.py:2712) and for its reason:
+        once capture is open the pointer is irrelevant, because somebody
+        talking into a held pill may well move the mouse and moving the window
+        out from under them is the gesture betraying them. Before that, motion
+        is both the thing that tells a drag from a hold and the drag itself.
+
+        The offset is the grab point inside the window, taken on the press —
+        without it the window snaps its own corner to the cursor on the first
+        motion event, which is the defect flow/ui.py:2588-2592 records.
+        """
+        if self._press_at is None or self._press_talking:
             return
         x, y = getattr(e, "x_root", 0), getattr(e, "y_root", 0)
-        if (abs(x - self._press_xy[0]) > PILL_DRAG_SLOP
+        if not (abs(x - self._press_xy[0]) > PILL_DRAG_SLOP
                 or abs(y - self._press_xy[1]) > PILL_DRAG_SLOP):
-            self._press_moved = True
+            return
+        self._press_moved = True
+        self._move_window(x - self._drag[0], y - self._drag[1])
+
+    def _move_window(self, x: int, y: int) -> None:
+        """Put the window's top-left at `(x, y)`, clamped to the screen.
+
+        Its own method because it is the only part of a drag that touches Tk,
+        and `_on_motion`'s other job — telling a drag from a hold — has to
+        stay callable on a `__new__`-built fixture. Clamped so the pill cannot
+        be thrown somewhere only the tray could get it back from; the window
+        is the capsule plus whatever the panel and the notice have added, so
+        the bound is the drawn size and not `PILL_W`/`PILL_H`.
+        """
+        nx = max(0, min(x, self.winfo_screenwidth() - self._shell_w))
+        ny = max(0, min(y, self.winfo_screenheight() - self._shell_h))
+        self.geometry(f"{self._shell_w}x{self._shell_h}+{nx}+{ny}")
+        # No box to re-anchor: the palette and the setup box hold the keyboard
+        # and close on `FocusOut`, so the press that starts this drag has
+        # already dismissed either of them.
 
     def _on_release(self, e=None) -> None:
         """The button coming up: a hold ends the talk, anything else is a tap.
@@ -1084,9 +1147,15 @@ class CompactPill(tk.Tk):
         Tk has no sub-line row, so the canvas's `msub` lines are disabled
         entries — `_dark_menu` already greys them. The mode rows choose
         through the chooser API (`toggle_mode(to=)`); a flip cannot serve
-        "choose Refine" in a three-mode world. The last two rows are not on
-        the canvas: Hide to tray is the 2026-09-03 decision that superseded
-        its "no tray" (design/compact/README.md), and Quit was already there.
+        "choose Refine" in a three-mode world.
+
+        **This is the whole menu.** It ends at Workbench setup because the
+        artboard ends there — "this is everything it offers" is the line under
+        it. Hide to tray and Quit were here and are not on the canvas, so they
+        are gone from it; both live on the tray icon's own menu, which
+        `_start_tray` now raises at launch rather than waiting for a menu row
+        that no longer exists to ask for it. Quit is also the `quit` hotkey,
+        which needs no focus and no menu at all.
         """
         current = self.session.mode
         # On the instance, not the stack: a Tk variable dies with the frame
@@ -1112,9 +1181,6 @@ class CompactPill(tk.Tk):
         m.add_separator()
         m.add_command(label="Workbench setup", command=self._open_setup)
         m.add_command(label="mic, CLI, where it pastes", state="disabled")
-        m.add_separator()
-        m.add_command(label="Hide to tray", command=self.hide_to_tray)
-        m.add_command(label="Quit", command=self.quit_app)
 
     def _on_menu(self, e=None) -> None:
         """Right-click — the only menu the design allows (Workspace.dc.html).
@@ -1146,6 +1212,28 @@ class CompactPill(tk.Tk):
 
     # -- the tray ------------------------------------------------------------
 
+    def _start_tray(self) -> bool:
+        """Put the icon in the notification area. True once it is there.
+
+        Raised at launch rather than on demand, and that is what pays for
+        trimming the pill's menu back to the canvas (`_populate_menu`): the
+        artboard's menu ends at Workbench setup, so Show and Quit have to
+        live somewhere that does not depend on a menu row — the icon's own
+        `Show Flow` / `Quit Flow` (tray.py:308-309). It is also the escape
+        hatch the 2026-09-03 decision kept the tray for: a pill dragged
+        somewhere unreachable is now genuinely reachable, which it was not
+        while the way back was a row on the window you had lost.
+
+        Idempotent, and false on a machine with no notification area (a Mac,
+        a Linux desktop) — where `quit` is the hotkey, as it has always been.
+        """
+        if not tray.available():
+            return False
+        if self._tray is None:
+            self._tray = tray.Tray("Flow - press the chord to talk",
+                                   self._tray_events)
+        return self._tray.start()
+
     def hide_to_tray(self) -> bool:
         """Park the window behind a notification-area icon. True when it hid.
 
@@ -1160,13 +1248,7 @@ class CompactPill(tk.Tk):
         parked window straight back, and this one re-asserts only on a
         panel transition, so unmapping is safe here.
         """
-        if not tray.available():
-            self._flash = FLASH_FRAMES
-            return False
-        if self._tray is None:
-            self._tray = tray.Tray("Flow - press the chord to talk",
-                                   self._tray_events)
-        if not self._tray.start():
+        if not self._start_tray():
             self._flash = FLASH_FRAMES
             return False
         self._home = (self.winfo_rootx(), self.winfo_rooty())
@@ -1527,8 +1609,15 @@ class CompactPill(tk.Tk):
             inset = 1
         _capsule_ring(c, inset, inset, PILL_W - inset, PILL_H - inset, RING_OUTER)
         hi = inset + 1
-        c.create_arc(hi, hi, PILL_W - hi, PILL_H - hi,
-                     start=0, extent=180, style=tk.ARC, outline=RING_TOP)
+        # `inset 0 1px 0 RING_TOP` is a *straight* line along the top, the way
+        # `_panel_chrome` draws its own (flow/ui.py:2301) — not a curve. This
+        # was an arc over the full 120×32 bbox, which is an ellipse the width
+        # of the pill: it photographed as a bulge sweeping across the capsule
+        # and reading as the shape's own edge. It spans the flat run between
+        # the two end-cap centres, because that is the only part of a stadium
+        # a horizontal inset line can sit on.
+        c.create_line(hi + PILL_H // 2, hi, PILL_W - hi - PILL_H // 2, hi,
+                      fill=RING_TOP)
         self._draw_face(c, 0, BARS)
         if self._copied:
             self._draw_copied(c)
@@ -1608,8 +1697,16 @@ class CompactPill(tk.Tk):
             envelope = 1.0 - 0.6 * abs(i - centre) / centre
             h = 1.5 + lvl * BAR_MAX_HALF * envelope
             x = METER_X + i * (BAR_W + BAR_GAP)
-            c.create_rectangle(x, mid - h, x + BAR_W, mid + h,
-                               fill=shade, outline="")
+            # gen.py's `.meter i` carries `border-radius: 1px`, so the caps
+            # are round — the same call ui.py:5060 makes for its own bars, and
+            # squared off below the cap's own diameter for its reason: a
+            # smoothed polygon pinches into a lozenge there.
+            if h * 2 > BAR_W:
+                _round_rect(c, x, mid - h, x + BAR_W, mid + h, BAR_W / 2,
+                            fill=shade, outline="")
+            else:
+                c.create_rectangle(x, mid - h, x + BAR_W, mid + h,
+                                   fill=shade, outline="")
 
     def _draw_panel(self, c) -> None:
         """The 400 px band above the foot: strip, heard, result, footer.
@@ -1637,7 +1734,7 @@ class CompactPill(tk.Tk):
         # The workspace is the CLI's system role (README) — this line is where
         # the panel says which repo it is about to be about.
         ws = getattr(self.session, "workspace", "") or ""
-        self._draw_folder(c, PAD_X, STRIP_H // 2)
+        self._draw_folder(c, PAD_X, STRIP_H // 2, HEARING if ws else DIM)
         c.create_text(PAD_X + 20, STRIP_H // 2, anchor="w",
                       text=ws or "no workspace", font=FONT_TAG,
                       fill=CODE if ws else PLACEHOLDER)
@@ -1692,7 +1789,16 @@ class CompactPill(tk.Tk):
         # (Refine.dc.html; Ask's footer stops at the hint).
         x1, y1, x2, y2 = COPY_RECT
         _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
-        c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Copy",
+        # gen.py's chip is `{COPY_ICON}Copy` — two offset rounded rectangles,
+        # the back one open where the front overlaps it. The label sits after
+        # the glyph rather than centred in the chip, which is what the flex
+        # row with its 6 px gap does.
+        gx, gy = x1 + 11, (y1 + y2) // 2
+        _round_rect(c, gx - 1, gy - 2, gx + 7, gy + 6, 2,
+                    fill="", outline=MUTED, width=1)
+        c.create_line(gx + 2, gy - 2, gx - 4, gy - 2, gx - 4, gy + 3,
+                      fill=MUTED, width=1)
+        c.create_text(gx + 13, gy, anchor="w", text="Copy",
                       font=FONT_CHIP, fill=CODE)
         c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
                       text=spec["hint"], font=FONT_TAG, fill=DIM)
@@ -1703,12 +1809,17 @@ class CompactPill(tk.Tk):
             c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Send",
                           font=FONT_CHIP_PRIMARY, fill=PRIMARY_TEXT)
 
-    def _draw_folder(self, c, x: int, cy: int) -> None:
+    def _draw_folder(self, c, x: int, cy: int, colour: str = DIM) -> None:
         """The strip's folder glyph, stroked like the mic: a tab and a body,
-        13 px square, gen.py's `FOLDER` reduced to its two readable lines."""
+        13 px square, gen.py's `FOLDER` reduced to its two readable lines.
+
+        `colour` because gen.py's `strip()` and `wsrow()` both take one, and
+        it carries meaning rather than decoration: green says this workspace
+        is real and grounded, grey says there is none. Drawn `DIM` whatever
+        the state, the strip claimed "no workspace" over a live path."""
         c.create_line(x, cy - 4, x + 4, cy - 4, x + 6, cy - 2,
-                      fill=DIM, width=1)
-        c.create_rectangle(x, cy - 2, x + 13, cy + 5, outline=DIM, width=1)
+                      fill=colour, width=1)
+        c.create_rectangle(x, cy - 2, x + 13, cy + 5, outline=colour, width=1)
 
     def _draw_box_chrome(self, c, h: int) -> None:
         """The `.box` shell both standalone windows share: SHELL, the 1 px
@@ -1719,10 +1830,14 @@ class CompactPill(tk.Tk):
 
     def _draw_palette(self, c) -> None:
         """The search palette from Workspace.dc.html: field with caret, the
-        filtered folders with the top hit lit, the pinned last row, the
-        footer legend. The artboard also tints the matched substring — that
-        needs font metrics a 30 ms frame will not pay for, so the top row
-        carries the highlight instead; that is the residual delta."""
+        filtered folders with the top hit lit, the matched letters tinted, the
+        pinned last row, the footer legend.
+
+        The `.hit` tint is measured, not skipped. It was left out as needing
+        "font metrics a 30 ms frame will not pay for" — but this box does not
+        redraw at 30 ms. It redraws on a keystroke, which is the only thing
+        that can change what matched, and `tkfont.Font.measure` on one cached
+        font is nothing at that rate."""
         h = self._box_height()
         self._draw_box_chrome(c, h)
         # The field: search glyph, the query so far, the caret.
@@ -1742,10 +1857,30 @@ class CompactPill(tk.Tk):
                 c.create_rectangle(1, y, BOX_W - 1, y + PALETTE_ROW_H,
                                    fill=CHIP, outline="")
             cy = y + PALETTE_ROW_H // 2
-            self._draw_folder(c, 16, cy)
-            c.create_text(38, cy, anchor="w", text=label,
-                          font=(FONT_MONO, -12),
+            # gen.py's `wsrow`: the current row's folder is green, the rest
+            # grey, and the "just talk" row's is grey because there is no
+            # folder behind it.
+            self._draw_folder(c, 16, cy,
+                              HEARING if i == 0 and not is_none else DIM)
+            font = (FONT_MONO, -12)
+            hit = -1 if is_none or not query else label.lower().find(query.lower())
+            if hit >= 0:
+                # gen.py's `.hit`: the matched letters carry a green wash and
+                # step up to `TEXT`. The wash is a blend rather than an alpha
+                # — this window is colour-keyed and cannot composite, which is
+                # the rule `_mix` exists for (flow/ui.py:1850).
+                m = self._measure(font)
+                x0 = 38 + m(label[:hit])
+                x1 = x0 + m(label[hit:hit + len(query)])
+                c.create_rectangle(x0 - 1, cy - 8, x1 + 1, cy + 8,
+                                   fill=_mix(CHIP if i == 0 else SHELL,
+                                             HEARING, 0.16), outline="")
+            c.create_text(38, cy, anchor="w", text=label, font=font,
                           fill=PLACEHOLDER if is_none else CODE)
+            if hit >= 0:
+                c.create_text(x0, cy, anchor="w",
+                              text=label[hit:hit + len(query)],
+                              font=font, fill=TEXT)
         foot = h - PALETTE_FOOT_H
         c.create_line(0, foot, BOX_W, foot, fill=SEAM)
         c.create_text(16, foot + PALETTE_FOOT_H // 2, anchor="w",
@@ -1763,6 +1898,47 @@ class CompactPill(tk.Tk):
         return [("Microphone", mic), ("Agent CLI", cli),
                 ("On release", on_release)]
 
+    def _measure(self, spec):
+        """A text-width function for `spec`, the `tkfont.Font` cached per
+        spec. Built lazily and kept, because constructing a `Font` asks Tk for
+        metrics and the palette would otherwise do it per row per keystroke."""
+        fn = self._fonts.get(spec)
+        if fn is None:
+            try:
+                fn = tkfont.Font(font=spec).measure
+            except (tk.TclError, RuntimeError):
+                # No interpreter behind this instance, or none yet — every
+                # headless draw test. The palette's font is mono, so the nominal advance is
+                # the real answer there rather than a stand-in, and it is the
+                # same number the field's caret already steps by.
+                advance = abs(spec[1]) * 2 // 3
+                fn = lambda s, _w=advance: len(s) * _w  # noqa: E731
+            self._fonts[spec] = fn
+        return fn
+
+    def _draw_setup_icon(self, c, row: int, x: int, cy: int) -> None:
+        """Workbench setup's three glyphs (gen.py's `workspace` page), stroked
+        at 14 px like every other glyph on this surface: a microphone and a
+        terminal in `HEARING`, and a muted arrow-into-a-baseline for where the
+        words land."""
+        if row == 0:  # Microphone — the mic, minus the meter's stem
+            _round_rect(c, x + 4, cy - 6, x + 10, cy + 1, 3,
+                        fill="", outline=HEARING, width=1)
+            c.create_arc(x + 1, cy - 4, x + 13, cy + 5, start=180, extent=180,
+                         style=tk.ARC, outline=HEARING, width=1)
+            c.create_line(x + 7, cy + 5, x + 7, cy + 7, fill=HEARING, width=1)
+        elif row == 1:  # Agent CLI — a prompt chevron and its line, in a box
+            _round_rect(c, x + 1, cy - 6, x + 13, cy + 6, 2,
+                        fill="", outline=HEARING, width=1)
+            c.create_line(x + 4, cy - 3, x + 6, cy, x + 4, cy + 3,
+                          fill=HEARING, width=1)
+            c.create_line(x + 8, cy + 3, x + 11, cy + 3, fill=HEARING, width=1)
+        else:  # On release — down into a baseline
+            c.create_line(x + 7, cy - 6, x + 7, cy + 1, fill=MUTED, width=1)
+            c.create_line(x + 4, cy - 2, x + 7, cy + 1, x + 10, cy - 2,
+                          fill=MUTED, width=1)
+            c.create_line(x + 2, cy + 5, x + 12, cy + 5, fill=MUTED, width=1)
+
     def _draw_setup(self, c) -> None:
         """Workbench setup: three read-only lines. Open it when something is
         wrong; otherwise never (Workspace.dc.html)."""
@@ -1772,7 +1948,13 @@ class CompactPill(tk.Tk):
             if i:
                 c.create_line(0, y, BOX_W, y, fill=SEAM)
             cy = y + SETUP_ROW_H // 2
-            c.create_text(16, cy, anchor="w", text=name,
+            # Each row leads with its glyph (gen.py's `.row`: a 14 px icon,
+            # then a 10 px gap, then the label). Green on the two Flow found
+            # for itself, muted on the one that is a preference rather than a
+            # discovery — the artboard's own split, and the reason the box can
+            # be read at a glance instead of line by line.
+            self._draw_setup_icon(c, i, 16, cy)
+            c.create_text(38, cy, anchor="w", text=name,
                           font=FONT_BODY, fill=TEXT)
             c.create_text(BOX_W - 16, cy, anchor="e", text=value,
                           font=FONT_NOTE, fill=MUTED)

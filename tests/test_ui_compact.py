@@ -15,6 +15,7 @@ menu, the palette, the setup box, and the tray the canvas said no to.
 """
 
 import time
+import math
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -126,19 +127,80 @@ def ring_items(p) -> list:
     return items
 
 
-def pieslices(p) -> list:
-    """The capsule body's two ends — the only pieslices `_draw` makes."""
-    return [(a, fill) for a, fill, _o, style, *_r in p.canvas.arcs
-            if style == uc.tk.PIESLICE]
+def strokes(p, colour) -> list:
+    """Capsule outlines: `(points, width)` per `create_line` drawn from a flat
+    coordinate list. `_capsule_ring` passes one list, so the fake keeps a
+    one-tuple — which is exactly what tells a traced capsule apart from the
+    four-coordinate lines the glyph and the highlight draw."""
+    return [([(a[0][i], a[0][i + 1]) for i in range(0, len(a[0]), 2)], w)
+            for a, fill, w in p.canvas.lines
+            if fill == colour and len(a) == 1]
+
+
+def segments(p, colour) -> list:
+    """The plain four-coordinate lines: the mic's stem and slash, the inset
+    highlight, the panel's seams."""
+    return [(a, w) for a, fill, w in p.canvas.lines
+            if fill == colour and len(a) == 4]
+
+
+def bodies(p, colour) -> list:
+    """The filled capsule polygons — `(points, bbox)` each."""
+    out = []
+    for coords, fill, _outline in p.canvas.polys:
+        if fill != colour:
+            continue
+        pts = coords[0] if len(coords) == 1 else coords
+        xy = [(pts[i], pts[i + 1]) for i in range(0, len(pts), 2)]
+        xs, ys = [q[0] for q in xy], [q[1] for q in xy]
+        out.append((xy, (min(xs), min(ys), max(xs), max(ys))))
+    return out
+
+
+def off_stadium(pts, x1, y1, x2, y2) -> float:
+    """How far the worst point strays from the true stadium through
+    `(x1, y1, x2, y2)` — 0 for a capsule, and large for the rounded rectangle
+    `_round_rect` yields at r = h/2."""
+    r = (y2 - y1) / 2
+    cy, lcx, rcx = y1 + r, x1 + r, x2 - r
+    worst = 0.0
+    for x, y in pts:
+        if x < lcx:
+            d = abs(math.hypot(x - lcx, y - cy) - r)
+        elif x > rcx:
+            d = abs(math.hypot(x - rcx, y - cy) - r)
+        else:
+            d = min(abs(y - y1), abs(y - y2))
+        worst = max(worst, d)
+    return worst
 
 
 def glyph_stroke(p) -> str:
-    """The mic's colour: the body is the pill's only polygon — an outlined
-    `_round_rect`, stroked not filled."""
-    (body,) = p.canvas.polys
-    _coords, fill, outline = body
-    assert fill == "", "the mic body is stroked, not filled"
+    """The mic's colour: the body is the pill's only *unfilled* polygon — an
+    outlined `_round_rect`. The meter's bars are polygons too now that they
+    carry gen.py's 1 px cap radius, and they are filled, which is what tells
+    the two apart."""
+    (body,) = [it for it in p.canvas.polys if it[1] == ""]
+    _coords, _fill, outline = body
     return outline
+
+
+def meter_bars(p, colour) -> list:
+    """The meter's bars as `(x1, y1, x2, y2)`, whichever primitive drew them.
+
+    Rounded above their own cap diameter and squared below it (`_draw_face`,
+    ui.py:5056's rule), so a bar is a polygon at some levels and a rectangle
+    at others — the bbox is the thing the geometry assertions are about."""
+    out = [tuple(r[:4]) for r in p.canvas.rects if r[4] == colour]
+    for coords, fill, _outline in p.canvas.polys:
+        if fill != colour:
+            continue
+        # `create_polygon(pts, **kw)` — the fake keeps `*a`, so the flat point
+        # list arrives wrapped in a one-tuple.
+        pts = coords[0] if len(coords) == 1 else coords
+        xs, ys = pts[0::2], pts[1::2]
+        out.append((min(xs), min(ys), max(xs), max(ys)))
+    return sorted(out)
 
 
 class TestTheGlyphCarriesTheMode(unittest.TestCase):
@@ -218,11 +280,8 @@ class TestTheCapsuleIsFilled(unittest.TestCase):
     def test_the_shell_covers_the_pill(self):
         p = pill(State.IDLE, armed=False)
         p._draw()
-        slices = pieslices(p)
-        self.assertEqual(len(slices), 2)
-        self.assertTrue(all(fill == uc.SHELL for _a, fill in slices))
-        # And the rectangle between them, in the same fill.
-        self.assertIn(uc.SHELL, [fill for *_g, fill, _o in p.canvas.rects])
+        (_pts, bbox), = bodies(p, uc.SHELL)
+        self.assertEqual(bbox, (0, 0, uc.PILL_W, uc.PILL_H))
 
 
 class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
@@ -231,52 +290,78 @@ class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
     visual gate; these pin the geometry headless."""
 
     def test_the_body_is_a_true_stadium(self):
-        # Two pieslices of diameter `h` at the ends, a rectangle between —
-        # not a smoothed polygon, which at r = h/2 is a rounded rectangle.
+        # Every point on the body is on the stadium: semicircular ends of
+        # radius h/2 and straight runs between them. `_round_rect` at r = h/2
+        # is a rounded rectangle and misses by several pixels, which is what
+        # `.shots/01-compact-rest.png` showed before `_capsule` existed.
         p = pill(State.IDLE, armed=False)
         p._draw()
-        h, w = uc.PILL_H, uc.PILL_W
-        bboxes = sorted(tuple(a[:4]) for a, _f in pieslices(p))
-        self.assertEqual(bboxes, [(0, 0, h, h), (w - h, 0, w, h)])
-        (middle,) = [r for r in p.canvas.rects if r[4] == uc.SHELL]
-        self.assertEqual((middle[0], middle[2]), (h / 2, w - h / 2))
+        (pts, _bbox), = bodies(p, uc.SHELL)
+        self.assertLess(off_stadium(pts, 0, 0, uc.PILL_W, uc.PILL_H), 0.01)
+        # And it really is round at the ends: the leftmost point is on the
+        # vertical centre line, where only a semicircle puts it.
+        left = min(pts)
+        self.assertEqual(left[0], 0)
+        self.assertAlmostEqual(left[1], uc.PILL_H / 2)
+
+    def test_the_ring_traces_the_body_it_is_drawn_on(self):
+        # Fill and stroke come from one point run, inset by half the stroke.
+        # They were a pieslice and an arc, which do not rasterize onto the
+        # same pixels: the ring stood a pixel outside the body and a dark halo
+        # ran round the inside of both caps, with a step where each straight
+        # run met its arc (`.shots/02-compact-hearing.png`, zoomed).
+        p = pill(State.LISTENING)
+        p._draw()
+        (ring, width), = strokes(p, uc.HEARING)
+        self.assertEqual(width, 1)
+        self.assertLess(
+            off_stadium(ring, 0.5, 0.5, uc.PILL_W - 0.5, uc.PILL_H - 0.5),
+            0.01)
+        # Closed: a box-shadow wraps all four sides.
+        self.assertEqual(ring[0], ring[-1])
 
     def test_the_chrome_is_the_three_hairlines(self):
         # gen.py's `.pill`: a 1 px RING_OUTER border and an inset RING_TOP
         # highlight, always; the state ring one pixel further out when armed.
         p = pill(State.LISTENING)
         p._draw()
-        outer = [(tuple(a[:4]), w) for a, _f, outline, _s, w, *_r in p.canvas.arcs
-                 if outline == uc.RING_OUTER]
-        outer += [(tuple(a[:4]), w) for a, fill, w in p.canvas.lines
-                  if fill == uc.RING_OUTER]
-        # Two cap arcs and two runs, all 1 px, one pixel inside the ring's.
-        self.assertEqual(len(outer), 4)
-        self.assertTrue(all(w == 1 for _a, w in outer))
-        self.assertIn(((1, 1, uc.PILL_H - 1, uc.PILL_H - 1), 1), outer)
-        highlights = [(tuple(a[:4]), outline)
-                      for a, _f, outline, style, *_r in p.canvas.arcs
-                      if style == uc.tk.ARC and outline == uc.RING_TOP]
+        (outer, width), = strokes(p, uc.RING_OUTER)
+        # One 1 px trace, one pixel inside the state ring's.
+        self.assertEqual(width, 1)
+        self.assertLess(
+            off_stadium(outer, 1.5, 1.5, uc.PILL_W - 1.5, uc.PILL_H - 1.5),
+            0.01)
+        # `inset 0 1px 0 RING_TOP` is a straight line, not a curve: an arc
+        # over the pill's own bbox is an ellipse 120 px wide, and it
+        # photographed as a bulge sweeping across the capsule
+        # (`.shots/01-compact-rest.png`, before this was a line).
+        highlights = [a for a, _w in segments(p, uc.RING_TOP)]
         self.assertEqual(len(highlights), 1)
-        # The highlight steps in with the border when a ring takes the edge.
-        self.assertEqual(highlights[0][0], (2, 2, uc.PILL_W - 2, uc.PILL_H - 2))
+        # It steps in with the border when a ring takes the edge, and spans
+        # the flat run between the cap centres — the only part of a stadium a
+        # horizontal inset line can sit on.
+        r = uc.PILL_H // 2
+        self.assertEqual(highlights[0], (2 + r, 2, uc.PILL_W - 2 - r, 2))
+        self.assertEqual(p.canvas.arcs and
+                         [outline for _a, _f, outline, style, *_r
+                          in p.canvas.arcs
+                          if style == uc.tk.ARC and outline == uc.RING_TOP],
+                         [])
 
     def test_the_rest_chrome_sits_on_the_outermost_pixel(self):
         p = pill(State.IDLE, armed=False)
         p._draw()
-        highlights = [tuple(a[:4])
-                      for a, _f, outline, style, *_r in p.canvas.arcs
-                      if style == uc.tk.ARC and outline == uc.RING_TOP]
-        self.assertEqual(highlights, [(1, 1, uc.PILL_W - 1, uc.PILL_H - 1)])
+        r = uc.PILL_H // 2
+        highlights = [a for a, _w in segments(p, uc.RING_TOP)]
+        self.assertEqual(highlights, [(1 + r, 1, uc.PILL_W - 1 - r, 1)])
 
     def test_the_meter_is_fifteen_two_pixel_bars_on_a_two_pixel_gap(self):
         p = pill(State.IDLE, armed=False)
         p._draw()
-        bars = [r for r in p.canvas.rects if r[4] == uc.DIM]
+        bars = meter_bars(p, uc.DIM)
         self.assertEqual(len(bars), 15)
         self.assertEqual(uc.BARS, 15)
-        for i, bar in enumerate(bars):
-            x1, y1, x2, y2 = bar[:4]
+        for i, (x1, y1, x2, y2) in enumerate(bars):
             self.assertEqual(x1, uc.METER_X + i * (uc.BAR_W + uc.BAR_GAP))
             self.assertEqual(x2 - x1, 2)      # 2 px wide
             self.assertEqual(y2 - y1, 3.0)    # 3 px at rest
@@ -333,8 +418,10 @@ class TestTapAndHoldShareOneButton(unittest.TestCase):
 
     def test_a_drag_is_neither(self):
         p = pill()
-        p._on_press(mock.Mock(x_root=0, y_root=0))
-        p._on_motion(mock.Mock(x_root=uc.PILL_DRAG_SLOP + 1, y_root=0))
+        p._move_window = mock.Mock()
+        p._on_press(mock.Mock(x_root=0, y_root=0, x=0, y=0))
+        p._on_motion(mock.Mock(x_root=uc.PILL_DRAG_SLOP + 1, y_root=0,
+                               x=0, y=0))
         with mock.patch.object(
                 uc.time, "perf_counter",
                 return_value=time.perf_counter() + uc.PILL_HOLD_SEC + 0.01):
@@ -342,6 +429,54 @@ class TestTapAndHoldShareOneButton(unittest.TestCase):
         p.session.talk_start.assert_not_called()
         p._on_release()
         p.session.toggle_mode.assert_not_called()
+
+
+class TestTheDragMovesIt(unittest.TestCase):
+    """"Drag it anywhere" (Main.dc.html). It was the one gesture on the canvas
+    with nothing behind it: `_on_motion` recorded that the press had travelled
+    — which made the slop work — and never moved the window."""
+
+    def press(self, p, x=0, y=0):
+        p._on_press(mock.Mock(x_root=x, y_root=y, x=6, y=6))
+
+    def test_past_the_slop_the_window_follows_the_pointer(self):
+        p = pill()
+        p._move_window = mock.Mock()
+        self.press(p, 100, 100)
+        p._on_motion(mock.Mock(x_root=140, y_root=180, x=6, y=6))
+        # Moved by the pointer's travel, not snapped: the grab point inside
+        # the window is subtracted, so the pill keeps the place under the
+        # thumb it was picked up by.
+        p._move_window.assert_called_once_with(134, 174)
+
+    def test_inside_the_slop_nothing_moves(self):
+        p = pill()
+        p._move_window = mock.Mock()
+        self.press(p)
+        p._on_motion(mock.Mock(x_root=uc.PILL_DRAG_SLOP, y_root=0, x=6, y=6))
+        p._move_window.assert_not_called()
+
+    def test_a_hold_in_flight_is_never_dragged(self):
+        # ui.py:2712's rule, kept: somebody talking into a held pill may well
+        # move the mouse, and moving the window out from under them would be
+        # the gesture betraying them.
+        p = pill()
+        p._move_window = mock.Mock()
+        self.press(p)
+        p._press_talking = True
+        p._on_motion(mock.Mock(x_root=500, y_root=500, x=6, y=6))
+        p._move_window.assert_not_called()
+        self.assertFalse(p._press_moved)
+
+    def test_the_move_is_clamped_to_the_screen(self):
+        p = pill()
+        p.geometry = mock.Mock()
+        p.winfo_screenwidth = lambda: 1920
+        p.winfo_screenheight = lambda: 1080
+        p._shell_w, p._shell_h = uc.PILL_W, uc.PILL_H
+        p._move_window(-50, 5000)
+        p.geometry.assert_called_once_with(
+            f"{uc.PILL_W}x{uc.PILL_H}+0+{1080 - uc.PILL_H}")
 
 
 class TestTheClassDefaultsADrawNeeds(unittest.TestCase):
@@ -357,8 +492,7 @@ class TestTheClassDefaultsADrawNeeds(unittest.TestCase):
         # Rest: no ring, and the meter is there in its grey — rest claims no
         # state, so the bars are gen.py's DIM, not a mode's tint.
         self.assertEqual(rings(p), [])
-        bars = [r for r in p.canvas.rects if r[4] == uc.DIM]
-        self.assertEqual(len(bars), uc.BARS)
+        self.assertEqual(len(meter_bars(p, uc.DIM)), uc.BARS)
 
     def test_every_drawn_attribute_is_a_class_attribute(self):
         for name in ("armed", "_flash", "_meter_level", "_eased_level",
@@ -975,29 +1109,33 @@ class TestThePanelDraws(unittest.TestCase):
     def test_the_foot_is_the_pill_squared_on_the_join(self):
         p = self.open()
         p._draw()
-        # Quarter pieslices at the bottom corners only — the top squares off.
-        slices = [extent for _a, _f, _o, style, _w, extent in p.canvas.arcs
-                  if style == uc.tk.PIESLICE]
-        self.assertEqual(slices, [90, 90])
+        # Square on the join, round below it: the foot's top corners are
+        # exactly the band's own corners, and its bottom is a pair of
+        # quarter-circles (gen.py `.foot`: border-radius 0 0 17px 17px).
+        (pts, bbox), = [b for b in bodies(p, uc.SHELL)
+                        if b[1][1] == uc.PANEL_H]
+        self.assertEqual(bbox, (0, uc.PANEL_H, uc.PANEL_W,
+                                uc.PANEL_H + uc.PILL_H))
+        self.assertIn((0, uc.PANEL_H), pts)
+        self.assertIn((uc.PANEL_W, uc.PANEL_H), pts)
         # The foot's face: forty bars, not the capsule's fifteen.
-        bars = [r for r in p.canvas.rects if r[4] == uc.DIM]
-        self.assertEqual(len(bars), uc.BARS_FOOT)
+        self.assertEqual(len(meter_bars(p, uc.DIM)), uc.BARS_FOOT)
 
     def test_the_state_ring_wraps_the_foot_including_the_top(self):
         p = self.open(state=State.LISTENING)
         p._draw()
-        arcs = [(w, extent) for _a, _f, outline, style, w, extent
-                in p.canvas.arcs
-                if style == uc.tk.ARC and outline == uc.HEARING]
-        lines = [(a, w) for a, fill, w in p.canvas.lines if fill == uc.HEARING]
-        # Two quarter arcs and four runs — bottom, two sides, and the top the
-        # box-shadow wraps that border-top: 0 does not. All 1 px.
-        self.assertEqual(arcs, [(1, 90), (1, 90)])
-        self.assertEqual(len(lines), 4)
-        self.assertTrue(all(w == 1 for _a, w in lines))
+        # One closed 1 px trace round the foot — the top run included, which
+        # is the box-shadow wrapping a side that `border-top: 0` does not.
+        (ring, width), = strokes(p, uc.HEARING)
+        self.assertEqual(width, 1)
+        self.assertEqual(ring[0], ring[-1])
         # And the panel band above keeps its own neutral border: nothing
         # state-coloured up there.
-        self.assertTrue(all(a[1] >= uc.PANEL_H for a, _w in lines))
+        self.assertTrue(all(y >= uc.PANEL_H for _x, y in ring))
+        # The foot's own border stops at the seam: open, not closed.
+        (outer, _w), = [st for st in strokes(p, uc.RING_OUTER)
+                        if st[0][0][1] >= uc.PANEL_H]
+        self.assertNotEqual(outer[0], outer[-1])
 
 
 class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
@@ -1021,12 +1159,22 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
             ["Type", "Refine", "Ask",
              "tap the pill to cycle",
              "Switch workspace", "~/dev/products/flow",
-             "Workbench setup", "mic, CLI, where it pastes",
-             "Hide to tray", "Quit"])
+             "Workbench setup", "mic, CLI, where it pastes"])
         # The hints are disabled entries, never verbs.
         for hint in ("tap the pill to cycle", "~/dev/products/flow",
                      "mic, CLI, where it pastes"):
             self.assertIsNone(m.commands[hint])
+
+    def test_the_menu_ends_where_the_artboard_ends(self):
+        # "There is no preferences window and no tray menu. The pill is the
+        # only thing you can right-click, and this is everything it offers"
+        # (Workspace.dc.html). Hide to tray and Quit were rows here and are
+        # not on the canvas; they live on the tray icon, which `_start_tray`
+        # raises at launch so that removing them costs nobody the way out.
+        _p, m = self.build()
+        self.assertEqual(m.order[-1], "mic, CLI, where it pastes")
+        for gone in ("Hide to tray", "Quit"):
+            self.assertNotIn(gone, m.order)
 
     def test_the_check_is_on_the_current_mode(self):
         for mode, name in ((DICTATE, "Type"), (REFINE, "Refine"),
@@ -1344,9 +1492,9 @@ class TestTheMicIsGone(unittest.TestCase):
         # gen.py's slash: one diagonal across the glyph, in the ring's red —
         # the only red line that moves on both axes (the ring's runs are
         # horizontal, the stem vertical).
-        slashes = [(a, fill) for a, fill, _w in p.canvas.lines
-                   if fill == "#F2584A" and a[0] != a[2] and a[1] != a[3]]
-        (coords, _fill), = slashes
+        slashes = [a for a, _w in segments(p, "#F2584A")
+                   if a[0] != a[2] and a[1] != a[3]]
+        coords, = slashes
         x0, y0 = coords[0] - uc.MIC_X, coords[1] - uc.MIC_Y
         x1, y1 = coords[2] - uc.MIC_X, coords[3] - uc.MIC_Y
         self.assertEqual((round(x0, 1), round(y0, 1),

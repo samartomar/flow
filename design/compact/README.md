@@ -31,7 +31,9 @@ https://claude.ai/code/artifact/0ab88c75-8b24-455b-b96f-f9e5763a45fc
 - The tray stays (decided 2026-09-03, against Workspace.dc.html's "There is no
   preferences window and no tray menu"): it is the escape hatch if the pill is ever
   dragged somewhere unreachable — hidden must not mean gone. That canvas line is
-  superseded; the menu gains Hide to tray above Quit.
+  superseded — but only that sentence. The menu *drawing* stands exactly as drawn:
+  three modes, Switch workspace, Workbench setup, and nothing after it. The icon
+  goes up at launch instead, and carries Show and Quit.
 
 ## Rebuild and re-save
 

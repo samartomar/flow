@@ -83,11 +83,16 @@ is that **it is the escape hatch if the pill is ever dragged somewhere unreachab
 — a wordless 120 px capsule with no menu bar and no taskbar presence, parked
 somewhere the user cannot find, is a Flow that cannot be reached, configured or
 quit except through Task Manager. That is invariant 4 in a new place: hidden must
-not mean gone. The compact menu gains Hide to tray above Quit; the icon is the way
-back, exactly as the shipped design has it. The canvas line is superseded, and the
-supersession is recorded in `design/compact/README.md` rather than edited into the
-artboard, because the canvas is the record of what was drawn and this is the record
-of what was decided.
+not mean gone. **The icon goes up at launch, and the pill's menu is untouched** —
+`_start_tray` in `flow/ui_compact.py` raises it in the constructor, and `Show Flow`
+/ `Quit Flow` live there. That is the second half of this decision, taken the same
+day it was first written the other way round: the menu had grown Hide to tray and
+Quit rows, and the owner's review of the built surface was that the right-click is
+the artboard's menu and nothing else. Both halves survive, because the reason for
+keeping the tray was never that it needed a row on the pill — it was that there has
+to be a way back that does not depend on the window you have lost. A row on that
+window was the one place the hatch could not be. The canvas's "no tray menu" line
+is superseded; its menu drawing is not, and is now matched exactly.
 
 **Reopens if** the tray ever becomes the *only* way the compact surface is used —
 an escape hatch used daily is a design that failed somewhere else, and the answer
