@@ -167,6 +167,38 @@ class TestTheModule(unittest.TestCase):
                 with mock.patch.object(sys, "platform", platform):
                     self.assertIs(tray.available(), expected)
 
+    def test_it_imports_on_a_platform_that_has_no_win32_at_all(self):
+        """The macOS CI leg's whole failure, in one assertion.
+
+        `ui.py` imports this module unconditionally, so a module that cannot be
+        *imported* off Windows does not cost a tray icon — it costs every test that
+        touches `flow.ui`. That was 208 errors on 2026-09-01 from one line:
+        `_WNDPROC = ctypes.WINFUNCTYPE(...)` evaluated at module scope, where
+        `WINFUNCTYPE` exists only on Windows.
+
+        Re-imported under a patched `sys.platform` rather than asserted about the source,
+        because the property is "this file runs top to bottom on a Mac" and only running
+        it top to bottom can say so. The module is restored afterwards: every other test
+        in this file holds a reference to the one that was already imported.
+        """
+        import importlib
+
+        original = sys.modules["flow.tray"]
+        try:
+            with mock.patch.object(sys, "platform", "darwin"):
+                del sys.modules["flow.tray"]
+                fresh = importlib.import_module("flow.tray")
+                # Imported, and honest about what it can do there.
+                self.assertFalse(fresh.available())
+                # The Windows-only names are absent rather than present-and-wrong. A
+                # `getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)` fallback would pass
+                # an import check and hand the next caller a callback type with the
+                # wrong calling convention under the right name.
+                self.assertFalse(hasattr(fresh, "_WNDPROC"))
+                self.assertFalse(hasattr(fresh, "_WNDCLASSEXW"))
+        finally:
+            sys.modules["flow.tray"] = original
+
     def test_stopping_an_icon_that_never_started_is_safe(self):
         # `quit_app` calls this unconditionally, including after a `hide_to_tray` that
         # was refused.

@@ -6,6 +6,37 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-03 — A Windows-only module must still be *importable* everywhere
+
+The macOS CI leg had never been green, and one line was the whole reason. `flow/tray.py`
+built its window-procedure callback type at module scope — `ctypes.WINFUNCTYPE`, which
+exists only on Windows — and `flow/ui.py` imports `tray` unconditionally. So the failure
+was never "no tray icon on a Mac": it was **208 errors, every test that touches
+`flow.ui`**, all raised before a line of either module could run.
+
+Everything else in that file was already right. `available()` says "Windows-only by
+construction" and returns False off Windows, and every other Win32 call sits inside a
+function, reached only after that check. The rule the file was missing is the one this
+entry records: **a platform-specific module may refuse to work anywhere else, but it may
+not refuse to import.** Import is what other modules depend on; capability is what
+`available()` is for, and conflating them turns one unavailable feature into a dead test
+suite.
+
+Fixed by defining `_WNDPROC` and `_WNDCLASSEXW` under `sys.platform == "win32"` and
+nothing else. A `getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)` fallback was refused
+though it also imports: it manufactures a callback type with the wrong calling
+convention and stores it under the right name, moving the crash somewhere harder to
+find. Off Windows the names are absent, because off Windows nothing may use them.
+
+`tests/test_tray.py` re-imports the module under a patched `sys.platform` and asserts
+both halves — that it imports, and that the Windows-only names are absent rather than
+present-and-wrong. Asserted by running the file top to bottom rather than by reading its
+source, because "this imports on a Mac" is not a claim source-scanning can settle. It
+fails against the old module, which is the only reason to trust it.
+
+**Reopens if** a second platform-specific module appears: the guard is per-file today,
+and a third would argue for a shared idiom rather than three spellings of it.
+
 ### 2026-09-01 — The compact pass: the marks move to the pill row, and everything else pulls in
 
 Decided from a measured survey and the surface screenshots (`scripts/shots.py`), after

@@ -65,26 +65,46 @@ _TPM_RETURNCMD = 0x0100
 _TPM_RIGHTBUTTON = 0x0002
 
 _LRESULT = ctypes.c_ssize_t
-_WNDPROC = ctypes.WINFUNCTYPE(
-    _LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
-)
 
+#: **Defined only on Windows, because `ctypes.WINFUNCTYPE` exists only there.**
+#:
+#: Everything else in this file reaches Win32 from inside a function, so it was safe to
+#: import anywhere and inert off Windows — which is what `available()` promises and what
+#: every caller relies on. These two were the exception: a callback type built at module
+#: scope, and the structure that embeds it in a field list evaluated at class-definition
+#: time. Importing this module on a Mac therefore raised `AttributeError: module
+#: 'ctypes' has no attribute 'WINFUNCTYPE'` before a single line of it could run.
+#:
+#: The cost was out of all proportion to the cause. `ui.py` imports `tray`
+#: unconditionally, so the failure was not "no tray icon on a Mac" — it was **every test
+#: that touches `flow.ui` erroring on import**: 208 of them, one root cause, and a macOS
+#: CI leg that had never been green. Found by that leg on 2026-09-01.
+#:
+#: A `getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)` fallback would also import, and
+#: is refused: it would manufacture a callback type with the wrong calling convention and
+#: keep it in a variable named for the right one, so the next person to use it off
+#: Windows gets a crash somewhere else entirely. Nothing off Windows may have these,
+#: because nothing off Windows may use them.
+if sys.platform == "win32":
+    _WNDPROC = ctypes.WINFUNCTYPE(
+        _LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+    )
 
-class _WNDCLASSEXW(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", wintypes.UINT),
-        ("style", wintypes.UINT),
-        ("lpfnWndProc", _WNDPROC),
-        ("cbClsExtra", ctypes.c_int),
-        ("cbWndExtra", ctypes.c_int),
-        ("hInstance", wintypes.HINSTANCE),
-        ("hIcon", wintypes.HICON),
-        ("hCursor", wintypes.HANDLE),
-        ("hbrBackground", wintypes.HBRUSH),
-        ("lpszMenuName", wintypes.LPCWSTR),
-        ("lpszClassName", wintypes.LPCWSTR),
-        ("hIconSm", wintypes.HICON),
-    ]
+    class _WNDCLASSEXW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.UINT),
+            ("style", wintypes.UINT),
+            ("lpfnWndProc", _WNDPROC),
+            ("cbClsExtra", ctypes.c_int),
+            ("cbWndExtra", ctypes.c_int),
+            ("hInstance", wintypes.HINSTANCE),
+            ("hIcon", wintypes.HICON),
+            ("hCursor", wintypes.HANDLE),
+            ("hbrBackground", wintypes.HBRUSH),
+            ("lpszMenuName", wintypes.LPCWSTR),
+            ("lpszClassName", wintypes.LPCWSTR),
+            ("hIconSm", wintypes.HICON),
+        ]
 
 
 class _NOTIFYICONDATAW(ctypes.Structure):
