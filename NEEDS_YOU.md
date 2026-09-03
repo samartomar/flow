@@ -460,13 +460,13 @@ Two things the sweep turned up that you have not ruled on, kept here rather than
   three Tk questions are genuinely open on the other platform: whether
   `overrideredirect(True)` gives a borderless always-on-top window that behaves (macOS
   treats it differently from Windows), whether `-alpha` is honoured, and whether the pill
-  and bubble land inside the work area — `_work_area` falls back to the full screen
-  off-Windows, so the pill will sit against the very bottom-right corner, under the Dock
-  if the Dock is there. **If it is behind the Dock, that is the first fix and it is a
-  small one** (an inset, or NSScreen's visible frame via whatever is already on the
-  machine). Report what you see; do not work around it silently, because a Lite that is
-  awkward for a reason nobody wrote down is the version this decision would be measured
-  on.
+  and bubble land inside the work area. **The Dock half of this has since been answered
+  in code and not on a Mac**: `_aqua_work_area` asks the platform for its visible frame
+  and `_tk_work_area` measures a maximised window where it cannot, so the pill should no
+  longer sit under the Dock. That is a fix written against a description of macOS, and
+  it wants an eye on it rather than trust. Report what you see; do not work around
+  anything silently, because a Lite that is awkward for a reason nobody wrote down is the
+  version this decision would be measured on.
 
 - [ ] **Verify `copilot` — the four commands, then one line back here.** It is an inert
   entry in `refine.CANDIDATES` today: Flow will find it on PATH, say
@@ -808,6 +808,39 @@ tkinter errors are gone and the remainder is small and clearly Win32, the honest
 is a handful of `skipUnless` markers naming their mechanism. If tkinter is still missing
 under uv's own build, the fallback is `python3-tk` on Ubuntu plus whatever macOS needs,
 and that is worth knowing rather than guessing.
+
+### Update after the re-measure (2026-09-03) — macOS is green
+
+Run [33725734604](https://github.com/samartomar/flow/actions/runs/33725734604): all four
+legs pass, macOS for the first time. 2019 tests on macOS (90 skipped), 2248 on both
+Windows legs (4 skipped). The prediction above — "a handful of `skipUnless` markers
+naming their mechanism" — was **half right, and the half it missed is the interesting
+one.**
+
+The remainder was never small and never all Win32. It was **208 errors from one line**:
+`flow/tray.py` built its window-procedure callback with `ctypes.WINFUNCTYPE` at module
+scope, and `flow/ui.py` imports `tray` unconditionally — so every test that touched
+`flow.ui` died on import, and the count had nothing to do with how many things are
+Windows-only. The rule that was missing is now in `decisions.md`: a platform-specific
+module may refuse to *work* elsewhere, but it may not refuse to *import*.
+
+Under that, 12 real failures, and they were one mistake in four places rather than four
+bugs — **tests that name a platform and inherit whichever one they run on.**
+`TestTheWorkAreaOffWindows` is named for platforms it had never run on, and passed on
+Windows; on darwin `_tk_work_area` short-circuits into `_aqua_work_area`, so every count
+in it was off by a probe nobody meant to make. `TestTheMacFrame` was sharper still: on
+Windows the darwin branch never ran, so it asserted `overrideredirect` and passed, while
+on a Mac a `Mock` answers `wm_attributes` happily and the function returned at the style
+mask — a class called "the Mac frame" checking the frame every platform *but* a Mac gets.
+Three are pinned with `mock.patch` now; two are genuinely skipped, because no patch
+reaches them (`Tray` needs `_WNDPROC`, and `launch("win32")` really imports
+`flow.hotkey`, which binds user32 at module scope — the import is real even when the
+platform is pretend).
+
+**What this does and does not settle.** The suite runs on macOS; the *app* on macOS is
+still unmeasured. The two items above — does the pill draw, and does the clipboard hop
+grate — are exactly as open as they were, and a green CI leg must not be read as an
+answer to either.
 
 ## Two CI actions are on a deprecated Node (noticed 2026-08-03, not acted on)
 
