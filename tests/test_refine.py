@@ -58,6 +58,70 @@ def fake_proc(stdout: str = "", returncode: int = 0, stderr: str = "", *,
     return proc
 
 
+#: Exactly what `claude --safe-mode -p` wrote to stdout on 2026-09-03, exit 1, with
+#: stderr empty - including the middle dot, which is the character it really uses.
+NOT_LOGGED_IN = "Not logged in " + chr(0xB7) + " Please run /login" + chr(10)
+#: A reason under blank lines, with a stack trace after it.
+BLANK_THEN_REASON = chr(10) * 2 + "  Not logged in" + chr(10) + "Traceback:"
+ELLIPSIS = chr(0x2026)
+
+
+class TestAFailingCliSaysWhyInItsOwnWords(unittest.TestCase):
+    """A refusal that prints an empty reason is worse than a silent one.
+
+    `_invoke` read stderr alone on a non-zero exit, on the stream discipline this module
+    documents — the answer on stdout, the chrome and the errors on stderr. That holds
+    while a CLI is *working* and not when one refuses. Measured 2026-09-03:
+
+        claude --safe-mode -p  ->  exit 1, stdout "Not logged in · Please run /login",
+                                   stderr empty
+
+    which reached the panel as `ask failed (claude exited 1: ; then kiro-cli exited 1:
+    Not logged in ...)`. The only CLI that explained itself was the fallback, and the
+    line the user could act on was thrown away between the colon and the semicolon.
+    """
+
+    def run_with(self, stdout="", stderr=""):
+        proc = fake_proc(stdout=stdout, returncode=1, stderr=stderr)
+        with mock.patch.object(refine_mod.subprocess, "Popen", return_value=proc):
+            out, why = refine_mod._invoke(CLI, "a prompt", timeout=5)
+        self.assertIsNone(out)
+        return why
+
+    def test_the_reason_on_stdout_reaches_the_note(self):
+        why = self.run_with(stdout=NOT_LOGGED_IN)
+        self.assertIn("Not logged in", why)
+        self.assertIn("codex exited 1", why)
+
+    def test_stderr_still_comes_first(self):
+        # Where a CLI separates its streams, the error is on stderr — and a CLI can exit
+        # non-zero having already written part of an answer to stdout, so repeating the
+        # start of that as the reason would be a fabricated diagnosis.
+        why = self.run_with(stdout="Here is the first half of an answer",
+                            stderr="rate limit reached, try again in 60s")
+        self.assertIn("rate limit reached", why)
+        self.assertNotIn("first half", why)
+
+    def test_a_failure_with_nothing_to_say_still_names_the_cli_and_the_code(self):
+        why = self.run_with()
+        self.assertEqual(why, "codex exited 1: ")
+
+    def test_only_the_first_non_blank_line(self):
+        why = self.run_with(stdout=BLANK_THEN_REASON)
+        self.assertEqual(why, "codex exited 1: Not logged in")
+
+    def test_a_stack_trace_cannot_fill_the_panel(self):
+        why = self.run_with(stderr="E" * 4000)
+        self.assertLessEqual(len(why), len("codex exited 1: ") + refine_mod._WHY_CHARS)
+        self.assertTrue(why.endswith(ELLIPSIS))
+
+    def test_a_clean_exit_is_untouched(self):
+        proc = fake_proc(stdout="the answer", returncode=0, stderr="banner noise")
+        with mock.patch.object(refine_mod.subprocess, "Popen", return_value=proc):
+            out, why = refine_mod._invoke(CLI, "a prompt", timeout=5)
+        self.assertEqual((out, why), ("the answer", ""))
+
+
 class TestTailSplit(unittest.TestCase):
     def test_short_text_is_sent_whole(self):
         head, tail = _split_tail("short enough")

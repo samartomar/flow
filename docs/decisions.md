@@ -6,6 +6,38 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-03 — A failing CLI's reason comes from whichever stream it used
+
+`_invoke` read **stderr alone** on a non-zero exit, on the stream discipline this module
+documents and measures at the top: the answer on stdout, the banner and prompt echo and
+token accounting on stderr. That discipline is real and it holds while a CLI is
+*working*. It does not hold when one refuses.
+
+Measured here, 2026-09-03, claude 2.1.248:
+
+    claude --safe-mode -p   ->  exit 1
+                                stdout: "Not logged in · Please run /login"
+                                stderr: ""
+
+So an ask with a logged-out claude reached the card as `ask failed (claude exited 1: ;
+then kiro-cli exited 1: Not logged in. Set the KIRO_API_KEY environment variable or run
+kiro-cli login first.)` — the only CLI that explained itself was the *fallback*, and the
+line the user could act on for the CLI they actually run was thrown away between the
+colon and the semicolon. **A refusal that prints an empty reason is worse than a silent
+one: it looks like it said something.** That is P2 failing in the one place it is hardest
+to notice, because the note is there and merely says nothing.
+
+`_why(err, out)` takes the first non-blank line of stderr, and stdout only when stderr
+had none. **stderr keeps first place** for two reasons and not one: it is where a CLI
+that separates its streams puts the error, and a CLI can exit non-zero having already
+written a partial answer to stdout — repeating the head of that answer as the diagnosis
+would be a fabrication, which is worse than the blank it replaces. Bounded to one line
+and `_WHY_CHARS`, because some CLIs print a stack trace and a panel is not a terminal.
+
+**Reopens if** a CLI is found that writes its real error to stdout *and* a partial answer
+alongside it, which is the one shape this ordering cannot get right. The fix then is
+per-CLI knowledge on `Cli`, not a cleverer heuristic here.
+
 ### 2026-09-03 — The mic view: a controls-free pill, and why it is a view and not a mode
 
 Push-to-talk is a gesture with no decisions in it — hold, speak, release, and the words

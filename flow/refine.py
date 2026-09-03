@@ -834,9 +834,47 @@ def _invoke(
         break
 
     if proc.returncode != 0:
-        first = (err or "").strip().splitlines()
-        return None, f"{cli.name} exited {proc.returncode}: {first[0] if first else ''}"
+        return None, f"{cli.name} exited {proc.returncode}: {_why(err, out)}"
     return out, ""
+
+
+#: How much of a failing CLI's own words to repeat. One line, and short enough to sit in
+#: a panel beside the name of the CLI that said it — the whole of it is on stderr or
+#: stdout for anyone who runs the command themselves.
+_WHY_CHARS = 160
+
+
+def _why(err: str | None, out: str | None) -> str:
+    """Why a CLI exited non-zero, in its own words: stderr first, then stdout.
+
+    **stdout is not a fallback for tidiness, it is where claude puts it.** This read
+    stderr alone, on the stream discipline this module documents at the top — the answer
+    on stdout, the banner and the errors on stderr — and that discipline holds while a
+    CLI is *working*. It does not hold when one refuses. Measured here on 2026-09-03:
+
+        claude --safe-mode -p   ->  exit 1, stdout "Not logged in · Please run /login",
+                                    stderr empty
+
+    So the note read `ask failed (claude exited 1: ; then kiro-cli exited 1: Not logged
+    in...)` — the one CLI that explained itself was the fallback, and the actionable line
+    for the CLI the user actually runs was thrown away between the colon and the
+    semicolon. A refusal that prints an empty reason is worse than a silent one: it looks
+    like it said something.
+
+    stderr keeps first place because that is where a CLI that separates its streams puts
+    the error, and because a CLI can exit non-zero having already written a partial
+    answer to stdout — repeating the start of that answer as the reason would be a
+    fabricated diagnosis. stdout is read only when stderr had nothing to say.
+
+    Bounded and single-line so the note stays a note: some CLIs print a stack trace, and
+    a panel is not a terminal.
+    """
+    for stream in (err, out):
+        for line in (stream or "").strip().splitlines():
+            line = line.strip()
+            if line:
+                return line[:_WHY_CHARS - 1] + "…" if len(line) > _WHY_CHARS else line
+    return ""
 
 
 def tail_sent(text: str) -> int:
