@@ -64,6 +64,7 @@ from .ui import (
     _shell_window,
     _user32,
     foreground_hwnd,
+    owned_by_flow,
     toplevel_hwnd,
 )
 
@@ -163,6 +164,19 @@ class CompactPill(tk.Tk):
     #: The right-click menu, built in `__init__`. None on a fixture, and
     #: `_on_menu` checks rather than assuming.
     _menu = None
+    #: What the last `draft` event carried — the text the send path hands
+    #: over, and what item 3's panel `heard` block will read. "" on a fixture,
+    #: which is also the true answer for a pill that has heard nothing.
+    _last_draft = ""
+    #: Armed by a release whose `talk_end` reported words in flight; fired by
+    #: the `draft` event that brings them. The send path's whole state, and
+    #: False on a fixture for the same reason the press flags are idle there.
+    _send_pending = False
+    #: The window Send is aimed at, polled by `_track_target` the way ui.py's
+    #: own `paste_target` is (flow/ui.py:2486). None on a fixture, which is
+    #: also the Lite answer: no target-window awareness, and `paste()` asks
+    #: the foreground instead.
+    paste_target = None
     #: Whether the window is out of the activation chain. Set in `__init__`
     #: from `_no_activate`'s read-back; False on a fixture, which is the
     #: Lite/Mac answer `_on_menu`'s foreground borrow keys off.
@@ -188,6 +202,9 @@ class CompactPill(tk.Tk):
         self._press_xy = (0, 0)
         self._press_moved = False
         self._press_talking = False
+        self._last_draft = ""
+        self._send_pending = False
+        self.paste_target = None
 
         # The window. `_shell_window` applies the five probed attributes and
         # answers with the background the canvas must agree with — see its
@@ -287,6 +304,7 @@ class CompactPill(tk.Tk):
         # this one.
         if not self._drain_hotkeys():
             return
+        self._track_target()
         if self.armed:
             self.session.tick()
             hearing = getattr(self.session, "hearing", True)
@@ -307,12 +325,15 @@ class CompactPill(tk.Tk):
     def _drain_hotkeys(self) -> bool:
         """Act on every hotkey that arrived since the last drain. False after a quit.
 
-        The names are the ones `Pill._drain_hotkeys` (flow/ui.py:4295) acts on,
-        minus the two this scaffold has no surface for: `send` and `cancel`
-        belong to the docked panel ("Send / Esc / click-outside closes",
-        design/compact/README.md) and arrive with it. A name this loop does
-        not know falls through, which is what an unbound chord does in the
-        full UI too.
+        The names are the ones `Pill._drain_hotkeys` (flow/ui.py:4333) acts on.
+        `send` is bound here rather than arriving with the panel, because it was
+        never the panel's: a dictation surface with no send is not a dictation
+        surface. `cancel` alone still belongs to the panel ("Send / Esc /
+        click-outside closes", design/compact/README.md) — until it docks there
+        is nothing on this surface to cancel, so the chord is bound as a
+        documented no-op rather than left to fall through. A name this loop does
+        not know falls through, which is what an unbound chord does in the full
+        UI too.
         """
         if self.hotkeys is None:
             return True
@@ -327,16 +348,26 @@ class CompactPill(tk.Tk):
                 self._press_talking = True
                 self.session.talk_start()
             elif name == "talk-end":
-                self._press_talking = False
-                self.session.talk_end()
+                self._talk_end(send=True)
             elif name == "talk-break":
                 # Windows meant `ctrl+win+d`. What was said is committed either
-                # way (session.talk_end's own contract, P2); the difference —
-                # whether it also pastes — is the panel's `send`, and arrives
-                # with it.
-                self._press_talking = False
-                self.session.talk_end()
+                # way (session.talk_end's own contract, P2); it simply does not
+                # paste itself into whatever window a desktop switch moved to.
+                self._talk_end(send=False)
+            elif name == "send":
+                self._send()
+            elif name == "cancel":
+                # A no-op until the panel lands (item 3, `PANEL_W`) — bound so
+                # the chord is a decision, not a fall-through.
+                pass
             elif name == "mode":
+                # A pending paste belongs to the mode it was spoken in. Dictate
+                # pastes into a window and converse asks a CLI, so a wait armed
+                # in one and fired in the other does something the user never
+                # asked for — ui.py:4363-4369's rule, whose words these are.
+                # Dropped rather than translated: the words stay in the draft,
+                # and Send in the new mode does whatever it now means.
+                self._send_pending = False
                 self.session.toggle_mode()
             elif name == "quit":
                 self.quit_app()
@@ -346,18 +377,71 @@ class CompactPill(tk.Tk):
     def _pump_events(self) -> None:
         """Drain what the session said since the last frame.
 
-        Wordless, so most kinds have nowhere to go yet and say so: drafts,
-        partials, notes and replies are the panel's (TODO, `PANEL_W`). What
-        the pill itself owns is exactly two — an error turns the ring red, and
-        a `disarm` is the session saying capture has stopped and cannot
-        restart itself, so the surface that owns "armed" has to stop
-        claiming it.
+        Wordless, so the kinds split three ways. What the pill itself owns is
+        exactly two — an error turns the ring red, and a `disarm` is the session
+        saying capture has stopped and cannot restart itself, so the surface
+        that owns "armed" has to stop claiming it. What the send path owns: a
+        `draft` is the decode landing, its text is what `_send` hands over, and
+        when a release is waiting on exactly that, this is where Type's arc
+        finishes — release, draft, paste, and no panel (README: "Type never
+        opens a panel"). What is still the panel's: `partial`, `note` and
+        `reply` have nowhere to go until it docks (TODO, `PANEL_W`). `partial`
+        is named and discarded rather than fallen through, because a stream
+        kind nobody reads should be a decision, not an omission.
         """
         for ev in self.session.events():
-            if ev.kind == "error":
+            if ev.kind == "draft":
+                self._last_draft = ev.text
+                if ev.text and self._send_pending and not self._press_talking:
+                    # Not mid-hold: a flag still armed from an earlier release
+                    # must not fire on a segment final inside the *next*
+                    # utterance. The words are cumulative in the draft either
+                    # way — the next release re-arms and sends them all.
+                    self._send()
+            elif ev.kind == "partial":
+                # Item 3 wires this into the panel's `heard` block.
+                continue
+            elif ev.kind == "error":
                 self._flash = FLASH_FRAMES
             elif ev.kind == "disarm":
                 self.armed = False
+
+    def _send(self) -> None:
+        """Hand the draft over: the words paste, or the ring says they could not.
+
+        The shape is ui.py's `_send` (flow/ui.py:3756-3770) — the text from
+        `session.send()`, the paste target this surface polls, the problem the
+        handler hands back — down to the first line, which is what stops a
+        release and the `send` hotkey pasting the same words twice. Where the
+        full pill spends a problem on a bubble card, this one has no words to
+        say it with yet: a problem is the red flash, the whole vocabulary for
+        "something is wrong" until the panel lands. The CLI is not on this
+        path — Type is dictate, and `session.send()` in dictate never asks.
+        The Lite fallback (clipboard, plus "copied — press Ctrl+V" under the
+        pill) is item 6's; with no handler there is nothing here yet.
+        """
+        self._send_pending = False
+        text = self.session.send()
+        if text and self.on_send:
+            problem = self.on_send(text, self.paste_target) or ""
+            if problem:
+                self._flash = FLASH_FRAMES
+
+    def _track_target(self) -> None:
+        """Remember the last window that had the foreground and was not Flow's own.
+
+        ui.py:4223-4244's poll, minus the per-app classification this surface
+        has no slot for: by the time `paste()` runs, the gesture that started
+        it has had its chance to move the foreground, so the target is asked a
+        frame at a time rather than at send time. Lite has no target-window
+        awareness and does not ask — which is what makes `--lite` here the
+        same code a Mac runs instead of a rehearsal of it.
+        """
+        if self.lite:
+            return
+        hwnd = foreground_hwnd()
+        if hwnd and not owned_by_flow(hwnd):
+            self.paste_target = hwnd
 
     def _pump_press(self) -> None:
         """Turn a press that has outlived `PILL_HOLD_SEC` into an utterance.
@@ -384,6 +468,25 @@ class CompactPill(tk.Tk):
         self.armed = True
 
     # -- the gestures --------------------------------------------------------
+
+    def _talk_end(self, *, send: bool) -> None:
+        """The release, shared by the mouse and both hotkey endings.
+
+        `send=False` is the `ctrl+win+d` path: the words are still committed
+        and still land in the draft — nothing spoken is ever dropped (P2) —
+        they simply do not paste themselves into whatever window a desktop
+        switch just moved to. ui.py states the same at flow/ui.py:2760-2768.
+
+        The send is *armed*, not fired: the decode is still in flight, and the
+        `draft` event that brings the words is what fires it (`_pump_events`).
+        Type only — Ask's release is the panel's "say more" and arrives with
+        it (item 3), and `session.send()` in converse would ask the CLI, which
+        README says this release never takes: "Type never opens a panel".
+        """
+        self._press_talking = False
+        pending = self.session.talk_end()
+        if send and pending and self.session.mode == DICTATE:
+            self._send_pending = True
 
     def _toggle(self) -> None:
         """The arm/disarm click's logic, shared by the hotkey of the same name."""
@@ -427,11 +530,14 @@ class CompactPill(tk.Tk):
         talking = self._press_talking
         moved = self._press_moved
         self._press_at = None
-        self._press_talking = False
         self._press_moved = False
         if talking:
-            self.session.talk_end()
+            self._talk_end(send=True)
         elif not moved:
+            # A pending paste belongs to the mode it was spoken in — the same
+            # drop the `mode` hotkey documents, made by the tap that switches
+            # modes here.
+            self._send_pending = False
             self.session.toggle_mode()
 
     def _on_menu(self, e=None) -> None:

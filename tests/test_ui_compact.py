@@ -8,7 +8,8 @@ set of calls. The fixture idiom is test_pill's own: `__new__` plus class
 defaults, never `__init__`.
 
 Pinned: the glyph tint per mode, the ring colour per state, tap vs hold, the
-class-attribute defaults `_draw` depends on, and the pump's pull contract.
+class-attribute defaults `_draw` depends on, the pump's pull contract, and
+Type's whole arc — hold, release, draft, paste.
 """
 
 import time
@@ -295,6 +296,166 @@ class TestThePumpPulls(unittest.TestCase):
         p = pill()
         self.assertIsNone(p.hotkeys)
         self.assertTrue(p._drain_hotkeys())
+
+
+class TestTypeSendsEndToEnd(unittest.TestCase):
+    """Item 1's acceptance: hold, speak, release — and the words leave.
+
+    The contract mirrored from `Pill` (flow/ui.py:2760-2834, 3756-3770): the
+    release *arms* the send, the `draft` event that brings the decoded words
+    *fires* it, and `_send` is the one place every route to a send goes
+    through — which is what stops a release and the hotkey pasting the same
+    words twice. The session is the fake from `session()` with `talk_end`,
+    `send` and `events` configured, the same style as the rest of this file.
+    """
+
+    def sending_pill(self, s, sent, problem=""):
+        """A pill whose `on_send` records what it was asked to paste."""
+        p = pill(on_send=lambda text, target=None: sent.append(text) or problem)
+        p.session = s
+        return p
+
+    def test_a_hold_a_release_and_a_draft_calls_on_send(self):
+        from flow.session import Event
+        s = session(state=State.LISTENING)
+        s.talk_end.return_value = True  # words are in flight
+        s.send.return_value = "the plan for Tuesday"
+        sent = []
+        p = self.sending_pill(s, sent)
+        with mock.patch.object(uc.time, "perf_counter", return_value=100.0):
+            p._on_press()
+        # Past the threshold, the frame turns the press into an utterance.
+        with mock.patch.object(
+                uc.time, "perf_counter",
+                return_value=100.0 + uc.PILL_HOLD_SEC + 0.01):
+            p._pump_press()
+        p._on_release()
+        # Armed, not fired: the decode is still in flight, and nothing has
+        # been sent or handed back yet.
+        self.assertEqual(sent, [])
+        s.send.assert_not_called()
+        s.events.return_value = [Event("draft", "the plan for Tuesday")]
+        p._pump_events()
+        s.send.assert_called_once_with()
+        self.assertEqual(sent, ["the plan for Tuesday"])
+
+    def test_a_returned_problem_flashes_rather_than_being_swallowed(self):
+        s = session(state=State.IDLE)
+        s.send.return_value = "the words"
+        sent = []
+        p = self.sending_pill(s, sent, problem="no window would take it")
+        p._send()
+        self.assertEqual(sent, ["the words"])
+        self.assertEqual(p._flash, uc.FLASH_FRAMES)
+        self.assertEqual(p._ring_colour(), "#F2584A")
+
+    def test_a_draft_with_no_release_behind_it_sends_nothing(self):
+        from flow.session import Event
+        s = session(state=State.LISTENING)
+        s.events.return_value = [Event("draft", "just dictation settling")]
+        sent = []
+        p = self.sending_pill(s, sent)
+        p._pump_events()
+        # The text is remembered — it is what a later send hands over, and
+        # what item 3's panel will read — but nothing fires on its own.
+        self.assertEqual(p._last_draft, "just dictation settling")
+        s.send.assert_not_called()
+        self.assertEqual(sent, [])
+
+    def test_a_draft_mid_hold_does_not_fire_a_stale_send(self):
+        from flow.session import Event
+        s = session(state=State.LISTENING)
+        s.talk_end.return_value = True
+        s.send.return_value = "everything, cumulatively"
+        sent = []
+        p = self.sending_pill(s, sent)
+        p.hotkeys = mock.Mock()
+        # A release arms the send, and before the decode lands a new hold
+        # begins: the first draft event arrives mid-utterance and must not
+        # paste words the user is still adding to.
+        p.hotkeys.drain.return_value = ["talk-end"]
+        p._drain_hotkeys()
+        self.assertTrue(p._send_pending)
+        p.hotkeys.drain.return_value = ["talk"]
+        p._drain_hotkeys()
+        s.events.return_value = [Event("draft", "the first segment")]
+        p._pump_events()
+        s.send.assert_not_called()
+        self.assertEqual(sent, [])
+        # The words are cumulative in the draft; the next release's draft
+        # sends them all.
+        p.hotkeys.drain.return_value = ["talk-end"]
+        p._drain_hotkeys()
+        s.events.return_value = [Event("draft", "everything, cumulatively")]
+        p._pump_events()
+        self.assertEqual(sent, ["everything, cumulatively"])
+
+    def test_the_send_hotkey_sends_and_cancel_is_a_documented_no_op(self):
+        s = session(state=State.DRAFT)
+        s.send.return_value = "the words"
+        sent = []
+        p = self.sending_pill(s, sent)
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["send", "cancel"]
+        self.assertTrue(p._drain_hotkeys())
+        s.send.assert_called_once_with()
+        self.assertEqual(sent, ["the words"])
+
+    def test_talk_break_commits_without_arming_the_send(self):
+        s = session(state=State.LISTENING)
+        s.talk_end.return_value = True
+        p = pill(State.LISTENING)
+        p.session = s
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["talk-break"]
+        p._drain_hotkeys()
+        s.talk_end.assert_called_once_with()
+        self.assertFalse(p._send_pending)
+
+    def test_asks_release_does_not_arm_the_send(self):
+        # Type only: in converse a release is the panel's "say more" (item 3),
+        # and session.send() would ask the CLI — never this path.
+        s = session(state=State.LISTENING, mode=CONVERSE)
+        s.talk_end.return_value = True
+        p = pill(State.LISTENING)
+        p.session = s
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["talk-end"]
+        p._drain_hotkeys()
+        self.assertFalse(p._send_pending)
+
+    def test_a_mode_switch_drops_a_pending_send(self):
+        s = session(state=State.LISTENING)
+        s.talk_end.return_value = True
+        p = pill(State.LISTENING)
+        p.session = s
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["talk-end"]
+        p._drain_hotkeys()
+        self.assertTrue(p._send_pending)
+        p.hotkeys.drain.return_value = ["mode"]
+        p._drain_hotkeys()
+        # The words stay in the draft; the wait armed in the old mode is gone.
+        self.assertFalse(p._send_pending)
+        s.send.assert_not_called()
+
+    def test_a_partial_is_discarded_until_the_panel_lands(self):
+        from flow.session import Event
+        s = session(state=State.LISTENING)
+        s.events.return_value = [Event("partial", "hel")]
+        p = pill(State.LISTENING)
+        p.session = s
+        p._pump_events()  # a decision, not a fall-through: nothing happens
+        self.assertEqual(p._last_draft, "")
+        self.assertFalse(p._send_pending)
+
+    def test_the_send_paths_attributes_are_class_attributes(self):
+        # The same RecursionError guard as the drawn attributes above: a bare
+        # fixture driving `_frame` or `_pump_events` reads these, and only a
+        # class attribute never reaches `tk.Misc.__getattr__`.
+        for name in ("_last_draft", "_send_pending", "paste_target"):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(uc.CompactPill, name), name)
 
 
 if __name__ == "__main__":
