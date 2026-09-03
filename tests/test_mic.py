@@ -2,7 +2,7 @@
 
 At rest the row is the focused app's name and the mic glyph. While the chord is held it
 is the level bars and nothing else, in a box of the same width. Modelled on
-`test_compact.py`, which adds widths up against the smallest layout — the same job here,
+`test_compact_pass.py`, which adds widths up against the smallest layout — the same job here,
 one layout smaller and two frames deep.
 
 What is pinned is the four constraints the view was settled under, because each of them
@@ -64,7 +64,7 @@ def mic_pill(*, on=True, gesture="hold", app="Code.exe", marks=(), visible=False
 
 
 class TestTheRowFitsWhatItDraws(unittest.TestCase):
-    """`test_compact.py`'s arithmetic, at both of this view's layouts."""
+    """`test_compact_pass.py`'s arithmetic, at both of this view's layouts."""
 
     def test_the_width_is_the_meter_and_pad_either_side(self):
         # Written out rather than re-derived from the constant, so it is checked against

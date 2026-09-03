@@ -1304,7 +1304,7 @@ BODY_BOUNDARY_SCAN = 200
 #: ran to 345 px and the card's to 377. The secondaries are marks now, and since the
 #: compact pass (2026-09-01) they sit on the pill row rather than in a band of their
 #: own — so the floor is the *row's*: app slot, mic, meter, four marks, three icons and
-#: the label, which `tests/test_compact.py` adds up against the smallest width here.
+#: the label, which `tests/test_compact_pass.py` adds up against the smallest width here.
 #: 400 clears it with a few pixels of air; every option above it is for reading the
 #: draft more easily, and every direction that helps with that is up.
 #:
@@ -1432,7 +1432,7 @@ MIC_AT_DEFAULT: tuple[int, int] | None = None
 MIC_NOTE_SEC = 7.0
 
 #: The two frames' contents must fit the one width they share. Asserted in
-#: `tests/test_mic.py` the way `test_compact.py` adds the full row up, rather than here —
+#: `tests/test_mic.py` the way `test_compact_pass.py` adds the full row up, rather than here —
 #: this is arithmetic over constants and belongs where a failure names itself.
 
 
@@ -5203,7 +5203,7 @@ class Pill(tk.Tk):
         right is the one thing here that is text already. `_bar_label` reads it.
 
         A mark that would land on the meter is not drawn: a set too wide for the row
-        loses its leftmost members, never the rightmost — and `tests/test_compact.py`
+        loses its leftmost members, never the rightmost — and `tests/test_compact_pass.py`
         asserts the widest set fits at the narrowest panel width.
         """
         marks = self._marks()

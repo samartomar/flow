@@ -9,7 +9,7 @@ kind of change that quietly invalidates one.
   the bubble's five-chip row ran to 345 px and the card's to 377. The secondaries are
   marks on the pill row now (compact pass, 2026-09-01), so the floor is the row's own
   budget: app slot, mic, meter, four marks, three icons and the label, which
-  `test_compact.py` adds up. A panel narrower than that loses a mark, and the clamp is
+  `test_compact_pass.py` adds up. A panel narrower than that loses a mark, and the clamp is
   tested, not just written down.
 
   **It cannot change what today's users see.** `regular` has to reproduce the shipped

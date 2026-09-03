@@ -210,7 +210,7 @@ tip at the foot of the panel above it, since the row's own canvas would clip one
 
 **Why 400 and not 360.** The first proposal was 360/440/540. With the marks on the row
 the floor is the row's: app slot, mic, meter, four marks, three icons and the label sum
-to ~393 px at these sizes, and `tests/test_compact.py` adds them up against the
+to ~393 px at these sizes, and `tests/test_compact_pass.py` adds them up against the
 narrowest width so the floor cannot drift below the marks again. Reopen if the row
 ever has to carry a fifth mark, or if the app-name slot at 44 px proves too short for
 what people actually dictate into — the slot, the meter's bar count and the label's
