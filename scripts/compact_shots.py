@@ -17,6 +17,12 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   refine panel  the heard block grey, the result under its gold tag, Send
   palette   Switch workspace, mid-search: the query field, the top hit lit
   setup     Workbench setup: mic, CLI, where it pastes
+  no-cli    States.dc.html 1: no agent CLI on PATH — grey, not red
+  mic-gone  States.dc.html 2: slashed glyph, persistent red ring
+  silence   States.dc.html 3: held, nothing said — straight back to grey
+  refine-failed  States.dc.html 4: the raw dictation, the CLI's last line
+  recover   States.dc.html 5: the workspace is gone — amber, once
+  copied    States.dc.html 6: Lite — `copied — press Ctrl+V` under the pill
   menu      the right-click, the only menu the design allows
 
 The gestures (tap cycles, hold talks) are logic, pinned headless in
@@ -43,7 +49,9 @@ from PIL import ImageGrab  # noqa: E402
 import flow.ui as ui  # noqa: E402
 import shots  # noqa: E402  — the capture machinery and the fake session
 from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
-from flow.ui_compact import FLASH_FRAMES, CompactPill  # noqa: E402
+from flow.ui_compact import (  # noqa: E402
+    COPIED_FRAMES, FLASH_FRAMES, RECOVER_FRAMES, CompactPill,
+)
 
 
 def shot(pill, name: str, margin: int = 26) -> None:
@@ -161,11 +169,61 @@ def main() -> None:
         pill._sync_box()
 
     def setup_open():
-        # The three answers a real machine would have found.
-        sess.mic.device_name = "Yeti Nano"
-        sess._provider = lambda: "claude"
-        sess.pastes = True
+        # The three answers a real machine would have found — all native to
+        # the fake now (shots.py's FakeSession carries them).
         pill._open_setup()
+
+    def no_cli():
+        # States.dc.html 1: Type still works, the other two are not offered —
+        # and nothing about the resting pill says so but grey.
+        sess._provider = lambda: ""
+        sess.mode, sess.state = DICTATE, State.IDLE
+        pill.armed = False
+
+    def silence():
+        # States.dc.html 3: held, nothing said — the band the hold raised
+        # goes straight back down with no toast. FakeSession.talk_end answers
+        # "nothing pending", which is what a silent hold is.
+        sess.mode = CONVERSE
+        pill._talk_start()
+        pill._talk_end(send=True)
+
+    def refine_failed():
+        # States.dc.html 4: the panel holds the raw dictation, the CLI's own
+        # last line is the message, and Send still works.
+        sess.state, sess.mode = State.IDLE, REFINE
+        pill.armed = False
+        pill._panel_mode = REFINE
+        pill._panel_heard = ("make the pill not show any controls just the mic "
+                             "and when i let go it should paste in the window "
+                             "i was in before")
+        pill._panel_heard_final = True
+        pill._panel_failed = True
+        pill._panel_result = "refine failed (timed out after 20s) — draft unchanged"
+        pill._open_panel()
+
+    def recover():
+        # States.dc.html 5: the workspace the profile remembers is gone —
+        # amber, once. Type mode, as the artboard has it.
+        sess.mode = DICTATE
+        pill._recover = RECOVER_FRAMES
+
+    def copied():
+        # States.dc.html 6: Lite — the clipboard, and the line under the pill.
+        # Its own clean shot: the amber notice from the case before is done.
+        pill._recover = 0
+        pill.on_send = None
+        pill._copied = COPIED_FRAMES
+        pill._sync_shell()
+
+    def reset_fallbacks():
+        pill._recover = 0
+        pill._copied = 0
+        pill._mic_gone = False
+        pill._sync_shell()
+        # `del`, not a fresh lambda: the no-CLI step shadowed the fake's own
+        # method with an instance attribute, and the menu shot wants the fake.
+        del sess._provider
 
     steps = [
         (900, state(State.IDLE, armed=False)),
@@ -195,6 +253,21 @@ def main() -> None:
         (0, setup_open),
         (600, lambda: box_shot(pill, "13-compact-setup")),
         (0, lambda: pill._close_box()),
+        (0, no_cli),
+        (500, lambda: shot(pill, "14-compact-no-cli")),
+        (0, lambda: setattr(pill, "_mic_gone", True)),
+        (500, lambda: shot(pill, "15-compact-mic-gone")),
+        (0, lambda: setattr(pill, "_mic_gone", False)),
+        (0, silence),
+        (500, lambda: shot(pill, "16-compact-silence")),
+        (0, refine_failed),
+        (600, lambda: shot(pill, "17-compact-refine-failed")),
+        (0, lambda: pill._close_panel()),
+        (0, recover),
+        (500, lambda: shot(pill, "18-compact-recover")),
+        (0, copied),
+        (500, lambda: shot(pill, "19-compact-copied")),
+        (0, reset_fallbacks),
         (0, state(State.IDLE, armed=False)),
         (400, menu),
     ]

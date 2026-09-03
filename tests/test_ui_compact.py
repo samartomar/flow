@@ -579,7 +579,9 @@ class TestTypeSendsEndToEnd(unittest.TestCase):
         for name in ("_last_draft", "_send_pending", "paste_target",
                      "_panel_open", "_panel_mode", "_panel_heard",
                      "_panel_heard_final", "_panel_result", "_ask_pending",
-                     "_shell_w", "_shell_h", "_outside_was_down"):
+                     "_shell_w", "_shell_h", "_outside_was_down",
+                     "_mic_gone", "_recover", "_copied", "_panel_failed",
+                     "_capsule_off", "_mode_var"):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(uc.CompactPill, name), name)
 
@@ -1259,6 +1261,296 @@ class TestTheTrayStays(unittest.TestCase):
         p.quit_app()
         p._tray.stop.assert_called_once_with()
         p.session.close.assert_called_once_with()
+
+
+class TestNoCliMeansTypeOnly(unittest.TestCase):
+    """States.dc.html, first case: with no agent CLI on PATH, Refine and Ask
+    are simply not offered — grey, not red. Type never depends on the CLI."""
+
+    def test_a_tap_with_no_cli_does_not_cycle(self):
+        p = pill(mode=DICTATE)
+        p.session._provider = lambda: ""
+        p._on_press()
+        p._on_release()
+        p.session.toggle_mode.assert_not_called()
+        self.assertEqual(p._flash, 0)  # grey, not red: nothing happened
+
+    def test_a_tap_with_a_cli_cycles(self):
+        p = pill(mode=DICTATE)
+        p._on_press()
+        p._on_release()
+        p.session.toggle_mode.assert_called_once_with()
+
+    def test_the_mode_chord_follows_the_same_rule(self):
+        p = pill(mode=DICTATE)
+        p.session._provider = lambda: ""
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["mode"]
+        p._drain_hotkeys()
+        p.session.toggle_mode.assert_not_called()
+
+    def test_already_off_type_the_cycle_is_the_way_back(self):
+        # The CLI vanished mid-session: Type is the one mode left to offer.
+        p = pill(mode=REFINE)
+        p.session._provider = lambda: ""
+        p._on_press()
+        p._on_release()
+        p.session.toggle_mode.assert_called_once_with(to=DICTATE)
+
+    def test_the_menu_greys_refine_and_ask_rather_than_hiding_them(self):
+        p = pill(mode=DICTATE)
+        p.session._provider = lambda: ""
+        m = mock.Mock()
+        with mock.patch.object(uc.tk, "StringVar", FakeVar):
+            p._populate_menu(m)
+        for name in ("Refine", "Ask"):
+            m.add_radiobutton.assert_any_call(
+                label=name, value=name, variable=mock.ANY,
+                command=mock.ANY, state="disabled")
+        # And Type stays a working radio.
+        m.add_radiobutton.assert_any_call(
+            label="Type", value="Type", variable=mock.ANY, command=mock.ANY)
+
+
+class TestTheMicIsGone(unittest.TestCase):
+    """States.dc.html, second case: slashed glyph, red ring, and the one
+    gesture the pill refuses outright."""
+
+    def test_a_hold_into_a_dead_mic_sets_the_slash_and_the_ring(self):
+        p = pill(State.IDLE, armed=False)
+        p.session.talk_start.side_effect = OSError("device held exclusively")
+        p._talk_start()
+        self.assertTrue(p._mic_gone)
+        self.assertFalse(p._press_talking)
+        self.assertEqual(p._ring_colour(), "#F2584A")
+        self.assertEqual(p._glyph_tint(), "#F2584A")
+
+    def test_the_refusal_is_persistent_not_a_flash(self):
+        p = pill(State.IDLE, armed=False)
+        p.session.talk_start.side_effect = OSError("gone")
+        p._talk_start()
+        p._flash = 0  # the flash can end; the answer cannot
+        self.assertEqual(p._ring_colour(), "#F2584A")
+
+    def test_a_capture_that_answers_clears_the_slash(self):
+        p = pill(State.IDLE, armed=False)
+        p._mic_gone = True
+        p._talk_start()
+        self.assertFalse(p._mic_gone)
+
+    def test_the_slashed_glyph_is_drawn(self):
+        p = pill(State.IDLE, armed=False, _mic_gone=True)
+        p._draw()
+        # gen.py's slash: one diagonal across the glyph, in the ring's red —
+        # the only red line that moves on both axes (the ring's runs are
+        # horizontal, the stem vertical).
+        slashes = [(a, fill) for a, fill, _w in p.canvas.lines
+                   if fill == "#F2584A" and a[0] != a[2] and a[1] != a[3]]
+        (coords, _fill), = slashes
+        x0, y0 = coords[0] - uc.MIC_X, coords[1] - uc.MIC_Y
+        x1, y1 = coords[2] - uc.MIC_X, coords[3] - uc.MIC_Y
+        self.assertEqual((round(x0, 1), round(y0, 1),
+                          round(x1, 1), round(y1, 1)),
+                         (1.6, 1.8, 12.4, 16.4))
+
+    def test_a_disarm_that_is_not_a_release_means_the_device_died(self):
+        from flow.session import Event
+        p = pill(State.LISTENING)
+        p.session.events.return_value = [Event("disarm", "device lost")]
+        p._pump_events()
+        self.assertTrue(p._mic_gone)
+        self.assertFalse(p.armed)
+
+    def test_a_release_disarm_is_ordinary(self):
+        from flow.session import Event
+        p = pill(State.IDLE)
+        p.session.events.return_value = [Event("disarm", "push-to-talk")]
+        p._pump_events()
+        self.assertFalse(p._mic_gone)
+
+    def test_the_pump_lets_a_dead_hold_become_nothing_not_a_tap(self):
+        p = pill(armed=False)
+        p.session.talk_start.side_effect = OSError("gone")
+        with mock.patch.object(uc.time, "perf_counter", return_value=100.0):
+            p._on_press()
+        with mock.patch.object(
+                uc.time, "perf_counter",
+                return_value=100.0 + uc.PILL_HOLD_SEC + 0.01):
+            p._pump_press()
+        self.assertFalse(p.armed)
+        self.assertIsNone(p._press_at)  # over: no tap, no cycle, no ring claim
+
+
+class TestHeldNothingSaid(unittest.TestCase):
+    """States.dc.html, third case: straight back to grey. No panel, no toast."""
+
+    def test_a_silent_hold_in_a_panel_mode_closes_the_band_it_raised(self):
+        p = panel_pill(State.LISTENING, mode=CONVERSE)
+        p._talk_start()
+        self.assertTrue(p._panel_open)
+        p.session.talk_end.return_value = False  # nothing was said
+        p._talk_end(send=True)
+        self.assertFalse(p._panel_open)
+        self.assertFalse(p._ask_pending)
+
+    def test_a_silent_hold_leaves_an_exchange_on_screen(self):
+        # The band has something to show — silence beside it changes nothing.
+        p = panel_pill(State.LISTENING, mode=CONVERSE)
+        p._panel_open = True
+        p._panel_result = "the answer from before"
+        p.session.talk_end.return_value = False
+        p._talk_end(send=True)
+        self.assertTrue(p._panel_open)
+
+    def test_a_silent_hold_in_type_was_already_nothing(self):
+        p = pill(State.IDLE, armed=False)
+        p.session.talk_end.return_value = False
+        p._talk_end(send=True)
+        self.assertFalse(p._send_pending)
+        self.assertFalse(p._panel_open)
+        self.assertEqual(p._flash, 0)
+
+
+class TestRefineFailed(unittest.TestCase):
+    """States.dc.html, fourth case: the panel holds the raw dictation, the
+    CLI's own last line is the message, and Send still works."""
+
+    def failed(self):
+        from flow.session import Event
+        p = panel_pill(State.REFINING, mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_heard = "make the pill not show any controls"
+        p.session.events.return_value = [
+            Event("error", "refine failed (timed out) — draft unchanged")]
+        p._pump_events()
+        return p
+
+    def test_the_clis_last_line_is_the_result_block(self):
+        p = self.failed()
+        self.assertTrue(p._panel_failed)
+        self.assertEqual(p._panel_result,
+                         "refine failed (timed out) — draft unchanged")
+        self.assertEqual(p._flash, uc.FLASH_FRAMES)
+
+    def test_send_still_works_and_sends_the_raw_text(self):
+        sent = []
+        p = self.failed()
+        p.on_send = lambda text, target=None: sent.append(text) or ""
+        p._panel_send()
+        # Unrefined text beats no text.
+        self.assertEqual(sent, ["make the pill not show any controls"])
+        self.assertFalse(p._panel_open)
+
+    def test_copy_on_a_failure_copies_the_raw_text_too(self):
+        p = self.failed()
+        with mock.patch.object(uc, "_copy_to_clipboard",
+                               return_value="") as copy:
+            p._copy_result()
+        copy.assert_called_once_with(p, "make the pill not show any controls")
+
+    def test_a_later_reply_clears_the_failure(self):
+        from flow.session import Event
+        p = self.failed()
+        p.session.events.return_value = [Event("reply", "the shaped prompt")]
+        p._pump_events()
+        self.assertFalse(p._panel_failed)
+        self.assertEqual(p._panel_result, "the shaped prompt")
+
+    def test_an_error_that_is_not_the_clis_leaves_the_panel_alone(self):
+        from flow.session import Event
+        p = panel_pill(State.IDLE, mode=REFINE)
+        p._panel_open = True
+        p._panel_result = "the shaped prompt"
+        p.session.events.return_value = [Event("error", "model failed to load: x")]
+        p._pump_events()
+        self.assertFalse(p._panel_failed)
+        self.assertEqual(p._panel_result, "the shaped prompt")
+
+
+class TestTheWorkspaceIsGone(unittest.TestCase):
+    """States.dc.html, fifth case: amber once, at launch, then no workspace."""
+
+    def test_a_stored_path_that_is_gone_arms_the_amber_notice(self):
+        p = pill()
+        p.session.profile.workspace = "~/work/definitely-not-here-7e3f9a"
+        p._check_workspace_gone()
+        self.assertEqual(p._recover, uc.RECOVER_FRAMES)
+
+    def test_a_path_that_exists_is_not_a_notice(self):
+        p = pill()
+        p.session.profile.workspace = "."
+        p._check_workspace_gone()
+        self.assertEqual(p._recover, 0)
+
+    def test_the_amber_ring_shows_once_and_counts_down(self):
+        p = pill(State.IDLE, armed=False, _recover=2)
+        self.assertEqual(p._ring_colour(), "#E8A33D")
+        p._frame()
+        self.assertEqual(p._recover, 1)
+        p._frame()
+        self.assertEqual(p._recover, 0)
+        self.assertEqual(p._ring_colour(), "")  # then grey, as if nothing was
+
+    def test_a_hold_ends_the_notice_early(self):
+        p = pill(State.IDLE, armed=False, _recover=200)
+        p._talk_start()
+        self.assertEqual(p._recover, 0)
+
+
+class TestLiteCopiesAndSaysSo(unittest.TestCase):
+    """States.dc.html, last case: the clipboard, plus `copied — press Ctrl+V`
+    under the pill. Not an error state."""
+
+    def test_a_send_with_no_handler_copies_and_shows_the_line(self):
+        s = session(state=State.DRAFT)
+        s.send.return_value = "the words"
+        p = panel_pill(x=100, y=400)
+        p.session = s
+        p.on_send = None
+        with mock.patch.object(uc, "_copy_to_clipboard",
+                               return_value="") as copy:
+            p._send()
+        copy.assert_called_once_with(p, "the words")
+        self.assertEqual(p._flash, 0)  # not an error state
+        self.assertEqual(p._copied, uc.COPIED_FRAMES)
+        # The window grew 18 px *under* the capsule — which did not move.
+        p.geometry.assert_called_with("120x52+100+400")
+
+    def test_a_send_with_a_handler_pastes_instead(self):
+        sent = []
+        p = panel_pill(on_send=lambda text, target=None: sent.append(text) or "")
+        p.session.send.return_value = "the words"
+        with mock.patch.object(uc, "_copy_to_clipboard") as copy:
+            p._send()
+        copy.assert_not_called()
+        self.assertEqual(sent, ["the words"])
+        self.assertEqual(p._copied, 0)
+
+    def test_the_panel_send_follows_the_same_path(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = "the shaped prompt"
+        p.on_send = None
+        with mock.patch.object(uc, "_copy_to_clipboard",
+                               return_value="") as copy:
+            p._panel_send()
+        copy.assert_called_once_with(p, "the shaped prompt")
+        self.assertEqual(p._copied, uc.COPIED_FRAMES)
+        self.assertFalse(p._panel_open)
+
+    def test_the_notice_draws_the_line_and_counts_down_to_120(self):
+        p = panel_pill(x=100, y=400, _copied=2, _shell_h=uc.PILL_H + uc.NOTICE_H)
+        p._draw()
+        lines = [t for t in p.canvas.texts if t[1] == "copied — press Ctrl+V"]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0][2], uc.DIM)  # never an error colour
+        p._frame()
+        self.assertEqual(p._copied, 1)
+        p._frame()
+        self.assertEqual(p._copied, 0)
+        p.geometry.assert_called_with("120x34+100+400")
 
 
 if __name__ == "__main__":

@@ -139,6 +139,21 @@ RING = {
     State.ASKING: WAITING,  # the same wait from the user's side, as in ui.py
 }
 
+#: The fourth ring colour (States.dc.html): amber, once, at launch, when the
+#: workspace the profile remembers is gone. Not a session state — a launch
+#: notice — so it is not in `RING`; `_recover` counts it down.
+RECOVER = "#E8A33D"
+#: Frames the amber notice stays up (~9 s at the 30 ms frame), and the one
+#: thing that ends it early: a hold — the user is back, and has seen it.
+RECOVER_FRAMES = 300
+
+#: Lite's last inch (States.dc.html): the words are on the clipboard, said
+#: once in a strip under the pill, never in an error colour. The strip's
+#: height in the window, and how long it stays (~3 s).
+NOTICE_H = 18
+COPIED_FRAMES = 100
+COPIED_TEXT = "copied — press Ctrl+V"
+
 #: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
 #: viewBox after the 12 px left padding, centred in the 34 px height. The
 #: glyph itself is stroked, not filled — `mic()` in gen.py is 1.4 px strokes
@@ -497,6 +512,24 @@ class CompactPill(tk.Tk):
     #: off them. Zero on a fixture, whose box is never open.
     _box_x = 0
     _box_foot = 0
+    #: The three fallback states the ring can be in without a session state
+    #: behind them (States.dc.html). `_mic_gone` is the persistent one: the
+    #: mic is blocked or unplugged, so the glyph wears a slash and the ring
+    #: stays red until a capture answers — the one gesture the pill refuses
+    #: outright. `_recover` is the amber launch notice's countdown. `_copied`
+    #: is Lite's clipboard notice's countdown. All zero/False on a fixture,
+    #: which is a healthy pill.
+    _mic_gone = False
+    _recover = 0
+    _copied = 0
+    #: Whether the CLI's failure line is what's in the result block — so Copy
+    #: and Send hand over the raw dictation instead, because unrefined text
+    #: beats no text.
+    _panel_failed = False
+    #: The capsule's y-offset inside the window — the panel band's height at
+    #: the last `_sync_shell`. The capsule's screen position is the anchor
+    #: every resize keeps ("the pill never hides and never moves").
+    _capsule_off = 0
     #: Whether the window is out of the activation chain. Set in `__init__`
     #: from `_no_activate`'s read-back; False on a fixture, which is the
     #: Lite/Mac answer `_on_menu`'s foreground borrow keys off.
@@ -542,6 +575,11 @@ class CompactPill(tk.Tk):
         self._box_canvas = None
         self._box_kind = ""
         self._palette = None
+        self._mic_gone = False
+        self._recover = 0
+        self._copied = 0
+        self._panel_failed = False
+        self._capsule_off = 0
 
         # The window. `_shell_window` applies the five probed attributes and
         # answers with the background the canvas must agree with — see its
@@ -585,11 +623,16 @@ class CompactPill(tk.Tk):
                 self.session.start()
             except Exception:
                 # No microphone, a device held exclusively elsewhere. Stay
-                # disarmed and flash, rather than showing a green ring over a
-                # capture that does not exist — `_toggle`'s rule, kept here.
+                # disarmed and slash the glyph, rather than showing a green
+                # ring over a capture that does not exist — `_toggle`'s rule,
+                # kept here.
                 self._flash = FLASH_FRAMES
+                self._mic_gone = True
             else:
                 self.armed = True
+
+        # States.dc.html's amber case, detected once, at launch.
+        self._check_workspace_gone()
 
         self.after(30, self._tick)
 
@@ -667,6 +710,13 @@ class CompactPill(tk.Tk):
             self._close_panel()
         if self._flash:
             self._flash -= 1
+        if self._recover:
+            self._recover -= 1
+        if self._copied:
+            self._copied -= 1
+            if not self._copied:
+                # The notice strip's time is up; the window is 120×34 again.
+                self._sync_shell()
         self._draw()
 
     def _drain_hotkeys(self) -> bool:
@@ -704,34 +754,64 @@ class CompactPill(tk.Tk):
             elif name == "cancel":
                 self._close_panel()
             elif name == "mode":
-                # A pending paste belongs to the mode it was spoken in. Dictate
-                # pastes into a window and converse asks a CLI, so a wait armed
-                # in one and fired in the other does something the user never
-                # asked for — ui.py:4363-4369's rule, whose words these are.
-                # Dropped rather than translated: the words stay in the draft,
-                # and Send in the new mode does whatever it now means.
-                self._send_pending = False
-                self.session.toggle_mode()
+                self._cycle_mode()
             elif name == "quit":
                 self.quit_app()
                 return False
         return True
 
+    def _check_workspace_gone(self) -> None:
+        """States.dc.html's amber case: the workspace the profile remembers is
+        gone. `resolve_workspace` has already dropped it and said so on the
+        console (flow/profile.py:289-291) — the fallback to no workspace is
+        done; the pill's half is to say it the one way this surface can,
+        once, in amber. A hold or the countdown ends the notice."""
+        stored = getattr(getattr(self.session, "profile", None),
+                         "workspace", None)
+        if stored and not Path(stored).is_dir():
+            self._recover = RECOVER_FRAMES
+
+    def _cli_offered(self) -> bool:
+        """Whether Refine and Ask exist on this machine right now
+        (States.dc.html: with no agent CLI on PATH they are simply not
+        offered). The same answer the setup box's "none found" gives —
+        `_provider`'s own cache pays the PATH lookup."""
+        return bool(self.session._provider())
+    def _cycle_mode(self) -> None:
+        """The tap's and the `mode` chord's cycle, filtered by what the
+        machine offers.
+
+        The session stays three-mode — the shipped UI cycles through all
+        three and a CLI can arrive mid-session. The exclusion is this
+        surface's, and it is grey, not red: no flash, no error, Type simply
+        does not cycle. Already off Type (the CLI vanished mid-session), the
+        one cycle that still runs is the way back to it.
+        """
+        # A pending paste belongs to the mode it was spoken in — ui.py:4363-
+        # 4369's rule, whose words the `mode` chord used to carry here. The
+        # words stay in the draft; Send in the new mode does what it now means.
+        self._send_pending = False
+        if self._cli_offered():
+            self.session.toggle_mode()
+        elif self.session.mode != DICTATE:
+            self.session.toggle_mode(to=DICTATE)
+
     def _pump_events(self) -> None:
         """Drain what the session said since the last frame.
 
-        The pill itself owns exactly two — an error turns the ring red, and a
-        `disarm` is the session saying capture has stopped and cannot restart
-        itself, so the surface that owns "armed" has to stop claiming it. The
-        send path owns `draft`: the decode landing, its text what `_send` hands
-        over when a Type release is waiting — release, draft, paste, and no
-        panel (README: "Type never opens a panel"). The panel owns the rest: a
-        `partial` is the heard block's live text, a `draft` against an armed
-        ask is the question going to the CLI, a `reply` is the answer landing
-        in the result block, and a `mode` closes the band — it belongs to the
-        mode that raised it. `note` alone still falls through, documented:
-        its homes ("nothing to ask", "still waiting") are item 6's fallback
-        sentences, and it gets them there.
+        The pill itself owns two persistent kinds — an error turns the ring
+        red (and a CLI's failure line joins the panel's result block; a
+        `disarm` that is not a release means the device is gone, and the
+        slash stays until a capture answers). The send path owns `draft`: the
+        decode landing, its text what `_send` hands over when a Type release
+        is waiting — release, draft, paste, and no panel (README: "Type never
+        opens a panel"). The panel owns the rest: a `partial` is the heard
+        block's live text, a `draft` against an armed ask is the question
+        going to the CLI, a `reply` is the answer landing in the result
+        block, and a `mode` closes the band — it belongs to the mode that
+        raised it. `note` alone still falls through: the failure sentence the
+        artboards care about arrives as an `error`, and the rest draw no
+        surface here.
         """
         for ev in self.session.events():
             if ev.kind == "draft":
@@ -754,6 +834,7 @@ class CompactPill(tk.Tk):
                     self._panel_heard_final = False
             elif ev.kind == "reply":
                 if ev.text:
+                    self._panel_failed = False
                     self._panel_result = ev.text
                     # Never silent (P2): if the panel was closed while the CLI
                     # was working, the answer reopens it rather than landing
@@ -764,8 +845,24 @@ class CompactPill(tk.Tk):
                 self._close_panel()
             elif ev.kind == "error":
                 self._flash = FLASH_FRAMES
+                if (self._panel_open
+                        and ev.text.startswith(("refine failed", "ask failed"))):
+                    # The panel opens holding the raw dictation; the CLI's own
+                    # last line is the message, not a generic failure
+                    # (States.dc.html). Send still works — `_panel_text`
+                    # answers with the raw text, because unrefined text beats
+                    # no text. Notes that are not this stay unread: the
+                    # failure arrives as an `error`, and the rest have no
+                    # surface the artboards draw.
+                    self._panel_failed = True
+                    self._panel_result = ev.text
             elif ev.kind == "disarm":
                 self.armed = False
+                if ev.text != "push-to-talk":
+                    # Not a release — the device itself went away and did not
+                    # come back (ui.py:4526-4532's case, the same words). The
+                    # slash and the red ring persist until a capture answers.
+                    self._mic_gone = True
 
     def _ask(self) -> None:
         """The panel-mode release: the heard block's final text goes to the CLI.
@@ -787,20 +884,34 @@ class CompactPill(tk.Tk):
         The shape is ui.py's `_send` (flow/ui.py:3756-3770) — the text from
         `session.send()`, the paste target this surface polls, the problem the
         handler hands back — down to the first line, which is what stops a
-        release and the `send` hotkey pasting the same words twice. Where the
-        full pill spends a problem on a bubble card, this one has no words to
-        say it with yet: a problem is the red flash, the whole vocabulary for
-        "something is wrong" until the panel lands. The CLI is not on this
-        path — Type is dictate, and `session.send()` in dictate never asks.
-        The Lite fallback (clipboard, plus "copied — press Ctrl+V" under the
-        pill) is item 6's; with no handler there is nothing here yet.
+        release and the `send` hotkey pasting the same words twice. The CLI is
+        not on this path — Type is dictate, and `session.send()` in dictate
+        never asks. The way out itself is `_deliver`'s, shared with the
+        panel's Send.
         """
         self._send_pending = False
         text = self.session.send()
-        if text and self.on_send:
+        if text:
+            self._deliver(text)
+
+    def _deliver(self, text: str) -> None:
+        """The words' way out, shared by both sends: paste where the user
+        was, or Lite's clipboard — which is not an error state, and says so
+        under the pill rather than flashing (States.dc.html's last case).
+        Where the full pill spends a problem on a bubble card, this one has
+        no words to say it with: a problem is the red flash, the whole
+        vocabulary for "something is wrong" that is not a fallback with its
+        own artboard.
+        """
+        if self.on_send:
             problem = self.on_send(text, self.paste_target) or ""
             if problem:
                 self._flash = FLASH_FRAMES
+        elif _copy_to_clipboard(self, text):
+            self._flash = FLASH_FRAMES
+        else:
+            self._copied = COPIED_FRAMES
+            self._sync_shell()
 
     def _track_target(self) -> None:
         """Remember the last window that had the foreground and was not Flow's own.
@@ -831,12 +942,11 @@ class CompactPill(tk.Tk):
             return
         if time.perf_counter() - self._press_at < PILL_HOLD_SEC:
             return
-        try:
-            self._talk_start()
-        except Exception:
-            # Same refusal `_toggle` makes: a green ring over a dead capture
-            # is the one lie this surface must not tell.
-            self._flash = FLASH_FRAMES
+        self._talk_start()
+        if not self._press_talking:
+            # The refusal `_toggle` also makes: a green ring over a dead
+            # capture is the one lie this surface must not tell — and this
+            # press is over, so it cannot become a tap either.
             self._press_at = None
             return
         self.armed = True
@@ -852,14 +962,28 @@ class CompactPill(tk.Tk):
         reply" a reply rather than an append. Type is not in `PANEL_SPEC`, so
         its holds change nothing on screen (README: "Type never opens a
         panel").
+
+        A hold into a dead microphone is the one gesture the pill refuses
+        outright (States.dc.html): the refusal is the persistent slashed
+        glyph and red ring, not a flash that forgets by morning. A capture
+        that answers clears the slash — it was about then, not now.
         """
         self._press_talking = True
-        self.session.talk_start()
+        try:
+            self.session.talk_start()
+        except Exception:
+            self._press_talking = False
+            self._mic_gone = True
+            self._flash = FLASH_FRAMES
+            return
+        self._mic_gone = False
+        self._recover = 0  # a hold ends the launch notice: seen, and moved on
         if self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
             self._panel_heard = ""
             self._panel_heard_final = False
             self._panel_result = ""
+            self._panel_failed = False
             self._open_panel()
 
     def _talk_end(self, *, send: bool) -> None:
@@ -876,6 +1000,11 @@ class CompactPill(tk.Tk):
         — and the paste rule stays Type-only: an Ask hold while the panel is
         up is a reply, and its result lands in the panel, never in the window
         you were in (README: "Type never opens a panel").
+
+        A hold with nothing said into it ends in nothing: straight back to
+        grey, no panel, no toast (States.dc.html). The band the hold raised
+        has nothing to show, so it goes back down — silence is a normal thing
+        to do with a push-to-talk button.
         """
         self._press_talking = False
         pending = self.session.talk_end()
@@ -884,6 +1013,9 @@ class CompactPill(tk.Tk):
                 self._send_pending = True
             elif self.session.mode in PANEL_SPEC:
                 self._ask_pending = True
+        elif (not pending and self._panel_open
+                and not (self._panel_heard or self._panel_result)):
+            self._close_panel()
 
     def _toggle(self) -> None:
         """The arm/disarm click's logic, shared by the hotkey of the same name."""
@@ -895,7 +1027,9 @@ class CompactPill(tk.Tk):
                 self.session.start()
             except Exception:
                 self._flash = FLASH_FRAMES
+                self._mic_gone = True
                 return
+            self._mic_gone = False
             self.armed = True
 
     def _on_press(self, e=None) -> None:
@@ -940,11 +1074,7 @@ class CompactPill(tk.Tk):
         if talking:
             self._talk_end(send=True)
         elif not moved:
-            # A pending paste belongs to the mode it was spoken in — the same
-            # drop the `mode` hotkey documents, made by the tap that switches
-            # modes here.
-            self._send_pending = False
-            self.session.toggle_mode()
+            self._cycle_mode()
 
     def _populate_menu(self, m) -> None:
         """The only menu the design allows (Workspace.dc.html), rebuilt on
@@ -964,11 +1094,16 @@ class CompactPill(tk.Tk):
         # indicator — `.shots/06` showed three modes and no check until this
         # was `self.`.
         self._mode_var = tk.StringVar(value=MODE_NAME.get(current, ""))
+        # No CLI on PATH: the cycle skips Refine and Ask, and the menu says so
+        # the same way — grey, not absent (States.dc.html: a smaller Flow,
+        # not a broken one; Workbench setup is the row that explains it).
+        offered = self._cli_offered()
         for mode in (DICTATE, REFINE, CONVERSE):
             name = MODE_NAME[mode]
+            kw = {} if mode == DICTATE or offered else {"state": "disabled"}
             m.add_radiobutton(
                 label=name, value=name, variable=self._mode_var,
-                command=lambda t=mode: self.session.toggle_mode(to=t))
+                command=lambda t=mode: self.session.toggle_mode(to=t), **kw)
         m.add_command(label="tap the pill to cycle", state="disabled")
         m.add_separator()
         m.add_command(label="Switch workspace", command=self._open_palette)
@@ -1230,25 +1365,29 @@ class CompactPill(tk.Tk):
         self._sync_shell()
 
     def _sync_shell(self) -> None:
-        """Resize the one window around the foot: 120×34 alone, 400×(200+34)
-        with the band — the shipped surface's `_shell_h != PILL_H` mechanism
-        (flow/ui.py:4985-5000), adapted to the capsule.
+        """Resize the one window around the capsule: 120×34 alone, 400×(200+34)
+        with the band, 18 px taller while Lite's copied notice is showing.
 
-        The foot's bottom edge is the anchor — "the pill never hides and never
-        moves" (README) — so the band grows upward, and the left edge stays
-        put so the mic does. The two clamps are the screen saying otherwise:
-        the band goes left rather than off the right edge (the mic moves
-        before the panel clips), and down rather than off the top.
+        The capsule's screen position is the anchor — "the pill never hides
+        and never moves" (README) — tracked in `_capsule_off` rather than read
+        back off `winfo_*`, which lags the window manager. The band grows
+        upward from it, the notice strip downward. The one clamp is the
+        screen's right edge: the band goes left rather than off it (the mic
+        moves before the panel clips).
         """
+        panel_h = PANEL_H if self._panel_open else 0
+        notice_h = NOTICE_H if self._copied else 0
         w = PANEL_W if self._panel_open else PILL_W
-        h = PILL_H + (PANEL_H if self._panel_open else 0)
+        h = PILL_H + panel_h + notice_h
         if (w, h) == (self._shell_w, self._shell_h):
             return
-        x, foot = self.winfo_rootx(), self.winfo_rooty() + self._shell_h
+        x = self.winfo_rootx()
+        capsule_top = self.winfo_rooty() + self._capsule_off
         if x + w > self.winfo_screenwidth():
             x = self.winfo_screenwidth() - w
-        y = max(0, foot - h)
+        y = max(0, capsule_top - panel_h)
         self._shell_w, self._shell_h = w, h
+        self._capsule_off = panel_h
         self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _panel_click(self, e) -> None:
@@ -1262,6 +1401,14 @@ class CompactPill(tk.Tk):
         elif self._spec()["send"] and _hit(SEND_RECT, x, y):
             self._panel_send()
 
+    def _panel_text(self) -> str:
+        """What Copy copies and Refine's Send pastes: the result, unless the
+        CLI failed — then the raw dictation, because unrefined text beats no
+        text (States.dc.html)."""
+        if self._panel_failed:
+            return self._panel_heard
+        return self._panel_result or self._panel_heard
+
     def _copy_result(self) -> None:
         """The Copy chip: the answer, or the question if that is all there is.
 
@@ -1269,7 +1416,7 @@ class CompactPill(tk.Tk):
         the clipboard. The borrow is ui.py's one clipboard transaction, shared
         rather than copied.
         """
-        text = self._panel_result or self._panel_heard
+        text = self._panel_text()
         if not text:
             return
         if _copy_to_clipboard(self, text):
@@ -1278,17 +1425,16 @@ class CompactPill(tk.Tk):
     def _panel_send(self) -> None:
         """The footer Send: paste the result into `paste_target`, and close.
 
-        The mechanism is item 4's Refine flow wired ahead of it — paste the
-        refined text where the user was, through the same `on_send` contract
-        item 1 pasted drafts through, target included. No mode sets `send`
-        while the session has two: Ask's footer is Copy and the hint
-        (Ask.dc.html), and Type never opens the panel at all.
+        The mechanism is Refine's flow — paste the refined text where the user
+        was, through the same `on_send` contract item 1 pasted drafts through,
+        target included, and the Lite clipboard when there is no handler.
+        `_panel_text` is what "Send still works" means on a failed refine:
+        the raw dictation goes, because unrefined text beats no text. Ask's
+        footer has no Send (Ask.dc.html), and Type never opens the panel.
         """
-        text = self._panel_result
-        if text and self.on_send:
-            problem = self.on_send(text, self.paste_target) or ""
-            if problem:
-                self._flash = FLASH_FRAMES
+        text = self._panel_text()
+        if text:
+            self._deliver(text)
         self._close_panel()
 
     def _outside_click_now(self) -> bool:
@@ -1319,18 +1465,27 @@ class CompactPill(tk.Tk):
         """This frame's ring, or "" for none at rest.
 
         The flash outranks the state, because an error is true regardless of
-        which state raised it — the same layering ui.py's `accent` gives. A
+        which state raised it — the same layering ui.py's `accent` gives. The
+        two fallbacks that are not session states come next (States.dc.html):
+        the mic's persistent red, then the launch notice's one amber. A
         disarmed pill is at rest whatever the session thinks: capture is off,
         and a ring would claim otherwise.
         """
         if self._flash:
             return ERROR
+        if self._mic_gone:
+            return ERROR
+        if self._recover:
+            return RECOVER
         if not self.armed:
             return ""
         return RING.get(self.session.state, "")
 
     def _glyph_tint(self) -> str:
-        """This frame's mic tint: the mode's hue (Main.dc.html)."""
+        """This frame's mic tint: the mode's hue — or red, while the mic is
+        the thing that is wrong (gen.py's `mic(mode if not slash else state)`)."""
+        if self._mic_gone:
+            return ERROR
         return MODE_TINT.get(self.session.mode, TEXT)
 
     def _draw(self) -> None:
@@ -1345,6 +1500,8 @@ class CompactPill(tk.Tk):
         if self._panel_open:
             self._draw_panel(c)
             self._draw_foot(c)
+            if self._copied:
+                self._draw_copied(c)
             return
         # The capsule body first, and it is load-bearing rather than cosmetic:
         # `_shell_window` keyed the canvas background out with
@@ -1373,6 +1530,25 @@ class CompactPill(tk.Tk):
         c.create_arc(hi, hi, PILL_W - hi, PILL_H - hi,
                      start=0, extent=180, style=tk.ARC, outline=RING_TOP)
         self._draw_face(c, 0, BARS)
+        if self._copied:
+            self._draw_copied(c)
+
+    def _draw_copied(self, c) -> None:
+        """Lite's last inch, said once and never in an error colour
+        (States.dc.html): the words are on the clipboard and the last step is
+        the user's. The strip has a body, not just floating glyphs: Tk
+        anti-aliases text against the canvas behind it, and on the keyed-out
+        region that background is the magenta the window is keyed by — text
+        drawn without one photographed as the key colour itself
+        (`.shots/19-compact-copied.png` before this strip had a fill)."""
+        y = self._shell_h - NOTICE_H
+        w = self._shell_w
+        _capsule(c, 0, y, w, self._shell_h, square_top=True,
+                 fill=SHELL, outline="")
+        _capsule_ring(c, 0, y, w, self._shell_h, RING_OUTER,
+                      square_top=True, top=False)
+        c.create_text(w // 2, y + NOTICE_H // 2, text=COPIED_TEXT,
+                      font=FONT_TAG, fill=DIM)
 
     def _draw_foot(self, c) -> None:
         """The pill as the panel's foot: the same face, 400 wide, squared on
@@ -1414,6 +1590,12 @@ class CompactPill(tk.Tk):
                      outline=tint, width=MIC_STROKE)
         c.create_line(x + 7, y + 13.6, x + 7, y + 16.4,
                       fill=tint, width=MIC_STROKE, capstyle=tk.ROUND)
+        if self._mic_gone:
+            # The slashed variant (States.dc.html, gen.py's `mic(slash=True)`):
+            # one diagonal across the glyph — "the one gesture the pill
+            # refuses outright", in the same red the ring wears.
+            c.create_line(x + 1.6, y + 1.8, x + 12.4, y + 16.4,
+                          fill=tint, width=MIC_STROKE, capstyle=tk.ROUND)
         # The meter (R13's live level, restated wordless): 2 px bars on a 2 px
         # gap, 3 px at rest, blooming around the centre line so quiet reads as
         # a flat line rather than an empty box. Rest is gen.py's `DIM` — grey
@@ -1487,12 +1669,17 @@ class CompactPill(tk.Tk):
         result = _fit(self._panel_result, LINE_CHARS, RESULT_LINES)
         if result:
             accent = spec["result_accent"]
-            if spec["result_tag"] is not None:
+            if spec["result_tag"] is not None and not self._panel_failed:
                 # Refine.dc.html: the tag carries the hue, the text is plain.
+                # Suppressed on a failure — "refined for this repo" over the
+                # CLI's last line would claim a refinement that did not happen.
                 c.create_text(PAD_X, RESULT_Y, anchor="w",
                               text=spec["result_tag"], font=FONT_TAG,
                               fill=accent)
                 c.create_text(PAD_X, RESULT_Y + 16, anchor="nw", text=result,
+                              font=FONT_BODY, fill=TEXT)
+            elif spec["result_tag"] is not None:
+                c.create_text(PAD_X, RESULT_Y, anchor="nw", text=result,
                               font=FONT_BODY, fill=TEXT)
             else:
                 # Ask.dc.html's card: a violet left bar, no tag.
@@ -1569,12 +1756,9 @@ class CompactPill(tk.Tk):
         Flow already found: the microphone PortAudio opened, the CLI
         `_provider` would use — "none found" when there isn't one, which item
         6's no-CLI fallback needs too — and where a release's words go."""
-        mic = getattr(getattr(self.session, "mic", None),
-                      "device_name", "") or "none found"
-        provider = getattr(self.session, "_provider", lambda: "")
-        cli = provider() or "none found"
-        pastes = getattr(self.session, "pastes", False)
-        on_release = ("paste into last window" if pastes
+        mic = self.session.mic.device_name or "none found"
+        cli = self.session._provider() or "none found"
+        on_release = ("paste into last window" if self.session.pastes
                       else "copy — you paste it")
         return [("Microphone", mic), ("Agent CLI", cli),
                 ("On release", on_release)]

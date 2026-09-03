@@ -97,6 +97,8 @@ class FakeMic:
     #: Read by `Pill._bar_label`, which says `NO INPUT` when the device has gone —
     #: distinct from `SPEAKING`/`EDITING`, where the microphone comes back on its own.
     active = True
+    #: Read by the compact surface's Workbench setup line.
+    device_name = "Yeti Nano"
 
     def stop(self) -> None: ...
 
@@ -164,6 +166,8 @@ class FakeSession:
         self.muted = False
         self.cli = None
         self.auto_ask = True
+        #: Read by the compact surface's setup box and no-CLI cycle.
+        self.pastes = True
         self.auto_ask_in = None
         self.editing = False
         self.can_rescue = False
@@ -177,9 +181,19 @@ class FakeSession:
 
     def start(self) -> None: ...
     def close(self) -> None: ...
+
+    def _provider(self) -> str:
+        """The CLI the setup box names and the no-CLI cycle asks about."""
+        return "claude"
     def tick(self) -> None: ...
     def pump_results(self) -> None: ...
     def pause(self) -> None: ...
+    def talk_start(self) -> None: ...
+
+    def talk_end(self) -> bool:
+        """Nothing pending — the fake never captures, so a release's answer
+        is always "nothing was said into the hold"."""
+        return False
     def stop_speaking(self) -> None: ...
     def hold_auto_ask(self) -> None: ...
     def rescue_last_append(self) -> None: ...
