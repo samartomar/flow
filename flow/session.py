@@ -36,6 +36,7 @@ from .edits import (
     is_artifact_request,
     plan,
     removed_text,
+    shape,
 )
 
 #: P4/P8: the local operations that teach Flow a spelling. Every one of these replaces
@@ -765,11 +766,15 @@ class Draft:
             self._history.pop(0)
 
     def append(self, more: str) -> None:
-        more = more.strip()
+        more = shape(more.strip())
         if not more:
             return
         self._remember()
-        if not self.text or self.text.endswith(("\n", " ")):
+        if (not self.text or self.text.endswith(("\n", " "))
+                or more.startswith(("\n", " "))):
+            # The shaped text can *start* with the shape — a newline or an
+            # indent — and a join space in front of it would be the one thing
+            # "press enter" was said to avoid.
             self.text = f"{self.text}{more}"
         else:
             self.text = f"{self.text} {more}"

@@ -43,6 +43,55 @@ compact pass", which is what they always meant.
 
 **Reopens if** the compact design reaches spec parity and one of the two stops being
 used — a second surface is a standing cost, justified only while both are real.
+Parity is what the 2026-09-03 build brief (`design/compact/BUILD_BRIEF.md`) was, and
+it has landed: all seven items are on the branch, from Type working end to end to
+spoken punctuation, so the bar is now live rather than hypothetical.
+
+### 2026-09-03 — REFINE as a third session mode, in the session and not the surface
+
+The compact canvas draws three modes on the pill; the session had two, and a scaffold
+that faked the third in the UI was the cheap way to ship two half-features. **Refine
+is a mode of the session** (`flow/session.py`'s `REFINE`, cycling DICTATE → REFINE →
+CONVERSE), built on the machinery that already existed: the polish pass over a held
+draft, with the workspace as the CLI's system role — `GROUNDING_WHERE` and
+`_refine_cwd` were the seam, and no second pipeline was built.
+
+**Refine-as-an-action and refine-as-a-mode share one pipeline and differ in
+delivery.** A spoken "make this shorter" still rewrites the draft in place; a mode
+Send delivers the shaped text as a `reply` — a result to be shown and sent on
+purpose, because the draft it would have been checked against was already committed
+by `send()`. The shipped surface consumes that reply the way it consumes an answer
+(the card holds it, Take pastes it); the compact panel's result block shows it and
+its Send pastes it. Both are one call path, which is the whole point of doing this
+in the session.
+
+**The cycle of three is the defect that does not announce itself.** Every two-way
+`!= DICTATE` read in the shipped UI had to be audited — the mode menu, the settings
+glyph, the auto-ask entry, `--converse` at launch — because a third value read as
+CONVERSE pastes nothing and reads as DICTATE asks nothing, and neither failure has
+a sound. `toggle_mode(to=)` is the chooser API the audit produced: a cycle cannot
+serve "choose Converse" in a three-mode world.
+
+**Reopens if** a fourth mode is ever proposed — the audit was sized for three, and
+the answer then is a mode registry, not a fourth constant beside three.
+
+### 2026-09-03 — The compact design keeps the tray, against its own canvas
+
+`Workspace.dc.html` says "There is no preferences window and no tray menu", and the
+decision is to keep the tray anyway. The canvas's argument is aesthetic; the tray's
+is that **it is the escape hatch if the pill is ever dragged somewhere unreachable**
+— a wordless 120 px capsule with no menu bar and no taskbar presence, parked
+somewhere the user cannot find, is a Flow that cannot be reached, configured or
+quit except through Task Manager. That is invariant 4 in a new place: hidden must
+not mean gone. The compact menu gains Hide to tray above Quit; the icon is the way
+back, exactly as the shipped design has it. The canvas line is superseded, and the
+supersession is recorded in `design/compact/README.md` rather than edited into the
+artboard, because the canvas is the record of what was drawn and this is the record
+of what was decided.
+
+**Reopens if** the tray ever becomes the *only* way the compact surface is used —
+an escape hatch used daily is a design that failed somewhere else, and the answer
+then is to fix the somewhere else, not to remove the hatch.
 
 ### 2026-09-03 — A failing CLI's reason comes from whichever stream it used
 

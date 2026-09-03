@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # for test_converse's fixture
 
 from flow.edits import (  # noqa: E402
     _MISHEARD_PROMPT,
@@ -19,6 +20,7 @@ from flow.edits import (  # noqa: E402
     describe_change,
     plan,
     removed_text,
+    shape,
 )
 
 DRAFT = "Call Bob today. The meeting is on Tuesday afternoon at nasa."
@@ -698,3 +700,103 @@ class TestTheMisHeardPromptTable(unittest.TestCase):
         # acceptance fixtures already wait in tests/test_live_replay.py.
         self.assertLess(len(_MISHEARD_PROMPT), 5,
                         "five heard nouns is Phase 3's evidence, not a sixth entry")
+
+
+class TestShape(unittest.TestCase):
+    """The inline keys (Refine.dc.html): "You say the key; the text carries the
+    shape." Unconditional by design — the words are never lost, because undo
+    holds every append; the table stays small so prose keeps its chances."""
+
+    def test_the_artboards_example_verbatim(self):
+        # "… press enter press enter then tab dash fix the tests" — a blank
+        # line, then an indented bullet, exactly as the mono block shows it.
+        self.assertEqual(
+            shape("… press enter press enter then tab dash fix the tests"),
+            "…\n\n    - fix the tests")
+
+    def test_the_structural_keys(self):
+        for said, expected in (
+            ("press enter", "\n"),
+            ("newline", "\n"),
+            ("press tab", "    "),
+            ("tab", "    "),
+            ("one press enter two", "one\ntwo"),
+            ("one press tab two", "one    two"),
+        ):
+            with self.subTest(said=said):
+                self.assertEqual(shape(said), expected)
+
+    def test_double_press_enter_is_the_blank_line(self):
+        self.assertEqual(shape("press enter press enter"), "\n\n")
+
+    def test_the_marks_attach_left(self):
+        for said, expected in (
+            ("hello comma world", "hello, world"),
+            ("hello period", "hello."),
+            ("hello full stop", "hello."),
+            ("really question mark", "really?"),
+            ("wow exclamation mark", "wow!"),
+            ("wow exclamation point", "wow!"),
+            ("note colon fix it", "note: fix it"),
+            ("one semicolon two", "one; two"),
+        ):
+            with self.subTest(said=said):
+                self.assertEqual(shape(said), expected)
+
+    def test_dash_is_a_bullet_at_line_start_a_spaced_dash_mid_sentence(self):
+        self.assertEqual(shape("dash fix the tests"), "- fix the tests")
+        self.assertEqual(shape("one dash two"), "one - two")
+
+    def test_hyphen_joins_compounds(self):
+        self.assertEqual(shape("well hyphen known"), "well-known")
+
+    def test_the_connective_is_consumed_only_before_a_key(self):
+        for said, expected in (
+            ("then tab", "    "),
+            ("and then tab", "    "),
+            ("back then", "back then"),
+            ("one then two", "one then two"),
+        ):
+            with self.subTest(said=said):
+                self.assertEqual(shape(said), expected)
+
+    def test_whispers_capitals_and_marks_are_not_the_key(self):
+        self.assertEqual(shape("Press Enter."), "\n")
+        self.assertEqual(shape("Tab, dash."), "    - ")
+
+    def test_ordinary_text_is_untouched(self):
+        for s in (
+            "the release goes out on Tuesday",
+            "enter the dragon",
+            "press the button",
+        ):
+            with self.subTest(s=s):
+                self.assertEqual(shape(s), s)
+
+
+class TestShapeReachesTheDraft(unittest.TestCase):
+    """End to end: `shape` runs in `Draft.append`, the one funnel every append
+    in `_route` goes through — so Type gets it with no CLI on the machine, and
+    both surfaces read it off the same draft they have always read."""
+
+    def test_the_artboards_example_through_the_router(self):
+        from test_converse import session
+
+        s = session()
+        s._route("the release plan")
+        s._route("press enter press enter then tab dash fix the tests")
+        self.addCleanup(s.close)
+        self.assertEqual(s.draft.text, "the release plan\n\n    - fix the tests")
+        # And it is what the surfaces are handed: the draft event carries the
+        # shaped text, not the words as said.
+        drafts = [e.text for e in s.events() if e.kind == "draft"]
+        self.assertEqual(drafts[-1], "the release plan\n\n    - fix the tests")
+
+    def test_a_key_mid_draft_still_shapes(self):
+        from test_converse import session
+
+        s = session()
+        s._route("first point")
+        s._route("press enter dash second point")
+        self.addCleanup(s.close)
+        self.assertEqual(s.draft.text, "first point\n- second point")

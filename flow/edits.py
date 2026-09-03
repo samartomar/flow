@@ -1081,6 +1081,118 @@ def _tidy(s: str) -> str:
     return s.strip()
 
 
+# -- spoken punctuation -------------------------------------------------------
+
+#: "You say the key; the text carries the shape" (Refine.dc.html). The inline
+#: phrases, longest first — "press tab" must win over "tab", and the
+#: structural keys over the marks. The indent is four spaces because that is
+#: what the artboard's mono block shows, and because a literal \t would render
+#: at whatever stop the *receiving* app chose: Flow pastes into apps it knows
+#: nothing about, and the artboard's promise is the shape, not the character.
+#:
+#: **Unconditional, by design** — the convention the send trigger set, one
+#: level down: a key phrase is the shape wherever it appears, including inside
+#: prose. "press enter to continue" comes out "\n to continue", and that is
+#: the intent of the feature rather than a mis-route — the words are never
+#: lost (undo holds them, as it does for every append). The grammar's other
+#: convention — verify against the draft before acting — does not apply here
+#: because nothing is acted *on*: the text is only ever the user's own words,
+#: rearranged. Priced against that trade, the table stays small: keys a
+#: speaker reaches for *as* keys, not every mark English has a name for.
+_SHAPE_TABLE: tuple[tuple[str, str], ...] = (
+    ("press enter", "\n"),
+    ("press tab", "    "),
+    ("question mark", "?"),
+    ("exclamation mark", "!"),
+    ("exclamation point", "!"),
+    ("full stop", "."),
+    ("newline", "\n"),
+    ("tab", "    "),
+    ("dash", "- "),
+    ("hyphen", "-"),
+    ("comma", ","),
+    ("period", "."),
+    ("colon", ":"),
+    ("semicolon", ";"),
+)
+
+#: The spoken connective a key phrase may arrive with — "then tab" is the key
+#: and its "then", which is the artboard's own example. Consumed only when a
+#: key follows it, so "back then" in prose keeps its word.
+_SHAPE_LEADS = ("then", "and then")
+
+#: The pieces that attach to the word before them instead of standing alone.
+_ATTACH = frozenset({",", ".", "?", "!", ":", ";"})
+
+
+def _key_at(tokens: list[str], i: int) -> tuple[int, str] | None:
+    """(words consumed, piece) if a key phrase starts at tokens[i], else None."""
+    for phrase, piece in _SHAPE_TABLE:
+        words = phrase.split()
+        if [t.lower().strip(".,!?\"'") for t in tokens[i:i + len(words)]] == words:
+            return len(words), piece
+    return None
+
+
+def shape(text: str) -> str:
+    """Resolve inline spoken punctuation in dictated text.
+
+    Runs where dictation becomes draft — `Draft.append`, the one funnel every
+    append path in `_route` goes through — which is what puts it in front of
+    both surfaces and never behind the CLI (the brief's one hard rule: Type
+    gets it with no CLI on the machine). Finals only, matching the rest of
+    the grammar: partials are a preview of the raw decode and have always been.
+    """
+    tokens = text.split()
+    out: list[tuple[str, str]] = []  # ("word", token) or ("shape", piece)
+    i = 0
+    while i < len(tokens):
+        hit = _key_at(tokens, i)
+        if hit is not None:
+            n, piece = hit
+            out.append(("shape", piece))
+            i += n
+            continue
+        lowered = tokens[i].lower().strip(".,!?")
+        # A lead-in with a key behind it is consumed, never emitted; without
+        # one it is an ordinary word. "and" only counts as the front of
+        # "and then" — "back then" in prose keeps its word.
+        lead = 0
+        if lowered == "then" and _key_at(tokens, i + 1) is not None:
+            lead = 1
+        elif (lowered == "and" and i + 2 < len(tokens)
+                and tokens[i + 1].lower().strip(".,!?") == "then"
+                and _key_at(tokens, i + 2) is not None):
+            lead = 2
+        if lead:
+            i += lead
+            continue
+        out.append(("word", tokens[i]))
+        i += 1
+
+    result = ""
+    for kind, piece in out:
+        if kind == "word":
+            if result and not result.endswith((" ", "\n", "-")):
+                result += " "
+            result += piece
+        elif piece == "\n":
+            result = result.rstrip(" ") + "\n"
+        elif piece in _ATTACH:
+            result = result.rstrip(" ") + piece
+        elif piece == "- ":
+            # A bullet at line start, a spaced dash mid-sentence — the space
+            # before it is earned by a word being there, never by a newline.
+            if result and not result.endswith((" ", "\n")):
+                result += " "
+            result += "- "
+        else:
+            # The indent and the hyphen carry their own spacing.
+            result = result.rstrip(" ") + piece if piece == "-" \
+                else result + piece
+    return result
+
+
 def command_bias(draft: str, limit: int = 48) -> str:
     """The vocabulary a suspected command should be re-decoded against.
 
