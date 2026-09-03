@@ -88,6 +88,44 @@ class TestPersistence(unittest.TestCase):
         self.assertFalse(Profile(p.path).calibrated)
 
 
+class TestTheDesignField(unittest.TestCase):
+    """The compact design is chosen by name, and the name survives the file.
+
+    `flow/profile.py` spells the default itself rather than importing either UI module,
+    because this module is read on every launch including Lite's — the same reason
+    `panel` and `place` are spelled there.
+    """
+
+    def test_a_fresh_profile_launches_the_current_design(self):
+        p = tmp_profile()
+        self.assertEqual(p.design, "current")
+
+    def test_it_round_trips(self):
+        p = tmp_profile()
+        p.design = "compact"
+        self.assertTrue(p.save())
+        again = Profile(p.path)
+        self.assertEqual(again.design, "compact")
+        self.assertNotIn("design", again.faults)
+
+    def test_a_name_that_is_not_a_design_degrades_to_the_default(self):
+        p = tmp_profile()
+        p.path.parent.mkdir(parents=True, exist_ok=True)
+        p.path.write_text(json.dumps({"schema": 1, "design": "brutalist"}),
+                          encoding="utf-8")
+        again = Profile(p.path)
+        self.assertEqual(again.design, "current")
+
+    def test_a_wrong_type_is_named_in_faults(self):
+        p = tmp_profile()
+        p.path.parent.mkdir(parents=True, exist_ok=True)
+        p.path.write_text(json.dumps({"schema": 1, "design": 2}),
+                          encoding="utf-8")
+        again = Profile(p.path)
+        self.assertEqual(again.design, "current")
+        self.assertIn("design", again.faults)
+
+
 class TestLearnedWords(unittest.TestCase):
     def test_one_correction_is_not_yet_a_pattern(self):
         # A single "change X to Y" is as likely to be a change of mind as a mishearing.

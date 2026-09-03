@@ -241,6 +241,15 @@ PLACE_DEFAULT = "bottom"
 #: Mac, and this one is read on every launch including Lite's.
 GESTURE_DEFAULT = "hold"
 
+#: Which UI design launches: `"current"` is the pill and bubble Flow shipped,
+#: `"compact"` is the wordless pill specced in `design/compact/`. Spelled here rather
+#: than imported from either UI module for `PANEL_DEFAULT`'s reason: this module is read
+#: on every launch including Lite's, where neither surface may be imported, and a
+#: default the profile could not read would be one it could not write back.
+#: `flow/__main__.py` maps the name to a class and treats an unknown one as this.
+DESIGN_DEFAULT = "current"
+DESIGNS = ("current", "compact")
+
 #: How many model names the settings menu will remember. A ceiling rather than a
 #: judgement: this list is only ever appended to, by hand, one name at a time, and a menu
 #: is not a place for an unbounded list.
@@ -437,6 +446,12 @@ class Profile:
         #: paragraph or a pair of hands that cannot hold two keys down. Judged in
         #: `flow/hotkey.py`, which knows what the words mean.
         self.gesture: str = GESTURE_DEFAULT
+        #: Which UI design to launch. A name and not a module path, for `panel`'s
+        #: reason: this module is read on every launch and must not need the modules
+        #: that know what the names draw. The switch applies at next launch — a design's
+        #: whole window tree is built once, in its constructor — so nothing running
+        #: reads this back.
+        self.design: str = DESIGN_DEFAULT
         #: Which model to ask the agent CLI for, "" meaning whatever it defaults to, and
         #: how hard to let it think. Both apply to whichever CLI answers - `refine.tuned`
         #: drops either for a CLI not measured to accept it.
@@ -529,6 +544,9 @@ class Profile:
         self.mic = take("mic", lambda v, _d: bool(v), False)
         self.mic_at = take("mic_at", lambda v, _d: _pair(v), None)
         self.gesture = take("gesture", _text, GESTURE_DEFAULT)
+        self.design = take("design", _text, DESIGN_DEFAULT)
+        if self.design not in DESIGNS:
+            self.design = DESIGN_DEFAULT
         self.cli_model = take("cli_model", _text, "")
         self.cli_effort = take("cli_effort", _text, EFFORT_DEFAULT)
         if self.cli_effort not in EFFORTS:
@@ -579,6 +597,7 @@ class Profile:
             # ended at — so `save` is not only re-emitting what `load` already judged.
             "mic_at": _pair(self.mic_at),
             "gesture": self.gesture,
+            "design": self.design,
             "cli_model": self.cli_model,
             "cli_effort": self.cli_effort,
             "cli_models": list(self.cli_models),
