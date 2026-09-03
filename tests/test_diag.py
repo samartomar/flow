@@ -151,7 +151,7 @@ class TestTheWordsCannotGetIn(Temp):
             s.wait_idle(timeout=5.0)
 
         # A question and its answer, spoken aloud.
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.assertEqual(s.mode, CONVERSE)
         s.draft.set(f"what is {SENTINEL}")
         with mock.patch("flow.session.ask", return_value=(f"{SENTINEL} is a word", "codex")):

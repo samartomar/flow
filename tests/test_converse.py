@@ -19,7 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flow.audio import BLOCK  # noqa: E402
 from flow.help import AUTO_ASK_OFF_LABEL  # noqa: E402
 from flow.profile import Profile  # noqa: E402
-from flow.session import AUTO_ASK_SEC, CONVERSE, DICTATE, Session, State  # noqa: E402
+from flow.session import (  # noqa: E402
+    AUTO_ASK_SEC,
+    CONVERSE,
+    DICTATE,
+    REFINE,
+    Session,
+    State,
+)
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 
@@ -82,8 +89,10 @@ class TestModeSwitch(unittest.TestCase):
     def test_it_starts_in_dictate(self):
         self.assertEqual(session().mode, DICTATE)
 
-    def test_one_action_switches_and_switches_back(self):
+    def test_one_action_cycles_through_all_three(self):
+        # Type → Refine → Ask, wrapping (design/compact/README.md).
         s = session()
+        self.assertEqual(s.toggle_mode(), REFINE)
         self.assertEqual(s.toggle_mode(), CONVERSE)
         self.assertEqual(s.toggle_mode(), DICTATE)
 
@@ -92,12 +101,12 @@ class TestModeSwitch(unittest.TestCase):
         # should not have to say it again — the words are the same words either way.
         s = session()
         s.draft.set("the deploy failed after the migration")
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.assertEqual(s.draft.text, "the deploy failed after the migration")
 
     def test_the_switch_is_announced(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         events = s.events()
         self.assertEqual(next(e.text for e in events if e.kind == "mode"), CONVERSE)
         # Every note, not the last one: the first entry carries a second line now
@@ -116,14 +125,14 @@ class TestSendRouting(unittest.TestCase):
         # The whole risk of this feature: a question pasted into whatever window
         # happened to have focus. send() must hand the caller nothing.
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", return_value=("ALTER TABLE.", "fake")):
             self.assertEqual(s.send(), "")
 
     def test_an_empty_draft_does_not_ask(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         with mock.patch("flow.session.ask") as spy:
             s.draft.set("   ")
             s.send()
@@ -140,7 +149,7 @@ class TestAnswers(unittest.TestCase):
 
     def test_the_answer_is_emitted_and_kept(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self._ask(s, "how do I widen a column", ("Use ALTER TABLE.", "codex"))
         self.assertEqual(s.reply, "Use ALTER TABLE.")
         self.assertIn("Use ALTER TABLE.",
@@ -148,7 +157,7 @@ class TestAnswers(unittest.TestCase):
 
     def test_the_next_question_inherits_the_last_exchange(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self._ask(s, "how do I widen a column", ("Use ALTER TABLE.", "codex"))
         spy = self._ask(s, "and to rename it?", ("Use RENAME COLUMN.", "codex"))
         context = spy.call_args.kwargs["context"]
@@ -159,14 +168,14 @@ class TestAnswers(unittest.TestCase):
         # It is already in the thread by the time the ask starts; passing it as
         # background asks the CLI not to answer the thing it was just asked.
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         spy = self._ask(s, "how do I widen a column", ("Use ALTER TABLE.", "codex"))
         self.assertNotIn("how do I widen a column",
                          spy.call_args.kwargs["context"])
 
     def test_a_failure_is_non_destructive_and_visible(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self._ask(s, "how do I widen a column", (None, "codex timed out after 20s"))
         self.assertEqual(s.reply, "")
         self.assertTrue(any(e.kind == "error" for e in s.events()))
@@ -174,7 +183,7 @@ class TestAnswers(unittest.TestCase):
 
     def test_the_question_survives_a_failure_in_the_thread(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self._ask(s, "how do I widen a column", (None, "no agent CLI found on PATH"))
         self.assertIn("how do I widen a column", s.thread.turns)
 
@@ -188,7 +197,7 @@ class TestNewConversationIsOneAct(unittest.TestCase):
 
     def asked(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
             s.send()
@@ -232,7 +241,7 @@ class TestNewConversationIsOneAct(unittest.TestCase):
         # It belongs to a conversation that no longer exists. `_pump_ask` drops a result
         # whose op has moved, and clearing the op is what moves it.
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("a question")
         with mock.patch("flow.session.ask", return_value=("late answer", "codex")):
             s.send()
@@ -266,7 +275,7 @@ class TestTheFirstConverseEntrySaysAPauseSends(unittest.TestCase):
 
     def entered(self, profile=None):
         s = session(profile=profile)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         return " | ".join(e.text for e in s.events() if e.kind == "note")
 
     def test_the_first_entry_names_the_pause_and_the_setting(self):
@@ -309,9 +318,9 @@ class TestTheFirstConverseEntrySaysAPauseSends(unittest.TestCase):
     def test_going_back_to_dictate_says_nothing_about_it(self):
         p = self.profile()
         s = session(profile=p)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.events()
-        s.toggle_mode()
+        s.toggle_mode(to=DICTATE)
         said = " | ".join(e.text for e in s.events() if e.kind == "note")
         self.assertNotIn(AUTO_ASK_OFF_LABEL, said)
 
@@ -337,7 +346,7 @@ class TestTheThreadStoresTheCleanedAnswer(unittest.TestCase):
         from flow import refine
 
         s = session(cli=refine.named("kiro-cli"))
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.refine._invoke", return_value=(self.FURNITURE, "")):
             s.send()
@@ -378,7 +387,7 @@ class TestSpokenReplies(unittest.TestCase):
     def test_the_answer_is_spoken_when_a_speaker_is_attached(self):
         sp = FakeSpeaker()
         s = session(speaker=sp)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
             s.send()
@@ -388,7 +397,7 @@ class TestSpokenReplies(unittest.TestCase):
     def test_nothing_is_spoken_when_the_ask_failed(self):
         sp = FakeSpeaker()
         s = session(speaker=sp)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", return_value=(None, "timed out")):
             s.send()
@@ -397,7 +406,7 @@ class TestSpokenReplies(unittest.TestCase):
 
     def test_a_session_without_a_speaker_stays_silent_and_does_not_crash(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
             s.send()
@@ -483,7 +492,7 @@ class TestTheAnswerArrivesEvenIfNobodyIsListening(unittest.TestCase):
 
     def test_pump_results_delivers_a_reply_with_no_audio_pump(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
             s.send()
@@ -500,7 +509,7 @@ class TestTheAnswerArrivesEvenIfNobodyIsListening(unittest.TestCase):
         # the violet "still thinking" state vanished exactly when it was wanted.
         s = session()
         s.start()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", return_value=("Use ALTER TABLE.", "codex")):
             s.send()
@@ -551,7 +560,7 @@ class TestTheCliIsToldTheConversationTheCardIsShowing(unittest.TestCase):
         # The measured shape: four prior turns, question and reply alternating, none of
         # them short. All four used to be three.
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         turns = [f"turn {i} " + "x" * 400 for i in range(4)]
         context = self.asked(s, turns)
         self.assertEqual(len(context), 4, [t[:12] for t in context])
@@ -559,7 +568,7 @@ class TestTheCliIsToldTheConversationTheCardIsShowing(unittest.TestCase):
     def test_and_a_conversation_that_still_outruns_the_bound_says_so(self):
         """The silence was the worse half. A bound nobody is told about is amnesia."""
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         turns = [f"turn {i} " + "x" * 3000 for i in range(6)]
         context = self.asked(s, turns)
         self.assertLess(len(context), 6)
@@ -567,7 +576,7 @@ class TestTheCliIsToldTheConversationTheCardIsShowing(unittest.TestCase):
 
     def test_and_says_nothing_when_nothing_was_dropped(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.asked(s, ["short one", "(reply) short answer"])
         self.assertNotIn("the CLI saw the last", self.notes(s))
 
@@ -605,7 +614,7 @@ class TestAFallbackThatRescuesACallIsNotSilent(unittest.TestCase):
 
     def run_ask(self, fake):
         s = session(diag=self.Recording())
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column")
         with mock.patch("flow.session.ask", side_effect=fake):
             s.send()
@@ -659,7 +668,7 @@ class TestSendSaysWhenItRefuses(unittest.TestCase):
         sentence was about the wrong object.
         """
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.thread.add("what is the deploy order")
         s.thread.add("(reply) migrations first, then the workers")
         s.events()
@@ -670,7 +679,7 @@ class TestSendSaysWhenItRefuses(unittest.TestCase):
 
     def test_a_second_ask_while_one_is_in_flight_says_so(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("first question")
         with mock.patch("flow.session.ask", return_value=("answer", "codex")):
             s.send()
@@ -688,7 +697,7 @@ class TestCorrectionLoopStillApplies(unittest.TestCase):
 
     def test_an_edit_shapes_the_question_before_it_is_asked(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I widen a column in postgres")
         s._route("change postgres to MySQL")
         self.assertIn("MySQL", s.draft.text)
@@ -721,7 +730,7 @@ class TestSpeechIsARuntimeChoice(unittest.TestCase):
     def test_muting_silences_the_next_reply(self):
         sp = FakeSpeaker()
         s = session(speaker=sp)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.assertFalse(s.toggle_speech())
         self._answer(s)
         self.assertEqual(sp.said, [])
@@ -729,7 +738,7 @@ class TestSpeechIsARuntimeChoice(unittest.TestCase):
     def test_unmuting_restores_it(self):
         sp = FakeSpeaker()
         s = session(speaker=sp)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.toggle_speech()
         self.assertTrue(s.toggle_speech())
         self._answer(s)
@@ -745,7 +754,7 @@ class TestSpeechIsARuntimeChoice(unittest.TestCase):
         # Muting silences the voice, it does not discard the answer.
         sp = FakeSpeaker()
         s = session(speaker=sp)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.toggle_speech()
         self._answer(s)
         self.assertEqual(s.reply, "Use ALTER TABLE.")
@@ -763,7 +772,7 @@ class TestAutoAsk(unittest.TestCase):
 
     def _armed(self, **kw):
         s = session(**kw)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("can you hear me")
         s._after_draft_change()
         s.events()
@@ -788,7 +797,7 @@ class TestAutoAsk(unittest.TestCase):
     def test_dictate_mode_never_sends_itself(self):
         # R5 in full force: this one pastes into whatever has focus.
         s = self._armed()
-        s.toggle_mode()
+        s.toggle_mode(to=DICTATE)
         self.assertEqual(s.mode, DICTATE)
         self._fire(s)
         self.assertEqual(s.draft.text, "can you hear me")
@@ -870,7 +879,7 @@ class TestTheProviderIsNamedBeforeTheFact(unittest.TestCase):
     def test_switching_to_converse_names_the_cli_and_says_it_leaves(self):
         s = session()
         with mock.patch("flow.session.available", return_value=self.found("codex")):
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
         note = self.notes(s)
         self.assertIn("codex", note)
         self.assertIn("leaves this machine", note)
@@ -878,15 +887,15 @@ class TestTheProviderIsNamedBeforeTheFact(unittest.TestCase):
     def test_dictate_mode_makes_no_such_claim(self):
         # Nothing leaves the machine in dictate mode, so nothing should say it does.
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.events()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.assertNotIn("leaves this machine", self.notes(s))
 
     def test_an_absent_cli_is_said_plainly_rather_than_named(self):
         s = session()
         with mock.patch("flow.session.available", return_value=[]):
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
         note = self.notes(s)
         self.assertIn("no agent CLI", note)
         self.assertNotIn("leaves this machine", note, "it cannot leave via nothing")
@@ -934,7 +943,7 @@ class TestTheNotesObeyThePin(unittest.TestCase):
         codex, claude = self.clis()
         s = session(cli=claude)
         with mock.patch("flow.session.available", return_value=[codex, claude]):
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
         note = self.notes(s)
         self.assertIn("claude", note)
         self.assertNotIn("codex", note, "the note named a CLI that will not be called")
@@ -965,11 +974,11 @@ class TestTheNotesObeyThePin(unittest.TestCase):
         codex, claude = self.clis()
         s = session()
         with mock.patch("flow.session.available", return_value=[codex, claude]):
-            s.toggle_mode()
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
+            s.toggle_mode(to=DICTATE)
             s.set_cli(claude)
             s.events()
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
         self.assertIn("claude", self.notes(s))
 
     def test_with_no_pin_the_preference_order_still_decides(self):
@@ -977,7 +986,7 @@ class TestTheNotesObeyThePin(unittest.TestCase):
         codex, claude = self.clis()
         s = session()
         with mock.patch("flow.session.available", return_value=[codex, claude]):
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
         self.assertIn("codex", self.notes(s))
 
     def test_a_pin_that_is_not_on_path_is_still_what_gets_named(self):
@@ -989,7 +998,7 @@ class TestTheNotesObeyThePin(unittest.TestCase):
         codex, claude = self.clis()
         s = session(cli=claude)
         with mock.patch("flow.session.available", return_value=[codex]):
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
         self.assertIn("claude", self.notes(s))
 
     def test_the_marker_and_the_note_cannot_disagree(self):
@@ -1060,7 +1069,7 @@ class TestTheReplyCanBecomeTheDraft(unittest.TestCase):
 
     def answered(self, text: str = "Write a migration that adds last_seen_at.", **kw):
         s = session(**kw)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("how do I add a column")
         with mock.patch("flow.session.ask", return_value=(text, "codex")):
             s.send()

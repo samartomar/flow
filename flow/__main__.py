@@ -30,7 +30,7 @@ from .profile import DESIGN_DEFAULT, DESIGNS
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, EFFORT_DEFAULT, EFFORTS, available, named, unverified, unverified_note
-from .session import AUTO_ASK_SEC, Session
+from .session import AUTO_ASK_SEC, CONVERSE, Session
 from .stats import TYPING_WPM
 from .stats import report as stats_report
 from .version import check_update, version
@@ -734,7 +734,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.no_auto_ask:
         session.auto_ask = False
     if args.converse:
-        session.toggle_mode()
+        # `to=`, not a bare cycle: with three modes, one blind flip from
+        # DICTATE lands on REFINE — exactly the defect a three-way cycle
+        # does not announce.
+        session.toggle_mode(to=CONVERSE)
         say("mode: CONVERSE - the Ask button puts the draft to the agent CLI "
             "and the reply appears in Flow")
         if session.auto_ask:

@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flow.audio import BLOCK  # noqa: E402
 from flow.edits import is_artifact_request  # noqa: E402
 from flow.refine import ASK_MAX_CHARS, Cli, ask  # noqa: E402
-from flow.session import Session  # noqa: E402
+from flow.session import CONVERSE, Session  # noqa: E402
 
 CLI = Cli("codex", ("codex", "exec"))
 
@@ -72,7 +72,7 @@ class FakeSpeaker:
 
 def converse_session(speaker=None) -> Session:
     s = Session(asr=FakeAsr(), mic=FakeMic(), speaker=speaker)
-    s.toggle_mode()
+    s.toggle_mode(to=CONVERSE)
     return s
 
 

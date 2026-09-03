@@ -97,7 +97,7 @@ class Menu(unittest.TestCase):
     def build(self, profile=None, *, speaker=None, converse=False, clis=(),
               workspace=None, voices=(), recent=(), notes=None,
               can_take_reply=True, armed=False, gesture=None,
-              mic=False) -> FakeMenu:
+              mic=False, mode=None) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -110,7 +110,7 @@ class Menu(unittest.TestCase):
 
         self.pill = pill = ui.Pill.__new__(ui.Pill)
         pill.session = mock.Mock(
-            mode=ui.State.DRAFT if converse else ui.DICTATE,
+            mode=mode or (ui.CONVERSE if converse else ui.DICTATE),
             speaker=speaker, profile=profile, muted=False, auto_ask=True, cli=None,
             send_words=(SEND_WORD, SEND_ENTER_WORD), workspace=workspace,
         )
@@ -203,6 +203,19 @@ class TestWhatStaysOneTap(Menu):
         # itself says where you are; what is inside it is the choice.
         self.assertIn("Dictate", self.build(self.profile()).cascades)
         self.assertIn("Converse", self.build(self.profile(), converse=True).cascades)
+
+    def test_the_mode_radios_offer_all_three_and_choose_directly(self):
+        # A three-mode world cannot choose by flipping: one blind toggle from
+        # Dictate lands on Refine. Every radio goes straight at its target.
+        top = self.build(self.profile())
+        radios = top.cascades["Dictate"].radios
+        self.assertEqual([label for label, _v in radios],
+                         ["Dictate", "Refine", "Converse"])
+        top.cascades["Dictate"].commands["Converse"]()
+        self.pill.session.toggle_mode.assert_called_once_with(to="converse")
+
+    def test_the_mode_cascade_names_refine_when_in_it(self):
+        self.assertIn("Refine", self.build(self.profile(), mode="refine").cascades)
 
     def test_copy_sits_above_clear_inside_draft(self):
         # One saves the words and one destroys them; the order is which hand reaches
@@ -396,6 +409,12 @@ class TestWhatMovedInside(Menu):
                          self.settings(self.profile()).commands)
         self.assertIn("Ask only when I press it",
                       self.settings(self.profile(), converse=True).commands)
+
+    def test_the_auto_ask_toggle_stays_out_of_refine_mode(self):
+        # Refine settles nothing on a pause — the countdown is converse's, and
+        # the `!= DICTATE` read used to offer it there anyway.
+        self.assertNotIn("Ask only when I press it",
+                         self.settings(self.profile(), mode="refine").commands)
 
     def test_the_cli_picker_appears_only_when_there_is_a_choice(self):
         # `Mock(name=...)` names the mock rather than setting the attribute, and the

@@ -46,7 +46,7 @@ from . import tray
 from .notes import Notes
 from .profile import DESIGNS, DESIGN_DEFAULT, path_key, resolve_workspace
 from .refine import EFFORT_DEFAULT, EFFORTS, available
-from .session import CONVERSE, DICTATE, Session, State
+from .session import CONVERSE, DICTATE, REFINE, Session, State
 from .stats import today_note
 from .thread import MAX_TURNS as THREAD_MAX_TURNS
 from .version import version
@@ -1968,20 +1968,35 @@ def _speaker(c: tk.Canvas, cx: float, cy: float, colour: str, muted: bool, tags)
                          outline=colour, width=2, tags=tags)
 
 
-def _mode_glyph(c: tk.Canvas, cx: float, cy: float, colour: str, converse: bool,
-                tags) -> None:
-    """Lines of text for dictate, a speech bubble for converse.
+#: What each session mode is called where a human reads it — the settings-row
+#: cascade and its radios. One map, so the day a fourth mode arrives the menu
+#: is one entry, not a scatter of two-way `!= DICTATE` reads.
+MODE_NAMES = {DICTATE: "Dictate", REFINE: "Refine", CONVERSE: "Converse"}
 
-    The two modes differ in *where the words go* — into the window you were in, or to an
-    agent that answers — so the marks are "text" and "a reply", not two abstractions
-    somebody has to learn.
+
+def _mode_glyph(c: tk.Canvas, cx: float, cy: float, colour: str, mode: str,
+                tags) -> None:
+    """Lines of text for dictate, a pen for refine, a speech bubble for converse.
+
+    The modes differ in *where the words go* — into the window you were in, to an
+    agent that shapes them and hands them back, or to an agent that answers — so
+    the marks are "text", "a pen" and "a reply", not abstractions somebody has to
+    learn. Read `mode`, not a converse bool: the two-way read treated REFINE as
+    CONVERSE, and a speech bubble over a mode that pastes is exactly the lie the
+    third mode was not supposed to introduce silently.
     """
     r = ICON_SIZE / 2
-    if converse:
+    if mode == CONVERSE:
         _round_rect(c, cx - r, cy - r + 1, cx + r, cy + r - 4, 4,
                     fill="", outline=colour, tags=tags)
         c.create_line(cx - 2, cy + r - 4, cx - 4, cy + r, fill=colour, width=2,
                       tags=tags)
+    elif mode == REFINE:
+        # A pen: the shaft, and the nib pointing back at the draft it shapes.
+        c.create_line(cx - r + 3, cy + r - 3, cx + r - 2, cy - r + 2,
+                      fill=colour, width=2, tags=tags)
+        c.create_line(cx - r + 3, cy + r - 3, cx - r, cy + r,
+                      fill=colour, width=2, tags=tags)
     else:
         for i, width in enumerate((r * 2, r * 2, r * 1.2)):
             y = cy - r + 3 + i * 5
@@ -2236,7 +2251,7 @@ def _row_icons(c: tk.Canvas, pill, x: float, mid: float, tags="row") -> float:
     session = getattr(pill, "session", None)
     if session is None:
         return x
-    converse = getattr(session, "mode", DICTATE) != DICTATE
+    mode = getattr(session, "mode", DICTATE)
 
     # Once per canvas, not once per frame. `tag_bind` registers a fresh Tcl command
     # on every call and Tkinter frees none of them until the widget is destroyed
@@ -2261,7 +2276,7 @@ def _row_icons(c: tk.Canvas, pill, x: float, mid: float, tags="row") -> float:
         hit("row-voice", getattr(session, "toggle_speech", lambda: None))
         x += ICON_SIZE + ICON_GAP
 
-    _mode_glyph(c, x + ICON_SIZE / 2, mid, ICON_MODE, converse, ("row-mode", tags))
+    _mode_glyph(c, x + ICON_SIZE / 2, mid, ICON_MODE, mode, ("row-mode", tags))
     hit("row-mode", getattr(session, "toggle_mode", lambda: None))
     return x + ICON_SIZE + ICON_GAP
 
@@ -2970,19 +2985,21 @@ class Pill(tk.Tk):
         """
         sub = _dark_menu(parent)
         current = self.session.mode
-        self._mode_var = tk.StringVar(value="Converse" if current != DICTATE else "Dictate")
+        self._mode_var = tk.StringVar(value=MODE_NAMES.get(current, "Dictate"))
 
         def choose(target) -> None:
-            if self.session.mode != target:
-                self.session.toggle_mode()
+            # `to=`, not a bare cycle: in a three-mode world "choose Converse"
+            # cannot be a flip — one blind toggle from Dictate lands on Refine.
+            self.session.toggle_mode(to=target)
 
-        for name, target in (("Dictate", DICTATE), ("Converse", CONVERSE)):
+        for name, target in (("Dictate", DICTATE), ("Refine", REFINE),
+                             ("Converse", CONVERSE)):
             sub.add_radiobutton(
                 label=name, value=name, variable=self._mode_var,
                 command=lambda t=target: choose(t),
             )
         parent.add_cascade(
-            label="Converse" if current != DICTATE else "Dictate", menu=sub)
+            label=MODE_NAMES.get(current, "Dictate"), menu=sub)
 
     def _draft_menu(self, parent: tk.Menu) -> None:
         """The verbs that act on the words, in one place instead of four rows.
@@ -3299,7 +3316,10 @@ class Pill(tk.Tk):
                 command=self.session.toggle_speech,
             )
             self._voice_menu(sub)
-        if self.session.mode != DICTATE:
+        if self.session.mode == CONVERSE:
+            # Auto-ask is converse's countdown; Refine settles nothing on a
+            # pause, and a toggle for it there would switch a feature that
+            # mode does not have.
             sub.add_command(
                 label=AUTO_ASK_OFF_LABEL if self.session.auto_ask
                 else AUTO_ASK_ON_LABEL,

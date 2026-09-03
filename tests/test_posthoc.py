@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flow.audio import BLOCK  # noqa: E402
 from flow.edits import plan  # noqa: E402
 from flow.profile import Profile  # noqa: E402
-from flow.session import Session  # noqa: E402
+from flow.session import CONVERSE, Session  # noqa: E402
 
 
 def tmp_profile() -> Profile:
@@ -293,7 +293,7 @@ class TestEligibilityDiesWithTheDraftItDiagnosed(unittest.TestCase):
         # the draft, because someone who dictated three sentences and then decides to ask
         # about them should not have to say it again. So this is cleared by name.
         s, _mic = self._appended()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.assertFalse(s.can_rescue)
 
     def test_an_undo_back_to_the_same_text_still_takes_it_away(self):

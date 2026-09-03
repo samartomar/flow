@@ -297,7 +297,7 @@ class TestKeeping(unittest.TestCase):
 
     def test_the_bare_verb_keeps_the_answer_with_its_question(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         answered(s, "how do I widen a column", "Use ALTER TABLE.")
         self.assertTrue(s.keep_note())
         note = s.notes.all[0]
@@ -338,7 +338,7 @@ class TestKeeping(unittest.TestCase):
     def test_the_spoken_verb_reaches_the_session(self):
         # End to end through the router, which is the only path a user has.
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         answered(s, "how do I widen a column", "Use ALTER TABLE.")
         s._route("keep note")
         self.assertEqual(len(s.notes), 1)

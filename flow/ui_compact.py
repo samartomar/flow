@@ -13,15 +13,15 @@ while armed and `session.pump_results()` while not, drains `session.events()`,
 and reads the state attributes (`state`, `mode`, `level_db`, `hearing`,
 `busy`, `draft`) at draw time.
 
-**The spec has three modes; the session has two.** Type / Refine / Ask
-(README) map onto DICTATE / — / CONVERSE: Type is dictate, Ask is converse,
-and Refine's gold has no session counterpart yet. That is a documented gap,
-not something this file extends `session.py` for — see `REFINE_GOLD` below.
-What exists is the panel the Refine and Ask artboards draw the pill as the
-foot of, built mode-driven against the modes that exist: `PANEL_SPEC` maps a
-mode to its panel, Ask (CONVERSE) is the sole entry, and item 4's REFINE
-lands as one more entry — the mechanism is already mode-generic. Spoken
-punctuation is still a stub citing its artboard, not a feature.
+**The spec has three modes, and so does the session.** Type / Refine / Ask
+(README) map onto DICTATE / REFINE / CONVERSE: Type is dictate, Ask is
+converse, and Refine is the polish pass over the held draft with the workspace
+as the CLI's system role — an action on a draft that became a mode in
+session.py, delivered as a `reply` rather than a draft rewrite. The panel the
+Refine and Ask artboards draw the pill as the foot of is mode-driven:
+`PANEL_SPEC` maps a mode to its panel, and Type is the only mode with no
+entry (README: "Type never opens a panel"). Spoken punctuation is still a
+stub citing its artboard, not a feature.
 
 Windowing is the same five probed attributes every Flow window wears
 (`overrideredirect`, `-topmost`, `-alpha`, `-transparentcolor`, `-toolwindow`),
@@ -42,7 +42,7 @@ import tkinter as tk
 import traceback
 from pathlib import Path
 
-from .session import CONVERSE, DICTATE, Session, State
+from .session import CONVERSE, DICTATE, REFINE, Session, State
 
 # The hues and the fonts are ui.py's own, imported rather than restated: the
 # spec's rule is "the hues flow/ui.py already gives those commands" (README),
@@ -110,22 +110,18 @@ PILL_W = 120
 PILL_H = 34
 PILL_ALPHA = 0.94
 
-#: Mic glyph tint per mode (README: "white Type … violet Ask"). Keyed on the
-#: session's two modes; the spec's third is below.
+#: Refine's gold (README, and ui.py's Refine chip at flow/ui.py:2200). Declared
+#: once, ahead of the mode itself, and aliased into the two maps that wear it:
+#: a colour written down twice is a colour that drifts.
+REFINE_GOLD = "#E1B75C"
+
+#: Mic glyph tint per mode (README: "white Type … violet Ask") — all three,
+#: now that the session has all three.
 MODE_TINT = {
     DICTATE: TEXT,  # Type
+    REFINE: REFINE_GOLD,  # Refine
     CONVERSE: CARD_ACCENT,  # Ask — the violet ui.py already gives the card
 }
-
-#: Refine's gold (README, and ui.py's Refine chip at flow/ui.py:2200). Declared
-#: so the day the session grows a third mode the hue is already here — and a
-#: constant rather than a map entry because nothing can reach it yet.
-#:
-#: TODO: no session counterpart. The session is DICTATE/CONVERSE and the spec's
-#: Refine — "hands the CLI the workspace as its system role"
-#: (design/compact/README.md) — is a mode session.py does not have. When it
-#: lands, this joins MODE_TINT.
-REFINE_GOLD = "#E1B75C"
 
 #: Ring colour per state (README: "green hearing, blue CLI, red wrong, none at
 #: rest"). The same hues ui.py's ACCENT map gives the same states. IDLE and
@@ -161,8 +157,8 @@ BAR_MAX_HALF = 7.0  # half-height at full level — 14 px of travel inside 34
 #: pill, which becomes its foot — one window, one seam, the foot still
 #: holdable for "say more" / reply, closed by Send / Esc / click-outside
 #: (design/compact/README.md). The band is a fixed height: the artboards grow
-#: with their text, and the residual delta is that tkinter here clips instead
-#: — see `HEARD_CHARS` / `RESULT_CHARS`.
+#: with their text, and the residual delta is that tkinter here wraps to a
+#: line budget instead — see `LINE_CHARS` / `_fit`.
 PANEL_W = 400
 PANEL_H = 200
 
@@ -192,19 +188,34 @@ PAD_X = 16
 COPY_RECT = (PAD_X, FOOTER_Y, 72, FOOTER_Y + CHIP_H)
 SEND_RECT = (PANEL_W - 74, FOOTER_Y, PANEL_W - 16, FOOTER_Y + CHIP_H)
 CLOSE_RECT = (PANEL_W - 30, 8, PANEL_W - 6, 30)
-#: Text is clipped, not scrolled: the band is fixed-height, and these are the
-#: most characters a block shows before an ellipsis says there was more.
-HEARD_CHARS = 140
-RESULT_CHARS = 420
+#: The panel's text budget. Tk wraps canvas text by pixel width and happily
+#: wraps *past the bottom of the block it is given* — `.shots/11` drew a
+#: three-line answer through the footer chips before this was measured. So the
+#: band wraps itself, in characters: FONT_BODY measures about 7 px a
+#: character, the blocks are 356-368 px wide, and the line counts are what the
+#: fixed rows below leave between a block's first row and the next block's.
+LINE_CHARS = 52
+HEARD_LINES = 2
+RESULT_LINES = 2
 
 #: The mode → panel map: which modes raise the panel on a hold, and what their
-#: panel looks like. **This is the one place item 4's REFINE entry lands** —
-#: the mechanism (open on hold, `heard` ← partials and the release's draft,
-#: `result` ← the reply, a Send chip when `send` is true) is mode-generic;
-#: only the entry is missing. Ask (CONVERSE) is the sole entry while the
-#: session has two modes, and Type is never here (README: "Type never opens a
-#: panel").
+#: panel looks like. The mechanism (open on hold, `heard` ← partials and the
+#: release's draft, `result` ← the reply, a Send chip when `send` is true) is
+#: mode-generic; the entries are the whole of what differs. Type is never here
+#: (README: "Type never opens a panel").
 PANEL_SPEC = {
+    REFINE: {
+        # Refine.dc.html: the raw dictation in PLACEHOLDER grey under a "heard"
+        # tag; the shaped text under a gold "refined for this repo" tag — no
+        # accent bar, the tag carries the hue; the footer's Send pastes what
+        # came back.
+        "heard_tag": "heard",
+        "heard_fill": PLACEHOLDER,
+        "result_tag": "refined for this repo",
+        "result_accent": REFINE_GOLD,
+        "hint": "hold the mic to say more",
+        "send": True,
+    },
     CONVERSE: {
         # Ask.dc.html: the question is body text, not a grey transcript, and
         # carries no tag; the answer is a card with a violet left bar; the
@@ -305,10 +316,31 @@ def _hit(rect, x, y) -> bool:
     return x1 <= x < x2 and y1 <= y < y2
 
 
-def _clip(text: str, chars: int) -> str:
-    """`text` cut to `chars` with an ellipsis — the fixed-height band's answer
-    to the artboards growing with their content."""
-    return text if len(text) <= chars else text[:chars - 1].rstrip() + "…"
+def _fit(text: str, line_chars: int, max_lines: int) -> str:
+    """`text` word-wrapped to at most `max_lines` lines of about `line_chars`,
+    with an ellipsis on the last when there was more.
+
+    The fixed-height band's answer to Tk's width-only wrapping: wrapped here,
+    on explicit newlines, the text cannot spill into the block below it — see
+    `LINE_CHARS` for what this costs.
+    """
+    words, lines, cur = text.split(), [], ""
+    truncated = False
+    for word in words:
+        trial = f"{cur} {word}".strip()
+        if cur and len(trial) > line_chars:
+            lines.append(cur)
+            if len(lines) == max_lines:
+                truncated = True
+                break
+            cur = word
+        else:
+            cur = trial
+    if truncated:
+        lines[-1] = lines[-1].rstrip() + "…"
+    else:
+        lines.append(cur)
+    return "\n".join(lines)
 
 
 class CompactPill(tk.Tk):
@@ -1086,8 +1118,8 @@ class CompactPill(tk.Tk):
         bottom border that is the one line between panel and foot — the join
         reads as an internal divider, not two windows touching
         (flow/ui.py:4985-5000's `seam="top"`, adapted to the capsule). Text is
-        `create_text` with ui.py's own font tuples, wrapped by Tk's `width`
-        and clipped by character count: the band is fixed-height where the
+        `create_text` with ui.py's own font tuples, wrapped to a line budget
+        by `_fit` rather than by Tk — the band is fixed-height where the
         artboards grow, and that is the residual delta.
         """
         spec = self._spec()
@@ -1118,33 +1150,40 @@ class CompactPill(tk.Tk):
         # release's draft makes them final — the same honesty FONT_PARTIAL
         # gives the shipped bubble.
         y = HEARD_TAG_Y
+        lines = 3
         if spec["heard_tag"] is not None:
             c.create_text(PAD_X, y, anchor="w", text=spec["heard_tag"],
                           font=FONT_TAG, fill=DIM)
             y = HEARD_Y
-        heard = _clip(self._panel_heard, HEARD_CHARS)
+            lines = HEARD_LINES
+        heard = _fit(self._panel_heard, LINE_CHARS, lines)
         if heard:
-            c.create_text(PAD_X, y, anchor="nw", text=heard, width=368,
+            c.create_text(PAD_X, y, anchor="nw", text=heard,
                           font=FONT_BODY if self._panel_heard_final
                           else FONT_PARTIAL,
                           fill=spec["heard_fill"])
         # The result block: the answer, on its accent bar (Ask.dc.html's
-        # card). Nothing at all while the CLI is still working — the foot's
-        # blue ring is already saying that.
-        result = _clip(self._panel_result, RESULT_CHARS)
+        # card) or under its tag (Refine.dc.html). Nothing at all while the
+        # CLI is still working — the foot's blue ring is already saying that.
+        result = _fit(self._panel_result, LINE_CHARS, RESULT_LINES)
         if result:
             accent = spec["result_accent"]
             if spec["result_tag"] is not None:
+                # Refine.dc.html: the tag carries the hue, the text is plain.
                 c.create_text(PAD_X, RESULT_Y, anchor="w",
                               text=spec["result_tag"], font=FONT_TAG,
                               fill=accent)
-            if accent:
-                c.create_rectangle(PAD_X, RESULT_Y, PAD_X + 2,
-                                   RESULT_Y + 44, fill=accent, outline="")
-            c.create_text(PAD_X + 12, RESULT_Y, anchor="nw", text=result,
-                          width=356, font=FONT_BODY, fill=TEXT)
+                c.create_text(PAD_X, RESULT_Y + 16, anchor="nw", text=result,
+                              font=FONT_BODY, fill=TEXT)
+            else:
+                # Ask.dc.html's card: a violet left bar, no tag.
+                if accent:
+                    c.create_rectangle(PAD_X, RESULT_Y, PAD_X + 2,
+                                       RESULT_Y + 44, fill=accent, outline="")
+                c.create_text(PAD_X + 12, RESULT_Y, anchor="nw", text=result,
+                              font=FONT_BODY, fill=TEXT)
         # The footer: Copy, the hold hint, and Send in the modes that have one
-        # (Refine.dc.html — item 4; Ask's footer stops at the hint).
+        # (Refine.dc.html; Ask's footer stops at the hint).
         x1, y1, x2, y2 = COPY_RECT
         _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
         c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Copy",

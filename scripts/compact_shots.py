@@ -13,6 +13,8 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   ask panel the 400 px band on its foot: strip, heard, result, footer
   asking    the same, mid-ask: heard only, the ring wraps the foot
   closed    120 wide again immediately after the close, proving it returns
+  refine    REFINE at rest: the gold glyph, no ring
+  refine panel  the heard block grey, the result under its gold tag, Send
   menu      the right-click, the only menu the design allows
 
 The gestures (tap cycles, hold talks) are logic, pinned headless in
@@ -38,7 +40,7 @@ from PIL import ImageGrab  # noqa: E402
 
 import flow.ui as ui  # noqa: E402
 import shots  # noqa: E402  — the capture machinery and the fake session
-from flow.session import CONVERSE, DICTATE, State  # noqa: E402
+from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
 from flow.ui_compact import FLASH_FRAMES, CompactPill  # noqa: E402
 
 
@@ -105,6 +107,22 @@ def main() -> None:
         pill._panel_heard_final = True
         pill._panel_result = ""
 
+    def refine_panel():
+        # The answered Refine: the raw dictation in grey, the shaped text
+        # under its gold tag, and the footer Ask does not have — Send.
+        sess.state, sess.mode = State.IDLE, REFINE
+        pill.armed = False
+        pill._panel_mode = REFINE
+        pill._panel_heard = ("make the pill not show any controls just the mic "
+                             "and when i let go it should paste in the window "
+                             "i was in before")
+        pill._panel_heard_final = True
+        pill._panel_result = ("Strip every control from the push-to-talk pill in "
+                              "flow/ui.py — leave the mic glyph and the meter. "
+                              "On release, inject the draft into the window "
+                              "that held focus before the pill.")
+        pill._open_panel()
+
     def menu():
         pill.lift()
         pill.update_idletasks()
@@ -137,6 +155,11 @@ def main() -> None:
         (500, lambda: shot(pill, "08-compact-asking")),
         (0, lambda: pill._close_panel()),
         (500, lambda: shot(pill, "09-compact-closed")),
+        (0, state(State.IDLE, mode=REFINE, armed=False)),
+        (600, lambda: shot(pill, "10-compact-refine")),
+        (0, refine_panel),
+        (700, lambda: shot(pill, "11-compact-refine-panel")),
+        (0, lambda: pill._close_panel()),
         (0, state(State.IDLE, armed=False)),
         (400, menu),
     ]

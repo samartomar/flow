@@ -249,7 +249,7 @@ class TestTheWholeExchangeIsAccountedFor(unittest.TestCase):
     def test_asking_then_speaking_then_quiet(self):
         sp = FakeSpeaker()
         s = session(speaker=sp)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("what does WER stand for")
         with mock.patch("flow.session.ask",
                         return_value=("Word Error Rate.", "codex")):

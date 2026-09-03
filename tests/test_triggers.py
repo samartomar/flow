@@ -428,7 +428,7 @@ class TestConverseIgnoresTheSuffix(unittest.TestCase):
         for word in ("boom", "enter boom"):
             with self.subTest(word=word):
                 p = Pressed(session())
-                p.session.toggle_mode()
+                p.session.toggle_mode(to=CONVERSE)
                 self.assertEqual(p.session.mode, CONVERSE)
                 p.session.draft.set("what is a rollback")
                 with mock.patch("flow.session.ask",
@@ -441,7 +441,7 @@ class TestConverseIgnoresTheSuffix(unittest.TestCase):
 
     def test_the_note_about_the_suffix_is_said_once_and_only_for_enter(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("what is a rollback")
         s.events()
         with mock.patch("flow.session.ask", return_value=("an answer", "codex")):

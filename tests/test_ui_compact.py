@@ -22,7 +22,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import flow.ui_compact as uc  # noqa: E402
-from flow.session import CONVERSE, DICTATE, State  # noqa: E402
+from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
 
 
 class Canvas:
@@ -152,10 +152,16 @@ class TestTheGlyphCarriesTheMode(unittest.TestCase):
         self.assertEqual(glyph_stroke(p), uc.MODE_TINT[CONVERSE])
         self.assertEqual(uc.MODE_TINT[CONVERSE], "#B48EF5")
 
-    def test_refines_gold_is_declared_but_nowhere_on_the_map(self):
-        # The session has two modes; the spec's third hue waits for it.
+    def test_refines_gold_joined_the_map_with_the_mode(self):
+        # Declared ahead of the session's third mode; it joined the map the
+        # day REFINE landed, per the brief's rule.
         self.assertEqual(uc.REFINE_GOLD, "#E1B75C")
-        self.assertNotIn(uc.REFINE_GOLD, uc.MODE_TINT.values())
+        self.assertEqual(uc.MODE_TINT[REFINE], uc.REFINE_GOLD)
+
+    def test_refine_is_gold(self):
+        p = pill(State.LISTENING, mode=REFINE)
+        p._draw()
+        self.assertEqual(glyph_stroke(p), uc.REFINE_GOLD)
 
 
 class TestTheRingCarriesTheState(unittest.TestCase):
@@ -609,9 +615,82 @@ class TestThePanelOpensForAskAndNeverForType(unittest.TestCase):
         self.assertFalse(p._panel_open)
 
     def test_the_map_is_the_only_place_a_mode_joins_the_panel(self):
-        # Item 4's seam: REFINE arrives as one entry here, not as a branch.
-        self.assertEqual(list(uc.PANEL_SPEC), [CONVERSE])
+        # Type is never here (README); the two panel modes are the whole map.
+        self.assertEqual(set(uc.PANEL_SPEC), {REFINE, CONVERSE})
         self.assertNotIn(DICTATE, uc.PANEL_SPEC)
+
+
+class TestTheRefinesWholeArc(unittest.TestCase):
+    """Refine as a mode: hold, raw dictation heard, shaped text back, Send
+    pastes. The session side is pinned in test_refine_mode.py; this is the
+    panel's half — the mode landed as one `PANEL_SPEC` entry and the
+    mechanism already worked."""
+
+    def test_a_hold_in_refine_opens_the_panel(self):
+        p = panel_pill(mode=REFINE)
+        p._talk_start()
+        self.assertTrue(p._panel_open)
+        self.assertEqual(p._panel_mode, REFINE)
+
+    def test_the_release_arms_the_ask_path_not_the_paste(self):
+        # `_talk_end`'s gate, revisited: PANEL_SPEC covers REFINE, and the
+        # paste rule stays Type-only.
+        p = panel_pill(State.LISTENING, mode=REFINE)
+        p.session.talk_end.return_value = True
+        p._talk_end(send=True)
+        self.assertTrue(p._ask_pending)
+        self.assertFalse(p._send_pending)
+
+    def test_the_shaped_text_lands_in_the_result_block(self):
+        from flow.session import Event
+        p = panel_pill(State.REFINING, mode=REFINE)
+        p._panel_open = True
+        p.session.events.return_value = [Event("reply", "the shaped prompt")]
+        p._pump_events()
+        self.assertEqual(p._panel_result, "the shaped prompt")
+
+    def test_the_send_chip_pastes_the_result_and_closes(self):
+        sent = []
+        p = panel_pill(mode=REFINE,
+                       on_send=lambda text, target=None: sent.append((text, target)) or "")
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = "the shaped prompt"
+        p.paste_target = 0xBEEF
+        p._panel_click(mock.Mock(x=uc.SEND_RECT[0] + 4, y=uc.SEND_RECT[1] + 4))
+        self.assertEqual(sent, [("the shaped prompt", 0xBEEF)])
+        self.assertFalse(p._panel_open)
+
+    def test_the_refine_panel_draws_the_gold_tag_and_send(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_heard = "the raw dictation"
+        p._panel_heard_final = True
+        p._panel_result = "the shaped prompt"
+        p._draw()
+        texts = [t[1] for t in p.canvas.texts]
+        self.assertIn("heard", texts)
+        self.assertIn("refined for this repo", texts)
+        self.assertIn("hold the mic to say more", texts)
+        self.assertIn("Send", texts)
+        # The tag carries the hue — Refine's result has no accent bar
+        # (Refine.dc.html; the bar is Ask's card).
+        gold = [t[1] for t in p.canvas.texts if t[2] == uc.REFINE_GOLD]
+        self.assertEqual(gold, ["refined for this repo"])
+        self.assertEqual([r for r in p.canvas.rects if r[4] == uc.REFINE_GOLD],
+                         [])
+        heard = [t for t in p.canvas.texts if t[1] == "the raw dictation"]
+        self.assertEqual(heard[0][2], uc.PLACEHOLDER)
+
+    def test_the_tap_cycles_three_ways_for_free(self):
+        # The tap calls the session's cycle with no opinion of its own — the
+        # three-way order is toggle_mode's (test_refine_mode.py pins it), so
+        # Type → Refine → Ask cost the pill nothing.
+        p = pill(mode=REFINE)
+        p._on_press()
+        p._on_release()
+        p.session.toggle_mode.assert_called_once_with()
 
 
 class TestTheAsksWholeArc(unittest.TestCase):

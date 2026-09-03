@@ -451,14 +451,19 @@ class State(str, Enum):
     ASKING = "asking"  # P9: a converse-mode question is with the CLI
 
 
-#: P9. Where a finished draft goes when the user sends it.
+#: P9, and the compact design's three modes (design/compact/README.md). Where a
+#: finished draft goes when the user sends it.
 #:
 #: DICTATE pastes into whatever has focus — the original product. CONVERSE hands it to
 #: the agent CLI and renders the reply in Flow, so the same voice loop becomes a
-#: conversation instead of a keyboard. Everything before Send is deliberately identical
-#: in both: the same gate, the same decode, and the same correction grammar shaping the
-#: outgoing words. That is the point — the thing being corrected is a prompt either way.
+#: conversation instead of a keyboard. REFINE is the middle of the three: the draft
+#: goes to the CLI too, but to be *shaped for where it is going* — the workspace is
+#: the CLI's system role — and the shaped text comes back to be pasted, not to be
+#: read. Everything before Send is deliberately identical in all three: the same
+#: gate, the same decode, and the same correction grammar shaping the outgoing
+#: words. That is the point — the thing being corrected is a prompt either way.
 DICTATE = "dictate"
+REFINE = "refine"
 CONVERSE = "converse"
 
 
@@ -889,6 +894,10 @@ class Session:
         #: believed no CLI work was happening.
         self._op = 0
         self._refine_op: int | None = None
+        #: Whether the refine in flight delivers its result as a `reply` (refine
+        #: as a mode — the draft was already committed by send()) rather than as
+        #: a rewrite applied back to the draft (refine as an action on one).
+        self._refine_reply = False
         self._ask_op: int | None = None
         #: P9 profiles: whether the ask in flight requested a piece of work. Decided
         #: when the question leaves (edits.is_artifact_request) and read when the
@@ -3200,19 +3209,24 @@ class Session:
                 return app_note(self.target_app, note)
         return ""
 
-    def _start_refine(self, instruction: str, *, polish: bool = False) -> None:
+    def _start_refine(self, instruction: str, *, polish: bool = False,
+                      text: str | None = None, reply: bool = False) -> None:
         if self._refine_op is not None:
             # The refusal `send()` already makes, for the same reason. Two rewrites of
             # one draft race to write it, and the loser's words are the user's.
             self._emit("note", "still rewriting — say that again when it lands")
             return
         op = self._refine_op = self._next_op()
-        self.diag.write("refine", op=op, chars=len(self.draft.text),
-                        sent=tail_sent(self.draft.text),
+        self._refine_reply = reply
+        before = text if text is not None else self.draft.text
+        self.diag.write("refine", op=op, chars=len(before),
+                        sent=tail_sent(before),
                         route="polish" if polish else "semantic")
         self._cli_started = time.perf_counter()
         # The version this rewrite is an answer about. The draft stays editable for
         # the whole ~7 s the CLI takes, so the result has to be checked against it.
+        # Meaningless for a reply-delivered refine — the draft it would check was
+        # cleared by send() — and harmlessly read anyway: the check is skipped there.
         revision = self.draft.revision
         self._settle_state()
         who = self._provider() or "no CLI on PATH"
@@ -3221,7 +3235,6 @@ class Session:
             f"shaping that into a prompt via {who}" if polish
             else f"refining via {who}: {instruction!r}",
         )
-        before = self.draft.text
         sent = tail_sent(before)
         if sent < len(before):
             # R11 caps what the CLI is handed, and from outside the cap looks like the
@@ -3268,9 +3281,20 @@ class Session:
             # rescue nobody asked for: ignore it rather than act on it.
             return
         self._refine_op = None
+        reply, self._refine_reply = self._refine_reply, False
         self._trace_cli("refine", op, revised is not None, note, skipped)
+        done = (f"refined via {note}" if not skipped
+                else f"refined via {note}, after {'; then '.join(skipped)}")
         if revised is None:
             self._emit("error", f"refine failed ({note}) — draft unchanged")
+        elif reply:
+            # Refine-as-mode's delivery: the shaped text is the *result*, to be
+            # shown and sent on purpose — not a rewrite applied to a draft that
+            # send() already committed to the thread. The surfaces consume it the
+            # way they consume an answer: the card holds it, the compact panel's
+            # result block shows it.
+            self._emit("reply", revised)
+            self._emit("note", done)
         elif revision != self.draft.revision:
             # A rewrite of text that no longer exists. Applying it would delete
             # whatever was said while the CLI was thinking, and would do it invisibly,
@@ -3279,8 +3303,7 @@ class Session:
             self._emit("note", "discarded a stale rewrite — the draft moved on")
         else:
             self.draft.set(revised)
-            self._emit("note", f"refined via {note}" if not skipped
-                       else f"refined via {note}, after {'; then '.join(skipped)}")
+            self._emit("note", done)
         self._after_draft_change()
 
     # -- actions -----------------------------------------------------------
@@ -3370,14 +3393,27 @@ class Session:
         self._emit("conversation", "")
         self._emit("note", "new conversation")
 
-    def toggle_mode(self) -> str:
-        """P9: one action switches dictate <-> converse. Returns the new mode.
+    def toggle_mode(self, to: str | None = None) -> str:
+        """P9: one action cycles dictate → refine → converse. Returns the new mode.
+
+        `to` is the chooser's form of the same switch — the mode menu's radios
+        and `--converse` at launch. A cycle of three cannot serve "choose
+        Converse": one blind flip from DICTATE lands on REFINE now, which is
+        precisely the defect a three-way cycle does not announce. A `to` that
+        names the current mode is a no-op, the way selecting an already-ticked
+        radio anywhere else in this app is.
 
         Deliberately does not touch the draft. Someone who has dictated three sentences
         and then decides they want to ask about them rather than paste them should not
-        have to say it again — the words are the same words either way.
+        have to say it again — the words are the same words either way. That holds for
+        all three modes: the thing being corrected is a prompt either way.
         """
-        self.mode = CONVERSE if self.mode == DICTATE else DICTATE
+        if to is None:
+            to = {DICTATE: REFINE, REFINE: CONVERSE,
+                  CONVERSE: DICTATE}[self.mode]
+        if to == self.mode:
+            return self.mode
+        self.mode = to
         # The one clearing the revision cannot do, because this deliberately does
         # not touch the draft. Asking about words is a different intent from having
         # mis-dictated them, and the chip should not survive the change of mind.
@@ -3407,6 +3443,19 @@ class Session:
                        if who else
                        "converse mode - no agent CLI on PATH, so Ask has nothing to send")
             self._first_converse_notice()
+        elif self.mode == REFINE:
+            who = self._provider()
+            # The same work as converse's sentence: the provider, the fact that the
+            # words leave the machine, and the workspace they leave *from* — which in
+            # this mode is the point of the exercise, because the workspace is the
+            # CLI's system role (design/compact/README.md).
+            where = (f", grounded in {self._refine_cwd}" if self._refine_cwd
+                     else ", with no project behind it")
+            self._emit("note",
+                       f"refine mode - Send shapes the draft via {who}, and the words "
+                       f"leave this machine{where}"
+                       if who else
+                       "refine mode - no agent CLI on PATH, so Refine has nothing to send")
         else:
             self._emit("note", "dictate mode - Send pastes into the focused window"
                        if self.pastes
@@ -3419,7 +3468,10 @@ class Session:
         In dictate mode the caller injects the returned text (stage 8). In converse
         mode the text goes to the CLI instead and the caller gets "" — there is nothing
         to paste, and returning the text anyway would paste the question into whatever
-        window happened to have focus.
+        window happened to have focus. Refine mode is the same shape as converse from
+        here: the draft goes to the CLI to be shaped, the caller gets "", and the
+        shaped text arrives later as a `reply` — what a surface pastes, and when, is
+        the surface's decision, not this method's.
 
         Both refusals below say so out loud. Send is a button, and a button that does
         nothing when pressed reads as broken — which is exactly how it was reported.
@@ -3432,9 +3484,11 @@ class Session:
             # Flow denying the conversation it was displaying. Reported that way on
             # 2026-08-06: "even though there is context". The draft really was empty; the
             # sentence was talking about the wrong object.
-            self._emit("note",
-                       "nothing to ask - say a question first" if self.mode == CONVERSE
+            refusal = ("nothing to ask - say a question first" if self.mode == CONVERSE
+                       else "nothing to refine - the draft is empty"
+                       if self.mode == REFINE
                        else "nothing to send - the draft is empty")
+            self._emit("note", refusal)
             return ""
         # The in-flight calls, not `state`: the state is a display of what is happening
         # and routing can move it, while these two are the fact itself.
@@ -3460,6 +3514,14 @@ class Session:
         self._emit("draft", "")
         if self.mode == CONVERSE and text.strip():
             self._start_ask(text)
+            return ""
+        if self.mode == REFINE and text.strip():
+            # Refine is a mode here, not an instruction: the polish pass over the
+            # whole draft, with the workspace as the CLI's system role — the same
+            # `_refine_cwd` the action form already runs from. The result comes back
+            # as a `reply`, not a rewrite: the raw words are already in the thread,
+            # and the draft the rewrite would have been checked against is gone.
+            self._start_refine("", text=text, polish=True, reply=True)
             return ""
         self._set_state(State.IDLE)
         return text

@@ -21,7 +21,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import flow.ui as ui  # noqa: E402
-from flow.session import CONVERSE, DICTATE, State  # noqa: E402
+from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
 
 
 class Canvas:
@@ -1403,6 +1403,19 @@ class TestTheRowIcons(unittest.TestCase):
         c, p, _x = self.row()
         self.fire(c, "row-mode")
         p.session.toggle_mode.assert_called_once()
+
+    def test_the_mode_glyph_is_a_pen_in_refine_not_a_bubble(self):
+        # The two-way read (`mode != DICTATE`) drew converse's speech bubble
+        # over a mode that pastes — the exact defect the third mode was not to
+        # introduce silently. The pen is its own mark: shaft and nib.
+        shapes = {}
+        for mode in (DICTATE, REFINE, CONVERSE):
+            c = Canvas()
+            ui._mode_glyph(c, 10, 10, "#fff", mode, ())
+            shapes[mode] = (len(c.polys), len(c.lines))
+        self.assertEqual(shapes[DICTATE], (0, 3))   # three lines of text
+        self.assertEqual(shapes[REFINE], (0, 2))    # the pen: shaft and nib
+        self.assertEqual(shapes[CONVERSE], (1, 1))  # the bubble and its tail
 
     def test_the_speaker_toggles_replies(self):
         c, p, _x = self.row(speaker=mock.Mock())
