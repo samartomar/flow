@@ -44,7 +44,7 @@ from .lexicon import (
 )
 from . import tray
 from .notes import Notes
-from .profile import path_key, resolve_workspace
+from .profile import DESIGNS, DESIGN_DEFAULT, path_key, resolve_workspace
 from .refine import EFFORT_DEFAULT, EFFORTS, available
 from .session import CONVERSE, DICTATE, Session, State
 from .stats import today_note
@@ -3025,6 +3025,43 @@ class Pill(tk.Tk):
             )
         parent.add_cascade(label="Panel size", menu=sub)
 
+    def _design_menu(self, parent: tk.Menu) -> None:
+        """Which surface the *next* launch draws, switchable from this one.
+
+        Not applied live, and that is construction rather than omission: a design's
+        whole window tree is built in its constructor (`__main__.py` picks the class
+        before the first frame), so the only honest thing a menu press can do is write
+        the name and say when it takes effect — which is also `--lite`'s rule. The note
+        says "next launch" out loud, because a switch that applied silently later would
+        read as one that did nothing now.
+        """
+        sub = _dark_menu(parent)
+        profile = getattr(self.session, "profile", None)
+        here = getattr(profile, "design", DESIGN_DEFAULT)
+
+        def choose(name: str) -> None:
+            if profile is None:
+                # `--no-profile`. The choice has nowhere to live past this process, and
+                # a design switch exists only at launch — so there is nothing even a
+                # session-local apply could mean. Said rather than swallowed.
+                self.bubble.note("design: not saved - launched with --no-profile")
+                return
+            profile.design = name
+            # The same shape `_panel_menu.choose` uses: a setting somebody chooses once,
+            # so a save that failed has to be visible now.
+            if profile.save():
+                self.bubble.note(f"design: {name} - launches next time")
+            else:
+                self._flash = FLASH_FRAMES
+                self.bubble.note(f"could not save {profile.path}")
+
+        for name in DESIGNS:
+            sub.add_command(
+                label=name.capitalize() + ("   (current)" if name == here else ""),
+                command=lambda n=name: choose(n),
+            )
+        parent.add_cascade(label="Design", menu=sub)
+
     def _gesture_menu(self, parent: tk.Menu) -> None:
         """What the chord does, switchable while Flow is running.
 
@@ -3198,6 +3235,7 @@ class Pill(tk.Tk):
         self._mic_item(sub)
         self._trigger_menu(sub)
         self._panel_menu(sub)
+        self._design_menu(sub)
         # Also the CLI marker's refresh point: a CLI installed mid-session shows up here,
         # where a press is already paying for the PATH walk `_resolved` will not repeat.
         clis = self._clis = available()

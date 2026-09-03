@@ -560,3 +560,65 @@ class TestTheModelIsLoadedBeforeItIsAskedFor(unittest.TestCase):
         _code, _out, _pill, session = launch("win32", ["--no-warm"])
         session.return_value.warm.assert_not_called()
 
+
+class TestTheDesignSwitch(unittest.TestCase):
+    """`--design` / `profile.design` choose which surface is built.
+
+    The switch is launch-time by construction (decisions.md 2026-09-03, "The compact
+    design"): `main()` resolves the name once, before any window tree exists, and the
+    menu writes the profile for the *next* launch. What is pinned here is the wiring —
+    which class is constructed for which name, and that the flag is a remembered
+    setting the way `--cli-model` is, not a one-run override.
+    """
+
+    def setUp(self) -> None:
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name)
+
+    def launch(self, argv=()):
+        import flow.asr
+        import flow.diag
+        import flow.profile
+        import flow.ui
+        import flow.ui_compact
+
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(flow.profile, "DEFAULT_PATH",
+                                  self.dir / "profile.json"), \
+                mock.patch.object(flow.diag, "Diag"), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill") as pill, \
+                mock.patch.object(flow.ui_compact, "CompactPill") as compact, \
+                contextlib.redirect_stdout(out):
+            code = mod.main(["--no-speak", "--no-lexicon", *argv])
+        return code, out.getvalue(), pill, compact
+
+    def test_the_default_launch_builds_the_shipped_pill(self):
+        code, out, pill, compact = self.launch()
+        self.assertEqual(code, 0)
+        self.assertTrue(pill.called)
+        self.assertFalse(compact.called)
+        # Nothing to report when nothing was chosen: the shipped design is the default,
+        # and a line naming it every launch would be noise about the ordinary case.
+        self.assertNotIn("design:", out)
+
+    def test_the_flag_builds_the_compact_pill_and_is_remembered(self):
+        code, out, pill, compact = self.launch(["--design", "compact"])
+        self.assertEqual(code, 0)
+        self.assertTrue(compact.called)
+        self.assertFalse(pill.called)
+        self.assertIn("design: compact", out)
+        from flow.profile import Profile
+        self.assertEqual(Profile(self.dir / "profile.json").design, "compact")
+
+    def test_the_remembered_choice_needs_no_flag(self):
+        self.launch(["--design", "compact"])
+        _code, _out, pill, compact = self.launch()
+        self.assertFalse(pill.called)
+        self.assertTrue(compact.called)
+

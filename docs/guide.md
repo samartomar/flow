@@ -271,6 +271,7 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
 | `--cwd PATH` | the project converse-mode questions are asked from; overrides the stored `workspace` ([P9](#converse-mode-p9)) |
 | `--lite` | no global hotkeys and no target-window tracking (automatic off Windows — see [Install](#install)). On Windows it also makes Send copy instead of paste; on a Mac Send still pastes, through System Events |
+| `--design NAME` | which UI design to launch: `current` (the shipped pill and bubble) or `compact` (the wordless pill specced in `design/compact/`). Remembered; a switch takes effect at next launch |
 | `--version` | print `flow X.Y.Z` and exit. The same number the startup block names, and the one Help shows at the bottom of the sheet |
 | `--check-update` | ask GitHub once whether a newer release exists, print one line, and exit. Manual only: nothing in Flow ever checks on its own, and the request carries no version, no identifier and no account — see [What leaves the machine](architecture.md#what-leaves-the-machine) |
 | `--stats` | print how much has been dictated — today and all time — and exit, without loading a model or opening the microphone. See [The numbers](#the-numbers). With `--no-profile` it reads nothing and says so |

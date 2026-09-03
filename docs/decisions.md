@@ -6,6 +6,44 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-03 — The compact design: a second surface, switched, not a reskin
+
+`design/compact/` specs a wordless pill — glyph colour for mode, ring colour for state,
+tap to cycle, hold to talk — and the question was whether it replaces the shipped UI or
+stands beside it. **Beside it, as a module of its own** (`flow/ui_compact.py`), chosen
+from the profile's `design` field or `--design`, default `current`.
+
+**A sibling module rather than a branch inside `Pill`**, the way `lite` is a branch.
+Lite is the same windows with their hands tied; the compact design is a different
+window with different gestures, and a flag that deep inside a 7 400-line class is two
+designs sharing one file's blame. The seam was already clean: `main()` speaks to the
+surface through one constructor, `mainloop()` and `quit_app()`, and the surface pulls
+from the session — so a second class honouring that contract costs the shipped one
+nothing, and every test that pins `Pill` keeps meaning what it meant.
+
+**The switch is launch-time, said out loud.** A design's window tree is built once, in
+its constructor, so a live swap is a rebuild-the-world pattern nothing here has. The
+menu entry writes `profile.design` and the note names the cost: "launches next time" —
+the same rule `--lite` has always run under, and better than a switch that applied
+silently later and read as one that did nothing now.
+
+**The spec's three modes land on the session's two.** The canvas draws Type / Refine /
+Ask on the pill; the session knows DICTATE and CONVERSE. The scaffold maps Type to
+dictate and Ask to converse — white glyph, violet glyph, the hues the shipped UI
+already gives them — and Refine-as-a-pill-mode stays a TODO citing the artboards,
+because giving the session a third mode is core work, not surface work, and smuggling
+it into a UI scaffold is how two half-features ship as one. Tap-to-cycle is real (it is
+`toggle_mode` with a threshold); the docked 400 px panel and the workspace palette are
+stubbed, likewise cited.
+
+**The name.** "Compact" was already spoken for by the compact pass of 2026-09-01 — the
+shrink of the shipped pill — so its test is `tests/test_compact_pass.py` now and the
+bare word belongs to the design. Comments that narrate the pass keep saying "the
+compact pass", which is what they always meant.
+
+**Reopens if** the compact design reaches spec parity and one of the two stops being
+used — a second surface is a standing cost, justified only while both are real.
+
 ### 2026-09-03 — A failing CLI's reason comes from whichever stream it used
 
 `_invoke` read **stderr alone** on a non-zero exit, on the stream discipline this module

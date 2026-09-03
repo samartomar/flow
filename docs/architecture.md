@@ -110,6 +110,7 @@ which is 34% of the 30 ms the UI thread has to draw in.
 | Module | Band | Does |
 |---|---|---|
 | `ui.py` | surface | the pill and the draft bubble, DPI-aware |
+| `ui_compact.py` | surface | the compact design — a wordless pill beside it, chosen by `profile.design` at launch |
 | `hotkey.py` | surface | `RegisterHotKey` on its own message-loop thread |
 | `inject.py` | surface | clipboard + `SendInput`, terminal-safe paste (P7) |
 | `session.py` | core | the state machine and the pump |

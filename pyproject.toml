@@ -117,6 +117,9 @@ exclude = [
     # and the seeder rebuilds it from them. One of these alone put the sdist 15% over its
     # own size guard, which is the test that caught it.
     "design/build/",
+    # The compact design's seeded canvas, for the same reason — `design/compact/`
+    # documents in its README that `flow-compact.html` is regenerated, never edited.
+    "design/compact/flow-compact.html",
 ]
 
 [tool.uv]

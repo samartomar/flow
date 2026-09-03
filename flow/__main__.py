@@ -26,6 +26,7 @@ import sys
 
 from .asr import CUDA_MODEL, DEVICE, FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
+from .profile import DESIGN_DEFAULT, DESIGNS
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, EFFORT_DEFAULT, EFFORTS, available, named, unverified, unverified_note
@@ -369,6 +370,15 @@ def main(argv: list[str] | None = None) -> int:
         help="clipboard-out mode: Send copies the draft instead of pasting it, and no "
              "hotkeys are registered (automatic off Windows)",
     )
+    ap.add_argument(
+        "--design", default=None, choices=DESIGNS, metavar="NAME",
+        # A setting, not a one-run override, for `--cli-model`'s reason: the menu has no
+        # way to type a name, so a flag that vanished at exit would be the only place
+        # the choice could ever be made. Applies at next launch either way — a design's
+        # whole window tree is built in its constructor, so nothing running can swap.
+        help=f"which UI design to launch ({', '.join(DESIGNS)}; default "
+             f"{DESIGN_DEFAULT}, remembered)",
+    )
     # Last, because none of these is a way to run Flow: each answers a question about the
     # copy or about what it has already done, and exits. `--version` is argparse's own
     # action, so it prints and leaves where `--help` does, ahead of every flag above it —
@@ -569,6 +579,9 @@ def main(argv: list[str] | None = None) -> int:
     if profile is not None and args.cli_effort is not None:
         profile.cli_effort = args.cli_effort
         profile.save()
+    if profile is not None and args.design is not None:
+        profile.design = args.design
+        profile.save()
     if profile is not None:
         if profile.cli_model:
             say(f"model: {profile.cli_model}")
@@ -744,6 +757,16 @@ def main(argv: list[str] | None = None) -> int:
     apply_panel_width(panel_width(profile.panel if profile is not None else None))
     apply_place(profile.place if profile is not None else "bottom")
 
+    # Which surface launches. Read once, here, because the choice is launch-time by
+    # construction: a design's whole window tree is built in its constructor, so a
+    # switch written mid-session (the menu writes `profile.design`) takes effect on the
+    # next launch, exactly as `--lite` does. An explicit flag is a decision, a stored
+    # value is a preference, and the default is the design Flow shipped.
+    design = (args.design
+              or (profile.design if profile is not None else DESIGN_DEFAULT))
+    if design != DESIGN_DEFAULT:
+        say(f"design: {design}")
+
     hotkeys = None
     if not args.no_hotkeys and not lite:
         # Read only where registration happens, which is why `--no-hotkeys` and Lite are
@@ -839,6 +862,11 @@ def main(argv: list[str] | None = None) -> int:
     # settings.
     # What the mode notes read, and the same fact `on_send` is keyed off.
     session.pastes = paste is not None
+    if design == "compact":
+        # Lazy like the `from .ui import Pill` above, and for a superset of its reason:
+        # the compact surface is a whole second window tree nobody on the shipped design
+        # should pay to import.
+        from .ui_compact import CompactPill as Pill
     pill = Pill(
         # Keyed off whether an injector was imported, not off `lite`. The two came
         # apart the day a Mac got a paste path: it is Lite in every other sense and can
