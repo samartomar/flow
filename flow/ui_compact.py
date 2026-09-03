@@ -55,9 +55,16 @@ from .ui import (
     MUTED,
     PILL_DRAG_SLOP,
     PILL_HOLD_SEC,
+    SHELL,
     TEXT,
     WAITING,
+    _dark_menu,
+    _no_activate,
+    _round_rect,
     _shell_window,
+    _user32,
+    foreground_hwnd,
+    toplevel_hwnd,
 )
 
 #: The capsule, from Main.dc.html's `.pill`: 120 × 34, radius half the height.
@@ -156,6 +163,10 @@ class CompactPill(tk.Tk):
     #: The right-click menu, built in `__init__`. None on a fixture, and
     #: `_on_menu` checks rather than assuming.
     _menu = None
+    #: Whether the window is out of the activation chain. Set in `__init__`
+    #: from `_no_activate`'s read-back; False on a fixture, which is the
+    #: Lite/Mac answer `_on_menu`'s foreground borrow keys off.
+    no_activate = False
 
     def __init__(
         self, session: Session, on_send=None, hotkeys=None, arm=False,
@@ -201,11 +212,17 @@ class CompactPill(tk.Tk):
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Button-3>", self._on_menu)
 
-        self._menu = tk.Menu(self, tearoff=0)
+        self._menu = _dark_menu(self)
         self._menu.add_command(label="Quit", command=self.quit_app)
         # TODO: the rest of the menu is drawn in design/compact/Workspace.dc.html
         # — a mode list, Switch workspace, Workbench setup. Right-click is the
         # only menu the design allows, so all three land here when they land.
+
+        # Out of the activation chain, like every Flow window (ui.py:2570). Not
+        # cosmetic: a window the click *activates* is raised and focused by it,
+        # which both disturbs the z-order under the always-on-top band and earns
+        # the popup a foreground it must then be refused — see `_on_menu`.
+        self.no_activate = _no_activate(self)
 
         if arm:
             try:
@@ -418,10 +435,28 @@ class CompactPill(tk.Tk):
             self.session.toggle_mode()
 
     def _on_menu(self, e=None) -> None:
-        """Right-click — the only menu the design allows (Workspace.dc.html)."""
+        """Right-click — the only menu the design allows (Workspace.dc.html).
+
+        Borrows the foreground for the popup's lifetime, the trick `Pill._menu`
+        documents at flow/ui.py:2909-2923: a Tk popup is a native
+        `TrackPopupMenu` whose modal loop only receives input while its owner is
+        the foreground window, and `WS_EX_NOACTIVATE` means the click never made
+        us that. Guarded on `no_activate` — where the style cannot take (Lite,
+        Mac) the window is in the activation chain already, and a borrow would
+        be a Win32 call with nothing behind it. `_user32` is ui.py's `_NoHands`
+        there, so the guard is about clarity, not safety.
+        """
         if self._menu is None or e is None:
             return
-        self._menu.tk_popup(e.x_root, e.y_root)
+        previous = foreground_hwnd() if self.no_activate else 0
+        if self.no_activate:
+            _user32.SetForegroundWindow(toplevel_hwnd(self))
+        try:
+            self._menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            self._menu.grab_release()  # the documented idiom; cheap insurance
+            if previous:
+                _user32.SetForegroundWindow(previous)
 
     # -- the drawing ---------------------------------------------------------
 
@@ -452,12 +487,21 @@ class CompactPill(tk.Tk):
         """
         c = self.canvas
         c.delete("all")
+        # The capsule body first, and it is load-bearing rather than cosmetic:
+        # `_shell_window` keyed the canvas background out with
+        # `-transparentcolor`, and on Windows a keyed pixel is a *click-through*
+        # pixel — an unfilled pill is invisible against the desktop and lets the
+        # press fall to whatever is behind it, which is exactly what the first
+        # photographed run did to the right-click that was meant to open the
+        # menu. Radius half the height, as Main.dc.html's `.pill` has it.
+        _round_rect(c, 0, 0, PILL_W, PILL_H, PILL_H // 2, fill=SHELL, outline="")
         ring = self._ring_colour()
         if ring:
             # The hairline the spec means by "ring": a 2 px stroke a pixel
-            # inside the capsule's own edge.
-            c.create_rectangle(1, 1, PILL_W - 1, PILL_H - 1,
-                               outline=ring, width=2)
+            # inside the capsule's own edge, rounded with it — a square corner
+            # would poke past the capsule's into the keyed-out region.
+            _round_rect(c, 1, 1, PILL_W - 1, PILL_H - 1, PILL_H // 2 - 1,
+                        fill="", outline=ring, width=2)
         tint = self._glyph_tint()
         # Mic glyph: capsule + stand, the same three strokes ui.py draws
         # (flow/ui.py:4992-4998) at the same size — drawn, not fonted, so

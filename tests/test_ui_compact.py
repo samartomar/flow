@@ -60,7 +60,7 @@ class Canvas:
         self.arcs.append((a, kw.get("outline", "")))
 
     def create_polygon(self, *a, **kw) -> None:
-        self.polys.append((a, kw.get("fill", "")))
+        self.polys.append((a, kw.get("fill", ""), kw.get("outline", "")))
 
 
 def session(mode=DICTATE, state=State.IDLE, hearing=True, busy=False,
@@ -93,8 +93,14 @@ def pill(state=State.IDLE, *, armed=True, mode=DICTATE, **attrs):
 
 
 def rings(p) -> list[str]:
-    """The outlines drawn this frame — the ring is the only stroked rectangle."""
-    return [outline for *_g, _f, outline in p.canvas.rects if outline]
+    """The outlines drawn this frame — the ring is the only stroked polygon."""
+    return [outline for *_g, outline in p.canvas.polys if outline]
+
+
+def shell_fill(p) -> str:
+    """The capsule body's fill: the one filled polygon, under everything else."""
+    (body,) = [fill for _a, fill, outline in p.canvas.polys if not outline]
+    return body
 
 
 def glyph_fill(p) -> str:
@@ -152,6 +158,21 @@ class TestTheRingCarriesTheState(unittest.TestCase):
         p = pill(State.LISTENING, armed=False)
         p._draw()
         self.assertEqual(rings(p), [])
+
+
+class TestTheCapsuleIsFilled(unittest.TestCase):
+    """The body is drawn, not just the furniture on it.
+
+    `scripts/compact_shots.py` caught the version without it: `-transparentcolor`
+    keys the canvas background out, and on Windows a keyed pixel is click-through —
+    the pill was a glyph and some bars floating over the desktop, and the
+    right-click meant for the menu fell through to whatever was behind.
+    """
+
+    def test_the_shell_covers_the_pill(self):
+        p = pill(State.IDLE, armed=False)
+        p._draw()
+        self.assertEqual(shell_fill(p), uc.SHELL)
 
 
 class TestTapAndHoldShareOneButton(unittest.TestCase):
@@ -218,7 +239,8 @@ class TestTheClassDefaultsADrawNeeds(unittest.TestCase):
     def test_every_drawn_attribute_is_a_class_attribute(self):
         for name in ("armed", "_flash", "_meter_level", "_eased_level",
                      "lite", "hotkeys", "on_send", "_press_at", "_press_xy",
-                     "_press_moved", "_press_talking", "_menu", "_alive"):
+                     "_press_moved", "_press_talking", "_menu", "_alive",
+                     "no_activate"):
             with self.subTest(name=name):
                 # On the class, not only assigned in `__init__` — an
                 # instance-only attribute is exactly the RecursionError case.
