@@ -19,6 +19,7 @@ import queue
 import sys
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 import traceback
 from collections import deque
 from pathlib import Path
@@ -1349,6 +1350,115 @@ PLACE = PLACE_DEFAULT
 PANEL_BOTTOM_OFFSET = 24
 
 
+#: The mic view: the pill with nothing on it but the focused app's initial, the mic
+#: glyph and the level bars.
+#:
+#: **A view, not a mode.** `flow/session.py` is untouched by it and emits exactly the
+#: events it emits without it; the pill draws fewer of them. That is what makes "no
+#: impact on the existing behaviour" structural rather than a promise — there is no
+#: branch in a session route to get wrong, because there is no branch in a session
+#: route at all. If one is ever needed, the design is wrong, not the file.
+#:
+#: **The paste is the existing paste-on-release.** Nothing here makes the words arrive
+#: sooner. Optimistic paste — paste the partial, reconcile with the final — stays
+#: rejected for the reason decisions.md gives: a paste cannot be taken back in a
+#: terminal.
+#:
+#: **Two frames, and only one of them is on screen at a time.** At rest the row is the
+#: focused app's name and the mic glyph — where the words will land, and what will take
+#: them. While the chord is held it is the level bars and nothing else. Not both at once
+#: and not one with the other greyed out: the whole of what this view is for is that a
+#: gesture with no decisions in it does not need a surface with controls on it, and a
+#: resting meter sitting flat under a mic is a control's worth of pixels saying nothing.
+#:
+#: **One width across both frames**, and the numbers made that free rather than forced.
+#: The meter needs `METER_W` plus `PAD` either side; the name slot and the glyph, sized
+#: to say a real application name, come to the same 90 px. So the row never resizes: the
+#: press swaps what is drawn inside a box that does not move. This started as two widths
+#: and the arithmetic argued it out of them — a width that changes on every utterance is
+#: the thing decisions.md rejected on 2026-08-09, and not having to reason about whether
+#: this case is different is worth more than the six pixels it would have saved.
+#:
+#: The **name** and not an initial. The first cut of this view showed one character, on
+#: the reasoning that the slot only has to catch the one mistake a hold can make — the
+#: wrong window — and that `C` was enough of a sentence for that. It is not: `C` is Code,
+#: Chrome, Claude and cmd, which is four answers to the question the slot exists to
+#: settle. The row is small enough to say the whole word, so it says it. Same
+#: `app_label` and same `APP_NAME_CHARS` truncation as the full row, in a slot six
+#: pixels wider than that row's, because here there is nothing else competing for them.
+MIC_NAME_W = 50
+MIC_SHIFT = MIC_NAME_W + APP_SLOT_GAP
+#: Where the mic capsule's centre sits in the resting frame, and how far its arc reaches
+#: either side of that — the same 14 px glyph the full row draws, at the same size.
+MIC_GLYPH_R = 7
+MIC_CX = PAD + MIC_SHIFT + MIC_GLYPH_R
+#: 90 px, and the two frames agree on it: the name, the glyph and `PAD` either side come
+#: to exactly what the meter and `PAD` either side do. The bars start at `PAD` rather
+#: than at `METER_X`, because `METER_X` is the offset that clears a mic glyph the held
+#: frame does not draw.
+MIC_W = PAD + METER_W + PAD
+
+#: Where the mic view sits, as an (x, y) on the work area rather than one of `PLACES`.
+#:
+#: `PLACES` has two entries because the pill anchors a stack that has to fit a 400, 480
+#: or 580 px panel under the pointer's monitor — "bottom" and "corner" are the two
+#: placements that can be guaranteed to hold one. This view has no stack: it is 90 px of
+#: row that fits anywhere, so the constraint that made placement a two-item menu is
+#: gone and the honest setting is the position itself. Dragged into place and kept.
+#:
+#: Stored, and re-clamped against `_work_area` on the way out (`_placed`), because the
+#: answer is per monitor and the profile is not: a position saved on a second display
+#: that is no longer plugged in must land somewhere visible rather than off-screen.
+MIC_AT_DEFAULT: tuple[int, int] | None = None
+
+#: How long a note that grew the full pill back stays before the view returns, in seconds.
+#:
+#: **The missing half of the grow-back.** A note on a hidden bubble is normally dropped;
+#: under the mic view it surfaces one instead, so a refusal is never silent. But nothing
+#: hides a surfaced note — on the full row it sits on a panel that was already up and is
+#: cleared by the next draft, and under this view there is no next draft, so one line from
+#: a settings row left the pill 400 px wide indefinitely. Measured: twelve seconds after
+#: clicking "Push to talk" the panel was still up, which is the "falls apart" that was
+#: reported.
+#:
+#: Longer than `SENT_LINGER_SEC`'s 4, because that card is a receipt for something the
+#: user just did on purpose and this is a line they did not ask for and have to read
+#: cold. Not so long that it becomes the state — the whole point is that the view comes
+#: back on its own, and the note has already been on screen for as long as the panel
+#: takes to read.
+#:
+#: Applies **only** to a note this view surfaced. A note on a panel that was up for its
+#: own reasons is untouched, and so is every note on the full pill.
+MIC_NOTE_SEC = 7.0
+
+#: The two frames' contents must fit the one width they share. Asserted in
+#: `tests/test_mic.py` the way `test_compact.py` adds the full row up, rather than here —
+#: this is arithmetic over constants and belongs where a failure names itself.
+
+
+def _mic_spot(value) -> tuple[int, int] | None:
+    """Read a stored mic-view position, or `None`.
+
+    Judged here rather than in `flow/profile.py` for the same reason `panel` and `place`
+    are judged here: that module is read on every launch, including Lite's, and must not
+    need the module that knows what its values mean.
+
+    A pair of finite integers or nothing. Anything else — a hand-edited profile, a
+    truncated write, a `null` left by an older Flow — costs the position and not the
+    launch, which is the bargain every other setting in this file makes.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        x, y = int(value[0]), int(value[1])
+    except (TypeError, ValueError, OverflowError):
+        # `OverflowError` is `inf`, which the profile suite hands every field: a float
+        # that is not a number `int()` can reach, and the one shape that raises from a
+        # `try` written for text.
+        return None
+    return x, y
+
+
 def apply_place(name: str) -> None:
     """Set where the stack sits. Call before the first draw, beside `apply_panel_width`.
 
@@ -2248,6 +2358,13 @@ class Pill(tk.Tk):
     #: reason `lite` is: a fixture built with `__new__` must not recurse into `self.tk`.
     _hidden = False
     _tray = None
+    #: Whether the mic view is switched on, and where it was last dragged to. Class
+    #: attributes for the reason `lite` and `_docked_w` are: a fixture built with
+    #: `__new__` must find a real value here rather than fall through
+    #: `tk.Misc.__getattr__` into `self.tk` and recurse. `__init__` overrides both from
+    #: the profile.
+    mic_view_on = False
+    _mic_at: tuple[int, int] | None = MIC_AT_DEFAULT
     #: Where the window was when it was hidden, as (x, foot). Restored on the way back,
     #: because somebody who dragged Flow to the left of their screen did not ask for it
     #: to reappear in the middle.
@@ -2313,6 +2430,12 @@ class Pill(tk.Tk):
             Path(settings_path) if settings_path is not None else LEXICON_PATH
         )
         self._arm_on_start = arm
+        #: The mic view, restored before the first `_placed` call below — the width and
+        #: the position it asks for are both this window's opening geometry, so reading
+        #: it later would mean opening at the full width and jumping.
+        profile = getattr(session, "profile", None)
+        self.mic_view_on = bool(getattr(profile, "mic", False))
+        self._mic_at = _mic_spot(getattr(profile, "mic_at", None))
         #: The level every bar is drawn from this frame, 0…1. One number, where this
         #: used to be a `deque` of `BARS` of them: the meter blooms from its own centre
         #: now rather than scrolling a history past, so there is no past to keep. See
@@ -2374,8 +2497,12 @@ class Pill(tk.Tk):
         #: the pointer's monitor in `_sync_monitor`; see `_pointer_monitor`.
         self.full, self.work = _pointer_monitor(
             self.winfo_screenwidth(), self.winfo_screenheight(), self)
-        self.x, self.y = self._placed(PILL_W)
-        self.geometry(f"{PILL_W}x{PILL_H}+{self.x}+{self.y}")
+        # `pill_w` and not `PILL_W`: with the mic view restored the window opens at
+        # `MIC_W`, and opening at one width to be resized on the first frame is the
+        # jump `_sync_shell` exists to prevent everywhere else.
+        _w0 = self.pill_w
+        self.x, self.y = self._placed(_w0)
+        self.geometry(f"{_w0}x{PILL_H}+{self.x}+{self.y}")
         #: The width last drawn, so `_sync_dock` can tell whether a panel appeared or
         #: went away since the last frame — and, holding the right edge fixed, by how
         #: much the left edge has to move to match. Neither panel exists yet at this
@@ -2515,8 +2642,29 @@ class Pill(tk.Tk):
         self._press_talking = False
         if talking:
             self._talk_end(send=True)
-        elif not moved:
+        elif moved:
+            self._remember_mic_at()
+        else:
             self._toggle()
+
+    def _remember_mic_at(self) -> None:
+        """Keep where the mic view was just dragged to, if that is what was dragged.
+
+        On the release rather than in the drag handler, which runs on every motion event
+        and would write the profile a hundred times across one gesture. Silent on
+        failure, alone among this file's saves: the other settings are chosen from a
+        menu, where somebody is waiting to see whether the choice took, and a note about
+        a failed write is exactly the surface this view exists to not have. The position
+        still holds for the session; what is lost is that it holds for the next one.
+        """
+        if not self.mic_view:
+            return
+        self._mic_at = (self.x, self.y)
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            return  # `--no-profile`, which asks for exactly this
+        profile.mic_at = self._mic_at
+        profile.save()
 
     def _on_motion(self, e) -> None:
         """Past the slop, this press is a drag — unless it is already an utterance.
@@ -2930,6 +3078,48 @@ class Pill(tk.Tk):
             )
         parent.add_cascade(label=f"Chord ({chord.describe()})", menu=sub)
 
+    def _mic_item(self, parent: tk.Menu) -> None:
+        """The mic view's one control: a checkbox, under the chord it belongs to.
+
+        **One entry, and only in push-to-talk.** A row offering to hide the controls of
+        a gesture that has no release to paste on would be an option that makes Flow
+        worse and could not say so from a menu label, so it is absent rather than
+        disabled — the rule the chord and CLI-picker rows already follow, which is that
+        this menu says what works on this machine this launch.
+
+        A checkbutton and not a cascade, because there is one thing to say about it.
+        The position it remembers is not a menu item either: it is set by dragging the
+        thing itself, which is the only place a position can be chosen honestly.
+
+        Saved on the way through, like every other setting here, and a save that failed
+        is said out loud — through `bubble.surface`, because the note has to be seen and
+        switching *on* is precisely the moment there is no row left to put it on.
+        """
+        if not self.push_to_talk:
+            return
+        self._mic_var = tk.BooleanVar(value=self.mic_view_on)
+
+        def choose() -> None:
+            self.mic_view_on = bool(self._mic_var.get())
+            # The width and the position both change with it, and `_sync_shell` holds
+            # the *foot* still rather than recomputing where the window belongs — so
+            # the placement is asked for here, at the one moment it is wanted.
+            self.x, self.y = self._placed(self.pill_w)
+            self._sync_shell()
+            self._draw()
+            profile = getattr(self.session, "profile", None)
+            if profile is None:
+                return  # `--no-profile`: applied for this session, which is what it asks
+            profile.mic = self.mic_view_on
+            if not profile.save():
+                self._flash = FLASH_FRAMES
+                self.bubble.surface(f"could not save {profile.path}")
+
+        parent.add_checkbutton(
+            label="Mic view - just the mic and the level, no controls",
+            variable=self._mic_var, onvalue=True, offvalue=False, command=choose,
+        )
+
     def _effort_menu(self, parent: tk.Menu) -> None:
         """How hard the agent CLI may think, where it offers the choice.
 
@@ -3005,6 +3195,7 @@ class Pill(tk.Tk):
         and Help and has to be one of them.
         """
         self._gesture_menu(sub)
+        self._mic_item(sub)
         self._trigger_menu(sub)
         self._panel_menu(sub)
         # Also the CLI marker's refresh point: a CLI installed mid-session shows up here,
@@ -3555,7 +3746,21 @@ class Pill(tk.Tk):
             self._flash = FLASH_FRAMES
             self.bubble.show_sent(text, problem)
         elif text:
-            self.bubble.show_sent(text)
+            # **Not under the mic view**, and this is the one route that made the panel
+            # appear on every single utterance — the reason it was reported as showing
+            # up uninvited. It is not an event, so `_pump_events`' gate never saw it: a
+            # release ends in `_pump_talk` calling `_send`, and `_send` put a receipt on
+            # screen for words that had *already* gone into the other window. On the full
+            # row that card is the record of what was sent and worth its band; under this
+            # view the record is the words now sitting in the app whose name the row was
+            # showing a moment ago, and a panel restating them is the surface the whole
+            # view exists to not have.
+            #
+            # The `problem` branch above is untouched, deliberately. A paste that failed
+            # or could not be guaranteed still opens the panel and still flashes, because
+            # that is the one thing here that cannot be inferred from the other window.
+            if not self.mic_view:
+                self.bubble.show_sent(text)
             if self.lite and self.on_send is None:
                 # After the card, not instead of it: the words are the important half and
                 # the note is what tells somebody the last step is theirs.
@@ -3933,8 +4138,18 @@ class Pill(tk.Tk):
         `"corner"` is what Flow shipped, kept because somebody who has spent months
         with the pill in the bottom right should not have it moved by an upgrade.
         """
+        left, top, right, bottom = self.work
+        if self.mic_view and self._mic_at is not None:
+            # The third answer, and only this view gets it. `PLACES` is two entries
+            # because the pill anchors a stack that must fit a 400/480/580 px panel;
+            # this row anchors nothing, so the position is free and is persisted as
+            # itself. Clamped against the monitor that is actually under the pointer
+            # rather than trusted, which is what makes a position saved on a display
+            # that is no longer here land somewhere visible instead of off-screen.
+            x, y = self._mic_at
+            return (max(left, min(x, right - w)),
+                    max(top + EDGE_AIR, min(y, bottom - PILL_H)))
         if PLACE == "corner":
-            _left, _top, right, bottom = self.work
             return right - w - 28, bottom - PILL_H - 24
         return bottom_centre(w, PILL_H, self.full, self.work, PANEL_BOTTOM_OFFSET)
 
@@ -4066,6 +4281,7 @@ class Pill(tk.Tk):
             self.bubble.tick_countdown()
             self.bubble.tick_activity()
             self.bubble.tick_sent()
+            self.bubble.tick_note()
         if self._flash:
             self._flash -= 1
         self._advance_motion()
@@ -4186,7 +4402,19 @@ class Pill(tk.Tk):
         # partials in one frame means the first is on screen for no frames at all.
         newest_partial = max(
             (i for i, ev in enumerate(events) if ev.kind == "partial"), default=None)
+        # **The whole of what the mic view changes about routing.** The session emitted
+        # every event it always emits — `events()` was drained above and its list is
+        # identical with the view on and off — and the two that would put words on a
+        # panel are not drawn. Nothing is swallowed that says anything: a note, an
+        # error, a drop, an edit and a held answer all go through below and grow the
+        # full pill back to carry them. `_last_draft` is still kept, so a mode switch
+        # mid-view still knows what was on screen.
+        mic = self.mic_view
         for i, ev in enumerate(events):
+            if mic and ev.kind in ("draft", "partial"):
+                if ev.kind == "draft" and ev.text:
+                    self._last_draft = ev.text
+                continue
             if ev.kind == "draft":
                 if ev.text:
                     self._last_draft = ev.text
@@ -4471,7 +4699,72 @@ class Pill(tk.Tk):
         # bubble and the card are the same width by construction (`apply_panel_width`
         # sets both), and reaching through a window meant this could be asked before
         # there was one to ask.
-        return BUBBLE_W
+        return MIC_W if self.mic_view else BUBBLE_W
+
+    @property
+    def mic_talking(self) -> bool:
+        """Whether a hold is in flight right now — the meter frame, or the resting one.
+
+        Both ways in, because the pill carries the same gesture the chord does: the chord
+        hold (`_ptt_since`, set by the hook) and the press-and-hold on the pill itself
+        (`_press_talking`, `PILL_HOLD_SEC`). Either is somebody speaking.
+
+        Deliberately *not* `_ptt_wait`, which is the decode still running after the key
+        came up. "Once the button is released, fall back to the first image" is the ask
+        and it is also the honest drawing: nothing is being captured during that wait, so
+        a meter left up would be the same false "hearing you" `_flatten` exists to kill.
+        The words land by paste when they land, which is what the wait is for.
+
+        Chooses the frame and not the width — the two frames share one (`MIC_W`), so a
+        press swaps what is inside a box that does not move.
+        """
+        return (self.__dict__.get("_ptt_since") is not None
+                or bool(self.__dict__.get("_press_talking")))
+
+    @property
+    def push_to_talk(self) -> bool:
+        """Whether the chord this launch is the hold gesture.
+
+        Read off the live `Chord`, which is where `_gesture_menu` writes a switch made
+        while Flow is running — so the mic view goes away the moment somebody moves to
+        the toggle, rather than at the next launch. No chord at all (`--no-chord`, an
+        empty `"chord"`, a hook the OS refused) is not push-to-talk: there is no hold
+        to make, and a view built around one would be a surface with no gesture.
+        """
+        chord = getattr(self.__dict__.get("hotkeys"), "chord", None)
+        return getattr(chord, "gesture", None) == "hold"
+
+    @property
+    def mic_view(self) -> bool:
+        """Whether the row is drawing the controls-free view *this frame*.
+
+        Three conditions, and the third is the whole of the hard part:
+
+        1. It is switched on (`mic_view_on`, persisted as `profile.mic`).
+        2. The chord is push-to-talk. The view is the gesture drawn: hold, speak,
+           release, and the words are pasted. With a toggle there is no release to paste
+           on and the controls it hides are the only way to finish.
+        3. **Nothing is on a surface.** With no panels there is nowhere for a note to
+           land, and Flow's discipline is that a refusal is never silent — a refine that
+           came back with commentary instead of a rewrite, a CLI that could not be
+           reached, an unverified-CLI line. So the view stands down for exactly as long
+           as there is something to read and comes back when it clears. Because this is
+           a view and not a mode, the grow-back is not a state change: no flag flips,
+           nothing is entered or left, and the next frame's `pill_w` and `_draw` simply
+           answer differently. That is why the condition can live in a property rather
+           than in a transition somebody has to remember to reverse.
+
+        Asked through `__dict__` for the surfaces, like `_marks` and for its reason: a
+        bare fixture has no `bubble`, and a miss on a real attribute recurses through
+        `tk.Misc.__getattr__` rather than raising.
+        """
+        if not self.mic_view_on or not self.push_to_talk:
+            return False
+        for name in ("bubble", "card"):
+            surface = self.__dict__.get(name)
+            if surface is not None and surface.__dict__.get("_visible", False):
+                return False
+        return True
 
     def _sync_shell(self) -> None:
         """One window, sized for whatever band is up, with its bottom edge held still.
@@ -4624,6 +4917,13 @@ class Pill(tk.Tk):
             tuple((k, l) for k, l, _c in self._marks()),
             self.__dict__.get("_hover_mark"),
             self._bar_label(),
+            # The view itself. Without it the frame that grows back — a note arriving
+            # with nothing else on the row changed — is a frame `_draw` skips, and the
+            # note lands on a panel above a row still drawn at the small width. The
+            # frame goes in with it, because the two draw different things at the same
+            # level, colour and app name — the reads this key is otherwise built from.
+            self.mic_view,
+            self.mic_talking,
         )
 
     def _draw(self) -> None:
@@ -4640,6 +4940,9 @@ class Pill(tk.Tk):
         c.delete("all")
         accent = self.accent
         w = self._docked_w
+        if self.mic_view:
+            self._draw_mic(c, w, accent)
+            return
         seam = None
         if self._shell_h == PILL_H:
             radius = PILL_H // 2  # alone in the window: the capsule this has always been
@@ -4669,9 +4972,17 @@ class Pill(tk.Tk):
             # 6 px marker under the mic — and a 34 px row has no room under the mic.
             # Same slot, same question, one answer at a time.
             converse = getattr(self.session, "mode", DICTATE) != DICTATE
+            # Cut to the slot the layout actually reserved for it. `app_label` caps the
+            # name at `APP_NAME_CHARS` *characters*, and ten of those are 25 px of `Code`
+            # and 69 px of `WindowsTe…` — against a slot of 44 and a mic glyph whose arc
+            # starts 51 px along. This was written off as an overrun the full row never
+            # shows, on the reasoning that the next thing on the line is far enough away.
+            # It is not: a screenshot of Windows Terminal has the name printed through
+            # the mic. Same measured cut the mic view uses, same reason.
             c.create_text(PAD, PILL_H // 2, anchor="w",
                           text=self._marker() if converse
-                          else app_label(self.session.target_app),
+                          else self._fit_note(app_label(self.session.target_app),
+                                              APP_SLOT_W),
                           fill=accent if converse else MUTED, font=FONT_NOTE)
 
         # Mic glyph: capsule + stand, drawn rather than fonted so there is no
@@ -4732,6 +5043,124 @@ class Pill(tk.Tk):
         # icons — the middle this row always had and never used. See `_draw_marks`.
         self._draw_marks(c, icons_x - ICON_GAP, meter_right + MARK_AIR, mid)
         self._draw_label(c, w, mid, accent)
+
+    def _draw_mic(self, c: tk.Canvas, w: int, accent: str) -> None:
+        """The mic view, in whichever of its two frames is current.
+
+        What is absent from both is the list: no marks, no icons, no bar label, no seam
+        — there is never a panel above this row, because a surface being up is what takes
+        `mic_view` false. So this draws the capsule unconditionally, where `_draw` has to
+        ask which shape it is.
+
+        **At rest: the app's name and the mic.** Where the words will land, and what will
+        take them. The name is the one mistake a hold can make that it otherwise cannot
+        see — dictating into the wrong window — and the mic is what says this is Flow and
+        not a notification. No meter, because a flat meter at rest is a control's worth
+        of pixels reporting a level nobody is producing.
+
+        **While held: the bars, and nothing else.** The question during a hold is
+        exactly one question — is it hearing me — and every other pixel on the row is an
+        answer to a question nobody is asking mid-sentence. The bars carry `accent`, so
+        an error still turns this row red on the frame the flash starts, whether or not
+        the note explaining it has grown the panel back yet.
+
+        The waiting dots are not drawn in either. On the full row they stand in for the
+        meter while a CLI is out; here there is no meter at rest to stand in for, and the
+        mic glyph is already carrying `accent` — which is the same state, said by the one
+        thing on the row rather than by a second thing added to it.
+        """
+        _panel_chrome(c, w, PILL_H, PILL_H // 2, self.ring_color)
+        mid = PILL_H // 2
+        if self.mic_talking:
+            self._draw_mic_meter(c, mid, accent)
+            return
+        name = self._mic_name()
+        if name:
+            c.create_text(PAD, mid, anchor="w", text=name, fill=MUTED, font=FONT_NOTE)
+        cx, r = MIC_CX, MIC_GLYPH_R
+        c.create_oval(cx - 4, mid - 9, cx + 4, mid + 1, fill=accent, outline=accent)
+        c.create_arc(cx - r, mid - 5, cx + r, mid + 6, start=180, extent=180,
+                     style=tk.ARC, outline=accent, width=2)
+        c.create_line(cx, mid + 6, cx, mid + 10, fill=accent, width=2)
+
+    def _draw_mic_meter(self, c: tk.Canvas, mid: int, accent: str) -> None:
+        """The held frame: `BARS` bars from `PAD`, drawn the way the full row draws them.
+
+        The same `_bar_half_height` envelope and the same rounded caps — this is the
+        meter Flow already has, given the whole row instead of a slot in one. Kept a call
+        to that method rather than a copy of its arithmetic, so the bloom-from-the-centre
+        shape stays one implementation and a change to it cannot land in one meter only.
+        """
+        lvl = self._meter_level
+        shade = accent if lvl > 0.04 else MUTED
+        for i in range(BARS):
+            h = self._bar_half_height(i, lvl)
+            x = PAD + i * (BAR_W + BAR_GAP)
+            if h * 2 > BAR_W:
+                _round_rect(c, x, mid - h, x + BAR_W, mid + h, BAR_W / 2,
+                            fill=shade, outline="")
+            else:
+                c.create_rectangle(x, mid - h, x + BAR_W, mid + h,
+                                   fill=shade, outline="")
+
+    def _mic_name(self) -> str:
+        """The focused app's name, cut to what `MIC_NAME_W` can actually hold.
+
+        `app_label` first, so `claude.exe` reads `Claude` here as it does on the full
+        row. Then a **measured** cut, and that second step is not optional: a rendered
+        run put `WindowsTe…` straight through the mic glyph. `app_label`'s own limit is
+        `APP_NAME_CHARS` characters, and characters are not pixels in a proportional
+        font — ten of them are 25 px of `Code` and 80 px of capital Ms.
+
+        The full row has the same bug and it was written off here as one that row never
+        shows, on the reasoning that its glyph is further away. A screenshot settled it:
+        69 px of name from x=10, against an arc starting at 61. `_draw` runs its own
+        label through `_fit_note` too now, at `APP_SLOT_W`.
+
+        Measured rather than estimated from a per-character advance, because the estimate
+        is the bug: the only safe constant would be the widest glyph's, which would cut
+        `Explorer` to five letters to protect a name nobody has. Zero in Lite, which
+        tracks no foreground window — the same answer `_row_shift` gives there.
+        """
+        if self.lite:
+            return ""
+        return self._fit_note(app_label(getattr(self.session, "target_app", "")),
+                              MIC_NAME_W)
+
+    def _fit_note(self, text: str, budget: int) -> str:
+        """`text` cut with an ellipsis until it measures within `budget` px at `FONT_NOTE`.
+
+        **Memoised, because `_draw` may not build a font object per frame** — the rule
+        `LABEL_ADV` exists for. The answer depends only on the string and the budget, and
+        the string is a foreground window's name, so the table holds one entry per app
+        the user has dictated into this session and is read from the frame loop for the
+        cost of a dict lookup. Bounded by that: it cannot grow past the number of
+        distinct windows somebody has focused.
+
+        Degrades to the text unchanged when there is no interpreter to measure with — a
+        fixture built with `__new__`, or a font Tk cannot resolve. That is the right way
+        to fail here: the cut is a cosmetic guard on a name that is itself already capped
+        at `APP_NAME_CHARS`, and refusing to draw the name at all would lose the one
+        thing this frame is for.
+        """
+        if not text:
+            return ""
+        memo = self.__dict__.setdefault("_note_fits", {})
+        key = (text, budget)
+        if key in memo:
+            return memo[key]
+        try:
+            font = self.__dict__.get("_note_font")
+            if font is None:
+                font = self._note_font = tkfont.Font(root=self, font=FONT_NOTE)
+            cut = text
+            while cut and font.measure(cut) > budget:
+                cut = cut[:-2] + "…" if len(cut) > 1 else ""
+        except Exception:
+            # No interpreter, or a font name Tk will not resolve. See the docstring.
+            cut = text
+        memo[key] = cut
+        return cut
 
     #: The word the label slot shows while a mark is under the pointer. Eight
     #: characters at most — `LABEL_SLOT_W` is sized for `NO INPUT` — so the two commands
@@ -5769,6 +6198,9 @@ class Bubble(tk.Frame):
     _pointer_in = False
     _chips_drawn: tuple | None = None
     _note_undo = False
+    #: Same reason as the rest of this block: a fixture built with `__new__` must find a
+    #: real value rather than fall through `tk.Misc.__getattr__` into `self.tk`.
+    _for_note: float | None = None
 
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
@@ -5808,6 +6240,11 @@ class Bubble(tk.Frame):
         #: that ends with nothing to show takes its window away again rather than
         #: leaving an empty card behind.
         self._for_activity = False
+        #: When a note the mic view surfaced went up, or None. Its own field rather than
+        #: a flag on `_for_activity`, because the two end differently: an activity's panel
+        #: leaves when the activity does, and this one leaves on a clock — there is no
+        #: event coming that says a line has been read. See `tick_note`.
+        self._for_note: float | None = None
         #: Which float-up animation is current; older ones stop when this moves.
         self._anim = 0
         #: The hand editor, while one is open, and the window to give the foreground
@@ -5893,6 +6330,7 @@ class Bubble(tk.Frame):
         self._sent, self._sent_at, self._sent_left = text, time.perf_counter(), None
         self._text = self._partial = ""
         self._for_activity = False
+        self._for_note = None
         # Whatever edit the last note was about, its Undo would restore a draft this Send
         # has already taken away — and "Bring it back" is the chip for that now.
         self._note_undo = False
@@ -5915,6 +6353,7 @@ class Bubble(tk.Frame):
         # asked for vanished before they could read it.
         self._text, self._partial, self._sent = text, "", ""
         self._for_activity = False
+        self._for_note = None
         # Visible *before* the render, the way `show_partial`, `show_sent` and `surface`
         # already are. `_render` ends in `reposition`, and `reposition` only `place`s the
         # band while `_visible` is set — so a first show from hidden used to grow the
@@ -5935,6 +6374,7 @@ class Bubble(tk.Frame):
         # boundaries, so "not final yet" has to be visible.
         self._partial, self._sent = text, ""
         self._for_activity = False
+        self._for_note = None
         if not self._visible:
             self._visible = True
             self.pill._sync_shell()
@@ -5945,6 +6385,34 @@ class Bubble(tk.Frame):
         self._note_undo = bool(msg) and undoable
         if self._visible:
             self._render()
+        elif msg and self.pill.mic_view:
+            # **The grow-back.** A note on a hidden bubble is dropped, and that is right
+            # while the pill is the full row: the bubble is hidden because there is no
+            # draft, and every line that has to be seen regardless comes through
+            # `surface` instead. Under the mic view it is not right — there is no draft
+            # on screen *by design*, so this door is the one a refine's commentary, an
+            # unreachable CLI and an unverified-CLI line all arrive at, and dropping them
+            # would make the view the one place in Flow where a refusal is silent.
+            #
+            # `surface` and not a `_visible = True` here: it is the same act, already
+            # written, including the `_sync_shell` that gives the panel its band. The
+            # view stands down for as long as this note is up — `Pill.mic_view` reads
+            # the same `_visible` this sets — and comes back when it clears, with no
+            # state to unwind, because a view is not a mode.
+            self.surface(msg)
+            # **Stamped, so it can leave again.** Nothing else hides a surfaced note:
+            # on the full row it lands on a panel that was already up and the next draft
+            # clears it, and under this view there is no next draft. Unstamped, one line
+            # from a settings row left the pill 400 px wide for as long as Flow ran.
+            # `tick_note` reads this.
+            self._for_note = time.perf_counter()
+            # `surface` clears `_note_undo` — its own traffic is errors and warnings,
+            # and neither is an edit to take back. This door's is not only that, so the
+            # flag is put back and the render repeated rather than an undoable edit
+            # losing its way back for having arrived while the row was small.
+            if undoable:
+                self._note_undo = True
+                self._render()
 
     def surface(self, msg: str) -> None:
         """Show a note even with no draft — used for errors, which must be seen."""
@@ -5968,6 +6436,7 @@ class Bubble(tk.Frame):
         self._text = self._partial = self._note = self._sent = ""
         self._note_undo = False
         self._for_activity = False
+        self._for_note = None
         # Give the band back rather than parking a window offscreen. `park` existed
         # because hiding a Toplevel on Windows cost a taskbar flicker and a restack;
         # there is no window here to hide, only a `place` to undo, and the pill's shell
@@ -6736,6 +7205,31 @@ class Bubble(tk.Frame):
         self._sent_left = left
         self._render()
 
+    def tick_note(self) -> None:
+        """Give the row back once a note the mic view surfaced has been read.
+
+        Only a note *this view* put on screen — `_for_note` is stamped in `note` and
+        nowhere else, so a panel that is up for a draft, a sent card, an activity or a
+        user's own Send is untouched, and so is every note on the full pill.
+
+        **And only while there is nothing else on the panel.** A draft, a partial or a
+        sent card arriving during the dwell means the surface has a second reason to be
+        up, and taking it away under one of those would be this fix causing the class of
+        bug it is fixing. The stamp is dropped in that case rather than deferred: the
+        note is no longer the reason the panel is there.
+
+        `hide()` rather than clearing the note in place, because the panel exists only
+        for the note — clearing the text would leave an empty band above the row, which
+        is the surface the view is for not having.
+        """
+        if self._for_note is None:
+            return
+        if self._text or self._partial or self._sent:
+            self._for_note = None
+            return
+        if time.perf_counter() - self._for_note >= MIC_NOTE_SEC:
+            self.hide()
+
     def tick_activity(self) -> None:
         """Say what Flow is doing, animate it, and repaint only when that changes.
 
@@ -6756,6 +7250,20 @@ class Bubble(tk.Frame):
         self._frame_key, self._act, self._dot = key, act, dot
 
         surfacing = act is not None and not self._visible
+        if surfacing and self.pill.mic_view:
+            # **Progress is not something to read.** Under the mic view this door was
+            # opening a 400 px panel for "loading the model" on every launch and holding
+            # it for the eight seconds the load takes — measured, 1.07 s to 9.52 s from a
+            # cold start — so Flow came up as the full pill and shrank to the mic once
+            # the disk was done. That is the startup somebody reported as "it opens as a
+            # big window then it shifts to mic".
+            #
+            # The grow-back is for a *refusal*: a note nobody would otherwise see. An
+            # activity is the opposite — it says a thing is under way, the mic glyph is
+            # already carrying that state in its colour, and there is nothing to act on.
+            # A note arriving during a load still surfaces, through `note`, and brings
+            # the panel with it; this only declines to open one for the wait itself.
+            return
         if surfacing:
             self._for_activity = True
             self._visible = True

@@ -89,6 +89,28 @@ took the shape it did.
 
 ## Found while building, out of the item's scope
 
+- [ ] **An exception in the frame pump leaves the row painted at the last width, under a
+  window that has already been resized.** Found on 2026-09-03 while photographing the mic
+  view, with a probe whose fake session was missing `busy`. `Pill._frame` runs
+  `_pump_talk()` *before* `_sync_dock()` and `_draw()`, so anything that raises in the
+  pump aborts the frame before the repaint. `Pill._tick` catches it and surfaces the
+  message — which makes the bubble visible, which calls `_sync_shell` from the panel side
+  and grows the window to 400×98 — and the canvas still holds the capsule the previous
+  frame drew. The result is a 90 px row parked under a 400 px panel with a gap between
+  them, which is exactly the "two boxes of different widths stacked in one window" failure
+  `_sync_shell`'s own comment describes. It then *stays* that way, because the next frame
+  raises at the same place and never reaches the repaint either.
+  **Why it is here and not fixed in the same breath:** the mic view made it visible rather
+  than caused it — any raise in `_pump_talk`, `_pump_events` or `pump_results` does this,
+  and has been able to since the pill and its panel became one window. The fix is a
+  judgement call about the frame loop's contract, not a line: either `_frame` puts the
+  sync-and-draw in a `finally` so a broken pump still repaints what it can, or `_tick`'s
+  handler forces one after surfacing the error. The first is better and is also the one
+  that could hide a pump that is failing every frame behind a row that looks fine, which
+  is the trade worth your call rather than mine.
+  **Reproduce:** give `Pill` a session whose `busy` raises, arm a `_ptt_wait`, and watch
+  the window grow while the row does not.
+
 - [ ] **The furniture users saw is the *answer*, not the chrome — and stripping it is a
   product call.** Item 61 re-measured codex-cli 0.145.0 and claude 2.1.218 through
   `_invoke`'s own `Popen` shape, six calls over four prompt shapes, in this repo and in a
