@@ -7,9 +7,10 @@ a session state and a press, they write a fixed set of shapes and make a fixed
 set of calls. The fixture idiom is test_pill's own: `__new__` plus class
 defaults, never `__init__`.
 
-Pinned: the glyph tint per mode, the ring colour per state, tap vs hold, the
-class-attribute defaults `_draw` depends on, the pump's pull contract, and
-Type's whole arc — hold, release, draft, paste.
+Pinned: the glyph tint per mode, the ring colour per state, the capsule's
+geometry against `design/compact/gen.py`, tap vs hold, the class-attribute
+defaults `_draw` depends on, the pump's pull contract, and Type's whole arc —
+hold, release, draft, paste.
 """
 
 import time
@@ -29,15 +30,15 @@ class Canvas:
 
     The same shape test_pill's fake has — `polys`, `items` of ovals, rects,
     arcs, lines, and the `bindings` a `tag_bind` would make — so either pill
-    can be drawn onto it. Rects record their outline too: the ring is the one
-    thing this pill draws as a stroke, and it is the thing half these tests
-    assert on.
+    can be drawn onto it. Arcs record their style and width, lines their
+    width: the capsule body is pieslices and every ring is a 1 px stroke, and
+    both facts are things these tests assert on.
     """
 
     def __init__(self) -> None:
         self.ovals: list[tuple[float, float, float, float, str]] = []
         self.rects: list[tuple[float, float, float, float, str, str]] = []
-        self.lines: list[tuple[tuple, str]] = []
+        self.lines: list[tuple] = []
         self.arcs: list[tuple] = []
         self.polys: list[tuple] = []
         self.bindings: list[tuple] = []
@@ -55,10 +56,11 @@ class Canvas:
             (x1, y1, x2, y2, kw.get("fill", ""), kw.get("outline", "")))
 
     def create_line(self, *a, **kw) -> None:
-        self.lines.append((a, kw.get("fill", "")))
+        self.lines.append((a, kw.get("fill", ""), kw.get("width", 1)))
 
     def create_arc(self, *a, **kw) -> None:
-        self.arcs.append((a, kw.get("outline", "")))
+        self.arcs.append((a, kw.get("fill", ""), kw.get("outline", ""),
+                          kw.get("style"), kw.get("width", 1)))
 
     def create_polygon(self, *a, **kw) -> None:
         self.polys.append((a, kw.get("fill", ""), kw.get("outline", "")))
@@ -94,34 +96,51 @@ def pill(state=State.IDLE, *, armed=True, mode=DICTATE, **attrs):
 
 
 def rings(p) -> list[str]:
-    """The outlines drawn this frame — the ring is the only stroked polygon."""
-    return [outline for *_g, outline in p.canvas.polys if outline]
+    """The state ring's colour, or [] at rest: the only items that may wear a
+    state hue are the ring's two cap arcs and two straight runs."""
+    hues = (uc.HEARING, uc.WAITING, uc.ERROR)
+    colours = {outline for _a, _f, outline, _s, _w in p.canvas.arcs
+               if outline in hues}
+    colours |= {fill for _a, fill, _w in p.canvas.lines if fill in hues}
+    return sorted(colours)
 
 
-def shell_fill(p) -> str:
-    """The capsule body's fill: the one filled polygon, under everything else."""
-    (body,) = [fill for _a, fill, outline in p.canvas.polys if not outline]
-    return body
+def ring_items(p) -> list:
+    """Every arc and line wearing a state hue, for the 1 px assertions."""
+    hues = (uc.HEARING, uc.WAITING, uc.ERROR)
+    items = [(outline, w) for _a, _f, outline, _s, w in p.canvas.arcs
+             if outline in hues]
+    items += [(fill, w) for _a, fill, w in p.canvas.lines if fill in hues]
+    return items
 
 
-def glyph_fill(p) -> str:
-    """The mic capsule's fill: the pill's only oval."""
-    (only,) = p.canvas.ovals
-    return only[4]
+def pieslices(p) -> list:
+    """The capsule body's two ends — the only pieslices `_draw` makes."""
+    return [(a, fill) for a, fill, _o, style, _w in p.canvas.arcs
+            if style == uc.tk.PIESLICE]
+
+
+def glyph_stroke(p) -> str:
+    """The mic's colour: the body is the pill's only polygon — an outlined
+    `_round_rect`, stroked not filled."""
+    (body,) = p.canvas.polys
+    _coords, fill, outline = body
+    assert fill == "", "the mic body is stroked, not filled"
+    return outline
 
 
 class TestTheGlyphCarriesTheMode(unittest.TestCase):
     def test_type_is_white(self):
         p = pill(State.LISTENING, mode=DICTATE)
         p._draw()
-        self.assertEqual(glyph_fill(p), uc.MODE_TINT[DICTATE])
+        self.assertEqual(glyph_stroke(p), uc.MODE_TINT[DICTATE])
         # White, as the README's "white Type" says — ui.py's own near-white.
         self.assertEqual(uc.MODE_TINT[DICTATE], uc.TEXT)
 
     def test_ask_is_violet(self):
         p = pill(State.LISTENING, mode=CONVERSE)
         p._draw()
-        self.assertEqual(glyph_fill(p), uc.MODE_TINT[CONVERSE])
+        self.assertEqual(glyph_stroke(p), uc.MODE_TINT[CONVERSE])
         self.assertEqual(uc.MODE_TINT[CONVERSE], "#B48EF5")
 
     def test_refines_gold_is_declared_but_nowhere_on_the_map(self):
@@ -148,6 +167,14 @@ class TestTheRingCarriesTheState(unittest.TestCase):
         p._draw()
         self.assertEqual(rings(p), ["#F2584A"])
 
+    def test_the_ring_is_one_pixel_not_two(self):
+        # `box-shadow: 0 0 0 1px <state>` — every item wearing the state hue,
+        # cap arcs and straight runs alike.
+        p = pill(State.LISTENING)
+        p._draw()
+        self.assertTrue(ring_items(p))
+        self.assertTrue(all(w == 1 for _c, w in ring_items(p)))
+
     def test_rest_is_no_ring(self):
         for state in (State.IDLE, State.DRAFT):
             with self.subTest(state=state):
@@ -173,7 +200,85 @@ class TestTheCapsuleIsFilled(unittest.TestCase):
     def test_the_shell_covers_the_pill(self):
         p = pill(State.IDLE, armed=False)
         p._draw()
-        self.assertEqual(shell_fill(p), uc.SHELL)
+        slices = pieslices(p)
+        self.assertEqual(len(slices), 2)
+        self.assertTrue(all(fill == uc.SHELL for _a, fill in slices))
+        # And the rectangle between them, in the same fill.
+        self.assertIn(uc.SHELL, [fill for *_g, fill, _o in p.canvas.rects])
+
+
+class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
+    """Item 2's pixel contract with `design/compact/gen.py` — the authority
+    when the canvas and memory disagree. The photographs in `.shots/` are the
+    visual gate; these pin the geometry headless."""
+
+    def test_the_body_is_a_true_stadium(self):
+        # Two pieslices of diameter `h` at the ends, a rectangle between —
+        # not a smoothed polygon, which at r = h/2 is a rounded rectangle.
+        p = pill(State.IDLE, armed=False)
+        p._draw()
+        h, w = uc.PILL_H, uc.PILL_W
+        bboxes = sorted(tuple(a[:4]) for a, _f in pieslices(p))
+        self.assertEqual(bboxes, [(0, 0, h, h), (w - h, 0, w, h)])
+        (middle,) = [r for r in p.canvas.rects if r[4] == uc.SHELL]
+        self.assertEqual((middle[0], middle[2]), (h / 2, w - h / 2))
+
+    def test_the_chrome_is_the_three_hairlines(self):
+        # gen.py's `.pill`: a 1 px RING_OUTER border and an inset RING_TOP
+        # highlight, always; the state ring one pixel further out when armed.
+        p = pill(State.LISTENING)
+        p._draw()
+        outer = [(tuple(a[:4]), w) for a, _f, outline, _s, w in p.canvas.arcs
+                 if outline == uc.RING_OUTER]
+        outer += [(tuple(a[:4]), w) for a, fill, w in p.canvas.lines
+                  if fill == uc.RING_OUTER]
+        # Two cap arcs and two runs, all 1 px, one pixel inside the ring's.
+        self.assertEqual(len(outer), 4)
+        self.assertTrue(all(w == 1 for _a, w in outer))
+        self.assertIn(((1, 1, uc.PILL_H - 1, uc.PILL_H - 1), 1), outer)
+        highlights = [(tuple(a[:4]), outline)
+                      for a, _f, outline, style, _w in p.canvas.arcs
+                      if style == uc.tk.ARC and outline == uc.RING_TOP]
+        self.assertEqual(len(highlights), 1)
+        # The highlight steps in with the border when a ring takes the edge.
+        self.assertEqual(highlights[0][0], (2, 2, uc.PILL_W - 2, uc.PILL_H - 2))
+
+    def test_the_rest_chrome_sits_on_the_outermost_pixel(self):
+        p = pill(State.IDLE, armed=False)
+        p._draw()
+        highlights = [tuple(a[:4])
+                      for a, _f, outline, style, _w in p.canvas.arcs
+                      if style == uc.tk.ARC and outline == uc.RING_TOP]
+        self.assertEqual(highlights, [(1, 1, uc.PILL_W - 1, uc.PILL_H - 1)])
+
+    def test_the_meter_is_fifteen_two_pixel_bars_on_a_two_pixel_gap(self):
+        p = pill(State.IDLE, armed=False)
+        p._draw()
+        bars = [r for r in p.canvas.rects if r[4] == uc.DIM]
+        self.assertEqual(len(bars), 15)
+        self.assertEqual(uc.BARS, 15)
+        for i, bar in enumerate(bars):
+            x1, y1, x2, y2 = bar[:4]
+            self.assertEqual(x1, uc.METER_X + i * (uc.BAR_W + uc.BAR_GAP))
+            self.assertEqual(x2 - x1, 2)      # 2 px wide
+            self.assertEqual(y2 - y1, 3.0)    # 3 px at rest
+        # 2 px on a 2 px gap, and grey: rest claims no state.
+        self.assertEqual(uc.BAR_W, 2)
+        self.assertEqual(uc.BAR_GAP, 2)
+
+    def test_the_mic_is_stroked_not_filled(self):
+        # gen.py's `mic()`: an outlined capsule body, an arc cradle, a stem —
+        # and no filled oval anywhere.
+        p = pill(State.LISTENING)
+        p._draw()
+        self.assertEqual(p.canvas.ovals, [])
+        tint = uc.MODE_TINT[DICTATE]
+        self.assertEqual(glyph_stroke(p), tint)
+        cradle = [outline for _a, _f, outline, style, _w in p.canvas.arcs
+                  if style == uc.tk.ARC and outline == tint]
+        self.assertEqual(cradle, [tint])
+        stems = [fill for _a, fill, _w in p.canvas.lines if fill == tint]
+        self.assertEqual(stems, [tint])
 
 
 class TestTapAndHoldShareOneButton(unittest.TestCase):
@@ -231,11 +336,11 @@ class TestTheClassDefaultsADrawNeeds(unittest.TestCase):
         p.canvas = Canvas()
         p.session = session()
         p._draw()
-        # Rest: no ring, and the meter is there in its muted shade.
+        # Rest: no ring, and the meter is there in its grey — rest claims no
+        # state, so the bars are gen.py's DIM, not a mode's tint.
         self.assertEqual(rings(p), [])
-        bars = [r for r in p.canvas.rects if not r[5]]
+        bars = [r for r in p.canvas.rects if r[4] == uc.DIM]
         self.assertEqual(len(bars), uc.BARS)
-        self.assertTrue(all(b[4] == uc.MUTED for b in bars))
 
     def test_every_drawn_attribute_is_a_class_attribute(self):
         for name in ("armed", "_flash", "_meter_level", "_eased_level",

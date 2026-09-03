@@ -47,14 +47,16 @@ from .ui import (
     CARD_ACCENT,
     DB_CEIL,
     DB_FLOOR,
+    DIM,
     ERROR,
     FLASH_FRAMES,
     HEARING,
     LEVEL_FALL_ALPHA,
     LEVEL_RISE_ALPHA,
-    MUTED,
     PILL_DRAG_SLOP,
     PILL_HOLD_SEC,
+    RING_OUTER,
+    RING_TOP,
     SHELL,
     TEXT,
     WAITING,
@@ -103,12 +105,22 @@ RING = {
     State.ASKING: WAITING,  # the same wait from the user's side, as in ui.py
 }
 
-#: The level meter: the spec's `.meter` is 2 px bars on a 2 px gap, blooming
-#: around the centre line. Twelve of them fill what the glyph leaves of 120 px.
-METER_X = 40
-BARS = 12
+#: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
+#: viewBox after the 12 px left padding, centred in the 34 px height. The
+#: glyph itself is stroked, not filled — `mic()` in gen.py is 1.4 px strokes
+#: with round caps. Tk has no fractional rasterizer; 1.4 is passed through
+#: and lands as it lands (see the shots).
+MIC_X = 12
+MIC_Y = (PILL_H - 18) // 2
+MIC_STROKE = 1.4
+
+#: The level meter, gen.py's `.meter`: 15 bars 2 px wide on a 2 px gap, 3 px
+#: at rest, in a 14 px band, blooming around the centre line. It starts after
+#: the padding, the glyph and the 9 px gap the flex row gives them.
+METER_X = MIC_X + 14 + 9
+BARS = 15
 BAR_W = 2
-BAR_GAP = 4
+BAR_GAP = 2
 BAR_MAX_HALF = 7.0  # half-height at full level — 14 px of travel inside 34
 
 #: Where the docked panel grows to (Refine.dc.html, Ask.dc.html: "the pill
@@ -123,6 +135,48 @@ PANEL_W = 400
 #: TODO: spoken punctuation ("press enter", "tab"), resolved locally so Type
 #: gets it without a CLI (design/compact/README.md). The session's decode
 #: pipeline owns words; this belongs beside it, not in the pill.
+
+
+def _capsule(c: tk.Canvas, x1, y1, x2, y2, **kw) -> None:
+    """A true stadium, filled: two `create_arc` pieslices of diameter `h` at
+    each end plus a `create_rectangle` between them.
+
+    `_round_rect` is a smoothed polygon, and at `r = h/2` it yields a rounded
+    rectangle, not a capsule — the difference is what `.shots/01-compact-rest.png`
+    showed before this helper existed. Kept separate from `_round_rect` rather
+    than an option on it: the shipped surface depends on that shape staying
+    exactly what it is.
+    """
+    h = y2 - y1
+    c.create_arc(x1, y1, x1 + h, y2, start=90, extent=180,
+                 style=tk.PIESLICE, **kw)
+    c.create_arc(x2 - h, y1, x2, y2, start=270, extent=180,
+                 style=tk.PIESLICE, **kw)
+    c.create_rectangle(x1 + h / 2, y1, x2 - h / 2, y2, **kw)
+
+
+def _capsule_ring(c: tk.Canvas, x1, y1, x2, y2, colour: str, width=1) -> None:
+    """The stadium as a stroke: two arc outlines and the two straight runs
+    between them, because a pieslice's outline also draws its radii — the
+    diameter line — and a capsule has none.
+
+    The runs sit on integer rows while the bbox stays fractional-free,
+    because the two primitives rasterize differently: an arc's stroke falls
+    *inside* its bbox, and a line's centres on its path with half-pixels
+    rounding up — a run drawn at `y1 + width/2` lands one row low (and the
+    bottom run lands off the window entirely). Measured against
+    `.shots/02-compact-hearing.png`, where both showed.
+    """
+    h = y2 - y1
+    dy = (width - 1) / 2
+    c.create_arc(x1, y1, x1 + h, y2, start=90, extent=180,
+                 style=tk.ARC, outline=colour, width=width)
+    c.create_arc(x2 - h, y1, x2, y2, start=270, extent=180,
+                 style=tk.ARC, outline=colour, width=width)
+    c.create_line(x1 + h / 2, y1 + dy, x2 - h / 2, y1 + dy,
+                  fill=colour, width=width)
+    c.create_line(x1 + h / 2, y2 - 1 - dy, x2 - h / 2, y2 - 1 - dy,
+                  fill=colour, width=width)
 
 
 class CompactPill(tk.Tk):
@@ -599,29 +653,45 @@ class CompactPill(tk.Tk):
         # pixel — an unfilled pill is invisible against the desktop and lets the
         # press fall to whatever is behind it, which is exactly what the first
         # photographed run did to the right-click that was meant to open the
-        # menu. Radius half the height, as Main.dc.html's `.pill` has it.
-        _round_rect(c, 0, 0, PILL_W, PILL_H, PILL_H // 2, fill=SHELL, outline="")
+        # menu. A true stadium, as Main.dc.html's `.pill` has it — see
+        # `_capsule` for why not `_round_rect`.
+        _capsule(c, 0, 0, PILL_W, PILL_H, fill=SHELL, outline="")
+        # The chrome, gen.py's `.pill`: a 1 px `RING_OUTER` border and an inset
+        # `RING_TOP` highlight, plus the state ring one pixel further out when
+        # there is one (`box-shadow: 0 0 0 1px <state>` — 1 px, not 2). The
+        # window is exactly the capsule, so "further out" does not exist and
+        # the stack shifts in instead: the ring takes the outermost pixel, the
+        # border steps one in, the highlight one more. `_panel_chrome`
+        # (flow/ui.py:2269) is the same idea for the shipped surface — three
+        # opaque hairlines instead of a shadow no keyed window could composite.
         ring = self._ring_colour()
+        inset = 0
         if ring:
-            # The hairline the spec means by "ring": a 2 px stroke a pixel
-            # inside the capsule's own edge, rounded with it — a square corner
-            # would poke past the capsule's into the keyed-out region.
-            _round_rect(c, 1, 1, PILL_W - 1, PILL_H - 1, PILL_H // 2 - 1,
-                        fill="", outline=ring, width=2)
+            _capsule_ring(c, 0, 0, PILL_W, PILL_H, ring)
+            inset = 1
+        _capsule_ring(c, inset, inset, PILL_W - inset, PILL_H - inset, RING_OUTER)
+        hi = inset + 1
+        c.create_arc(hi, hi, PILL_W - hi, PILL_H - hi,
+                     start=0, extent=180, style=tk.ARC, outline=RING_TOP)
         tint = self._glyph_tint()
-        # Mic glyph: capsule + stand, the same three strokes ui.py draws
-        # (flow/ui.py:4992-4998) at the same size — drawn, not fonted, so
-        # there is no dependency on an emoji font being present.
-        cx, cy = 20, PILL_H // 2
-        c.create_oval(cx - 4, cy - 9, cx + 4, cy + 1, fill=tint, outline=tint)
-        c.create_arc(cx - 7, cy - 5, cx + 7, cy + 6,
-                     start=180, extent=180, style=tk.ARC, outline=tint, width=2)
-        c.create_line(cx, cy + 6, cx, cy + 10, fill=tint, width=2)
-        # The meter (R13's live level, restated wordless). Blooms around the
-        # centre line so quiet reads as a flat line rather than an empty box.
+        # The mic, stroked not filled — gen.py's `mic()`: a rounded-rect
+        # capsule, an arc cradle, a stem, in a 14×18 viewBox with round caps.
+        # The coordinates are the viewBox's, offset by its frame in the window.
+        x, y = MIC_X, MIC_Y
+        _round_rect(c, x + 4.3, y + 1.2, x + 9.7, y + 10.8, 2.7,
+                    fill="", outline=tint, width=MIC_STROKE)
+        c.create_arc(x + 1.8, y + 3.2, x + 12.2, y + 13.6,
+                     start=180, extent=180, style=tk.ARC,
+                     outline=tint, width=MIC_STROKE)
+        c.create_line(x + 7, y + 13.6, x + 7, y + 16.4,
+                      fill=tint, width=MIC_STROKE, capstyle=tk.ROUND)
+        # The meter (R13's live level, restated wordless): 2 px bars on a 2 px
+        # gap, 3 px at rest, blooming around the centre line so quiet reads as
+        # a flat line rather than an empty box. Rest is gen.py's `DIM` — grey
+        # claims no state — the mode's tint is earned by an actual level.
         mid = PILL_H // 2
         lvl = self._meter_level
-        shade = tint if lvl > 0.04 else MUTED
+        shade = tint if lvl > 0.04 else DIM
         centre = (BARS - 1) / 2
         for i in range(BARS):
             envelope = 1.0 - 0.6 * abs(i - centre) / centre
