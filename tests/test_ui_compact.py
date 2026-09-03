@@ -9,8 +9,9 @@ defaults, never `__init__`.
 
 Pinned: the glyph tint per mode, the ring colour per state, the capsule's
 geometry against `design/compact/gen.py`, tap vs hold, the class-attribute
-defaults `_draw` depends on, the pump's pull contract, and Type's whole arc —
-hold, release, draft, paste.
+defaults `_draw` depends on, the pump's pull contract, Type's whole arc —
+hold, release, draft, paste — and the gestures complete: the Workspace.dc.html
+menu, the palette, the setup box, and the tray the canvas said no to.
 """
 
 import time
@@ -20,9 +21,11 @@ from unittest import mock
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # for test_menu's fakes
 
 import flow.ui_compact as uc  # noqa: E402
 from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
+from test_menu import FakeMenu, FakeVar  # noqa: E402
 
 
 class Canvas:
@@ -993,6 +996,269 @@ class TestThePanelDraws(unittest.TestCase):
         # And the panel band above keeps its own neutral border: nothing
         # state-coloured up there.
         self.assertTrue(all(a[1] >= uc.PANEL_H for a, _w in lines))
+
+
+class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
+    """The right-click menu: three modes with the check on the current one,
+    the hints as disabled entries (Tk has no sub-line row), Switch workspace
+    with the path beneath it, Workbench setup with its hint, then the two
+    window rows the canvas does not name."""
+
+    def build(self, mode=DICTATE, workspace="~/dev/products/flow"):
+        p = pill(mode=mode)
+        p.session.workspace = workspace
+        m = FakeMenu()
+        with mock.patch.object(uc.tk, "StringVar", FakeVar):
+            p._populate_menu(m)
+        return p, m
+
+    def test_the_structure_in_order(self):
+        _p, m = self.build()
+        self.assertEqual(
+            m.order,
+            ["Type", "Refine", "Ask",
+             "tap the pill to cycle",
+             "Switch workspace", "~/dev/products/flow",
+             "Workbench setup", "mic, CLI, where it pastes",
+             "Hide to tray", "Quit"])
+        # The hints are disabled entries, never verbs.
+        for hint in ("tap the pill to cycle", "~/dev/products/flow",
+                     "mic, CLI, where it pastes"):
+            self.assertIsNone(m.commands[hint])
+
+    def test_the_check_is_on_the_current_mode(self):
+        for mode, name in ((DICTATE, "Type"), (REFINE, "Refine"),
+                           (CONVERSE, "Ask")):
+            with self.subTest(mode=mode):
+                _p, m = self.build(mode=mode)
+                # Three radios, one tick: FakeVar recorded the value the
+                # variable was made with.
+                self.assertEqual([label for label, _v in m.radios],
+                                 ["Type", "Refine", "Ask"])
+
+    def test_choosing_a_mode_goes_straight_at_it(self):
+        p, m = self.build()
+        m.commands["Refine"]()
+        p.session.toggle_mode.assert_called_once_with(to=REFINE)
+
+    def test_the_modes_are_named_for_the_job_not_the_mechanism(self):
+        self.assertEqual(uc.MODE_NAME,
+                         {DICTATE: "Type", REFINE: "Refine", CONVERSE: "Ask"})
+
+    def test_the_workspace_line_says_when_there_is_none(self):
+        _p, m = self.build(workspace="")
+        self.assertIn("no workspace", m.order)
+
+    def test_the_menu_is_rebuilt_on_open(self):
+        # The check and the path are the values of now: switching modes and
+        # re-opening must move the tick, not leave it where the menu was made.
+        p = pill(mode=DICTATE)
+        p.session.workspace = "~/dev/products/flow"
+        m = FakeMenu()
+        m.delete = mock.Mock()
+        p._menu = m
+        with mock.patch.object(uc.tk, "StringVar", FakeVar):
+            p._on_menu(mock.Mock(x_root=10, y_root=10))
+        m.delete.assert_called_once_with(0, "end")
+        self.assertIn("Type", m.radios[0])
+
+
+class TestThePalette(unittest.TestCase):
+    """The palette's logic, driven headless: the filter, the pinned row, the
+    choice. The window and the keys are thin triggers beside it."""
+
+    WORKSPACES = ("~/dev/products/flow", "~/dev/products/flow-lite-notes",
+                  "~/work/riverflow")
+
+    def palette(self, query=""):
+        pal = uc._Palette(self.WORKSPACES)
+        pal.query = query
+        return pal
+
+    def test_the_filter_is_a_case_insensitive_substring_in_profile_order(self):
+        rows = self.palette("FLO").rows()
+        # The profile's own order is the ranking — the filter never re-sorts.
+        self.assertEqual([label for label, _n in rows],
+                         ["~/dev/products/flow", "~/dev/products/flow-lite-notes",
+                          "~/work/riverflow", uc._Palette.NONE])
+
+    def test_the_filter_narrows(self):
+        rows = self.palette("lite").rows()
+        self.assertEqual([label for label, _n in rows],
+                         ["~/dev/products/flow-lite-notes", uc._Palette.NONE])
+
+    def test_no_workspace_is_always_last_and_never_filtered_out(self):
+        rows = self.palette("zzz-no-such-folder").rows()
+        self.assertEqual(rows, [(uc._Palette.NONE, True)])
+
+    def test_choosing_the_pinned_row_clears_the_workspace(self):
+        pal = self.palette("lite")
+        self.assertIsNone(pal.choose(1))
+        self.assertEqual(pal.choose(0), "~/dev/products/flow-lite-notes")
+
+    def test_typing_and_backspace_edit_the_query(self):
+        pal = uc._Palette(self.WORKSPACES)
+        for ch in "flo":
+            pal.type(ch)
+        self.assertEqual(pal.query, "flo")
+        pal.backspace()
+        self.assertEqual(pal.query, "fl")
+
+    def test_the_recents_come_from_the_profile_record(self):
+        p = pill()
+        p.session.profile.workspaces = ["~/a", "~/b"]
+        self.assertEqual(p._workspace_recents(), ["~/a", "~/b"])
+
+
+class TestThePaletteWindow(unittest.TestCase):
+    """The thin triggers: keys and clicks on the box reach the palette's
+    logic and the session, and every way out closes."""
+
+    def open(self):
+        p = panel_pill(mode=CONVERSE)
+        p._palette = uc._Palette(["~/dev/products/flow", "~/work/riverflow"])
+        p._box_kind = "palette"
+        p._sync_box = mock.Mock()
+        p._close_box = mock.Mock(wraps=lambda: setattr(p, "_palette", None))
+        return p
+
+    def key(self, p, keysym, char=""):
+        p._on_box_key(mock.Mock(keysym=keysym, char=char))
+
+    def test_letters_and_backspace_drive_the_query(self):
+        p = self.open()
+        self.key(p, "f", "f")
+        self.key(p, "l", "l")
+        self.key(p, "BackSpace")
+        self.assertEqual(p._palette.query, "f")
+        self.assertEqual(p._sync_box.call_count, 3)
+
+    def test_enter_sets_the_top_hit_and_closes(self):
+        p = self.open()
+        for ch in "river":
+            self.key(p, ch, ch)
+        self.key(p, "Return")
+        p.session.set_workspace.assert_called_once_with("~/work/riverflow")
+        p._close_box.assert_called_once()
+
+    def test_enter_on_the_pinned_row_clears_the_workspace(self):
+        p = self.open()
+        self.key(p, "z", "z")  # narrows to the pinned row alone
+        self.key(p, "Return")
+        p.session.set_workspace.assert_called_once_with(None)
+
+    def test_esc_leaves_it_without_touching_the_workspace(self):
+        p = self.open()
+        self.key(p, "Escape")
+        p.session.set_workspace.assert_not_called()
+        p._close_box.assert_called_once()
+
+    def test_a_row_click_is_the_same_choice(self):
+        p = self.open()
+        y = uc.PALETTE_FIELD_H + uc.PALETTE_ROW_H + 5  # the second row
+        p._on_box_click(mock.Mock(y=y))
+        p.session.set_workspace.assert_called_once_with("~/work/riverflow")
+        p._close_box.assert_called_once()
+
+
+class TestThePaletteAndSetupDraw(unittest.TestCase):
+    def test_the_palette_draws_the_top_hit_lit_and_the_pinned_row_grey(self):
+        p = panel_pill(mode=CONVERSE)
+        p._palette = uc._Palette(["~/dev/products/flow", "~/work/riverflow"])
+        p._palette.query = "flo"
+        p._box_kind = "palette"
+        c = Canvas()
+        p._draw_palette(c)
+        # The top row carries the highlight (CHIP), the caret is the green
+        # line, the pinned row reads grey, and the footer says the keys.
+        self.assertTrue(any(r[4] == uc.CHIP for r in c.rects))
+        self.assertTrue(any(fill == uc.HEARING for _a, fill, _w in c.lines))
+        labels = {t[1]: t[2] for t in c.texts}
+        self.assertEqual(labels[uc._Palette.NONE], uc.PLACEHOLDER)
+        self.assertEqual(labels["~/dev/products/flow"], uc.CODE)
+        self.assertIn("↵ set    esc leave it", labels)
+
+    def test_the_setup_box_draws_three_read_only_lines(self):
+        p = panel_pill(mode=CONVERSE)
+        p.session.mic = mock.Mock(device_name="Yeti Nano")
+        p.session._provider = lambda: "claude"
+        p.session.pastes = True
+        c = Canvas()
+        p._draw_setup(c)
+        texts = [t[1] for t in c.texts]
+        for line in ("Microphone", "Yeti Nano", "Agent CLI", "claude",
+                     "On release", "paste into last window"):
+            self.assertIn(line, texts)
+
+    def test_the_setup_lines_say_none_found_and_the_clipboard_answer(self):
+        p = panel_pill(mode=CONVERSE)
+        p.session.mic = mock.Mock(device_name="")
+        p.session._provider = lambda: ""
+        p.session.pastes = False
+        rows = p._setup_rows()
+        self.assertEqual(rows, [("Microphone", "none found"),
+                                ("Agent CLI", "none found"),
+                                ("On release", "copy — you paste it")])
+
+
+class TestTheTrayStays(unittest.TestCase):
+    """Kept against the canvas (decided 2026-09-03): the escape hatch if the
+    pill is ever dragged somewhere unreachable."""
+
+    def tray_pill(self):
+        p = panel_pill()
+        p.withdraw = mock.Mock()
+        p.deiconify = mock.Mock()
+        p.lift = mock.Mock()
+        return p
+
+    def test_hide_to_tray_starts_the_icon_and_withdraws(self):
+        p = self.tray_pill()
+        icon = mock.Mock()
+        icon.start.return_value = True
+        with mock.patch.object(uc.tray, "available", return_value=True), \
+                mock.patch.object(uc.tray, "Tray", return_value=icon):
+            self.assertTrue(p.hide_to_tray())
+        icon.start.assert_called_once_with()
+        p.withdraw.assert_called_once_with()
+        self.assertTrue(p._hidden)
+        self.assertEqual(p._home, (100, 400))
+
+    def test_no_notification_area_means_no_hiding(self):
+        # Invariant 4 in a new place: a withdrawn window with no icon behind
+        # it is a Flow only Task Manager can reach.
+        p = self.tray_pill()
+        with mock.patch.object(uc.tray, "available", return_value=False):
+            self.assertFalse(p.hide_to_tray())
+        p.withdraw.assert_not_called()
+        self.assertFalse(p._hidden)
+
+    def test_the_icon_is_the_way_back(self):
+        p = self.tray_pill()
+        p._hidden = True
+        p._home = (100, 400)
+        p.show_from_tray()
+        p.geometry.assert_called_with("+100+400")
+        p.deiconify.assert_called_once_with()
+        self.assertFalse(p._hidden)
+
+    def test_the_tray_queue_is_drained_on_the_frame(self):
+        import queue as q
+        p = self.tray_pill()
+        p._tray = mock.Mock()
+        p._tray_events = q.Queue()
+        p._tray_events.put(uc.tray.SHOW)
+        p._hidden = True
+        p._drain_tray()
+        p.deiconify.assert_called_once_with()
+
+    def test_quit_stops_the_tray_before_the_window_goes(self):
+        p = self.tray_pill()
+        p._tray = mock.Mock()
+        p.destroy = mock.Mock()
+        p.quit_app()
+        p._tray.stop.assert_called_once_with()
+        p.session.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

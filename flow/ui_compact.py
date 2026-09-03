@@ -36,12 +36,14 @@ reads the panel's click-outside poll needs are declared on ui.py's own
 from __future__ import annotations
 
 import ctypes
+import queue
 import sys
 import time
 import tkinter as tk
 import traceback
 from pathlib import Path
 
+from . import tray
 from .session import CONVERSE, DICTATE, REFINE, Session, State
 
 # The hues and the fonts are ui.py's own, imported rather than restated: the
@@ -64,10 +66,12 @@ from .ui import (
     FONT_CHIP,
     FONT_CHIP_PRIMARY,
     FONT_MONO,
+    FONT_NOTE,
     FONT_PARTIAL,
     HEARING,
     LEVEL_FALL_ALPHA,
     LEVEL_RISE_ALPHA,
+    MUTED,
     PILL_DRAG_SLOP,
     PILL_HOLD_SEC,
     PLACEHOLDER,
@@ -229,6 +233,19 @@ PANEL_SPEC = {
     },
 }
 
+#: The modes' names on this surface (README, Workspace.dc.html). The shipped
+#: UI's Dictate/Converse named the mechanism; the compact names the job.
+MODE_NAME = {DICTATE: "Type", REFINE: "Refine", CONVERSE: "Ask"}
+
+#: The standalone box (Workspace.dc.html's `.box`) the palette and the setup
+#: share: 360 px wide, SHELL with a `RING_OUTER` border and the `RING_TOP`
+#: inset highlight. Its rows, measured off the artboard.
+BOX_W = 360
+PALETTE_FIELD_H = 40
+PALETTE_ROW_H = 30
+PALETTE_FOOT_H = 34
+SETUP_ROW_H = 42
+
 #: TODO: spoken punctuation ("press enter", "tab"), resolved locally so Type
 #: gets it without a CLI (design/compact/README.md). The session's decode
 #: pipeline owns words; this belongs beside it, not in the pill.
@@ -343,6 +360,46 @@ def _fit(text: str, line_chars: int, max_lines: int) -> str:
     return "\n".join(lines)
 
 
+class _Palette:
+    """The Switch-workspace palette's state (Workspace.dc.html): the query,
+    and the rows it leaves standing.
+
+    Logic only, so a bare fixture can drive it — the window, the keys and the
+    `set_workspace` call are CompactPill's, thin triggers beside it. The list
+    is the folders Flow has been pointed at, most recent first: the profile's
+    own record (`profile.workspaces`, written by `note_workspace`), so the
+    order the profile keeps is already the palette's ranking, and a substring
+    filter never re-sorts it.
+    """
+
+    #: The pinned last row (Workspace.dc.html). Choosing it clears the
+    #: workspace, which is what `session.set_workspace(None)` already means.
+    NONE = "No workspace — just talk"
+
+    def __init__(self, workspaces) -> None:
+        self.query = ""
+        self.workspaces = list(workspaces)
+
+    def type(self, ch: str) -> None:
+        self.query += ch
+
+    def backspace(self) -> None:
+        self.query = self.query[:-1]
+
+    def rows(self) -> list:
+        """(label, is_none) per visible row: the query's substring hits in
+        profile order, then the pinned row — always last, never filtered out."""
+        q = self.query.lower()
+        hits = [(w, False) for w in self.workspaces if q in w.lower()]
+        return hits + [(self.NONE, True)]
+
+    def choose(self, index: int = 0):
+        """What the highlighted row (or row `index`) hands
+        `session.set_workspace` — the path, or None for the pinned row."""
+        label, is_none = self.rows()[index]
+        return None if is_none else label
+
+
 class CompactPill(tk.Tk):
     """The wordless capsule. Press and hold to talk, tap to switch mode."""
 
@@ -380,8 +437,11 @@ class CompactPill(tk.Tk):
     _press_moved = False
     _press_talking = False
     #: The right-click menu, built in `__init__`. None on a fixture, and
-    #: `_on_menu` checks rather than assuming.
+    #: `_on_menu` checks rather than assuming. `_mode_var` is the radios'
+    #: tick, on the instance because a Tk variable dies with the frame that
+    #: created it (see `_populate_menu`).
     _menu = None
+    _mode_var = None
     #: What the last `draft` event carried — the text the send path hands
     #: over, and what item 3's panel `heard` block will read. "" on a fixture,
     #: which is also the true answer for a pill that has heard nothing.
@@ -415,6 +475,28 @@ class CompactPill(tk.Tk):
     _shell_h = PILL_H
     #: The outside-click poll's edge detector: the button's last read.
     _outside_was_down = False
+    #: The tray's three states (the escape hatch the canvas said no to and
+    #: 2026-09-03 kept — design/compact/README.md): the icon, the queue it
+    #: puts its clicks on, and whether the window is hidden behind it. All
+    #: idle on a fixture, which is a pill that was never hidden.
+    _tray = None
+    _tray_events = None
+    _hidden = False
+    #: Where the window was when it was hidden, so `show_from_tray` puts it
+    #: back rather than where the window manager feels like.
+    _home = None
+    #: The standalone box (palette or setup) and its state: one at a time,
+    #: None when closed — which is all a fixture ever sees. `_palette` holds
+    #: the palette's logic while its box is open; `_box_kind` says which box.
+    _box = None
+    _box_canvas = None
+    _box_kind = ""
+    _palette = None
+    #: The box's anchor: left edge and bottom row, recorded at open because
+    #: `winfo_*` lags a `geometry` call by a frame and `_sync_box` re-heights
+    #: off them. Zero on a fixture, whose box is never open.
+    _box_x = 0
+    _box_foot = 0
     #: Whether the window is out of the activation chain. Set in `__init__`
     #: from `_no_activate`'s read-back; False on a fixture, which is the
     #: Lite/Mac answer `_on_menu`'s foreground borrow keys off.
@@ -452,6 +534,14 @@ class CompactPill(tk.Tk):
         self._shell_w = PILL_W
         self._shell_h = PILL_H
         self._outside_was_down = False
+        self._tray = None
+        self._tray_events = queue.Queue()
+        self._hidden = False
+        self._home = None
+        self._box = None
+        self._box_canvas = None
+        self._box_kind = ""
+        self._palette = None
 
         # The window. `_shell_window` applies the five probed attributes and
         # answers with the background the canvas must agree with — see its
@@ -482,10 +572,7 @@ class CompactPill(tk.Tk):
         self.bind("<Escape>", lambda _e: self._close_panel())
 
         self._menu = _dark_menu(self)
-        self._menu.add_command(label="Quit", command=self.quit_app)
-        # TODO: the rest of the menu is drawn in design/compact/Workspace.dc.html
-        # — a mode list, Switch workspace, Workbench setup. Right-click is the
-        # only menu the design allows, so all three land here when they land.
+        self._populate_menu(self._menu)
 
         # Out of the activation chain, like every Flow window (ui.py:2570). Not
         # cosmetic: a window the click *activates* is raised and focused by it,
@@ -518,6 +605,11 @@ class CompactPill(tk.Tk):
             return
         self._alive = False
         try:
+            # Before the hotkeys and before the window: an icon outliving its
+            # process is a ghost in the notification area that only a hover
+            # clears (ui.py:4114-4118, whose order this keeps).
+            if self._tray is not None:
+                self._tray.stop()
             if self.hotkeys is not None:
                 self.hotkeys.stop()
             self.session.close()
@@ -556,6 +648,7 @@ class CompactPill(tk.Tk):
         # this one.
         if not self._drain_hotkeys():
             return
+        self._drain_tray()
         self._track_target()
         if self.armed:
             self.session.tick()
@@ -853,6 +946,41 @@ class CompactPill(tk.Tk):
             self._send_pending = False
             self.session.toggle_mode()
 
+    def _populate_menu(self, m) -> None:
+        """The only menu the design allows (Workspace.dc.html), rebuilt on
+        every open: the mode check and the workspace path are live values,
+        and a stale check over a new mode is the same lie as no check.
+
+        Tk has no sub-line row, so the canvas's `msub` lines are disabled
+        entries — `_dark_menu` already greys them. The mode rows choose
+        through the chooser API (`toggle_mode(to=)`); a flip cannot serve
+        "choose Refine" in a three-mode world. The last two rows are not on
+        the canvas: Hide to tray is the 2026-09-03 decision that superseded
+        its "no tray" (design/compact/README.md), and Quit was already there.
+        """
+        current = self.session.mode
+        # On the instance, not the stack: a Tk variable dies with the frame
+        # that created it, and a radiobutton whose variable is gone draws no
+        # indicator — `.shots/06` showed three modes and no check until this
+        # was `self.`.
+        self._mode_var = tk.StringVar(value=MODE_NAME.get(current, ""))
+        for mode in (DICTATE, REFINE, CONVERSE):
+            name = MODE_NAME[mode]
+            m.add_radiobutton(
+                label=name, value=name, variable=self._mode_var,
+                command=lambda t=mode: self.session.toggle_mode(to=t))
+        m.add_command(label="tap the pill to cycle", state="disabled")
+        m.add_separator()
+        m.add_command(label="Switch workspace", command=self._open_palette)
+        ws = getattr(self.session, "workspace", "") or ""
+        m.add_command(label=ws or "no workspace", state="disabled")
+        m.add_separator()
+        m.add_command(label="Workbench setup", command=self._open_setup)
+        m.add_command(label="mic, CLI, where it pastes", state="disabled")
+        m.add_separator()
+        m.add_command(label="Hide to tray", command=self.hide_to_tray)
+        m.add_command(label="Quit", command=self.quit_app)
+
     def _on_menu(self, e=None) -> None:
         """Right-click — the only menu the design allows (Workspace.dc.html).
 
@@ -867,6 +995,10 @@ class CompactPill(tk.Tk):
         """
         if self._menu is None or e is None:
             return
+        # Rebuilt rather than refreshed: the mode check and the workspace
+        # line are the values of now, not of when the menu was first made.
+        self._menu.delete(0, "end")
+        self._populate_menu(self._menu)
         previous = foreground_hwnd() if self.no_activate else 0
         if self.no_activate:
             _user32.SetForegroundWindow(toplevel_hwnd(self))
@@ -876,6 +1008,193 @@ class CompactPill(tk.Tk):
             self._menu.grab_release()  # the documented idiom; cheap insurance
             if previous:
                 _user32.SetForegroundWindow(previous)
+
+    # -- the tray ------------------------------------------------------------
+
+    def hide_to_tray(self) -> bool:
+        """Park the window behind a notification-area icon. True when it hid.
+
+        ui.py:4038-4051's one act, compact-sized, and kept against the
+        canvas's "no tray menu" (decided 2026-09-03 — the tray is the escape
+        hatch if the pill is ever dragged somewhere unreachable;
+        design/compact/README.md). The icon comes first and hiding is
+        conditional on it: a withdrawn window with nothing in the
+        notification area is a Flow only Task Manager can reach — invariant
+        4, hidden must not mean gone. `withdraw` rather than `park`: the
+        shipped shell re-asserts its geometry every frame and would drag a
+        parked window straight back, and this one re-asserts only on a
+        panel transition, so unmapping is safe here.
+        """
+        if not tray.available():
+            self._flash = FLASH_FRAMES
+            return False
+        if self._tray is None:
+            self._tray = tray.Tray("Flow - press the chord to talk",
+                                   self._tray_events)
+        if not self._tray.start():
+            self._flash = FLASH_FRAMES
+            return False
+        self._home = (self.winfo_rootx(), self.winfo_rooty())
+        self._hidden = True
+        self.withdraw()
+        return True
+
+    def show_from_tray(self) -> None:
+        """Bring the window back where the user left it. The icon stays:
+        somebody who hid Flow once will hide it again."""
+        if not self._hidden:
+            return
+        self._hidden = False
+        if self._home is not None:
+            x, y = self._home
+            self.geometry(f"+{x}+{y}")
+        self.deiconify()
+        self.lift()
+
+    def _drain_tray(self) -> None:
+        """What the icon decided, acted on from Tk's own thread — the only
+        place Tk is touched, which is the rule tray.py's whole threading
+        argument exists for."""
+        if self._tray is None:
+            return
+        while True:
+            try:
+                event = self._tray_events.get_nowait()
+            except queue.Empty:
+                return
+            if event == tray.SHOW:
+                self.show_from_tray()
+            elif event == tray.QUIT:
+                self.quit_app()
+                return
+
+    # -- the standalone box --------------------------------------------------
+
+    def _workspace_recents(self) -> list:
+        """The folders Flow has been pointed at, most recent first — the
+        profile's own record, which `session.set_workspace` already writes."""
+        profile = getattr(self.session, "profile", None)
+        return list(getattr(profile, "workspaces", ()) or ())
+
+    def _open_palette(self) -> None:
+        """Switch workspace, from the menu: the search palette in
+        Workspace.dc.html over the folders the profile has recorded."""
+        self._palette = _Palette(self._workspace_recents())
+        self._open_box("palette")
+
+    def _open_setup(self) -> None:
+        """Workbench setup, from the menu: three read-only lines with the
+        values Flow already found."""
+        self._palette = None
+        self._open_box("setup")
+
+    def _box_height(self) -> int:
+        if self._box_kind == "palette" and self._palette is not None:
+            return (PALETTE_FIELD_H
+                    + PALETTE_ROW_H * len(self._palette.rows())
+                    + PALETTE_FOOT_H)
+        return SETUP_ROW_H * 3 + 2
+
+    def _open_box(self, kind: str) -> None:
+        """Raise the standalone 360 px box (Workspace.dc.html's `.box`) above
+        the pill, which itself never hides and never moves.
+
+        One at a time — palette or setup, not both. The box *takes* the
+        keyboard, the one window this surface activates on purpose: the
+        palette is a type-ahead, and a type-ahead nobody can type into is a
+        picture of one. It gives the focus back the way it came — Esc,
+        Enter, or a click anywhere else (`FocusOut`, which a no-activate
+        window could never offer, is exactly what taking focus buys).
+        """
+        # Replace, not close: the caller has already set the new box's state
+        # (`_palette`), which `_close_box` would wipe along with the old
+        # window. One at a time still holds.
+        if self._box is not None:
+            self._box.destroy()
+            self._box = None
+            self._box_canvas = None
+        self._box_kind = kind
+        box = tk.Toplevel(self)
+        bg = _shell_window(box, self.lite, PILL_ALPHA)
+        box.configure(bg=bg)
+        self._box = box
+        self._box_canvas = tk.Canvas(box, bg=bg, highlightthickness=0, bd=0)
+        self._box_canvas.pack(fill="both", expand=True)
+        h = self._box_height()
+        x, y = self.winfo_rootx(), self.winfo_rooty()
+        # Tracked, not read back: `winfo_*` lags the window manager by a
+        # frame or two after a `geometry` call, and `_sync_box` re-anchoring
+        # off a stale read parked the box above the screen's top edge —
+        # `.shots/12-compact-palette.png` was a picture of the backdrop.
+        self._box_x = x
+        self._box_foot = max(0, y - h - 8) + h
+        box.geometry(f"{BOX_W}x{h}+{x}+{self._box_foot - h}")
+        box.bind("<Key>", self._on_box_key)
+        box.bind("<ButtonPress-1>", self._on_box_click)
+        box.bind("<FocusOut>", lambda _e: self._close_box())
+        box.focus_force()
+        self._draw_box()
+
+    def _close_box(self) -> None:
+        """Idempotent, like every close on this surface: Esc, Enter, a click
+        away and a second menu choice can all mean the same close."""
+        self._palette = None
+        if self._box is not None:
+            self._box.destroy()
+            self._box = None
+            self._box_canvas = None
+            self._box_kind = ""
+
+    def _sync_box(self) -> None:
+        """Re-height and redraw the box after a keystroke changed its rows.
+        Bottom-anchored, like the panel: the box grows upward, off the anchor
+        `_open_box` recorded — see there for why not `winfo_*`."""
+        if self._box is None:
+            return
+        h = self._box_height()
+        self._box.geometry(
+            f"{BOX_W}x{h}+{self._box_x}+{self._box_foot - h}")
+        self._draw_box()
+
+    def _on_box_key(self, e) -> None:
+        """The palette's keyboard: letters build the query, Backspace edits,
+        Enter sets the top hit, Esc leaves it — the footer's own legend."""
+        if e.keysym == "Escape":
+            self._close_box()
+            return
+        if self._box_kind != "palette" or self._palette is None:
+            return
+        if e.keysym == "BackSpace":
+            self._palette.backspace()
+        elif e.keysym == "Return":
+            self.session.set_workspace(self._palette.choose())
+            self._close_box()
+            return
+        elif e.char and e.char.isprintable():
+            self._palette.type(e.char)
+        else:
+            return
+        self._sync_box()
+
+    def _on_box_click(self, e) -> None:
+        """A row tap is the same choice as Enter on it. Read-only boxes
+        (setup) swallow the click and stay."""
+        if self._box_kind != "palette" or self._palette is None:
+            return
+        i = (e.y - PALETTE_FIELD_H) // PALETTE_ROW_H
+        if 0 <= i < len(self._palette.rows()):
+            self.session.set_workspace(self._palette.choose(i))
+            self._close_box()
+
+    def _draw_box(self) -> None:
+        if self._box_canvas is None:
+            return
+        c = self._box_canvas
+        c.delete("all")
+        if self._box_kind == "palette":
+            self._draw_palette(c)
+        else:
+            self._draw_setup(c)
 
     # -- the panel -----------------------------------------------------------
 
@@ -1203,6 +1522,76 @@ class CompactPill(tk.Tk):
         c.create_line(x, cy - 4, x + 4, cy - 4, x + 6, cy - 2,
                       fill=DIM, width=1)
         c.create_rectangle(x, cy - 2, x + 13, cy + 5, outline=DIM, width=1)
+
+    def _draw_box_chrome(self, c, h: int) -> None:
+        """The `.box` shell both standalone windows share: SHELL, the 1 px
+        `RING_OUTER` border at 18 px, and the `RING_TOP` inset highlight —
+        the pill's own three hairlines at the box's radius."""
+        _round_rect(c, 0, 0, BOX_W - 1, h, 18, fill=SHELL, outline=RING_OUTER)
+        c.create_line(19, 1, BOX_W - 19, 1, fill=RING_TOP)
+
+    def _draw_palette(self, c) -> None:
+        """The search palette from Workspace.dc.html: field with caret, the
+        filtered folders with the top hit lit, the pinned last row, the
+        footer legend. The artboard also tints the matched substring — that
+        needs font metrics a 30 ms frame will not pay for, so the top row
+        carries the highlight instead; that is the residual delta."""
+        h = self._box_height()
+        self._draw_box_chrome(c, h)
+        # The field: search glyph, the query so far, the caret.
+        c.create_oval(16, 13, 26, 23, outline=DIM, width=1)
+        c.create_line(25, 22, 30, 27, fill=DIM, width=1)
+        query = self._palette.query
+        c.create_text(38, PALETTE_FIELD_H // 2, anchor="w", text=query,
+                      font=(FONT_MONO, -13), fill=TEXT)
+        caret = 38 + len(query) * 8
+        c.create_line(caret, 11, caret, PALETTE_FIELD_H - 11,
+                      fill=HEARING, width=1)
+        c.create_line(0, PALETTE_FIELD_H, BOX_W, PALETTE_FIELD_H, fill=SEAM)
+        for i, (label, is_none) in enumerate(self._palette.rows()):
+            y = PALETTE_FIELD_H + i * PALETTE_ROW_H
+            if i == 0:
+                # "Top hit highlighted" — the row, not the matched letters.
+                c.create_rectangle(1, y, BOX_W - 1, y + PALETTE_ROW_H,
+                                   fill=CHIP, outline="")
+            cy = y + PALETTE_ROW_H // 2
+            self._draw_folder(c, 16, cy)
+            c.create_text(38, cy, anchor="w", text=label,
+                          font=(FONT_MONO, -12),
+                          fill=PLACEHOLDER if is_none else CODE)
+        foot = h - PALETTE_FOOT_H
+        c.create_line(0, foot, BOX_W, foot, fill=SEAM)
+        c.create_text(16, foot + PALETTE_FOOT_H // 2, anchor="w",
+                      text="↵ set    esc leave it", font=FONT_TAG, fill=DIM)
+
+    def _setup_rows(self) -> list:
+        """The workbench's three answers (Workspace.dc.html), each a value
+        Flow already found: the microphone PortAudio opened, the CLI
+        `_provider` would use — "none found" when there isn't one, which item
+        6's no-CLI fallback needs too — and where a release's words go."""
+        mic = getattr(getattr(self.session, "mic", None),
+                      "device_name", "") or "none found"
+        provider = getattr(self.session, "_provider", lambda: "")
+        cli = provider() or "none found"
+        pastes = getattr(self.session, "pastes", False)
+        on_release = ("paste into last window" if pastes
+                      else "copy — you paste it")
+        return [("Microphone", mic), ("Agent CLI", cli),
+                ("On release", on_release)]
+
+    def _draw_setup(self, c) -> None:
+        """Workbench setup: three read-only lines. Open it when something is
+        wrong; otherwise never (Workspace.dc.html)."""
+        self._draw_box_chrome(c, self._box_height())
+        for i, (name, value) in enumerate(self._setup_rows()):
+            y = i * SETUP_ROW_H
+            if i:
+                c.create_line(0, y, BOX_W, y, fill=SEAM)
+            cy = y + SETUP_ROW_H // 2
+            c.create_text(16, cy, anchor="w", text=name,
+                          font=FONT_BODY, fill=TEXT)
+            c.create_text(BOX_W - 16, cy, anchor="e", text=value,
+                          font=FONT_NOTE, fill=MUTED)
 
     def _eased(self, target: float) -> float:
         """This frame's drawn level, one step closer to `target` than the last.

@@ -28,6 +28,10 @@ https://claude.ai/code/artifact/0ab88c75-8b24-455b-b96f-f9e5763a45fc
   holdable for "say more" / reply, and never hides. Send / Esc / click-outside closes.
 - Refine hands the CLI the workspace as its system role; spoken punctuation
   ("press enter", "tab") is resolved locally so Type gets it without a CLI.
+- The tray stays (decided 2026-09-03, against Workspace.dc.html's "There is no
+  preferences window and no tray menu"): it is the escape hatch if the pill is ever
+  dragged somewhere unreachable — hidden must not mean gone. That canvas line is
+  superseded; the menu gains Hide to tray above Quit.
 
 ## Rebuild and re-save
 

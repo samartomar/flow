@@ -15,6 +15,8 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   closed    120 wide again immediately after the close, proving it returns
   refine    REFINE at rest: the gold glyph, no ring
   refine panel  the heard block grey, the result under its gold tag, Send
+  palette   Switch workspace, mid-search: the query field, the top hit lit
+  setup     Workbench setup: mic, CLI, where it pastes
   menu      the right-click, the only menu the design allows
 
 The gestures (tap cycles, hold talks) are logic, pinned headless in
@@ -53,6 +55,17 @@ def shot(pill, name: str, margin: int = 26) -> None:
     shots._grab((x - margin, y - margin,
                  x + pill.winfo_width() + margin,
                  y + pill.winfo_height() + margin), name)
+
+
+def box_shot(pill, name: str, margin: int = 26) -> None:
+    """The standalone box (palette, setup), captured the same way."""
+    box = pill._box
+    box.lift()
+    box.update_idletasks()
+    x, y = box.winfo_rootx(), box.winfo_rooty()
+    shots._grab((x - margin, y - margin,
+                 x + box.winfo_width() + margin,
+                 y + box.winfo_height() + margin), name)
 
 
 def main() -> None:
@@ -137,6 +150,23 @@ def main() -> None:
             daemon=True).start()
         return done
 
+    def palette_open():
+        # Mid-search: three recorded folders, "flo" typed, the top hit lit.
+        sess.profile.workspaces = ["~/dev/products/flow",
+                                   "~/dev/products/flow-lite-notes",
+                                   "~/work/riverflow"]
+        pill._open_palette()
+        for ch in "flo":
+            pill._palette.type(ch)
+        pill._sync_box()
+
+    def setup_open():
+        # The three answers a real machine would have found.
+        sess.mic.device_name = "Yeti Nano"
+        sess._provider = lambda: "claude"
+        sess.pastes = True
+        pill._open_setup()
+
     steps = [
         (900, state(State.IDLE, armed=False)),
         (600, lambda: shot(pill, "01-compact-rest")),
@@ -160,6 +190,11 @@ def main() -> None:
         (0, refine_panel),
         (700, lambda: shot(pill, "11-compact-refine-panel")),
         (0, lambda: pill._close_panel()),
+        (0, palette_open),
+        (600, lambda: box_shot(pill, "12-compact-palette")),
+        (0, setup_open),
+        (600, lambda: box_shot(pill, "13-compact-setup")),
+        (0, lambda: pill._close_box()),
         (0, state(State.IDLE, armed=False)),
         (400, menu),
     ]

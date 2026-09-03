@@ -1641,6 +1641,10 @@ CARD_GAP = 8
 #: card is what makes the sentence actionable — it says where the words went and what to
 #: press, rather than only that something happened.
 ANSWER_HELD = "that landed on the conversation card - switch to converse to read it"
+#: The same announcement when the held result is Refine's. Naming the mode is
+#: what keeps the sentence true: "switch to converse" over a refined text
+#: would point at a conversation that never happened.
+ANSWER_HELD_REFINE = "that landed on the conversation card - switch to refine to read it"
 
 #: How long each dot of the indeterminate-wait animation holds.
 #:
@@ -4539,7 +4543,9 @@ class Pill(tk.Tk):
                         # that is already up: the case needing this line most is the one
                         # with nothing on screen at all, where an answer held off-screen
                         # and unannounced is the silence P2 forbids.
-                        self.bubble.surface(ANSWER_HELD)
+                        self.bubble.surface(
+                            ANSWER_HELD_REFINE
+                            if self.session.mode == REFINE else ANSWER_HELD)
             elif ev.kind == "mode":
                 self._swap_surfaces()
             elif ev.kind == "conversation":
