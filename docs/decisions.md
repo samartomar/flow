@@ -81,6 +81,25 @@ The failure branch is not: a paste that failed or could not be guaranteed still 
 panel and still flashes, because it is the one thing here that cannot be read off the
 other window.
 
+**The grow-back needed a way back, and two doors needed closing.** Found by running the
+app rather than the suite, which had asserted the shrink by calling `hide()` by hand:
+
+- *A note that grew the panel back never left.* Nothing hides a surfaced note — on the
+  full row it lands on a panel that was already up and the next draft clears it, and here
+  there is no next draft. One line from a settings row left the pill 400 px wide for as
+  long as Flow ran; measured at twelve seconds and still up. `Bubble.tick_note` gives the
+  row back after `MIC_NOTE_SEC` (7 s, longer than the sent card's 4 because that is a
+  receipt for something the user just did and this is a line they did not ask for),
+  stamped only where this view surfaced it, and dropped the moment the panel has a second
+  reason to be there.
+- *Progress opened a panel.* `tick_activity` surfaces the bubble for a wait with nothing
+  else on screen, which is right on the full row and wrong here: the model load opened a
+  400 px panel on every launch and held it for the eight seconds the load takes — 90x34 at
+  0.76 s, 400x98 at 1.07 s, back at 9.52 s from a cold start. The grow-back is for a
+  *refusal*, and an activity is the opposite: the mic glyph already carries that state in
+  its colour and there is nothing to act on. It declines to *open* one; a wait already up
+  is left alone, and a note arriving during a load still surfaces.
+
 **Reopens if** the view needs a fourth thing on the row — the honest answer then is that
 the gesture has grown a decision and the full row is the surface for it — or if the
 grow-back is reported as jarring rather than as the panel doing its job, in which case

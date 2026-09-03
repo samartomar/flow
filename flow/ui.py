@@ -1411,6 +1411,26 @@ MIC_W = PAD + METER_W + PAD
 #: that is no longer plugged in must land somewhere visible rather than off-screen.
 MIC_AT_DEFAULT: tuple[int, int] | None = None
 
+#: How long a note that grew the full pill back stays before the view returns, in seconds.
+#:
+#: **The missing half of the grow-back.** A note on a hidden bubble is normally dropped;
+#: under the mic view it surfaces one instead, so a refusal is never silent. But nothing
+#: hides a surfaced note — on the full row it sits on a panel that was already up and is
+#: cleared by the next draft, and under this view there is no next draft, so one line from
+#: a settings row left the pill 400 px wide indefinitely. Measured: twelve seconds after
+#: clicking "Push to talk" the panel was still up, which is the "falls apart" that was
+#: reported.
+#:
+#: Longer than `SENT_LINGER_SEC`'s 4, because that card is a receipt for something the
+#: user just did on purpose and this is a line they did not ask for and have to read
+#: cold. Not so long that it becomes the state — the whole point is that the view comes
+#: back on its own, and the note has already been on screen for as long as the panel
+#: takes to read.
+#:
+#: Applies **only** to a note this view surfaced. A note on a panel that was up for its
+#: own reasons is untouched, and so is every note on the full pill.
+MIC_NOTE_SEC = 7.0
+
 #: The two frames' contents must fit the one width they share. Asserted in
 #: `tests/test_mic.py` the way `test_compact.py` adds the full row up, rather than here —
 #: this is arithmetic over constants and belongs where a failure names itself.
@@ -4261,6 +4281,7 @@ class Pill(tk.Tk):
             self.bubble.tick_countdown()
             self.bubble.tick_activity()
             self.bubble.tick_sent()
+            self.bubble.tick_note()
         if self._flash:
             self._flash -= 1
         self._advance_motion()
@@ -6177,6 +6198,9 @@ class Bubble(tk.Frame):
     _pointer_in = False
     _chips_drawn: tuple | None = None
     _note_undo = False
+    #: Same reason as the rest of this block: a fixture built with `__new__` must find a
+    #: real value rather than fall through `tk.Misc.__getattr__` into `self.tk`.
+    _for_note: float | None = None
 
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
@@ -6216,6 +6240,11 @@ class Bubble(tk.Frame):
         #: that ends with nothing to show takes its window away again rather than
         #: leaving an empty card behind.
         self._for_activity = False
+        #: When a note the mic view surfaced went up, or None. Its own field rather than
+        #: a flag on `_for_activity`, because the two end differently: an activity's panel
+        #: leaves when the activity does, and this one leaves on a clock — there is no
+        #: event coming that says a line has been read. See `tick_note`.
+        self._for_note: float | None = None
         #: Which float-up animation is current; older ones stop when this moves.
         self._anim = 0
         #: The hand editor, while one is open, and the window to give the foreground
@@ -6301,6 +6330,7 @@ class Bubble(tk.Frame):
         self._sent, self._sent_at, self._sent_left = text, time.perf_counter(), None
         self._text = self._partial = ""
         self._for_activity = False
+        self._for_note = None
         # Whatever edit the last note was about, its Undo would restore a draft this Send
         # has already taken away — and "Bring it back" is the chip for that now.
         self._note_undo = False
@@ -6323,6 +6353,7 @@ class Bubble(tk.Frame):
         # asked for vanished before they could read it.
         self._text, self._partial, self._sent = text, "", ""
         self._for_activity = False
+        self._for_note = None
         # Visible *before* the render, the way `show_partial`, `show_sent` and `surface`
         # already are. `_render` ends in `reposition`, and `reposition` only `place`s the
         # band while `_visible` is set — so a first show from hidden used to grow the
@@ -6343,6 +6374,7 @@ class Bubble(tk.Frame):
         # boundaries, so "not final yet" has to be visible.
         self._partial, self._sent = text, ""
         self._for_activity = False
+        self._for_note = None
         if not self._visible:
             self._visible = True
             self.pill._sync_shell()
@@ -6368,6 +6400,12 @@ class Bubble(tk.Frame):
             # the same `_visible` this sets — and comes back when it clears, with no
             # state to unwind, because a view is not a mode.
             self.surface(msg)
+            # **Stamped, so it can leave again.** Nothing else hides a surfaced note:
+            # on the full row it lands on a panel that was already up and the next draft
+            # clears it, and under this view there is no next draft. Unstamped, one line
+            # from a settings row left the pill 400 px wide for as long as Flow ran.
+            # `tick_note` reads this.
+            self._for_note = time.perf_counter()
             # `surface` clears `_note_undo` — its own traffic is errors and warnings,
             # and neither is an edit to take back. This door's is not only that, so the
             # flag is put back and the render repeated rather than an undoable edit
@@ -6398,6 +6436,7 @@ class Bubble(tk.Frame):
         self._text = self._partial = self._note = self._sent = ""
         self._note_undo = False
         self._for_activity = False
+        self._for_note = None
         # Give the band back rather than parking a window offscreen. `park` existed
         # because hiding a Toplevel on Windows cost a taskbar flicker and a restack;
         # there is no window here to hide, only a `place` to undo, and the pill's shell
@@ -7166,6 +7205,31 @@ class Bubble(tk.Frame):
         self._sent_left = left
         self._render()
 
+    def tick_note(self) -> None:
+        """Give the row back once a note the mic view surfaced has been read.
+
+        Only a note *this view* put on screen — `_for_note` is stamped in `note` and
+        nowhere else, so a panel that is up for a draft, a sent card, an activity or a
+        user's own Send is untouched, and so is every note on the full pill.
+
+        **And only while there is nothing else on the panel.** A draft, a partial or a
+        sent card arriving during the dwell means the surface has a second reason to be
+        up, and taking it away under one of those would be this fix causing the class of
+        bug it is fixing. The stamp is dropped in that case rather than deferred: the
+        note is no longer the reason the panel is there.
+
+        `hide()` rather than clearing the note in place, because the panel exists only
+        for the note — clearing the text would leave an empty band above the row, which
+        is the surface the view is for not having.
+        """
+        if self._for_note is None:
+            return
+        if self._text or self._partial or self._sent:
+            self._for_note = None
+            return
+        if time.perf_counter() - self._for_note >= MIC_NOTE_SEC:
+            self.hide()
+
     def tick_activity(self) -> None:
         """Say what Flow is doing, animate it, and repaint only when that changes.
 
@@ -7186,6 +7250,20 @@ class Bubble(tk.Frame):
         self._frame_key, self._act, self._dot = key, act, dot
 
         surfacing = act is not None and not self._visible
+        if surfacing and self.pill.mic_view:
+            # **Progress is not something to read.** Under the mic view this door was
+            # opening a 400 px panel for "loading the model" on every launch and holding
+            # it for the eight seconds the load takes — measured, 1.07 s to 9.52 s from a
+            # cold start — so Flow came up as the full pill and shrank to the mic once
+            # the disk was done. That is the startup somebody reported as "it opens as a
+            # big window then it shifts to mic".
+            #
+            # The grow-back is for a *refusal*: a note nobody would otherwise see. An
+            # activity is the opposite — it says a thing is under way, the mic glyph is
+            # already carrying that state in its colour, and there is nothing to act on.
+            # A note arriving during a load still surfaces, through `note`, and brings
+            # the panel with it; this only declines to open one for the wait itself.
+            return
         if surfacing:
             self._for_activity = True
             self._visible = True

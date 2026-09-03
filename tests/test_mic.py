@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -438,7 +439,8 @@ class Stub(SimpleNamespace):
 
     def __init__(self, pill, **kw) -> None:
         super().__init__(pill=pill, _visible=False, _note="", _note_undo=False,
-                         _for_activity=False, renders=0, **kw)
+                         _for_activity=False, _for_note=None, _text="", _partial="",
+                         _sent="", _frame_key=None, _act=None, _dot=0, renders=0, **kw)
 
     def _render(self) -> None:
         self.renders += 1
@@ -451,13 +453,21 @@ class Stub(SimpleNamespace):
     def show_partial(self, text: str) -> None:
         self._visible, self._partial = True, text
 
-    def hide(self) -> None:
-        self._visible = False
+    #: `Bubble.hide` reaches these two on its way out. Stubbed rather than routed around,
+    #: so the real `hide` is what runs — the fields it clears are the assertion.
+    def place_forget(self) -> None: ...
 
+    def reposition(self) -> None: ...
+
+    _editor = None
+    _placed_band = None
     showing_sent = False
 
+    hide = ui.Bubble.hide
     surface = ui.Bubble.surface
     note = ui.Bubble.note
+    tick_note = ui.Bubble.tick_note
+    tick_activity = ui.Bubble.tick_activity
 
 
 class TestANoteGrowsTheFullPillBack(unittest.TestCase):
@@ -592,6 +602,129 @@ class TestTheReleaseDoesNotOpenAPanel(unittest.TestCase):
         p = self.send(lite=True, on_send=False)
         self.assertTrue(p.bubble._visible)
         self.assertEqual(p.bubble._note, ui.COPIED)
+
+
+class TestTheGrownBackPanelGivesTheRowBack(unittest.TestCase):
+    """The other half of the grow-back, and the half that was assumed rather than run.
+
+    Nothing hides a surfaced note. On the full row it lands on a panel that was already
+    up and the next draft clears it; under this view there is no next draft, so one line
+    from a settings row left the pill 400 px wide for as long as Flow ran. Measured on
+    the real window: twelve seconds after clicking "Push to talk", still 400x98. The
+    earlier tests here called `hide()` by hand and so proved only that hiding works.
+    """
+
+    def bubble(self, **kw):
+        p = mic_pill(**kw)
+        p._sync_shell = mock.Mock()
+        p.bubble = Stub(p)
+        return p, p.bubble
+
+    def test_the_note_is_stamped_when_the_view_surfaces_it(self):
+        p, b = self.bubble()
+        b.note("chord: Push to talk - hold to speak, release to send")
+        self.assertIsNotNone(b._for_note)
+
+    def test_it_stays_long_enough_to_read(self):
+        p, b = self.bubble()
+        b.note("could not reach the CLI")
+        b.tick_note()
+        self.assertTrue(b._visible)
+        b._for_note = time.perf_counter() - (ui.MIC_NOTE_SEC - 0.5)
+        b.tick_note()
+        self.assertTrue(b._visible)
+
+    def test_and_then_the_row_comes_back_on_its_own(self):
+        p, b = self.bubble()
+        b.note("could not reach the CLI")
+        b._for_note = time.perf_counter() - ui.MIC_NOTE_SEC
+        b.tick_note()
+        self.assertFalse(b._visible)
+        self.assertEqual(b._note, "")
+        self.assertTrue(p.mic_view)
+        self.assertEqual(p.pill_w, ui.MIC_W)
+
+    def test_a_panel_with_something_else_on_it_is_not_taken_away(self):
+        # A draft, a partial or a sent card arriving during the dwell means the surface
+        # has a second reason to be up. Hiding it under one of those would be this fix
+        # causing the class of bug it exists to fix.
+        for field in ("_text", "_partial", "_sent"):
+            with self.subTest(field=field):
+                p, b = self.bubble()
+                b.note("a line")
+                setattr(b, field, "the words")
+                b._for_note = time.perf_counter() - ui.MIC_NOTE_SEC * 3
+                b.tick_note()
+                self.assertTrue(b._visible)
+                self.assertIsNone(b._for_note)
+
+    def test_a_panel_the_view_did_not_surface_is_never_touched(self):
+        # Every note on the full pill, and every panel up for its own reasons. The stamp
+        # is set in `note` under the view and nowhere else.
+        p, b = self.bubble(on=False)
+        b._visible = True
+        b.note("panel size: large")
+        self.assertIsNone(b._for_note)
+        b.tick_note()
+        self.assertTrue(b._visible)
+
+    def test_the_dwell_is_longer_than_the_sent_cards(self):
+        # That card is a receipt for something the user just did on purpose; this is a
+        # line they did not ask for and have to read cold.
+        self.assertGreater(ui.MIC_NOTE_SEC, ui.SENT_LINGER_SEC)
+
+
+class TestProgressDoesNotOpenAPanel(unittest.TestCase):
+    """The startup somebody reported as "it opens as a big window then it shifts to mic".
+
+    `Bubble.tick_activity` surfaces the panel for a wait with nothing else on screen —
+    right on the full row, where the invisible states are the ones with no draft to hang
+    a note on. Under this view it meant the model load opened a 400 px panel on every
+    launch and held it for the eight seconds the load takes. Measured on the real window
+    from a cold start: 90x34 at 0.76 s, 400x98 at 1.07 s, back to 90x34 at 9.52 s.
+    """
+
+    def bubble(self, *, on=True, act=SimpleNamespace(label="loading the model",
+                                                     waiting=True)):
+        p = mic_pill(on=on)
+        p._sync_shell = mock.Mock()
+        p.bubble = Stub(p)
+        p.session.activity = act
+        return p, p.bubble
+
+    def test_a_wait_does_not_surface_a_panel_under_the_view(self):
+        p, b = self.bubble()
+        b.tick_activity()
+        self.assertFalse(b._visible)
+        self.assertTrue(p.mic_view)
+        self.assertEqual(p.pill_w, ui.MIC_W)
+
+    def test_and_off_the_view_it_surfaces_exactly_as_it_did(self):
+        # The wait is the only thing that says a fresh Flow is doing anything at all, so
+        # taking it away from the full row would be a regression, not a tidy-up.
+        p, b = self.bubble(on=False)
+        b.tick_activity()
+        self.assertTrue(b._visible)
+        self.assertTrue(b._for_activity)
+
+    def test_a_note_arriving_during_the_wait_still_gets_through(self):
+        # Progress is not something to read; a refusal is. Declining to open a panel for
+        # the wait must not close the door the notes come through.
+        p, b = self.bubble()
+        b.tick_activity()
+        b.note("could not reach the CLI")
+        self.assertTrue(b._visible)
+        self.assertFalse(p.mic_view)
+
+    def test_the_panel_is_not_taken_away_from_a_wait_that_is_already_up(self):
+        # Switching the view on mid-load must not yank a panel that is already carrying
+        # the indicator: `tick_activity` only declines to *open* one.
+        p, b = self.bubble(on=False)
+        b.tick_activity()
+        p.mic_view_on = True
+        b._frame_key = None
+        b.tick_activity()
+        self.assertTrue(b._visible)
 
 
 class Recorder:
