@@ -411,6 +411,20 @@ class TestTheWindowsOnlyTkAttributes(unittest.TestCase):
     attribute it is a magenta rectangle where the app should be.
     """
 
+    def setUp(self):
+        # **Pinned to Windows, because Windows is what this class is about.**
+        # `_bare_window` takes an entirely different branch on darwin — it asks for
+        # `-stylemask` and returns before any of these attributes are reached — so on a
+        # Mac these did not test the Windows-only attributes weakly, they died on a
+        # `FakeWindow` that has no `wm_attributes` at all. The stand-in stays honest
+        # about the platform it stands in for. The class below is the same idiom done
+        # right, per platform.
+        import flow.ui as ui
+
+        platform = mock.patch.object(ui.sys, "platform", "win32")
+        platform.start()
+        self.addCleanup(platform.stop)
+
     class FakeWindow:
         def __init__(self) -> None:
             self.asked: list[str] = []

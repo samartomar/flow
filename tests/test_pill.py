@@ -1016,6 +1016,16 @@ class TestTheWorkAreaOffWindows(unittest.TestCase):
         self._was = ui._TK_WORK
         ui._TK_WORK = None
         self.addCleanup(lambda: setattr(ui, "_TK_WORK", self._was))
+        # **Says which platform it is testing rather than inheriting the host's.**
+        # `_tk_work_area` short-circuits into `_aqua_work_area` on darwin, so on a Mac
+        # these ran the branch above the one they describe: two Toplevels per call
+        # instead of one, and every count here off by the probe nobody meant to make.
+        # On Windows the same tests passed, which is how a suite named "off Windows"
+        # came to be verified only there. Linux is the platform whose answer this path
+        # actually is; the aqua path has its own tests.
+        platform = mock.patch.object(ui.sys, "platform", "linux")
+        platform.start()
+        self.addCleanup(platform.stop)
 
     def fake_win(self, zoomed=(0, 23, 1280, 672)):
         """A Tk stand-in whose `Toplevel` reports a maximised geometry."""
@@ -1164,9 +1174,25 @@ class TestTheMacFrame(unittest.TestCase):
                     self.assertFalse(ui._no_activate(mock.Mock()))
 
     def test_the_shell_still_asks_for_the_one_thing_that_works(self):
-        win = mock.Mock()
-        ui._shell_window(win, lite=True, alpha=0.94)
-        win.overrideredirect.assert_called_once_with(True)
+        """On Tk 9 that is `-stylemask`; on 8.6, which has none, `overrideredirect`.
+
+        Pinned to darwin rather than left to the host, and the drift is why: on Windows
+        the darwin branch never ran, so this asserted `overrideredirect` and passed — and
+        on a Mac, where a Mock answers `wm_attributes` happily, the function returned at
+        the style mask and `overrideredirect` was never reached. A test in a class called
+        `TestTheMacFrame` was checking the frame every platform *but* a Mac gets.
+        """
+        with mock.patch.object(ui.sys, "platform", "darwin"):
+            win = mock.Mock()
+            ui._shell_window(win, lite=True, alpha=0.94)
+            win.wm_attributes.assert_any_call("-stylemask", "")
+            win.overrideredirect.assert_not_called()
+
+            # Tk 8.6 has no style masks, and a Mac on it must still lose its title bar.
+            old = mock.Mock()
+            old.wm_attributes.side_effect = ui.tk.TclError("no such attribute")
+            ui._shell_window(old, lite=True, alpha=0.94)
+            old.overrideredirect.assert_called_once_with(True)
 
 
 class TestMix(unittest.TestCase):

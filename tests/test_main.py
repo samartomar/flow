@@ -527,8 +527,16 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+@unittest.skipUnless(sys.platform == "win32",
+                     "Windows-only: launch() imports flow.hotkey, which binds user32 "
+                     "at import time")
 class TestTheModelIsLoadedBeforeItIsAskedFor(unittest.TestCase):
     """"loading the model" used to be the first thing a fresh Flow said back.
+
+    Skipped off Windows, and the skip is not squeamishness: `launch("win32")` patches
+    `sys.platform` but `main()` then really imports `flow.hotkey`, which calls
+    `ctypes.WinDLL("user32")` at module scope. Nothing a patch can do about that — the
+    import is real even when the platform is pretend.
 
     It said it in the bubble, while somebody was already speaking, because the load lands
     *inside* the first utterance rather than in front of it — first partial 1 230 ms

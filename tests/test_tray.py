@@ -22,6 +22,15 @@ import flow.tray as tray
 import flow.ui as ui
 
 
+#: Constructing a `Tray` needs `_WNDPROC`, which exists only on Windows — see
+#: `flow/tray.py`, where the definition is guarded so the module can still be *imported*
+#: anywhere. Nothing off Windows ever builds one: `ui.py` checks `tray.available()`
+#: first and leaves `_tray` as None. So these skip rather than assert about an object
+#: that platform is not allowed to have.
+WINDOWS_ONLY = unittest.skipUnless(sys.platform == "win32",
+                                   "Windows-only: Tray needs WINFUNCTYPE")
+
+
 def pill(**kw):
     """A pill with just enough of one to hide and come back."""
     p = ui.Pill.__new__(ui.Pill)
@@ -199,6 +208,7 @@ class TestTheModule(unittest.TestCase):
         finally:
             sys.modules["flow.tray"] = original
 
+    @WINDOWS_ONLY
     def test_stopping_an_icon_that_never_started_is_safe(self):
         # `quit_app` calls this unconditionally, including after a `hide_to_tray` that
         # was refused.
@@ -206,6 +216,7 @@ class TestTheModule(unittest.TestCase):
         icon.stop()
         self.assertEqual(icon.hwnd, 0)
 
+    @WINDOWS_ONLY
     def test_starting_twice_returns_the_first_answer(self):
         icon = tray.Tray("probe")
         icon._thread = mock.Mock()
@@ -223,6 +234,7 @@ class TestTheModule(unittest.TestCase):
         self.assertEqual(icon._icon_data().cbSize,
                          ctypes.sizeof(tray._NOTIFYICONDATAW))
 
+    @WINDOWS_ONLY
     def test_the_window_procedure_is_held_alive(self):
         """A ctypes callback is garbage like anything else, and one collected while
         Windows still holds its address is an access violation on a thread nobody is
@@ -322,6 +334,7 @@ class TestEveryWin32NameResolves(unittest.TestCase):
     def test_the_shell_call_exists_too(self):
         self.assertTrue(hasattr(tray._shell(), "Shell_NotifyIconW"))
 
+    @WINDOWS_ONLY
     def test_a_click_that_raises_does_not_escape_into_windows(self):
         """Windows called us. An exception unwinding into its stack is undefined at
         best, and a tray that silently stops answering is the failure this file exists
