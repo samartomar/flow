@@ -112,6 +112,11 @@ exclude = [
     "NEEDS_YOU.md",
     "docs/decisions.md",
     "docs/history/",
+    # A seeded design canvas is ~2.5 MB of editor bundled around a few KB of design, and
+    # it is a *build product* — `design/*.dc.html` plus `canvas.json` are the sources,
+    # and the seeder rebuilds it from them. One of these alone put the sdist 15% over its
+    # own size guard, which is the test that caught it.
+    "design/build/",
 ]
 
 [tool.uv]

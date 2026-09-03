@@ -534,6 +534,8 @@ class MeasuringCanvas:
 
     def tag_raise(self, *a, **kw) -> None: ...
 
+    def tag_lower(self, *a, **kw) -> None: ...
+
     def itemconfigure(self, *a, **kw) -> None: ...
 
     def create_window(self, *a, **kw) -> None:
@@ -549,6 +551,9 @@ class MeasuringCanvas:
         item = {
             "x": x, "y": y, "text": text, "anchor": kw.get("anchor", "center"),
             "h": lines * self.LINE_H.get(size, 17), "lines": lines,
+            # The wrap budget, recorded because one item is now bounded *horizontally*
+            # by something beside it — the elided count stops before the command marks.
+            "wrap": width or 10**6,
             # Recorded because one surface draws the same slot in two colours to say
             # whose words they are — the answer in REPLY, the question in MUTED — and a
             # fake that dropped the colour could not see them swap.
@@ -605,6 +610,7 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         #: is an unpackable that raises, which is the loud failure this would rather have
         #: than a fixture silently laying out against a screen of no particular size.
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text, b._sent, b._partial, b._note = text, "", "", note
         b._editor = None
@@ -619,19 +625,35 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         note_top, note_bottom = b.canvas.band("WinError 2")
         chips_top = b._h - 14 - 26  # `_lay_out`: y2 = _h - PAD, y1 = y2 - 26
         self.assertGreater(note_bottom, note_top)
-        self.assertLessEqual(
-            note_bottom, chips_top,
-            f"the note runs to y={note_bottom} and the chips start at y={chips_top}",
-        )
+        # The note is *on* the chip row now, not above it, so the check that matters is
+        # horizontal: its column has to stop before the primary chip starts. A note that
+        # ran the full width would put an error message under the Send button.
+        import flow.ui as ui
 
-    def test_the_bubble_grew_to_make_room_rather_than_clipping(self):
-        # The other way to stop an overlap is to cut the text off, and for an error
-        # message that is the same defect wearing a different hat.
+        self.assertLessEqual(note_bottom, b._h - ui.PAD)
+        note = next(i for i in b.canvas.items if "WinError 2" in str(i.get("text", "")))
+        self.assertLess(note["x"], b._primary_x - ui.CHIP_GAP)
+
+    def test_the_bubble_grows_to_make_room_rather_than_clipping(self):
+        """The other way to stop an overlap is to cut the text off, and for an error
+        message that is the same defect wearing a different hat.
+
+        Briefly untrue, while the panel was a fixed height — the room came out of the
+        body instead. The band is snug around its content again (`_settled_h`), so this
+        is back to what it always asserted, and the foot still does not move: the shell
+        grows upward.
+        """
         short = self._bubble("ok")
         short._render()
         long_ = self._bubble(self.ERROR)
         long_._render()
-        self.assertGreater(long_._h, short._h)
+        # `assertGreaterEqual`, not `assertGreater`, and the reason is `_settled_h`: the
+        # band steps by a whole body line, so a note that grew by 14 px can land in the
+        # same 17 px bucket as the one before it. That is the point of the snap — the
+        # window stops changing size for every small thing — and the property this test
+        # is really about is the next two lines, which is that the note is drawn whole.
+        # The sibling test above asserts it clears the chips.
+        self.assertGreaterEqual(long_._h, short._h)
         drawn = next(i for i in long_.canvas.items if "WinError 2" in i["text"])
         self.assertEqual(drawn["text"], self.ERROR, "the note must not be truncated")
 
@@ -639,7 +661,11 @@ class TestALongNoteDoesNotLandOnTheChips(unittest.TestCase):
         b = self._bubble("saved")
         b._render()
         _top, bottom = b.canvas.band("saved")
-        self.assertLessEqual(bottom, b._h - 14 - 26)
+        # The note shares the chip row now, so "clears the chips" became a *horizontal*
+        # question: it ends where the primary begins. Vertically it is on the row on
+        # purpose — stacking the two cost a whole band for a sentence that fits beside
+        # the button.
+        self.assertLessEqual(bottom, b._h - 14)
 
 
 class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
@@ -666,6 +692,7 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
         b.pill.session = mock.Mock(**fields)
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text = "Meeting on Tuesday afternoon."
         b._sent = b._partial = b._note = ""
@@ -678,6 +705,10 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
     def _right_edge(self, b, label):
         import flow.ui as ui
 
+        # A glyph primary carries no word on the canvas; the tip table has its edge.
+        spec = b.canvas.__dict__.get("_flow_tips", {}).get(ui.chip_tag(label))
+        if spec is not None:
+            return spec[1]
         it = next(i for i in b.canvas.items if i["text"] == label)
         return it["x"] + ui.chip_w(label, label) / 2
 
@@ -707,15 +738,48 @@ class TestThePrimaryChipHasAFixedAddress(unittest.TestCase):
         b._render()
         self.assertAlmostEqual(self._right_edge(b, "Send"), settled, delta=1)
 
-    def test_the_secondaries_still_start_at_the_left_pad(self):
-        # Pinned right is not centred or spread: the row still reads left to right.
+    def test_the_rightmost_command_mark_has_a_fixed_address_too(self):
+        """The secondaries left the foot and became marks in the top-right corner, and
+        the same argument followed them.
+
+        The set changes constantly — Edit and Was a command come and go with what was
+        said — so the cluster is laid out right-to-left from the panel's right edge.
+        Grown the other way it would shift every mark under the hand each time the set
+        changed, which is the defect the primary's fixed address exists to prevent.
+        """
         import flow.ui as ui
 
-        b = self._bubble()
-        b._render()
-        it = next(i for i in b.canvas.items if i["text"] == "Refine")
-        self.assertAlmostEqual(it["x"] - ui.chip_w("Refine", "Refine") / 2,
-                               ui.PAD, delta=1)
+        self.assertEqual(ui.command_x(0), ui.BUBBLE_W - ui.PAD)
+        # Slot 0 does not care how many are beside it — that is the property.
+        self.assertEqual(ui.command_x(0), ui.command_x(0, ui.BUBBLE_W - ui.PAD))
+        step = ui.COMMAND_H + ui.COMMAND_GAP
+        self.assertEqual(ui.command_x(1), ui.command_x(0) - step)
+        self.assertEqual(ui.command_x(3), ui.command_x(0) - 3 * step)
+
+    def test_command_slots_walks_the_cluster_the_way_it_is_drawn(self):
+        """One walk, two callers: the marks are drawn from it and the elided count stops
+        before it. A second copy of this arithmetic is a copy that rots."""
+        import flow.ui as ui
+
+        slots = ui.command_slots([("Refine", "Refine"), ("Continue", "Continue")])
+        self.assertEqual([w for _x, w in slots], [ui.COMMAND_H, ui.COMMAND_H])
+        self.assertEqual(slots[0][0], ui.BUBBLE_W - ui.PAD)
+        self.assertEqual(slots[1][0], ui.command_x(1))
+
+        # A command with no glyph keeps its word and is wider than a slot, so everything
+        # left of it shifts by the difference — which is why the walk carries the edge.
+        wide = ui.command_slots([("Nameless", "Nameless"), ("Refine", "Refine")])
+        width = ui.chip_w("Nameless", "Nameless")
+        self.assertEqual(wide[0][1], width)
+        self.assertEqual(wide[1][0], ui.BUBBLE_W - ui.PAD - width - ui.COMMAND_GAP)
+
+    def test_the_cluster_never_reaches_the_left_pad(self):
+        # Four marks is the most the bubble ever shows at once — Refine, Continue, Edit,
+        # Was a command — and they have to leave the draft's column alone.
+        import flow.ui as ui
+
+        leftmost = ui.command_x(3) - ui.COMMAND_H
+        self.assertGreater(leftmost, ui.BUBBLE_W / 2)
 
 
 class TestTheWayBackSitsBesideTheFact(unittest.TestCase):
@@ -743,6 +807,7 @@ class TestTheWayBackSitsBesideTheFact(unittest.TestCase):
         )
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text = "Meeting on Tuesday afternoon."
         b._sent = b._partial = b._note = ""
@@ -832,6 +897,7 @@ class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
         )
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.canvas = MeasuringCanvas()
         b._text = "seconds, send the question. No auto-ask to press it yourself."
         b._sent, b._partial, b._note = "", partial, note
@@ -861,7 +927,10 @@ class TestALongPartialDoesNotLandOnTheNote(unittest.TestCase):
             f"the partial runs to y={bottom} and the chips start at y={chips_top}",
         )
 
-    def test_the_bubble_grew_rather_than_clipping(self):
+    def test_the_bubble_grows_rather_than_clipping(self):
+        # Grows in whole-line steps rather than continuously (`_settled_h`), and upward,
+        # so a partial arriving while you speak moves the top edge and leaves every
+        # control where it was.
         one = self._bubble("part key towel control")
         one._render()
         many = self._bubble(self.PARTIAL)
@@ -945,6 +1014,7 @@ class TestTheEditorSaysWhatItIsHolding(unittest.TestCase):
         b.pill = mock.Mock()
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.pill.session = mock.Mock(mode="dictate", editing=True, can_rescue=False,
                                    can_take_reply=False, auto_ask_in=None)
         b.canvas = MeasuringCanvas()
@@ -1111,6 +1181,7 @@ class TestClickingTheDraftOpensEdit(unittest.TestCase):
         b.pill = mock.Mock()
         b.pill.accent = "#000000"
         b.pill.work = WORK
+        b.pill.band_h = lambda: ui.PANEL_MAX_H
         b.pill.session = mock.Mock(mode="dictate", editing=False, can_rescue=False,
                                    can_take_reply=False, auto_ask_in=None)
         b.canvas = MeasuringCanvas()

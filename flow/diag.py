@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import threading
 import time
@@ -125,6 +126,19 @@ class NullDiag:
 
     def write(self, kind: str, /, **fields) -> None: ...
 
+    def flush(self, timeout: float = 1.0) -> bool:
+        return True
+
+    def close(self) -> None: ...
+
+
+#: How many records the background writer may hold before it starts refusing them.
+#: Two thousand is a minute of the busiest trace this app produces; a queue this deep
+#: means the disk has stopped, and a record dropped then is counted, not hidden.
+QUEUE_MAX = 2_000
+
+_STOP = object()
+
 
 class Diag:
     """Append-only JSONL, one record per line, bounded and rotated once.
@@ -134,13 +148,32 @@ class Diag:
     is full or a file that is locked means no trace, not a stack trace.
     """
 
-    def __init__(self, path: Path | str | None = None, max_bytes: int = MAX_BYTES) -> None:
+    def __init__(
+        self, path: Path | str | None = None, max_bytes: int = MAX_BYTES,
+        background: bool = False,
+    ) -> None:
         self.path = Path(path) if path is not None else DEFAULT_PATH
         self.max_bytes = max_bytes
         #: Records refused for an unknown field name. Counted rather than written,
         #: because the safest thing to do with a record nobody vetted is nothing.
         self.rejected = 0
+        #: Records the background writer could not take because the disk had fallen
+        #: `QUEUE_MAX` behind. Zero in any session where the file is writable.
+        self.dropped = 0
         self._lock = threading.Lock()
+        #: `background=True` appends from a thread of its own, and the app asks for
+        #: that: `write()` is called on the UI thread for every partial, every route
+        #: and every state change, and each call was a `stat`, an open, a write and a
+        #: close — 0.4 ms on a quiet disk, tens of milliseconds under a virus scanner,
+        #: inside a 30 ms frame budget. The tests keep the synchronous default so a
+        #: record is on disk the moment `write()` returns; `flush()` is the bridge.
+        self._queue: queue.Queue | None = None
+        self._thread: threading.Thread | None = None
+        if background:
+            self._queue = queue.Queue(maxsize=QUEUE_MAX)
+            self._thread = threading.Thread(
+                target=self._drain, daemon=True, name="diag")
+            self._thread.start()
 
     def write(self, kind: str, /, **fields) -> None:
         record = {"t": round(time.time(), 3), "kind": _safe(kind)}
@@ -158,6 +191,15 @@ class Diag:
                 # the part that was never in question.
                 self.rejected += 1
         line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+        if self._queue is not None:
+            try:
+                self._queue.put_nowait(line)
+            except queue.Full:
+                self.dropped += 1
+            return
+        self._append(line)
+
+    def _append(self, line: str) -> None:
         with self._lock:
             try:
                 self._rotate_if_needed(len(line) + 1)
@@ -166,6 +208,44 @@ class Diag:
                     fh.write(line + "\n")
             except OSError:
                 pass
+
+    def _drain(self) -> None:
+        q = self._queue
+        while True:
+            item = q.get()
+            try:
+                if item is _STOP:
+                    return
+                self._append(item)
+            finally:
+                q.task_done()
+
+    def flush(self, timeout: float = 1.0) -> bool:
+        """Wait until everything written so far is on disk. True if it is.
+
+        Bounded, because the quit path calls it and a disk that has stopped answering
+        must not keep the window on screen: past the deadline the records still queued
+        are abandoned with the daemon thread holding them.
+        """
+        q = self._queue
+        if q is None:
+            return True
+        deadline = time.monotonic() + timeout
+        while q.unfinished_tasks and time.monotonic() < deadline:
+            time.sleep(0.005)
+        return not q.unfinished_tasks
+
+    def close(self, timeout: float = 1.0) -> None:
+        """Flush and stop the writer. Idempotent; a closed trace refuses nothing loudly."""
+        q = self._queue
+        if q is None:
+            return
+        self.flush(timeout)
+        try:
+            q.put_nowait(_STOP)
+        except queue.Full:
+            pass
+        self._queue = None
 
     def _rotate_if_needed(self, incoming: int) -> None:
         try:

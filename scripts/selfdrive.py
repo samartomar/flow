@@ -598,7 +598,7 @@ def scenario_window(report) -> None:
     """Both windows land wholly inside the desktop work area, and take no focus."""
     import ctypes
 
-    from flow.ui import GWL_EXSTYLE, WS_EX_NOACTIVATE, Pill, toplevel_hwnd
+    from flow.ui import GWL_EXSTYLE, PILL_H, WS_EX_NOACTIVATE, Pill, toplevel_hwnd
 
     class Dead:
         level_db = -70.0
@@ -625,32 +625,43 @@ def scenario_window(report) -> None:
     pill = Pill(Session(asr=NoAsr(), mic=Dead(), profile=None), hotkeys=None)
     try:
         left, top, right, bottom = pill.work
+        # Off the window, not off `PILL_W`: the row is as wide as the shell it sits in,
+        # and `window_geometry` is the one reading `_sync_shell` itself compares against.
+        pw, px, py = pill.window_geometry()
         report("the pill is inside the work area",
-               left <= pill.x and pill.x + 152 <= right
-               and top <= pill.y and pill.y + 40 <= bottom,
-               f"pill ({pill.x},{pill.y}) in {pill.work}")
+               left <= px and px + pw <= right and top <= py and py + PILL_H <= bottom,
+               f"pill {pw}x{PILL_H}+{px}+{py} in {pill.work}")
+        # The bubble is a band inside the pill's window now, not a window of its own
+        # (`Pill._sync_shell`), so there is no `geometry()` to parse. Its place on the
+        # desktop is its own `winfo_root*`, read after a full `update`: `place` sizes a
+        # child at idle, and until the toplevel has been mapped that child is 1x1 —
+        # which is the shape of a band that was never placed, and what this used to
+        # find before `Bubble.show` learned to place itself on a first show.
         pill.bubble.show("a draft long enough to make the bubble size itself properly")
+        pill.update()
         pill.update_idletasks()
-        geo = pill.bubble.geometry()
-        size, _, pos = geo.partition("+")
-        bx, _, by = pos.partition("+")
-        bw, _, bh = size.partition("x")
-        inside = (left <= int(bx) and int(bx) + int(bw) <= right
-                  and top <= int(by) and int(by) + int(bh) <= bottom)
+        bubble = pill.bubble
+        bx, by = bubble.winfo_rootx(), bubble.winfo_rooty()
+        bw, bh = bubble.winfo_width(), bubble.winfo_height()
+        geo = f"{bw}x{bh}+{bx}+{by}"
+        report("the bubble is placed at all",
+               bool(bubble.winfo_ismapped()) and bw > 1 and bh > 1, geo)
+        inside = (left <= bx and bx + bw <= right and top <= by and by + bh <= bottom)
         report("the bubble is inside the work area", inside, geo)
 
-        # Read off the windows, not off the flag the app set: `SetWindowLongPtr` hands
+        # Read off the window, not off the flag the app set: `SetWindowLongPtr` hands
         # back the previous style word either way, so "it worked" and "it did nothing"
         # are the same return value. Read after a float-up, too — Tk writes the extended
-        # style word on every step of that animation to set -alpha.
+        # style word on every step of that animation to set -alpha. One window to read
+        # since the merge: `toplevel_hwnd` of the bubble's frame is the pill's own
+        # child HWND, which never carries the style and would fail for the wrong reason.
         get = getattr(ctypes.windll.user32, "GetWindowLongPtrW", None) \
             or ctypes.windll.user32.GetWindowLongW
         get.restype = ctypes.c_ssize_t
-        for name, win in (("pill", pill), ("bubble", pill.bubble)):
-            bits = get(ctypes.c_void_p(toplevel_hwnd(win)),
-                       ctypes.c_int(GWL_EXSTYLE)) & 0xFFFFFFFF
-            report(f"the {name} is out of the activation chain",
-                   bool(bits & WS_EX_NOACTIVATE), f"exstyle {bits:#010x}")
+        bits = get(ctypes.c_void_p(toplevel_hwnd(pill)),
+                   ctypes.c_int(GWL_EXSTYLE)) & 0xFFFFFFFF
+        report("the window is out of the activation chain",
+               bool(bits & WS_EX_NOACTIVATE), f"exstyle {bits:#010x}")
         report("and the pill knows it", pill.no_activate, str(pill.no_activate))
     finally:
         pill.destroy()
@@ -681,7 +692,7 @@ def scenario_chips(report) -> None:
     from unittest import mock
 
     from flow.inject import owned_by_flow
-    from flow.ui import CARD_W, Pill, chip_tag, toplevel_hwnd
+    from flow.ui import CARD_W, DEAF_COLLAPSE_FRAMES, Pill, chip_tag, toplevel_hwnd
 
     class Dead:
         #: Loud, and it stays loud. That is not a convenience: a real microphone keeps
@@ -761,12 +772,28 @@ def scenario_chips(report) -> None:
 
         `win` because there are two surfaces now: converse chips are on the conversation
         card and dictation chips are on the draft bubble (decisions.md 2026-08-03).
+
+        False, too, for a chip on a surface that is not on screen. Both surfaces are
+        bands inside the pill's window now, and only the mode's own is placed; a hidden
+        canvas keeps its drawing, so `find_withtag` still finds the chip, and a click
+        generated on an unmapped widget picks no item and binds to nothing. That is how
+        Refine got "pressed" on a bubble that converse mode had never put up, and read
+        back as a chip that armed nothing.
         """
         canvas = (win or pill.bubble).canvas
-        if not canvas.find_withtag(chip_tag(label)):
+        if not canvas.winfo_ismapped() or not canvas.find_withtag(chip_tag(label)):
             return False
         x1, y1, x2, y2 = canvas.bbox(chip_tag(label))
         canvas.event_generate("<Button-1>", x=int((x1 + x2) / 2), y=int((y1 + y2) / 2))
+        # Take the hand away again. Tk treats the generated press as the pointer
+        # arriving and delivers `<Enter>` to the canvas, and both surfaces hold their
+        # chip row and geometry still for as long as the pointer is in (`Bubble._frozen`,
+        # "nothing moves under the hand") — right for a hand, wrong for a harness that
+        # has none. Left in, the row after Send was still Refine / Continue / Edit / Send
+        # and "Bring it back" never came. A hand that clicked and stayed would see the
+        # same until it moved; `<Leave>` is that move, and `_leave` is where the surface
+        # catches up.
+        canvas.event_generate("<Leave>")
         pill.update()
         return True
 
@@ -832,15 +859,6 @@ def scenario_chips(report) -> None:
             pill._frame()
 
         session.draft.set("some words")
-        pill.bubble.show(session.draft.text)
-        pill.update()
-        click(pill, "Refine")
-        report("the Refine chip arms the next utterance",
-               session.force_next == "edit", str(session.force_next))
-        click(pill, "Refine")
-        report("pressing it again disarms it", session.force_next is None,
-               str(session.force_next))
-
         session.toggle_mode()
         pill.bubble.show(session.draft.text)
         pill.update()
@@ -848,6 +866,17 @@ def scenario_chips(report) -> None:
                bool(pill.bubble.canvas.find_withtag("chip-Send"))
                and not pill.bubble.canvas.find_withtag("chip-Ask"),
                f"mode={session.mode}")
+        # Pressed in dictate mode, after the toggle, because that is the only mode the
+        # bubble is up in: converse puts the draft on the card and leaves the bubble
+        # unplaced (`Pill._swap_surfaces`), so a Refine pressed there was pressed on
+        # nothing — see `click`. The user cannot reach it there either.
+        pressed = click(pill, "Refine")
+        report("the Refine chip arms the next utterance",
+               pressed and session.force_next == "edit",
+               f"pressed={pressed}, force_next={session.force_next}")
+        click(pill, "Refine")
+        report("pressing it again disarms it", session.force_next is None,
+               str(session.force_next))
         click(pill, "Send")
         report("clicking Send handed the draft over", pasted() == ["some words"],
                str(pasted()))
@@ -929,9 +958,12 @@ def scenario_chips(report) -> None:
         pill.armed = True
         pill._frame()
 
+        # One eased level for the whole bloom now, not a bar per frame: every bar reads
+        # `Pill._meter_level` through `_bar_half_height`, so "the bars move" is that
+        # level being off the floor.
         pill._frame()
-        report("a live microphone moves the bars", any(pill.levels),
-               f"peak {max(pill.levels):.2f}")
+        loud = pill._meter_level
+        report("a live microphone moves the bars", loud > 0.0, f"level {loud:.2f}")
         report("and says nothing it does not need to", indicator(pill) == "",
                indicator(pill))
 
@@ -939,8 +971,17 @@ def scenario_chips(report) -> None:
         pill._frame()
         report("a reply playing says it is not listening",
                "not listening" in indicator(pill), indicator(pill))
-        report("the bars go flat in the same frame", not any(pill.levels),
-               f"peak {max(pill.levels):.2f}")
+        # The meter no longer drops to nothing in one frame; it settles as one shape
+        # over `DEAF_COLLAPSE_FRAMES` (`Pill._flatten`). What must still be true is
+        # that it starts falling in the frame the reply starts — a level that held for
+        # even one frame is the meter dancing to Flow's own voice — and that it is flat
+        # before the collapse is over.
+        report("the bars start collapsing in the same frame", pill._meter_level < loud,
+               f"level {loud:.2f} -> {pill._meter_level:.2f}")
+        for _ in range(DEAF_COLLAPSE_FRAMES):
+            pill._frame()
+        report("and are flat within the collapse", pill._meter_level == 0.0,
+               f"level {pill._meter_level:.2f} after {DEAF_COLLAPSE_FRAMES} more frames")
         report("and the level the meter reads is silence",
                session.level_db == DEAF_DB, f"{session.level_db:.0f} dB")
         talker.stop()

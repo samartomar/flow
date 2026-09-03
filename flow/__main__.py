@@ -28,7 +28,7 @@ from .asr import CUDA_MODEL, DEVICE, FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
-from .refine import CANDIDATES, available, named, unverified, unverified_note
+from .refine import CANDIDATES, EFFORT_DEFAULT, EFFORTS, available, named, unverified, unverified_note
 from .session import AUTO_ASK_SEC, Session
 from .stats import TYPING_WPM
 from .stats import report as stats_report
@@ -44,9 +44,23 @@ from .version import check_update, version
 #: Said on every Lite launch, before anything else, in ASCII for the reason `say()` gives.
 #: It names the platform because the two ways into Lite are a flag and an OS, and someone
 #: who did not type `--lite` deserves to be told which one they got.
+#: What a Mac is told instead, because on a Mac the sentence above is no longer true.
+#: Send pastes there now — the one thing Lite was defined by. Everything else it says
+#: still holds: no injection DLL, no global hotkeys, the pill is the gesture.
+#:
+#: Accessibility is named at startup rather than at the first failed paste, because it is
+#: a thing to go and do once and finding out at the moment you needed it to work is the
+#: worst time to be told.
+MAC_LINE = (
+    "Flow on {platform}: Send pastes into whatever app is in front, using System Events "
+    "- grant your terminal Accessibility in System Settings > Privacy & Security. "
+    "No global hotkeys: hold the pill to talk, let go to send."
+)
+
 LITE_LINE = (
     "Flow Lite on {platform}: Send copies the draft and you paste it - no injection, "
-    "no global hotkeys, nothing to grant but the microphone."
+    "no global hotkeys, nothing to grant but the microphone. "
+    "Hold the pill to talk, let go to send; a quick click toggles listening."
 )
 
 
@@ -86,6 +100,140 @@ def _timeout_arg(text: str) -> float:
     return value
 
 
+
+def _chord(profile, hotkeys, Chord, parse_chord, echo, ignored_line,
+           unavailable, default):
+    """Install the modifier-only chord, and say what happened either way.
+
+    Separated from `main()` for the reason the rest of that function is not: this is the
+    one startup step that can fail *silently and invisibly*. A hotkey that could not
+    register has `Hotkeys.failed` to name it; a chord whose hook was refused looks
+    exactly like a chord nobody pressed. So every path out of here prints a line, and the
+    lines sit in the `hotkey` block where somebody already looks when a shortcut is dead.
+
+    Returns the `Chord` or None. The caller does not need the value — `hotkeys.chord`
+    holds it, which is what keeps the callback alive and gets it torn down — but a
+    returned object is what a test can look at.
+    """
+    wanted = profile.chord if profile is not None else default
+    # The empty string is how somebody turns it off in the file, and it is deliberately
+    # not the same as deleting the key: the next save writes every field back, so a
+    # deleted `chord` would reappear as the default and the setting would look ignored.
+    if not (wanted or "").strip():
+        return None
+    mods, reason = parse_chord(wanted)
+    if mods is None:
+        say(ignored_line.format(combo=echo(wanted), reason=reason))
+        return None
+    chord = Chord(hotkeys.presses, mods,
+                  gesture=getattr(profile, "gesture", None) if profile else None)
+    if not chord.start():
+        # The hook is refusable — by policy, by another process, by an elevated window
+        # this process cannot see into. Not fatal and not silent: the registered toggle
+        # is still there, and the line says so rather than leaving a shape that does
+        # nothing with no explanation.
+        say(unavailable)
+        return None
+    hotkeys.chord = chord
+    # "hold" and not "toggle": the word in this column is what the shortcut *does*, and
+    # the chord stopped doing the same thing as the toggle hotkey when it became
+    # push-to-talk. A startup block that still said toggle would be the only place a
+    # user could check, quietly describing the gesture they no longer have.
+    # The word in this column is what the shortcut *does*, and the chord does two
+    # different things now depending on a setting. A startup block that named only one
+    # of them would be the one place a user could check, describing a gesture half of
+    # them do not have.
+    if chord.gesture == "hold":
+        say(f"chord   {'hold':8s} {chord.describe()}  (hold to talk, release to send)")
+    else:
+        say(f"chord   {'toggle':8s} {chord.describe()}  (press to start, again to stop)")
+    return chord
+
+
+def _native_transcriber():
+    """Import late, so a Windows launch never touches the macOS-only module."""
+    from .native import NativeTranscriber
+
+    return NativeTranscriber()
+
+
+def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
+    """Which decoder this launch gets, and the clause explaining why.
+
+    `--engine` decides when it is asked to. `auto` is the interesting one, and its rule
+    is deliberately conservative: **Whisper unless it cannot run.** Apple's recogniser
+    is a real engine but a different one — no `no_speech_prob`, so `clean.py` drops to
+    the narrow filler check it documents for a non-Whisper engine, one quality tier
+    where Whisper has two, and no hotword biasing for the rescue path. Switching to it
+    silently, on a machine where Whisper was working, would change what Flow hears for
+    reasons the user never asked about.
+
+    So `auto` reaches for it in exactly one situation: the Whisper models are not on
+    this machine and cannot be fetched. That is the situation it was written for — a
+    network that blocks huggingface.co, where the alternative is not a worse engine but
+    no dictation at all.
+
+    Every path returns a clause for the startup line, because the engine decides what
+    Flow can hear and a silent choice would be the one thing nobody could check.
+    """
+    if args.engine == "whisper":
+        return "whisper", ""
+    if sys.platform != "darwin":
+        if args.engine == "native":
+            say("--engine native is macOS only; using whisper")
+        return "whisper", ""
+
+    from .native import available as native_available
+
+    if args.engine == "native":
+        ok, why = native_available()
+        if ok:
+            return "native", ""
+        say(f"--engine native unavailable: {why}")
+        return "whisper", ""
+
+    # auto. Ask the cheap question first: are the models here?
+    if _models_present(partial_name, final_name):
+        return "whisper", ""
+    # `compile_if_missing=False`, and a short probe. A launch is not the place to
+    # discover how slow `swiftc` is, and the probe blocks on a permission dialog that
+    # nobody has been shown yet — measured at a full minute per launch before this.
+    ok, why = native_available(compile_if_missing=False, timeout=10.0)
+    if ok:
+        return "native", " (whisper models not found on this machine)"
+    return "whisper", f" (not found locally, and no native engine: {why})"
+
+
+def _models_present(*names: str) -> bool:
+    """Whether every named model is already on disk, without reaching the network.
+
+    A directory holding `model.bin` is what `--model /some/path` gives, and a name like
+    `base.en` is present when huggingface_hub has it cached. Asked with the hub in
+    offline mode so this cannot become the download it is testing for.
+    """
+    import os
+    from pathlib import Path
+
+    for name in names:
+        path = Path(name)
+        if (path / "model.bin").exists():
+            continue
+        was = os.environ.get("HF_HUB_OFFLINE")
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        try:
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(f"Systran/faster-whisper-{name}", local_files_only=True)
+        except Exception:
+            return False
+        finally:
+            if was is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = was
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     # First, before anything resolves anything. Windows searches the current directory
     # ahead of PATH for a bare executable name, and Flow is launched *inside* project
@@ -122,6 +270,12 @@ def main(argv: list[str] | None = None) -> int:
         help="where decoding runs (default auto: the GPU when there is a working one)",
     )
     ap.add_argument(
+        "--engine", default="auto", choices=("auto", "whisper", "native"),
+        help="which decoder: whisper (faster-whisper, needs model files) or native "
+             "(macOS on-device speech, no download at all). Default auto: whisper "
+             "unless its models are missing and the native engine is ready",
+    )
+    ap.add_argument(
         "--lexicon", default=None,
         help=f"personal terms to bias decoding toward (default {DEFAULT_PATH})",
     )
@@ -141,6 +295,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--no-hotkeys", action="store_true", help="skip global hotkey registration"
+    )
+    ap.add_argument(
+        "--no-chord", action="store_true",
+        help="skip the modifier-only chord (no low-level keyboard hook)",
     )
     ap.add_argument(
         "--no-paste", action="store_true", help="print the draft instead of pasting"
@@ -182,6 +340,25 @@ def main(argv: list[str] | None = None) -> int:
         "--cli", default=None, metavar="NAME",
         help="pin the agent CLI instead of trying each in turn "
              f"({', '.join(c.name for c in CANDIDATES if c.verified)})",
+    )
+    ap.add_argument(
+        "--no-warm", action="store_true",
+        # For a launcher that starts with the machine, where paying a model load at login
+        # is the wrong trade — and for measuring the cold path on purpose.
+        help="do not load the model at startup; wait until it is first needed",
+    )
+    ap.add_argument(
+        "--cli-model", default=None, metavar="NAME",
+        # The only way a model name gets into Flow: the settings menu has no text field
+        # and is not growing one, so a name arrives here once, is remembered, and is a
+        # click from then on. Not validated against a list because no CLI will print one
+        # - `codex exec --help` says `-m, --model <MODEL>` and stops there.
+        help="ask the agent CLI for this model (remembered; blank clears it)",
+    )
+    ap.add_argument(
+        "--cli-effort", default=None, choices=EFFORTS, metavar="LEVEL",
+        help=f"how hard the CLI may think, where it offers the choice "
+             f"({', '.join(EFFORTS)}; default {EFFORT_DEFAULT})",
     )
     ap.add_argument(
         "--cli-timeout", type=_timeout_arg, default=REFINE_TIMEOUT_SEC, metavar="SEC",
@@ -246,8 +423,13 @@ def main(argv: list[str] | None = None) -> int:
     # while the platform *was* the problem; it is not one any more (decisions.md,
     # "Flow Lite").
     lite = args.lite or sys.platform != "win32"
+    #: Set when an injector is imported below. `None` means Send has nothing to paste
+    #: with and falls back to the clipboard, which is what `--no-paste` and every
+    #: platform without an injector get.
+    paste = take_warnings = None
     if lite:
-        say(LITE_LINE.format(platform=sys.platform))
+        say((MAC_LINE if sys.platform == "darwin" and not args.no_paste
+             else LITE_LINE).format(platform=sys.platform))
         if args.no_paste:
             # Accepted rather than refused: a launcher shared between two machines should
             # not fail on a flag that has simply run out of things to suppress.
@@ -261,9 +443,19 @@ def main(argv: list[str] | None = None) -> int:
     say(f"version: {version()} (nothing checks for updates on its own; "
         "--check-update asks GitHub)")
     if not lite:
-        from .hotkey import BAD_BLOCK_LINE, DEFAULT_BINDINGS, Hotkeys
+        from .hotkey import (
+            BAD_BLOCK_LINE, CHORD_IGNORED_LINE, CHORD_UNAVAILABLE,
+            DEFAULT_BINDINGS, Chord, Hotkeys, _echo, parse_chord,
+        )
+        from .profile import CHORD_DEFAULT
         from .inject import paste, take_warnings
-    from .ui import Pill
+    elif sys.platform == "darwin" and not args.no_paste:
+        # Lite is about hotkeys and window handles, not about whether Flow can put the
+        # words where they are going. A Mac has no `SendInput` and no `hwnd`, and it does
+        # have `osascript` — so it gets a real send while staying Lite in every other
+        # respect. See `inject_mac` for why the permission is the interesting part.
+        from .inject_mac import paste, take_warnings
+    from .ui import Pill, apply_panel_width, apply_place, panel_width
 
     from .asr import WhisperTranscriber
 
@@ -309,32 +501,83 @@ def main(argv: list[str] | None = None) -> int:
     # and somebody whose GPU quietly did not engage has no other way to tell.
     from .asr import cuda_reason, default_models, resolve_device
 
-    decode_device = resolve_device(args.decode_device)
-    # `cuda_reason()` rather than one sentence for every way this can be CPU: "no NVIDIA
-    # device" and "the runtime is not installed" are the same line to write and a
-    # completely different line to read, and only the second is something the reader can
-    # act on. It costs nothing extra — the probe has already run inside `resolve_device`
-    # and remembers its answer.
-    say(f"decoding on: {decode_device}"
-        + ("" if decode_device != "cpu" or args.decode_device == "cpu"
-           else f" ({cuda_reason()})"))
+    asked_partial = args.model or args.partial_model
+    asked_final = args.model or args.final_model
 
-    default_partial, default_final = default_models(decode_device)
-    partial_name = args.model or args.partial_model or default_partial
-    final_name = args.model or args.final_model or default_final
-    if partial_name == final_name:
-        say(f"model: {final_name}, for partials and finals both")
-    else:
-        say(f"models: {partial_name} for partials, {final_name} for finals")
+    def decode_plan() -> tuple[str, str, list[str]]:
+        """Both tier names, and the startup lines that name the device and them.
+
+        **Resolving the device is what loads CUDA** — ctranslate2's import and the
+        runtime probe, 310 ms measured on this machine — and it used to run here, in
+        front of the window. The transcriber resolves the same answer on its own the
+        first time it needs one, so nothing below depends on asking now; the lines are
+        said from a thread once the pill is up. Asked before the window in exactly one
+        case: a Mac deciding `--engine auto`, which needs the names to ask whether the
+        models are on disk.
+
+        `cuda_reason()` rather than one sentence for every way this can be CPU: "no
+        NVIDIA device" and "the runtime is not installed" are the same line to write
+        and a completely different line to read, and only the second is something the
+        reader can act on.
+        """
+        decode_device = resolve_device(args.decode_device)
+        lines = [f"decoding on: {decode_device}"
+                 + ("" if decode_device != "cpu" or args.decode_device == "cpu"
+                    else f" ({cuda_reason()})")]
+        default_partial, default_final = default_models(decode_device)
+        return asked_partial or default_partial, asked_final or default_final, lines
+
+    planned = None
+    partial_name = final_name = ""
+    if sys.platform == "darwin" and args.engine == "auto":
+        planned = decode_plan()
+        partial_name, final_name, _lines = planned
+    engine, engine_why = _engine(args, partial_name, final_name)
+
+    def say_models() -> None:
+        """The device and model lines, from a thread, after the pill is on screen."""
+        try:
+            partial, final, lines = planned or decode_plan()
+        except Exception as exc:
+            say(f"decoding on: could not be resolved ({exc})")
+            return
+        for line in lines:
+            say(line)
+        if engine == "native":
+            say(f"engine: macOS on-device speech{engine_why}")
+        elif partial == final:
+            say(f"model: {final}, for partials and finals both{engine_why}")
+        else:
+            say(f"models: {partial} for partials, {final} for finals{engine_why}")
 
     from .diag import Diag
-    from .profile import Profile, resolve_workspace
+    from .profile import CLI_MODEL_CAP, Profile, resolve_workspace
 
     # Tied to the same flag as the profile, and deliberately: --no-profile means
     # "write nothing about me this session", and a trace is a thing written about
     # somebody even when it holds none of their words.
     profile = None if args.no_profile else Profile()
-    diag = None if args.no_profile else Diag()
+    # Written to the profile before the session reads it, so `--cli-model` is a *setting*
+    # and not a one-run override: the settings menu has no way to type a name, so a flag
+    # that vanished at exit would leave the menu permanently empty. `--cli-model ""`
+    # clears it, which is why this tests for None rather than truthiness.
+    if profile is not None and args.cli_model is not None:
+        profile.cli_model = args.cli_model.strip()
+        if profile.cli_model and profile.cli_model not in profile.cli_models:
+            profile.cli_models = (*profile.cli_models, profile.cli_model)[-CLI_MODEL_CAP:]
+        profile.save()
+    if profile is not None and args.cli_effort is not None:
+        profile.cli_effort = args.cli_effort
+        profile.save()
+    if profile is not None:
+        if profile.cli_model:
+            say(f"model: {profile.cli_model}")
+        say(f"effort: {profile.cli_effort} (where the CLI offers the choice)")
+
+    # `background=True`: written from a thread of its own. The trace records every
+    # partial, route and state change from the UI thread, and each write was a file
+    # open on the frame budget — see `Diag.__init__`.
+    diag = None if args.no_profile else Diag(background=True)
     learned = profile.learned_terms if profile is not None else None
     if profile is not None and profile.calibrated:
         say(f"profile: room {profile.floor_db:.1f} dB, "
@@ -368,32 +611,48 @@ def main(argv: list[str] | None = None) -> int:
     # exactly what happened the first time someone tried it. Entering converse mode is
     # the opt-in; a conversation you have to read is not the feature.
     speaker = None
-    if not args.no_speak:
+
+    def setup_speech(session) -> None:
+        """Find the voices, build the speaker, hand it to the session. On a thread.
+
+        Every line of this used to run before the pill existed, and the first line is
+        a PowerShell start-up: 439 ms measured to list the Windows voices, plus the
+        Piper and Edge imports, plus the speech host's own process start in
+        `available`. Nothing on screen depends on any of it — a reply cannot be spoken
+        before a question has been asked — so it runs beside the window rather than
+        in front of it, and `session.speaker` goes from None to a speaker when it is
+        ready. The voice icon on the pill row appears at the same moment.
+        """
         from .speak import Speaker, default_voice, installed_voices, pick
 
-        # The flag wins over the profile, and the profile over whatever is best. A
-        # saved voice that has since been uninstalled resolves to None and is said out
-        # loud rather than silently ignored — the reply would otherwise come back in a
-        # voice nobody chose, which reads as the setting not working.
-        wanted = args.voice or (profile.voice if profile is not None else None)
-        chosen = pick(wanted)
-        # `default_voice` and not None, so that a machine with a better engine installed
-        # does not fall through to `System.Speech`'s own default — which is one of the
-        # 2013 voices the menu has stopped offering. See its docstring: hiding them from
-        # the list while still speaking in them is the worst of both.
-        fallback = default_voice()
-        if wanted and chosen is None:
-            say(f"voice: {wanted!r} is not installed - using "
-                f"{fallback or 'the engine default'}")
-        chosen = chosen or fallback
-        speaker = Speaker(voice=chosen)
-        if not speaker.available:
-            say("speech: engine unavailable - replies will be silent")
-            speaker = None
-        else:
+        try:
+            # The flag wins over the profile, and the profile over whatever is best.
+            # A saved voice that has since been uninstalled resolves to None and is
+            # said out loud rather than silently ignored — the reply would otherwise
+            # come back in a voice nobody chose, which reads as the setting not
+            # working.
+            wanted = args.voice or (profile.voice if profile is not None else None)
+            chosen = pick(wanted)
+            # `default_voice` and not None, so that a machine with a better engine
+            # installed does not fall through to `System.Speech`'s own default — which
+            # is one of the 2013 voices the menu has stopped offering. See its
+            # docstring: hiding them from the list while still speaking in them is the
+            # worst of both.
+            fallback = default_voice()
+            if wanted and chosen is None:
+                say(f"voice: {wanted!r} is not installed - using "
+                    f"{fallback or 'the engine default'}")
+            chosen = chosen or fallback
+            found = Speaker(voice=chosen)
+            if not found.available:
+                say("speech: engine unavailable - replies will be silent")
+                return
             n = len(installed_voices())
             say(f"speech: on, voice {chosen or 'engine default'} "
                 f"({n} installed; --voice, or the right-click menu, to change)")
+            session.speaker = found
+        except Exception as exc:
+            say(f"speech: unavailable ({exc}) - replies will be silent")
 
     # Said whichever way it resolves, including "not set". The owner accepted that a
     # stored workspace goes stale silently when a project moves; this line is what they
@@ -410,11 +669,13 @@ def main(argv: list[str] | None = None) -> int:
         profile.save()
 
     session = Session(
-        asr=WhisperTranscriber(
-            partial_name, final_name, lexicon=lexicon,
+        # The asked-for names, or None: the transcriber resolves a None to the tier
+        # its device wants, the same answer `decode_plan` reaches for the startup line.
+        asr=(_native_transcriber() if engine == "native" else WhisperTranscriber(
+            asked_partial, asked_final, lexicon=lexicon,
             baseline=profile.confidence if profile is not None else None,
             device=args.decode_device,
-        ),
+        )),
         device=args.device,
         speaker=speaker,
         profile=profile,
@@ -468,12 +729,20 @@ def main(argv: list[str] | None = None) -> int:
                 "(--no-auto-ask to press it yourself)")
         else:
             say("auto-ask: off - press Ask when you are ready")
-    elif lite:
+    elif paste is None:
         say("mode: DICTATE - Send copies the draft, and you paste it "
             "(--converse, or the right-click menu, to ask instead)")
     else:
         say("mode: DICTATE - Send pastes into the focused window "
-            "(--converse, or ctrl+alt+M, to ask instead)")
+            f"(--converse, or {'the right-click menu' if lite else 'ctrl+alt+M'}, "
+            "to ask instead)")
+
+    # Before anything is drawn, and that is the whole contract: `apply_panel_width`
+    # rebinds module globals that two window classes and the chrome functions read, so a
+    # call after the first frame would leave a window whose parts disagree about how wide
+    # it is. Here is the last moment that is safely true.
+    apply_panel_width(panel_width(profile.panel if profile is not None else None))
+    apply_place(profile.place if profile is not None else "bottom")
 
     hotkeys = None
     if not args.no_hotkeys and not lite:
@@ -499,6 +768,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             say("hotkey thread did not start; continuing without hotkeys")
             hotkeys = None
+        if hotkeys is not None:
+            if not args.no_chord:
+                _chord(profile, hotkeys, Chord, parse_chord, _echo,
+                       CHORD_IGNORED_LINE, CHORD_UNAVAILABLE, CHORD_DEFAULT)
     # Assigned rather than passed: the session is built before `RegisterHotKey` has been
     # asked for anything, and what the session needs is the answer, not the request. It
     # reads this only to say what still works when voice stops working.
@@ -536,18 +809,25 @@ def main(argv: list[str] | None = None) -> int:
     quits = (f"{hotkeys.chosen['quit']} quits"
              if hotkeys is not None and "quit" in hotkeys.chosen
              else "quit from the right-click menu")
-    if diag is not None:
-        # Off the startup path on purpose: two CLI process starts and a handful of file
-        # reads, none of which anybody is waiting for. The pill is on screen in 0.40 s
-        # and this must not be part of that number.
-        import threading as _threading
+    import threading as _threading
 
+    def record_identity_later() -> None:
+        """Two CLI process starts and a handful of file reads, ten seconds from now.
+
+        Off the startup path was never enough: this used to start beside the model
+        load, and two `node` boots contending with `WhisperModel` on the same cores
+        is a slower first decode for a record nobody reads until later. The names are
+        read then rather than now, because the device — and so the tiers — is resolved
+        on its own thread after the window is up.
+        """
         from .diag import record_identity
 
-        _threading.Thread(
-            target=record_identity, args=(diag, (partial_name, final_name)),
-            daemon=True, name="identity",
-        ).start()
+        def go() -> None:
+            asr_names = getattr(session.asr, "names", None)
+            names = tuple(asr_names) if isinstance(asr_names, tuple) else ()
+            record_identity(diag, names)
+
+        _threading.Thread(target=go, daemon=True, name="identity").start()
 
     say(
         ("listening | " if args.arm else "click the pill to arm | ")
@@ -557,11 +837,36 @@ def main(argv: list[str] | None = None) -> int:
     # exist, so the menu is sent to the real settings folder instead: the profile lives
     # there either way, and creating a template beside the source is nobody's idea of
     # settings.
+    # What the mode notes read, and the same fact `on_send` is keyed off.
+    session.pastes = paste is not None
     pill = Pill(
-        session, on_send=None if lite else on_send, hotkeys=hotkeys, arm=args.arm,
+        # Keyed off whether an injector was imported, not off `lite`. The two came
+        # apart the day a Mac got a paste path: it is Lite in every other sense and can
+        # still put the words in the other window.
+        session, on_send=on_send if paste is not None else None,
+        hotkeys=hotkeys, arm=args.arm,
         settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
         lite=lite,
     )
+    # **Loaded now, not at the first word.** "loading the model" used to be the first
+    # thing a fresh Flow said back, in the bubble, while somebody was already speaking —
+    # and the load lands *inside* that first utterance rather than in front of it, so the
+    # first partial measured 1 230 ms against ~570 ms for the four behind it. The chord's
+    # press-down has warmed the models since push-to-talk shipped, which covers the
+    # second use and not the first.
+    #
+    # After the pill is built and before the loop runs, so the window is on screen while
+    # the disk does its work rather than after it. `warm()` returns immediately — it is
+    # single-flight and does its loading on a thread of its own — so nothing here waits.
+    if not args.no_warm:
+        session.warm()
+    # Beside the window, not in front of it — see each one for what it used to cost.
+    _threading.Thread(target=say_models, daemon=True, name="startup-lines").start()
+    if not args.no_speak:
+        _threading.Thread(
+            target=setup_speech, args=(session,), daemon=True, name="voices").start()
+    if diag is not None:
+        pill.after(10_000, record_identity_later)
     try:
         pill.mainloop()
     except KeyboardInterrupt:

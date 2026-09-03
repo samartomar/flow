@@ -275,7 +275,8 @@ def installed_voices(refresh: bool = False) -> list[Voice]:
     global _CACHE
     if _CACHE is not None and not refresh:
         return _CACHE
-    modern = [v for v in all_voices(refresh=refresh) if v.engine != "sapi"]
+    every = all_voices(refresh=refresh)
+    modern = [v for v in every if v.engine != "sapi"]
     # The 2013 voices are offered only when nothing better is installed. They are not
     # removed outright, and the difference is the whole point: a default install declares
     # three dependencies and has neither extra, so SAPI is the only thing it can speak
@@ -286,7 +287,10 @@ def installed_voices(refresh: bool = False) -> list[Voice]:
     # Disappearing from the *menu* is not the same as becoming unreachable: `pick`
     # resolves against `all_voices`, so a profile or a `--voice` that names a Windows
     # voice still gets it, and `Speaker` still speaks it. Hidden, not withdrawn.
-    _CACHE = modern or _sapi_voices()
+    # From the rows `all_voices` already holds, not a second `_sapi_voices()`: that was
+    # a second PowerShell start-up — 439 ms measured — on the launch path of every
+    # machine without a better engine, to list the same three voices again.
+    _CACHE = modern or [v for v in every if v.engine == "sapi"]
     return _CACHE
 
 

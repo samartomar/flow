@@ -1,0 +1,17 @@
+{
+  "artboards": [
+    { "file": "Today.dc.html", "x": 0, "y": 0, "w": 500, "h": 300 },
+    { "file": "Main.dc.html", "x": 600, "y": 0, "w": 500, "h": 320 },
+    { "file": "Lines.dc.html", "x": 0, "y": 460, "w": 520, "h": 760 }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 600,
+      "y": 400,
+      "w": 500,
+      "text": "Commands become icons in the top-right corner.\nSend keeps its own place at the bottom right.\nThe text area holds three lines whether or not you filled them."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

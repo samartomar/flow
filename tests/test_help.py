@@ -29,9 +29,24 @@ from flow.edits import SEND_ENTER_WORD, SEND_WORD, TAKE_VERBS, plan  # noqa: E40
 class FakeHotkeys:
     """What `Hotkeys` looks like after `start()`: what registered, and what could not."""
 
-    def __init__(self, chosen: dict, failed=()) -> None:
+    def __init__(self, chosen: dict, failed=(), chord=None) -> None:
         self.chosen = chosen
         self.failed = list(failed)
+        #: `None` on the launches that have no chord — `--no-chord`, `"chord": ""`, or a
+        #: hook the OS refused — which is most of the tests in this file and is why it
+        #: defaults that way.
+        self.chord = chord
+
+
+class FakeChord:
+    """What `Chord` looks like once installed. It is not in `chosen` and never will be:
+    nothing registered it, because there is nothing `RegisterHotKey` could register."""
+
+    def __init__(self, spelling="ctrl+win", action="talk") -> None:
+        self.spelling, self.action = spelling, action
+
+    def describe(self) -> str:
+        return self.spelling
 
 
 REGISTERED = {"toggle": "ctrl+shift+space", "send": "ctrl+alt+enter",
@@ -61,6 +76,30 @@ class TestItNamesWhatRegistered(unittest.TestCase):
         text = rendered(hotkeys=FakeHotkeys(REGISTERED, failed=["cancel"]))
         line = next(ln for ln in text.splitlines() if "cancel" in ln)
         self.assertIn("owned by another app", line)
+
+    def test_the_chord_is_named_even_though_nothing_registered_it(self):
+        # The sheet is built from what `RegisterHotKey` accepted, and the chord is
+        # precisely the shortcut that call cannot express. A sheet built only from
+        # `chosen` would describe a machine on which the shape the user has been holding
+        # all week does not exist.
+        text = rendered(hotkeys=FakeHotkeys(REGISTERED, chord=FakeChord()))
+        self.assertIn("ctrl+win", text)
+        line = next(ln for ln in text.splitlines() if "ctrl+win" in ln)
+        self.assertIn("hold to talk, release to send", line)
+        self.assertIn("held", line)
+
+    def test_a_launch_without_a_chord_does_not_mention_one(self):
+        # `--no-chord`, `"chord": ""` and a refused hook all land here, and they are the
+        # same rule the rest of the sheet follows: it says what works on this machine
+        # this launch, and nothing else.
+        self.assertNotIn("ctrl+win", rendered(hotkeys=FakeHotkeys(REGISTERED)))
+
+    def test_the_chord_is_listed_before_the_hotkey_that_also_starts_dictation(self):
+        # They no longer do the same thing — the chord is a hold and the hotkey is a
+        # toggle — but they are the two ways to start talking, and the chord goes first
+        # because it is the one somebody opened this sheet to look up.
+        text = rendered(hotkeys=FakeHotkeys(REGISTERED, chord=FakeChord()))
+        self.assertLess(text.index("ctrl+win"), text.index("ctrl+shift+space"))
 
     def test_no_hotkeys_at_all_is_a_sentence_rather_than_a_hole(self):
         # `--no-hotkeys` is a supported way to run, and an empty section reads as a bug

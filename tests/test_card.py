@@ -44,6 +44,9 @@ def card(**kw):
     #: `reposition` does arithmetic on it now that the pill's width can dock.
     c.pill.pill_w = ui.PILL_W
     c.pill.work = WORK
+    # The panel band's height comes off the pill now that they share a window,
+    # so a Mock pill would otherwise answer `panel_h()` with a Mock.
+    c.pill.band_h = lambda: ui.PANEL_MAX_H
     c.pill.x, c.pill.y = 900, 560
     c.pill.session = mock.Mock(can_take_reply=True, auto_ask_in=None)
     c.canvas = MeasuringCanvas()
@@ -55,14 +58,40 @@ def card(**kw):
     c._h = ui.CARD_MIN_H
     c._pinned_h = 0
     c._countdown = None
+    #: What `reposition` asked for. It used to be a `geometry` string, because this was
+    #: a window; it is a `place` call now, because the card is a band inside the pill's
+    #: one window. The record is kept because tests read the height back out of it.
     c.placed = []
-    c.geometry = c.placed.append
-    c.deiconify = lambda: None
-    c.attributes = lambda *a, **kw: None
-    c.withdraw = lambda: None
+    c.place = lambda **kw: c.placed.append(f"{kw['width']}x{kw['height']}+0+0")
+    c.place_forget = lambda: None
     for name, value in kw.items():
         setattr(c, name, value)
     return c
+
+
+def commands(c) -> list[str]:
+    """Which commands are on the card, by their click binding rather than by their word.
+
+    The secondaries are marks in the top-right corner now, so only the primary still
+    carries a label — a check that looked for text would report `Use this` as vanished
+    when it had merely stopped being a sentence. Read off `tag_bind` rather than off the
+    drawn items, because which primitives a fixture records varies by glyph: `Copy` draws
+    rectangles and `Use this` draws lines, so tag-spotting made one visible and the other
+    not. The binding is the hit region, which is what these tests are actually about.
+    """
+    keys = ("Ask", "Use this", "Copy", "New conversation")
+    bound = {tag for tag, _seq, _fn in c.canvas.bindings}
+    # The secondaries are marks on the pill row since the compact pass: the card
+    # publishes them in `_marks` and the pill draws and binds them. Offered is offered,
+    # whichever canvas the hit region ends up on.
+    published = {k for k, _l, _c in c.__dict__.get("_marks", ())}
+    return [k for k in keys if ui.chip_tag(k) in bound or k in published]
+
+
+def primary_label(c) -> str:
+    """The word the Ask chip would say on hover — it draws a glyph, and the countdown
+    rides in the label the tip carries."""
+    return ui.tip_label(c.canvas, ui.chip_tag("Ask"))
 
 
 def drawn(c) -> list[str]:
@@ -249,39 +278,39 @@ class TestTheWindowStaysInsideTheDesktop(unittest.TestCase):
         c = card()
         c.ask("q")
         c.answer(prose(12_000))
-        chips = [i for i in c.canvas.items
-                 if i["text"] in ("Ask", "Use this", "Copy", "New conversation")]
-        self.assertEqual(len(chips), 4)
-        for chip in chips:
-            self.assertLess(chip["y"], c._h, chip["text"])
-            self.assertGreater(chip["y"], 0, chip["text"])
+        self.assertEqual(len(commands(c)), 4)
+        # Every mark this card still draws is inside the window: the primary at the
+        # foot. The three secondaries are on the pill row now and draw nothing here.
+        for key in ("Ask", "Use this", "Copy", "New conversation"):
+            ys = [i["y"] for i in c.canvas.items
+                  if ui.chip_tag(key) in (i.get("tags") or ()) and "y" in i]
+            for y in ys:
+                self.assertLess(y, c._h, key)
+                self.assertGreaterEqual(y, 0, key)
 
 
 class TestTheChips(unittest.TestCase):
-    def labels(self, c) -> list[str]:
-        keys = ("Ask", "Use this", "Copy", "New conversation")
-        return [i["text"] for i in c.canvas.items
-                if any(i["text"].startswith(k) for k in keys)]
+
 
     def test_ask_is_there_before_anything_has_been_asked(self):
         c = card()
         c.show()
-        self.assertIn("Ask", self.labels(c))
+        self.assertIn("Ask", commands(c))
 
     def test_the_countdown_rides_on_the_ask_chip(self):
         c = card()
         c.pill.session.auto_ask_in = 2.4
         c.ask("q")
-        self.assertIn("Ask 3s", self.labels(c))
+        self.assertEqual(primary_label(c), "Ask 3s")
 
     def test_use_this_and_copy_appear_only_with_an_answer(self):
         c = card()
         c.ask("q")
-        self.assertNotIn("Use this", self.labels(c))
-        self.assertNotIn("Copy", self.labels(c))
+        self.assertNotIn("Use this", commands(c))
+        self.assertNotIn("Copy", commands(c))
         c.answer("an answer")
-        self.assertIn("Use this", self.labels(c))
-        self.assertIn("Copy", self.labels(c))
+        self.assertIn("Use this", commands(c))
+        self.assertIn("Copy", commands(c))
 
     def test_copy_carries_the_whole_answer_and_not_the_head_that_is_drawn(self):
         # Item 45's promise, restated on this surface: the window is a view, not a
@@ -452,7 +481,17 @@ class TestTheAnswerShowsItsHead(unittest.TestCase):
                   for n in (6_000, 12_000)]
         self.assertLess(counts[0], counts[1])
 
-    def test_the_answer_still_sizes_the_card(self):
+    def test_the_answer_sizes_the_card_again(self):
+        """It did; then it did not for two commits; now it does, and that is right.
+
+        Fixing the height stopped the card moving and left a hole in it instead. A
+        FluidVoice demo read frame by frame settled the argument: that overlay's bottom
+        edge is at y=554 in every frame while the box is snug around two lines, then
+        three. Snug is what a reader wants; what must not move is the *foot*, and
+        `Pill._sync_shell` grows the shell upward so the pill row never does.
+
+        Stepping by a whole body line (`_settled_h`) is what keeps it from thrashing.
+        """
         self.assertGreater(self.answered(prose(4_000))._h,
                            self.answered(prose(200))._h)
 
@@ -713,7 +752,9 @@ class TestAnAnswerThatLandsAfterTheSwitch(unittest.TestCase):
         self.assertEqual(c._answer, "you add it with a migration")
         c.deiconify.assert_not_called()
         c.show()
-        c.deiconify.assert_called_once()
+        # It used to `deiconify` a window of its own. There is one window now, and a
+        # band that has been given a place in it is a band that is showing.
+        self.assertTrue(c.placed)
 
     @staticmethod
     def raised(call) -> bool:

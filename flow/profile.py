@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Sequence
 
 from . import edits
+from .refine import EFFORT_DEFAULT, EFFORTS
 
 
 # -- per-field validation ---------------------------------------------------
@@ -133,6 +134,29 @@ def _hotkeys(value) -> dict:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _apps(value) -> dict:
+    """The per-app instructions as written: a table, or nothing.
+
+    Shape only, exactly like `_hotkeys`, and the line it stops at is the same one. What
+    counts as an application name is `flow/inject.py`'s knowledge — it is whatever
+    `Target.process` reports — and that module binds `user32` at import, so it cannot be
+    read on a Mac while this one is loaded on every launch including Lite's.
+
+    But the second half of `_hotkeys`' argument does not apply here, and the difference
+    is worth being clear about: an action name has five right answers and a typo is
+    knowable, whereas an executable name has as many right answers as there are programs
+    on the machine. There is no table to check against and no such thing as a name Flow
+    can prove wrong — an entry for an app that is not installed is not a mistake, it is
+    somebody who has not opened it yet. So nothing here refuses an entry by name the way
+    registration does, and a key that never matches simply never fires.
+
+    Values are carried through untouched, including ones that are not strings. The
+    instruction is judged where it is used, which is the only place that knows whether it
+    has anything to say.
+    """
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _counter(value) -> Counter:
     """`{phrase: positive count}`. Entries that are not that shape are dropped.
 
@@ -168,6 +192,41 @@ SCHEMA = 1
 #: correction offers at three and the trigger presets at six: the menu is a native
 #: modal loop with a measured stall, so nothing offered in it may grow with usage.
 MAX_WORKSPACES = 5
+
+
+#: The shipped modifier-only chord (see `flow/hotkey.py`, `Chord`).
+#:
+#: Canonical *here* rather than in `flow/hotkey.py`, and the direction is deliberate:
+#: this module is imported on every launch including Lite and on a Mac, while
+#: `flow.hotkey` binds `user32` at import and cannot be imported at all off Windows. A
+#: default the profile could not read without Win32 would be a default Lite could not
+#: write back, and a field that vanishes from the file on one platform is worse than one
+#: nobody can edit. `flow.hotkey` owns what the string *means*; this owns what it is.
+CHORD_DEFAULT = "ctrl+win"
+
+#: The shipped panel width, by name. Spelled here and not imported from `flow/ui.py`
+#: for the reason `CHORD_DEFAULT` is not imported from `flow/hotkey.py`: this module is
+#: loaded on every launch including Lite's, and a default it could not read without the
+#: UI would be a default Lite could not write back. `ui.panel_width` maps the name to
+#: pixels and treats an unknown one as this, so the two cannot disagree about anything
+#: except the spelling of a word — which `tests/test_overlay.py` checks.
+PANEL_DEFAULT = "regular"
+
+#: Where the stack sits, by name — bottom-centre of the monitor under the pointer, or
+#: the bottom-right corner Flow shipped. Spelled here rather than imported from
+#: `flow/ui.py` for `PANEL_DEFAULT`'s reason, and judged there for the same one.
+PLACE_DEFAULT = "bottom"
+
+#: Which gesture the chord is: `"hold"` for push-to-talk, `"toggle"` for the original
+#: press-and-release. Spelled here rather than imported from `flow/hotkey.py` for
+#: `CHORD_DEFAULT`'s reason — that module binds user32 at import and cannot load on a
+#: Mac, and this one is read on every launch including Lite's.
+GESTURE_DEFAULT = "hold"
+
+#: How many model names the settings menu will remember. A ceiling rather than a
+#: judgement: this list is only ever appended to, by hand, one name at a time, and a menu
+#: is not a place for an unbounded list.
+CLI_MODEL_CAP = 12
 
 
 def path_key(path: str | None) -> str | None:
@@ -328,6 +387,37 @@ class Profile:
         #: less than that: `_hotkeys` carries an entry whose value is not a string rather
         #: than dropping it, so that registration can refuse it by name.
         self.hotkeys: dict[str, str] = {}
+        #: The modifier-only chord, as written. `hotkey.parse_chord` judges what it
+        #: means, for the same reason `hotkeys` is judged there: this module is imported
+        #: on every launch including Lite, and `flow.hotkey` binds `user32` at import.
+        self.chord: str = CHORD_DEFAULT
+        #: exe name -> an extra instruction for rewrites made while that app is in front.
+        self.apps: dict[str, str] = {}
+        #: Which of `ui.PANEL_WIDTHS` the draft panel is drawn at. A name and not a
+        #: number: three widths that have each been drawn are worth more than an integer
+        #: nobody has rendered at, and the meaning is judged in `flow/ui.py` for the same
+        #: reason the hotkey table's is judged in `flow/hotkey.py` — this module is read
+        #: on every launch and must not need the module that knows what it means.
+        self.panel: str = PANEL_DEFAULT
+        #: Where the panels open. `"bottom"` is the shipped placement now — bottom-centre
+        #: of whichever monitor the pointer is on — and `"corner"` is the bottom-right
+        #: Flow used to use, kept for anybody who wants it back rather than removed.
+        self.place: str = PLACE_DEFAULT
+        #: How the chord behaves. Both gestures ship because neither replaces the other:
+        #: a hold is better for a sentence, a toggle is the only one that survives a
+        #: paragraph or a pair of hands that cannot hold two keys down. Judged in
+        #: `flow/hotkey.py`, which knows what the words mean.
+        self.gesture: str = GESTURE_DEFAULT
+        #: Which model to ask the agent CLI for, "" meaning whatever it defaults to, and
+        #: how hard to let it think. Both apply to whichever CLI answers - `refine.tuned`
+        #: drops either for a CLI not measured to accept it.
+        self.cli_model: str = ""
+        self.cli_effort: str = EFFORT_DEFAULT
+        #: Every model name that has been set, in the order they were first used. The
+        #: settings menu has no text field to type one into and is not getting one, so
+        #: this list *is* the menu: a name arrives once through `--cli-model` and is a
+        #: click from then on.
+        self.cli_models: tuple[str, ...] = ()
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -398,6 +488,23 @@ class Profile:
         # names live — see `_hotkeys`, and `hotkey.overridden` for what it says about
         # each entry it refuses.
         self.hotkeys = take("hotkeys", lambda v, _d: _hotkeys(v), {})
+        # Absent means the shipped chord, and the empty string means "off" — somebody
+        # who does not want a global keyboard hook needs a way to say so that is not
+        # deleting the key, because the next save would write it straight back.
+        self.chord = take("chord", _text, CHORD_DEFAULT)
+        # Same bargain as `hotkeys`: a value that is not a table degrades to none and is
+        # named, and what is *in* the table is judged where it is used.
+        self.apps = take("apps", lambda v, _d: _apps(v), {})
+        self.panel = take("panel", _text, PANEL_DEFAULT)
+        self.place = take("place", _text, PLACE_DEFAULT)
+        self.gesture = take("gesture", _text, GESTURE_DEFAULT)
+        self.cli_model = take("cli_model", _text, "")
+        self.cli_effort = take("cli_effort", _text, EFFORT_DEFAULT)
+        if self.cli_effort not in EFFORTS:
+            self.cli_effort = EFFORT_DEFAULT
+        self.cli_models = tuple(
+            take("cli_models", lambda v, _d=None: _text_list(v, CLI_MODEL_CAP), [])
+        )
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
         # `stored=[]` because JSON has no set: `save` writes this one as a sorted list,
@@ -428,6 +535,17 @@ class Profile:
             # the only advertisement this feature gets in a project with no settings
             # dialog to put it in.
             "hotkeys": dict(self.hotkeys),
+            "chord": self.chord,
+            # Written back as it was read, so a hand-edit survives every save Flow makes
+            # on its own — and an empty table lands in every profile, which is the only
+            # advertisement this feature gets in a project with no settings dialog.
+            "apps": dict(self.apps),
+            "panel": self.panel,
+            "place": self.place,
+            "gesture": self.gesture,
+            "cli_model": self.cli_model,
+            "cli_effort": self.cli_effort,
+            "cli_models": list(self.cli_models),
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's

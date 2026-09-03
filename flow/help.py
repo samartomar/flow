@@ -138,6 +138,10 @@ def auto_ask_notice(seconds: float) -> str:
 #: cannot find here is worse than one described badly.
 _ACTIONS = {
     "toggle": "start and stop listening",
+    # The chord's word, and the one row here that describes a *hold* rather than a
+    # press. Spelled out to the end — release and all — because the half people get
+    # wrong is that there is no second shortcut to send.
+    "talk": "hold to talk, release to send",
     "send": "hand the draft over (Send, or Ask in converse mode)",
     "cancel": "clear the draft, and cut a spoken reply short",
     "mode": "switch between dictate and converse",
@@ -218,6 +222,16 @@ def _hotkey_rows(hotkeys) -> list[tuple[str, str, str]]:
     failed = list(getattr(hotkeys, "failed", []) or [])
     rows = [("pair", combo, _ACTIONS.get(action, action))
             for action, combo in chosen.items()]
+    # The chord goes first among the rows it duplicates, because it is the one somebody
+    # is looking for: it does not appear in `chosen` — nothing registered it — so a sheet
+    # built only from what `RegisterHotKey` accepted would describe a machine where the
+    # shape they have been using does not exist. Absent when the hook was refused or
+    # `--no-chord` was passed, which is the same rule the rest of this function follows:
+    # the sheet says what works on this machine this launch.
+    chord = getattr(hotkeys, "chord", None)
+    if chord is not None:
+        rows.insert(0, ("pair", f"{chord.describe()} (held)",
+                        _ACTIONS.get(chord.action, chord.action)))
     # Named as unavailable rather than left out. A shortcut that silently does nothing is
     # the defect `Hotkeys.failed` was built to report, and a sheet that omitted it would
     # send somebody looking for a key that cannot exist on this machine.

@@ -52,10 +52,16 @@ mode are all there, unchanged. What changes is the last inch: **Send copies the 
 you press Ctrl+V yourself.**
 
 Four things it does not do — exclusions, not gaps: no injection into another
-application's window, no global hotkeys (arming is a click on the pill), no auto-paste,
-and no target-window awareness. What that buys is the property full Flow cannot have:
-**nothing to grant but the microphone** — no accessibility permission, no input
-monitoring, no trusted-application prompt.
+application's window, no global hotkeys, no auto-paste, and no target-window awareness.
+What that buys is the property full Flow cannot have: **nothing to grant but the
+microphone** — no accessibility permission, no input monitoring, no trusted-application
+prompt.
+
+**Push-to-talk works here anyway, and it does not need a hotkey.** Hold the pill, speak,
+let go — the words land on your clipboard. A quick click still toggles listening, and
+dragging still moves the pill. It is the same gesture Windows gets from `ctrl+win`, on a
+button Flow already draws, which is why it costs no permission: a system hotkey is the
+part that needs Accessibility and Input Monitoring, and this is not one.
 
 Two requirements Lite cannot meet, named rather than dropped: P7 (safe paste into a
 terminal) is a promise about a paste Flow performs, and Lite performs none; and P9's loop
@@ -158,7 +164,7 @@ where Flow mishears them. That is the one thing I cannot measure alone.
 ```bash
 git clone https://github.com/samartomar/flow && cd flow
 uv sync && uv run flow                          # run it
-uv run python -m unittest discover -s tests     # 1,881 tests, ~40 s, no mic needed
+uv run python -m unittest discover -s tests     # 1,965 tests, ~42 s, no mic needed
 uv run python scripts/selfdrive.py              # the end-to-end harness
 ```
 

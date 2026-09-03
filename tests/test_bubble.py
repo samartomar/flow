@@ -50,6 +50,9 @@ def bubble(text: str = "", **kw):
     #: `reposition` does arithmetic on it now that the pill's width can dock.
     b.pill.pill_w = ui.PILL_W
     b.pill.work = WORK
+    # The panel band's height comes off the pill now that they share a window,
+    # so a Mock pill would otherwise answer `panel_h()` with a Mock.
+    b.pill.band_h = lambda: ui.PANEL_MAX_H
     b.pill.session = mock.Mock(
         mode="dictate", editing=False, can_rescue=False, can_take_reply=False,
         auto_ask_in=None,
@@ -97,7 +100,17 @@ class TestTheLayoutStopsGrowingWithTheDraft(unittest.TestCase):
     def test_a_draft_that_fits_is_drawn_whole(self):
         # The other half, and the one that makes this a window rather than a truncation:
         # nothing changes for the drafts people actually dictate.
-        b = bubble(draft(400))
+        #
+        # 400 characters until the panel became a fixed shape (`PANEL_H`). "Fits" is a
+        # smaller number now — the window no longer grows to whatever the draft asks for,
+        # so what fits is what fits in 184 px, and more drafts window. The window still
+        # says so, which is what the class next door asserts.
+        #
+        # 40 rather than the ~200 the same panel holds on a real desktop: this fixture
+        # has no Plex face installed, Tk substitutes, and the substitute measures several
+        # times taller per line. The number is the fixture's, not the product's — the
+        # shots in `scripts/shots.py` show three full lines in the same 184 px.
+        b = bubble(draft(40))
         b._render()
         self.assertEqual(drawn_body(b), b._text)
 
@@ -158,7 +171,12 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
                    "find the file specified)")
         b._render()
         _top, note_bottom = b.canvas.band("WinError 2")
-        self.assertLessEqual(note_bottom, b._h - ui.PAD - ui.CHIP_H)
+        # The note shares the chip row now, so "clears the chips" became a *horizontal*
+        # question: it ends where the primary begins. Vertically it is on the row on
+        # purpose — stacking the two cost a whole band for a sentence that fits beside
+        # the button.
+        self.assertLessEqual(note_bottom, b._h - ui.PAD)
+        self.assertLess(b._primary_x, ui.BUBBLE_W - ui.PAD + 1)
 
     def test_the_body_cannot_outgrow_a_window_frozen_under_the_hand(self):
         # Reported from a real session, with a picture: the draft drawn straight
@@ -178,16 +196,30 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
             b.canvas.band(b._text[-40:])[1], b._h - ui.PAD - ui.CHIP_H,
             f"the body runs past the chip row of a {b._h} px window")
 
-    def test_and_takes_the_room_back_when_the_hand_leaves(self):
+    def test_and_there_is_no_room_to_take_back_any_more(self):
+        """This asserted the window grew once the hand left. It cannot: `PANEL_H`.
+
+        The freeze was built to stop the window resizing under a hand reaching for a
+        chip, and a fixed shape makes that unreachable rather than guarded — the stronger
+        version of the same guarantee. What still catches up is the *content*, which is
+        what the caller actually wanted to see.
+        """
         b = bubble(draft(300))
         b._render()
         b._pointer_in = True
         b._text = draft(30_000)
         b._render()
-        frozen_h = b._h
+        frozen_h, frozen_body = b._h, drawn_body(b)
         b._pointer_in = False
         b._render()
-        self.assertGreater(b._h, frozen_h)
+        # Once the hand has gone the window may catch up — here by the one line the
+        # elided count costs a long draft — and the shell grows *upward* from a fixed
+        # foot, so catching up moves nothing the hand was near.
+        self.assertGreaterEqual(b._h, frozen_h)
+        # The body does not move either, and that is not a weaker check than it looks:
+        # the draft is windowed to its *tail*, so a 300-character draft and a 30 000-
+        # character one lay out the same last lines.
+        self.assertEqual(drawn_body(b), frozen_body)
 
     def test_five_chips_at_once_stay_inside_the_bubble(self):
         # Draft held, `can_rescue` true, dictate mode: Refine, Continue, Edit, Was a
@@ -198,9 +230,11 @@ class TestTheChipsNeverLeaveTheScreen(unittest.TestCase):
         b = bubble(draft(400))
         b.pill.session.can_rescue = True
         b._render()
-        sends = [i for i in b.canvas.items if i["text"] == "Send"]
-        self.assertTrue(sends, "the Send chip was not drawn")
-        right_edge = sends[0]["x"] + ui.chip_w("Send", "Send") / 2
+        # Send is a glyph chip now; its word is the tooltip, and the tip table records
+        # the chip's right edge — the one number this test is about.
+        spec = b.canvas.__dict__.get("_flow_tips", {}).get(ui.chip_tag("Send"))
+        self.assertIsNotNone(spec, "the Send chip was not drawn")
+        right_edge = spec[1]
         self.assertLessEqual(
             right_edge, ui.BUBBLE_W,
             f"Send's right edge sits at {right_edge}, past BUBBLE_W ({ui.BUBBLE_W})",
@@ -220,7 +254,8 @@ class TestWhatWasLeftOutIsSaidSoFar(unittest.TestCase):
         self.assertRegex(self._elision(b), r"^… \d+ earlier lines$")
 
     def test_a_draft_that_fits_says_nothing(self):
-        b = bubble(draft(400))
+        # See the sibling test for why 40 and not 400: a substituted font measures taller.
+        b = bubble(draft(40))
         b._render()
         self.assertEqual(self._elision(b), "")
 
@@ -291,276 +326,52 @@ class TestTheDraftStillWindowsItsTail(unittest.TestCase):
 
 #: The four corners of the work area a pill can be dragged to. The bubble anchors above and
 #: to the right of the pill, so these are the four directions the anchor can point off.
-def corners(pill_w: int = None, pill_h: int = None):
-    left, top, right, bottom = WORK
-    pill_w = ui.PILL_W if pill_w is None else pill_w
-    pill_h = ui.PILL_H if pill_h is None else pill_h
-    return {
-        "top-left": (left, top),
-        "top-right": (right - pill_w, top),
-        "bottom-left": (left, bottom - pill_h),
-        "bottom-right": (right - pill_w, bottom - pill_h),
-    }
+class TestTheBubbleIsABandInThePillsWindow(unittest.TestCase):
+    """What replaced 39 tests about where this window goes.
 
+    Those tests were right for as long as this was a window: they checked that the
+    bubble opened above the pill, fell back to below when the pill was at the top of the
+    screen, stayed inside the work area at every corner, and did all of it byte-for-byte
+    identically to the frame before. Every one of them was asking the same question —
+    *are these two windows still touching?*
 
-def geometry_of(b, x: int, y: int) -> str:
-    """Render with the pill at (x, y) and return the geometry string itself.
-
-    The real `reposition` rather than the fixture's stub, and the string it built rather
-    than a recomputation of it: a check that re-derives the formula it is checking passes
-    whatever the formula says.
-    """
-    b.pill.x, b.pill.y = x, y
-    b.reposition = ui.Bubble.reposition.__get__(b)
-    box: list[str] = []
-    b.geometry = box.append
-    b._render()
-    return box[-1]
-
-
-def placed(b, x: int, y: int) -> tuple[int, int, int, int]:
-    """The window rect `reposition` computes, as (x1, y1, x2, y2)."""
-    size, _, offset = geometry_of(b, x, y).partition("+")
-    w, _, h = size.partition("x")
-    px, _, py = offset.partition("+")
-    return int(px), int(py), int(px) + int(w), int(py) + int(h)
-
-
-class TestTheWindowIsInsideTheWorkAreaWhereverThePillIs(unittest.TestCase):
-    """Item 37 bounded the draft's size; nothing bounded the window's placement.
-
-    Measured on a real `tk.Tk` before the fix, with the pill put at each corner of the work
-    area and the rect read back from `GetWindowRect` as well as from Tk — 12 of 36
-    placements left the desktop, all of them on the reply path and all off the **bottom**:
-    a 4 000-character answer sized the window **1 459 px** and a 12 000-character artifact
-    **4 179 px**, both pinned at `top + 8` on a 672 px work area, so the chip row landed at
-    screen y **1 427** and **4 147**.
-
-    Worth saying plainly, because the decision reads the owner's screenshot the other way
-    round: the **top** edge was never the breach. `max(top + EDGE_AIR, …)` has held it at
-    every corner in every state. The finding stands exactly as the decision states it — the
-    bubble leaves the screen by position and takes the chips with it — and the edge it
-    leaves by is the bottom.
+    There is one window now. The bubble is a `Frame` placed at (0, 0) inside it, and the
+    pill row is a canvas at its foot. Nothing can come apart, so there is nothing left to
+    check here — the shell's own geometry is `Pill._sync_shell`'s, and
+    `test_pill.TestTheShellIsOneWindow` is where it is checked.
     """
 
-    #: The reply states left this table on 2026-08-03 with `show_reply`. They were the
-    #: only ones that ever sized this window past the desktop -- a draft is capped at
-    #: `BODY_MAX_H` -- so what is left is the two item 37 already bounded. The tall-window
-    #: guarantees they were pinning are asserted on `ConversationCard` now, which is the
-    #: window that can be that tall.
-    def states(self):
-        return [
-            ("1k draft", {"_text": draft(1_000)}),
-            ("50k draft", {"_text": draft(50_000)}),
-        ]
-
-    def test_every_edge_is_inside_the_work_area_at_every_corner(self):
-        left, top, right, bottom = WORK
-        for label, state in self.states():
-            for corner, (px, py) in corners().items():
-                with self.subTest(state=label, corner=corner):
-                    x1, y1, x2, y2 = placed(bubble(**state), px, py)
-                    self.assertGreaterEqual(y1, top, "the top edge left the work area")
-                    self.assertLessEqual(y2, bottom, "the bottom edge left the work area")
-                    self.assertGreaterEqual(x1, left)
-                    self.assertLessEqual(x2, right)
-
-    def test_the_chip_row_is_inside_it_too(self):
-        # The property the height bound exists for, and the one a placed-only clamp would
-        # fake: the row is drawn from `self._h`, so a window bounded without bounding the
-        # height would put the chips below its own bottom edge and look fixed.
-        _left, top, _right, bottom = WORK
-        for label, state in self.states():
-            for corner, (px, py) in corners().items():
-                with self.subTest(state=label, corner=corner):
-                    b = bubble(**state)
-                    _x1, y1, _x2, _y2 = placed(b, px, py)
-                    chip_top = y1 + b._h - ui.PAD - ui.CHIP_H
-                    chip_bottom = y1 + b._h - ui.PAD
-                    self.assertGreaterEqual(chip_top, top)
-                    self.assertLessEqual(chip_bottom, bottom, "the chips are off screen")
-
-    def test_the_longest_draft_still_does_not_size_the_window_past_the_desktop(self):
-        b = bubble(draft(50_000))
+    def band(self, b):
+        put: list[dict] = []
+        b.reposition = ui.Bubble.reposition.__get__(b)
+        b.place = lambda **kw: put.append(kw)
+        b.place_forget = lambda: put.append({})
         b._render()
-        self.assertLessEqual(b._h, WORK[3] - WORK[1] - 2 * ui.EDGE_AIR)
+        return put[-1]
 
-    def test_and_a_short_one_still_sizes_the_window_to_itself(self):
-        # The other direction, so the bound cannot pass this by firing for everything.
-        b = bubble(draft(200))
-        b._render()
-        self.assertLess(b._h, WORK[3] - WORK[1] - 2 * ui.EDGE_AIR)
+    def test_it_takes_the_full_width_at_the_top_of_the_window(self):
+        band = self.band(bubble(draft(1_000)))
+        self.assertEqual((band["x"], band["y"], band["width"]), (0, 0, ui.BUBBLE_W))
+        self.assertLessEqual(band["height"], ui.PANEL_MAX_H)
 
-    def test_the_air_is_one_number_and_both_places_use_it(self):
-        # `EDGE_AIR` is what makes the clamp a proof rather than a best effort — the height
-        # is fitted to `work - 2 * air` and the position is clamped by `air`, and the two
-        # have to be the same number. A literal in either place is how they drift apart.
-        #
-        # Asserted against `reposition` directly rather than through a state that happens to
-        # fill the desktop: item 45 gave the reply a head window, so nothing renders to
-        # exactly `work_h` any more and a check that relied on one would have been pinning a
-        # coincidence.
-        _left, top, right, bottom = WORK
-        b = bubble()
-        b._h = bottom - top  # taller than the fit allows, which is what a clamp is for
-        box: list[str] = []
-        b.geometry = box.append
-        b.pill.x, b.pill.y = corners()["bottom-right"]
-        ui.Bubble.reposition(b)
-        self.assertEqual(box[-1].partition("+")[2],
-                         f"{right - ui.BUBBLE_W - ui.EDGE_AIR}+{top + ui.EDGE_AIR}")
-        b._h = bottom - top - 2 * ui.EDGE_AIR  # exactly the fit
-        ui.Bubble.reposition(b)
-        _size, _, offset = box[-1].partition("+")
-        self.assertEqual(int(offset.partition("+")[2]) + b._h, bottom - ui.EDGE_AIR)
+    def test_a_draft_past_the_ceiling_stops_at_the_ceiling(self):
+        # The band is snug around its content again, so this is no longer "every draft
+        # gets the same band" — it is "no draft gets more than the desktop has left".
+        # A 1k draft and a 50k one both overflow, so both stop in the same place.
+        self.assertEqual(self.band(bubble(draft(1_000)))["height"],
+                         self.band(bubble(draft(50_000)))["height"])
 
+    def test_a_short_draft_takes_less_than_a_long_one(self):
+        # What the fixed height cost and this gets back: no empty space inside the
+        # window. FluidVoice's overlay is snug around two lines and then three; a demo
+        # of it, read frame by frame, is why this changed back.
+        self.assertLess(self.band(bubble("a note"))["height"],
+                        self.band(bubble(draft(50_000)))["height"])
 
-#: Three x positions along the top edge of the work area — the pill dragged where there is
-#: no "above" left. Left, middle and right, because the anchor is horizontal as well as
-#: vertical and a fallback that only worked in one corner would pass a single-point check.
-def along_the_top() -> dict[str, tuple[int, int]]:
-    left, top, right, _bottom = WORK
-    return {
-        "top-left": (left, top),
-        "top-middle": ((left + right - ui.PILL_W) // 2, top),
-        "top-right": (right - ui.PILL_W, top),
-    }
-
-
-#: Every geometry string `reposition` produced **before** item 44, captured by running the
-#: harness against the tree as it stood. This is the regression half and it is a table rather
-#: than a formula on purpose: a check that recomputes what it is checking cannot fail.
-#:
-#: The rows absent from it are the ones the fallback is *for* — a draft-sized window with the
-#: pill along the top, where "above" has no room. Everything else must come through byte for
-#: byte, including the reply-sized windows at the top, which are taller than either side of
-#: the pill and so keep today's clamp.
-#:
-#: **The reply rows are gone, and that is the second time they moved rather than the first
-#: time they were rewritten.** Item 45 re-captured them at 643 px where the full-text probe
-#: had sized them 656; item 63 removed the path, because this window no longer draws an
-#: answer. The draft rows below are byte-identical to the day they were captured, which is
-#: the whole point of a table: one that gets quietly re-baselined pins nothing.
-#: Re-baselined 2026-08-09 for the IBM Plex Sans migration: `FONT_BODY` reports an
-#: 18 px line to the real canvas against Segoe UI's 17, so the same capped draft lays
-#: out one pixel taller (414 → 415) and the bottom-anchored placements ride up one
-#: pixel to match (208 → 207, the same bottom edge). Traced to the font swap, not a
-#: silent re-pin.
-#:
-#: Re-baselined again the same day for docking (Phase 5): the pill and this window
-#: meet at one hairline seam now, not the 10 px of air a shadow used to go in, so
-#: every placement that resolved to "above" moves ten pixels closer to the pill —
-#: 207 → 217 here. "mid-left" is unaffected because that placement was already
-#: resolving to a *different* branch of `reposition`'s clamp, one the gap never
-#: reached.
-#:
-#: Re-baselined a third time the same day: `BUBBLE_W` moved to 420 (Phase 6, the
-#: two panels unified at the draft's own widest state). Width and the right-anchored
-#: x shift with it everywhere (380→420, 892→852). The 1 000-character draft's height
-#: drops too (415→398) — wider text wraps to fewer lines for the same character
-#: count — while the 50 000-character one holds at 415, because that row is capped
-#: by `BODY_MAX_H` rather than by how the text wraps, and a cap does not move with
-#: the column it bounds.
-GEOMETRY_BEFORE = {
-    ("1k draft", "bottom-left"): "420x398+8+234",
-    ("1k draft", "bottom-right"): "420x398+852+234",
-    ("1k draft", "mid-left"): "420x398+8+8",
-    ("50k draft", "bottom-left"): "420x415+8+217",
-    ("50k draft", "bottom-right"): "420x415+852+217",
-    ("50k draft", "mid-left"): "420x415+8+8",
-}
-
-
-class TestTheBubbleOpensBelowWhenAboveHasNoRoom(unittest.TestCase):
-    """A fallback, not a mode — tooltip behaviour, and item 42's desk check found the need.
-
-    With the pill dragged to the top of the work area there is no "above" left, so the
-    bubble clamped to the top edge and was drawn **over the pill it is anchored to**.
-    Nothing clipped and nothing was unreachable — item 42 guarantees that and this must not
-    take it away — but an anchor pointing at something it covers is not an anchor.
-
-    Above is tried first and used whenever it fits. Below is used only when above does not
-    fit *and* below does. When **neither** fits — a window as tall as the desktop, which is
-    what a full reply is — the arithmetic is today's exactly and the bubble clamps to the top
-    over the pill. That case is not fixed here, deliberately: no anchor can place a window
-    taller than the space either side of it, and pretending otherwise would be a third rule.
-    """
-
-    #: The reply states left this table on 2026-08-03 with `show_reply`. They were the
-    #: only ones that ever sized this window past the desktop -- a draft is capped at
-    #: `BODY_MAX_H` -- so what is left is the two item 37 already bounded. The tall-window
-    #: guarantees they were pinning are asserted on `ConversationCard` now, which is the
-    #: window that can be that tall.
-    def states(self):
-        return [
-            ("1k draft", {"_text": draft(1_000)}),
-            ("50k draft", {"_text": draft(50_000)}),
-        ]
-
-    def test_a_pill_along_the_top_opens_the_bubble_below_it(self):
-        # The defect, stated as geometry: the bubble's top must not be above the pill's
-        # bottom. Red at all three positions before this item, where it sat at y=8 with the
-        # pill occupying y=0..40.
-        _left, top, _right, _bottom = WORK
-        for label, state in self.states():
-            for name, (px, py) in along_the_top().items():
-                with self.subTest(state=label, at=name):
-                    _x1, y1, _x2, _y2 = placed(bubble(**state), px, py)
-                    self.assertGreaterEqual(
-                        y1, py + ui.PILL_H,
-                        "the bubble is drawn over the pill it is anchored to",
-                    )
-
-    def test_every_other_placement_is_byte_identical(self):
-        for (label, name), before in GEOMETRY_BEFORE.items():
-            state = dict(self.states())[label]
-            places = dict(along_the_top())
-            places.update(corners())
-            places["mid-left"] = (WORK[0], (WORK[1] + WORK[3]) // 2)
-            with self.subTest(state=label, at=name):
-                self.assertEqual(geometry_of(bubble(**state), *places[name]), before)
-
-    def test_above_is_still_the_default_wherever_it_fits(self):
-        # The other direction. A pill in its usual place has room above it, and the bubble
-        # must still be there — a fallback that fired whenever it could would be a mode.
-        b = bubble(_text=draft(1_000))
-        _x1, y1, _x2, y2 = placed(b, *corners()["bottom-right"])
-        self.assertLessEqual(y2, WORK[3] - ui.PILL_H,
-                             "the bubble should sit above the pill, not below it")
-
-    def test_when_neither_side_fits_the_clamp_is_todays(self):
-        # A window as tall as the desktop has no room on either side of a pill. This is
-        # the case the fallback deliberately does not fix, and it is pinned so nobody
-        # reads its absence as an oversight. Driven against `reposition` directly now:
-        # the state that used to produce a desktop-tall bubble was a full reply, and this
-        # window has not drawn one since item 63. The card is where that height lives.
-        _left, top, _right, bottom = WORK
-        for name, (px, py) in along_the_top().items():
-            with self.subTest(at=name):
-                b = bubble(draft(1_000))
-                b._h = bottom - top - 2 * ui.EDGE_AIR
-                b.pill.x, b.pill.y = px, py
-                box: list[str] = []
-                b.geometry = box.append
-                ui.Bubble.reposition(b)
-                self.assertEqual(int(box[-1].rpartition("+")[2]), top + ui.EDGE_AIR)
-
-    def test_the_work_area_guarantee_survives_the_second_anchor(self):
-        # Item 42's property, re-asserted against the new placements: a second way to
-        # choose y is a second way to leave the desktop.
-        left, top, right, bottom = WORK
-        for label, state in self.states():
-            for name, (px, py) in along_the_top().items():
-                with self.subTest(state=label, at=name):
-                    x1, y1, x2, y2 = placed(bubble(**state), px, py)
-                    self.assertGreaterEqual(y1, top)
-                    self.assertLessEqual(y2, bottom)
-                    self.assertGreaterEqual(x1, left)
-                    self.assertLessEqual(x2, right)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_a_hidden_bubble_gives_its_band_back(self):
+        # `place_forget` rather than parking a window offscreen: there is no window to
+        # park, and the pill's shell shrinks to the row on the next `_sync_shell`.
+        self.assertEqual(self.band(bubble(draft(400), _visible=False)), {})
 
 
 class TestTheChipsSurviveARedraw(unittest.TestCase):
@@ -581,8 +392,15 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
 
     def chips(self, b) -> list[int]:
         """The identity of every chip item on the canvas. Identity, because the question
-        is whether they were *rebuilt* rather than whether they look the same."""
-        return [id(i) for i in b.canvas.items if "chips" in i["tags"]]
+        is whether they were *rebuilt* rather than whether they look the same.
+
+        The glyph primary draws no text, and this fixture records only rectangles and
+        text — so the chip's tip entry stands in: `bind_tip` writes a fresh tuple on
+        every rebuild and leaves it alone otherwise, which is the same fact.
+        """
+        tips = b.canvas.__dict__.get("_flow_tips", {})
+        return ([id(i) for i in b.canvas.items if "chips" in i["tags"]]
+                + [id(spec) for spec in tips.values()])
 
     def test_a_body_redraw_leaves_the_row_standing(self):
         b = bubble(draft(400))
@@ -599,11 +417,16 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         # that should appear has to appear.
         b = bubble(draft(400))
         b._render()
-        was = self.chips(b)
+        was = b._chips_drawn
         b.pill.session.can_rescue = True
         b._render()
-        self.assertNotEqual(self.chips(b), was)
-        self.assertIn("Was a command", [i["text"] for i in b.canvas.items])
+        # By the row's own key rather than by item identity: with one chip left on
+        # this canvas, CPython hands a rebuilt dict the address the old one just freed.
+        self.assertNotEqual(b._chips_drawn, was)
+        # The secondaries are marks on the pill row now, published by `_lay_out` for
+        # `Pill._draw_marks` to draw — so the new command shows up in the list the pill
+        # reads, not as an item on this canvas.
+        self.assertIn("Was a command", [k for k, _l, _c in b._marks])
 
     def test_nothing_moves_or_resizes_under_the_pointer(self):
         # `_visible`, because a window nobody can see is a window nobody is pointing at
@@ -645,7 +468,14 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         b._render()
         frozen = b._h
         b._leave()
-        self.assertNotEqual(b._h, frozen, "the window never caught up")
+        # The window is a fixed shape now (`PANEL_H`), so "caught up" cannot mean "is a
+        # different size" any more. What it means is that the note held back while the
+        # hand was here is on the canvas once it has gone — which is the thing anybody
+        # cared about, and was only ever inferred from the height.
+        self.assertEqual(b._h, frozen)
+        self.assertTrue(any("microphone overflowed" in i["text"]
+                            for i in b.canvas.items if "text" in i),
+                        "the note never caught up")
 
     def test_a_countdown_does_not_resize_its_own_chip(self):
         # Chip width followed the label, so `Ask` -> `Ask 4s` -> `Ask` moved the hit
@@ -672,7 +502,7 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         widths = [ui.chip_w(k, l) for k, l in (
             ("Refine", "Refine"), ("Continue", "Continue"),
             ("Was a command", "Was a command"), ("Edit", "Edit"),
-            ("Send", "Send"), ("Done", "Done"),
+            ("Ask", "Ask"),
         )]
         gap = ui.chip_row_gap(widths, ui.BUBBLE_W - ui.PAD)
         self.assertLess(gap, ui.CHIP_GAP, "an overflowing row kept the ordinary gap")
@@ -696,3 +526,64 @@ class TestTheChipsSurviveARedraw(unittest.TestCase):
         self.assertIn('tag_raise("chips")', inspect.getsource(ui.Bubble._render))
         self.assertIn('tag_raise("chips")',
                       inspect.getsource(ui.ConversationCard._render))
+
+
+class TestTheCountHasALineAboveTheDraft(unittest.TestCase):
+    """`… N earlier lines` sits on a line of its own above the draft.
+
+    It shared the command band for a month — "66 earlier lines and icons should be in
+    same row that was the idea" — and the band is gone with the compact pass: the marks
+    are on the pill row. The count is back above the draft, at the top padding, and the
+    body gives that line back so a draft at the ceiling never runs into the row below.
+    """
+
+    def _elided(self, b):
+        return next(i for i in b.canvas.items if "earlier lines" in i["text"])
+
+    def test_the_count_sits_at_the_top_of_the_panel(self):
+        b = bubble(draft(50_000))
+        b._render()
+        it = self._elided(b)
+        self.assertEqual(it["y"], ui.PAD)
+        self.assertEqual(it["x"], ui.PAD)
+
+    def test_the_count_spans_the_column_and_stays_one_line(self):
+        b = bubble(draft(50_000))
+        b._render()
+        it = self._elided(b)
+        self.assertEqual(it["wrap"], ui.BUBBLE_W - 2 * ui.PAD)
+        self.assertEqual(it["lines"], 1)
+
+    def test_the_draft_still_shows_most_of_the_band(self):
+        # Without a 34 px band above it the body has more of the panel than it did
+        # even after paying a line for the count.
+        b = bubble(draft(50_000))
+        b._render()
+        lines = max(i["lines"] for i in b.canvas.items if "body" in i["tags"])
+        self.assertGreaterEqual(lines, 6)
+
+
+class TestAMarkSaysItsNameOnHover(unittest.TestCase):
+    """The word the icon replaced, on hover — "icon can have tool tip".
+
+    A mark earns its place by being small, and the price is that it says nothing until
+    you already know it. The marks are on the pill row now, and the word appears in the
+    row's label slot while the pointer is on one (`Pill._draw_marks`).
+    """
+
+    def _enter(self, b, key):
+        tag = ui.chip_tag(key)
+        return next(f for t, seq, f in b.canvas.bindings
+                    if t == tag and seq == "<Enter>")
+
+    # The hover word moved with the marks to the pill row, where it is shown in the
+    # label slot — `tests/test_compact.py` covers it there.
+
+    def test_the_primary_is_a_glyph_now_and_its_word_is_the_tip(self):
+        # Asked for by name — "send and ask can change >> & agent icon" — so the word
+        # that was on the chip is what the tip says.
+        b = bubble(draft(200))
+        b._render()
+        self.assertTrue(any(t == ui.chip_tag("Send") and seq == "<Enter>"
+                            for t, seq, _f in b.canvas.bindings))
+        self.assertEqual(ui.tip_label(b.canvas, ui.chip_tag("Send")), "Send")

@@ -6,6 +6,151 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-03 — A Windows-only module must still be *importable* everywhere
+
+The macOS CI leg had never been green, and one line was the whole reason. `flow/tray.py`
+built its window-procedure callback type at module scope — `ctypes.WINFUNCTYPE`, which
+exists only on Windows — and `flow/ui.py` imports `tray` unconditionally. So the failure
+was never "no tray icon on a Mac": it was **208 errors, every test that touches
+`flow.ui`**, all raised before a line of either module could run.
+
+Everything else in that file was already right. `available()` says "Windows-only by
+construction" and returns False off Windows, and every other Win32 call sits inside a
+function, reached only after that check. The rule the file was missing is the one this
+entry records: **a platform-specific module may refuse to work anywhere else, but it may
+not refuse to import.** Import is what other modules depend on; capability is what
+`available()` is for, and conflating them turns one unavailable feature into a dead test
+suite.
+
+Fixed by defining `_WNDPROC` and `_WNDCLASSEXW` under `sys.platform == "win32"` and
+nothing else. A `getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)` fallback was refused
+though it also imports: it manufactures a callback type with the wrong calling
+convention and stores it under the right name, moving the crash somewhere harder to
+find. Off Windows the names are absent, because off Windows nothing may use them.
+
+`tests/test_tray.py` re-imports the module under a patched `sys.platform` and asserts
+both halves — that it imports, and that the Windows-only names are absent rather than
+present-and-wrong. Asserted by running the file top to bottom rather than by reading its
+source, because "this imports on a Mac" is not a claim source-scanning can settle. It
+fails against the old module, which is the only reason to trust it.
+
+**Reopens if** a second platform-specific module appears: the guard is per-file today,
+and a third would argue for a shared idiom rather than three spellings of it.
+
+### 2026-09-01 — The compact pass: the marks move to the pill row, and everything else pulls in
+
+Decided from a measured survey and the surface screenshots (`scripts/shots.py`), after
+the felt-latency pass the same day. Two numbers made the case: the idle pill row was
+420 px wide with ~150 px of nothing between the meter and the icons, and a three-line
+draft sat inside ~178 px of panel of which 108 px was furniture — 34 of it a band that
+existed only to hold four 26 px marks.
+
+**The marks live on the pill row** (`Pill._draw_marks`): right-anchored against the
+three icons, laid out right-to-left so the rightmost keeps a fixed address whatever
+the set is — the argument the corner cluster already made, kept. The bubble and the
+card publish their secondaries (`_marks`) and draw only the primary at the foot; the
+pill binds each tag once and dispatches through the surface's live list at the click,
+so a repaint never rebinds and a Copy that means a different answer is one binding
+reading a different list. The hover word goes in the label slot on the right (`REFINE`,
+`COMMAND`, `NEW CHAT`): a tip drawn above a 34 px row would be clipped by its own
+canvas, and the state word is the one thing on the row that is already text.
+
+**What moved, in pixels.** `PILL_H` 40 → 34; `ICON_SIZE` 16 → 14 and `ICON_GAP` 12 → 8;
+`APP_SLOT_W` 72 → 44; `METER_X` 40 → 30; label gap and pad 12 → 8; the label's +.1em
+tracking retired (7 px, spent on the marks); `PAD` 14 → 10; `CHIP_H` 26 → 22; marks
+20 px in the row, glyphs still on their 16 px grid (`MARK_GLYPH`); `PANEL_MIN_H` 96 → 64
+and `CARD_MIN_H` 120 → 80; `PANEL_MAX_H` 183, on the snap grid (`PANEL_MIN_H` + 7 lines)
+so the ceiling is a height `_settled_h` can land on; `FONT_BODY` 14 → 13 px, which
+measures the same 17 px line, so `BODY_CHARS_PER_LINE` is 64 at the 380 px column;
+`PANEL_R` 18 → 12 and chips at `CHIP_R` = 11; `PANEL_WIDTHS` 420/520/640 → 400/480/580;
+the help sheet at 520 px, 17 px lines and 6 px gaps, ceiling 1 090 from a measured 1 075.
+The sent card no longer reserves the empty band, the activity row shares the note's
+line when there is no note, and the elided count is back on a line of its own above
+the draft (the band it shared is gone; the body gives that line back at the ceiling).
+
+**Send and Ask are glyphs, and the CLI's name took the app slot** (same day, from a
+screenshot of the converse card). `>>` for Send in the hearing green, an agent for Ask
+in the card's violet, the word as a tooltip above the chip and the countdown as digits
+beside the glyph; `Done`, `Cancel` and `Bring it back` keep their words. The converse
+marker had been a 6 px name under the mic, and a 34 px row has no room under the mic —
+so the app slot says where the words go in both modes: the window in dictate, the CLI in
+converse. A mark on the row says its word twice on hover: in the label slot, and as a
+tip at the foot of the panel above it, since the row's own canvas would clip one.
+
+**Why 400 and not 360.** The first proposal was 360/440/540. With the marks on the row
+the floor is the row's: app slot, mic, meter, four marks, three icons and the label sum
+to ~393 px at these sizes, and `tests/test_compact.py` adds them up against the
+narrowest width so the floor cannot drift below the marks again. Reopen if the row
+ever has to carry a fifth mark, or if the app-name slot at 44 px proves too short for
+what people actually dictate into — the slot, the meter's bar count and the label's
+pitch are the three places the row can still give.
+
+### 2026-09-01 — The felt-latency pass: what the trace said, what moved, and what did not
+
+Every number here is from this machine's own `~/.flow/diag.jsonl` (6 442 decode records,
+GTX 1070, `large-v3` on CUDA) or from a measurement taken the same day.
+
+**Where the time went.** Partials p50 **795 ms**, p90 1 357 ms. Finals p50 **1 523 ms**,
+p90 2 640 ms — and finals for utterances under three seconds still p50 823 ms, because
+Whisper pads every input to a 30 s mel window and the encoder costs the same for one word
+as for twenty. The final queued behind whichever partial was running (one decode thread,
+no cancel). With the profile's `toggle` gesture the spoken send word was a second
+utterance in full: 800 ms hangover plus ~800 ms decode, 1.6–2.5 s from "boom" to the
+paste. Everything else on the release path — three 30 ms frame quantisations, a mic
+reopen per hold (111–266 ms to the first block), two `profile.save()` and three
+`Diag.write()` calls on the UI thread, the paste itself at 1–3 ms — summed to well under
+a tenth of the decode.
+
+**What moved, and the bar for each.**
+
+- *The partial tier on the GPU is `small` again* (`asr.CUDA_PARTIAL_MODEL`). The
+  one-model decision of 2026-08-05 bought "no partial→final rewrite" at 795 ms a partial;
+  a partial that lands eight tenths of a second late is a caption, not a preview. Finals
+  are unchanged. Reopen if the rewrite on accented speech is reported as worse than the
+  delay was — the trade is stated in `asr.py` beside the constant.
+- *A final makes the running partial stale* (`DecodeWorker._partial_stale`); a
+  `cancellable` transcriber stops between segments, any other's result is discarded on
+  arrival.
+- *The send word fires on the silence after it* (`Session._hear_trigger`,
+  `TRIGGER_QUIET_BLOCKS` = 3, `TRIGGER_MAX_SEC` = 3): the partial already heard it; ~200
+  ms of quiet after a short utterance spends it without a final. Reopen if a trigger ever
+  fires inside a sentence — the quiet requirement and the length cap are the two knobs.
+- *The release stops reading, not the stream* (`MIC_LINGER_SEC` = 60): the next hold
+  inside a minute captures from the press rather than from 111–266 ms after it. An open,
+  unread stream is the idle unload's posture already; if that is ever not acceptable for
+  hold mode specifically, the constant goes to zero and `talk_end` is what it was.
+- *A 5 ms clock for the gesture* (`Pill._fast_tick`, `FAST_TICK_MS`), only while a hold
+  or a paste wait is in flight, and `timeBeginPeriod(1)` for the process so `after()`
+  means what it says on Windows' 15.6 ms timer.
+- *Nothing writes a file on the frame that pastes*: the trace appends from its own thread
+  (`Diag(background=True)`, bounded, flushed at close), and the profile save is owed by
+  the routing frame and paid by the next (`Session._pump_saves`).
+- *The pill repaints only when something it draws has changed* (`Pill._draw_key`). It
+  rebuilt ~50 canvas items every 30 ms while idle — and `_row_icons` called `tag_bind`
+  three times a frame, each a Tcl command Tkinter never frees (verified against
+  `Misc._bind`): ~100 leaked a second for the life of the window. Bound once now, and the
+  bubble's `draft` tag the same.
+- *One partial render per frame, the newest; the draft body's layout and the card's
+  answer layout are cached against their inputs; `place()` only when the band changes;
+  the pointer's monitor is polled every fourth frame.*
+- *Startup*: the voice enumeration (two PowerShell starts, now one, and off the path),
+  the CUDA probe (310 ms, now on a thread after the pill), `sounddevice` imported on
+  first use (172 ms), and `record_identity` ten seconds later rather than beside the
+  model load. Pill-on-screen loses roughly a second on a stock machine.
+- *A warm decode after each model load* (`WhisperTranscriber.warmup`), so the first real
+  decode is a decode and not cuDNN's autotuning.
+
+**What did not move, and why.** `FINAL_BEAM` stays at 5: on the three `.bench` reference
+clips `large-v3` decodes 2.0 s of audio in 764 ms at beam 5 and 722 ms at beam 1 — the
+padded encoder is the floor and the beam is noise beside it. Optimistic paste (paste the
+last partial on release, reconcile with the final) was designed and not built: a paste
+cannot be taken back in a terminal, and with the cheap partial tier the residual wait is
+the final itself. **That floor is the engine's**, not this code's: FluidVoice on this
+same machine runs NVIDIA Parakeet TDT 0.6B v3 (a q8 GGUF through parakeet.cpp with a
+CUDA runtime), whose log shows ~500 ms per utterance and a 390 ms model load, and a TDT
+decoder does not pad to 30 s. A Parakeet tier behind the `Transcriber` seam is the next
+latency decision and is its own entry when it is measured, not this one.
+
 ### 2026-08-15 — The interpreter is pinned, and `trusted()` stops asking it what "absolute" means
 
 A venv built on **CPython 3.14.7** ran the suite seven red; **3.12.13** ran the same tree
