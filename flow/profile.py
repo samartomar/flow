@@ -107,6 +107,24 @@ def _text_list(value, cap: int) -> list[str]:
     return [t for t in (_text(v) for v in value) if t][:cap]
 
 
+def _pair(value) -> list[int] | None:
+    """A pair of whole numbers, or None. Never raises, for anything.
+
+    The shape only — whether the point is *on a screen* is `ui._mic_spot`'s question and
+    `Pill._placed`'s clamp, for the reason `panel` and `place` are judged there. What is
+    settled here is what `save` may write, and the invariant behind that is the suite's:
+    no shape of any field, however hand-edited, may raise on the way out. `inf` found
+    this — a float is not iterable and `list()` on one is a `TypeError` thrown while
+    writing somebody's profile.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        return [int(value[0]), int(value[1])]
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _text_set(value) -> set[str]:
     if not isinstance(value, (list, tuple, set)):
         return set()
@@ -403,6 +421,17 @@ class Profile:
         #: of whichever monitor the pointer is on — and `"corner"` is the bottom-right
         #: Flow used to use, kept for anybody who wants it back rather than removed.
         self.place: str = PLACE_DEFAULT
+        #: Whether the pill draws the mic view: the focused app's initial, the mic and
+        #: the level bars, with no chips, marks or panel. A view rather than a mode —
+        #: nothing in this package or in `flow/session.py` reads it, and `flow/ui.py`
+        #: draws fewer of the events the session emits either way.
+        self.mic: bool = False
+        #: Where that view sits, as an (x, y), or None for wherever `place` would put
+        #: it. Its own field and not a third `PLACES` name because the view anchors no
+        #: panel: the two placements exist so a 400-580 px stack is guaranteed to fit,
+        #: and a 128 px row fits anywhere. Judged in `flow/ui.py` (`_mic_spot`), which
+        #: is also where it is re-clamped against the monitor it is opened on.
+        self.mic_at: tuple[int, int] | None = None
         #: How the chord behaves. Both gestures ship because neither replaces the other:
         #: a hold is better for a sentence, a toggle is the only one that survives a
         #: paragraph or a pair of hands that cannot hold two keys down. Judged in
@@ -497,6 +526,8 @@ class Profile:
         self.apps = take("apps", lambda v, _d: _apps(v), {})
         self.panel = take("panel", _text, PANEL_DEFAULT)
         self.place = take("place", _text, PLACE_DEFAULT)
+        self.mic = take("mic", lambda v, _d: bool(v), False)
+        self.mic_at = take("mic_at", lambda v, _d: _pair(v), None)
         self.gesture = take("gesture", _text, GESTURE_DEFAULT)
         self.cli_model = take("cli_model", _text, "")
         self.cli_effort = take("cli_effort", _text, EFFORT_DEFAULT)
@@ -542,6 +573,11 @@ class Profile:
             "apps": dict(self.apps),
             "panel": self.panel,
             "place": self.place,
+            "mic": self.mic,
+            # Through `_pair` on the way out as well as in, because this one is written
+            # by the UI between loads — `Pill._remember_mic_at` assigns the tuple a drag
+            # ended at — so `save` is not only re-emitting what `load` already judged.
+            "mic_at": _pair(self.mic_at),
             "gesture": self.gesture,
             "cli_model": self.cli_model,
             "cli_effort": self.cli_effort,

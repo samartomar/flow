@@ -6,6 +6,86 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-03 — The mic view: a controls-free pill, and why it is a view and not a mode
+
+Push-to-talk is a gesture with no decisions in it — hold, speak, release, and the words
+are pasted — and every control on the pill row is a decision it never asks for. So the
+row drops to what the gesture actually needs, in **two frames inside one 90 px box**
+(`MIC_W`, against 400 for the narrowest panel): at rest the focused app's name and the
+mic glyph, and while the chord is held the level bars and nothing else. Off by default,
+one checkbutton under Settings, and offered only while the chord is the hold gesture.
+
+**Two frames rather than one row that dims parts of itself**, because the question
+changes with the gesture. Before the hold it is *where will these words go* — which is
+the one mistake a hold can make that it cannot otherwise see — and during it there is
+exactly one question, *is it hearing me*, to which a mic glyph and an app initial are
+answers nobody is asking for mid-sentence. A resting meter is the same waste in the
+other direction: a control's worth of pixels reporting a level nobody is producing.
+
+**One width across both**, and the arithmetic made that free: the meter plus `PAD`
+either side, and the name slot plus the glyph plus `PAD` either side, both come to 90.
+This was drafted with two widths and an argument for why they were not the 205 -> 420
+jump of 2026-08-09; the numbers made the argument unnecessary, which is the better
+outcome. The press swaps what is drawn inside a box that does not move.
+
+**The name, not an initial.** The first cut showed one character on the reasoning that
+the slot only has to catch the wrong-window mistake. It does not catch it: `C` is Code,
+Chrome, Claude and cmd. The row is small enough to say the word, so `MIC_NAME_W` is 50 —
+six pixels wider than the full row's `APP_SLOT_W`, because here nothing competes for the
+line — and `app_label` and `APP_NAME_CHARS` are the same rules the full row uses.
+
+The frame is `Pill.mic_talking`: the chord hold (`_ptt_since`) or the pill's own
+press-and-hold (`_press_talking`), and deliberately **not** `_ptt_wait`. That is the
+decode still running after the key came up, and nothing is being captured during it — a
+meter left up there is the same false "hearing you" `_flatten` exists to kill. The
+release falls straight back to the resting frame and the words arrive by paste when they
+arrive. For the same reason the waiting dots are drawn in neither frame: there is no
+resting meter for them to stand in for, and the mic glyph already carries `accent`.
+
+**It is a view, not a mode, and that is the load-bearing decision.** `flow/session.py` is
+untouched: it emits exactly the events it emits without this, and `Pill._pump_events`
+draws fewer of them — `draft` and `partial`, and nothing else. That is what makes "no
+impact on the existing behaviour" structural rather than a promise, because there is no
+branch in a session route to get wrong. If one is ever needed, the design is wrong and
+not the file; `tests/test_mic.py` asserts both halves, against the source and against a
+scripted drain whose session-side calls are identical either way.
+
+**The paste is the existing paste-on-release.** Nothing here makes words arrive sooner.
+Optimistic paste — paste the partial, reconcile with the final — stays rejected for the
+reason already on this record: a paste cannot be taken back in a terminal.
+
+**The hard part was the note.** With no panels there is nowhere for a refine's commentary,
+an unreachable CLI or an unverified-CLI line to land, and swallowing one would make this
+the only place in Flow where a refusal is silent (P2). Because this is a view, it can grow
+back to the full pill for that moment and shrink again **with no state change**:
+`Pill.mic_view` is a property that reads whether a surface is up, so the grow-back is
+`Bubble.note` calling `surface` on a hidden bubble — one gate, only under the view — and
+the shrink is that surface going away. Nothing is entered and nothing has to be unwound,
+which is the difference a mode would have made and the argument for not building one.
+
+**Placement is free here, and only here.** `PLACES` has two entries because the pill
+anchors a stack that must fit a 400/480/580 px panel on whichever monitor the pointer is
+on; this row anchors nothing, so it persists an (x, y) instead (`profile.mic_at`, set by
+dragging the thing itself, saved on the release rather than per motion event). Re-clamped
+against `_work_area` on the way out, because the answer is per monitor and the profile is
+not: a position saved on a display that is no longer plugged in must land somewhere
+visible.
+
+**The sent card is the route that had to be found by using it.** A release ends in
+`_pump_talk` calling `Pill._send`, and `_send` put a sent card on screen for words that
+had *already* been pasted — so the panel opened on every single utterance, and it opened
+through the one door that is not an event and that `_pump_events`' gate therefore never
+saw. On the full row that card is the record of what was sent; under this view the record
+is the words now sitting in the app whose name the row was showing a moment ago. Gated.
+The failure branch is not: a paste that failed or could not be guaranteed still opens the
+panel and still flashes, because it is the one thing here that cannot be read off the
+other window.
+
+**Reopens if** the view needs a fourth thing on the row — the honest answer then is that
+the gesture has grown a decision and the full row is the surface for it — or if the
+grow-back is reported as jarring rather than as the panel doing its job, in which case
+what changes is the animation, not the state model.
+
 ### 2026-09-03 — A Windows-only module must still be *importable* everywhere
 
 The macOS CI leg had never been green, and one line was the whole reason. `flow/tray.py`

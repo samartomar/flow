@@ -168,6 +168,10 @@ class FakeSession:
         self.editing = False
         self.can_rescue = False
         self.can_take_reply = False
+        #: Read by the mic view's resting frame, and by the full row's app slot.
+        self.target_app = "claude.exe"
+        #: Read by `_pump_talk` while a paste is waiting.
+        self.busy = False
         self._events: list[Event] = []
         self._t0 = time.perf_counter()
 
@@ -540,6 +544,42 @@ def build(pill, sess):
         (0, state(State.IDLE, Activity("loading the model", True))),
         (900, lambda: shot(pill, "10-loading")),
         (0, state(State.IDLE)),
+        # -- the mic view ------------------------------------------------------
+        # Photographed because it cannot be reviewed any other way. Every test for it
+        # drives `_draw` against a recording canvas, which says what was asked of Tk and
+        # nothing about what Tk did — and the bug that shipped past those tests was a
+        # name overrunning the mic glyph, which is only a bug once it is pixels.
+        # Both frames, because the press swaps what is drawn and neither half is the
+        # other's default.
+        (300, lambda: (setattr(pill, "mic_view_on", True),
+                       state(State.LISTENING)())),
+        (600, lambda: shot(pill, "10a-mic-rest")),
+        (200, lambda: (setattr(pill, "_ptt_since", time.perf_counter()),
+                       setattr(pill, "_meter_level", 0.75),
+                       setattr(pill, "_eased_level", 0.75))),
+        (400, lambda: shot(pill, "10b-mic-talking")),
+        (0, lambda: (setattr(pill, "_ptt_since", None),
+                     setattr(pill, "_meter_level", 0.0))),
+        # The longest name the row can be handed, against the one thing beside it.
+        (300, lambda: setattr(sess, "target_app", "WindowsTerminal.exe")),
+        (400, lambda: shot(pill, "10c-mic-long-name")),
+        (0, lambda: setattr(sess, "target_app", "claude.exe")),
+        # The grow-back: with no panels there is nowhere for a note to land, so the view
+        # stands down for as long as one is up. The picture is the proof it is one
+        # window and not a 90 px row parked under a 400 px panel.
+        (300, lambda: pill.bubble.surface("could not reach the CLI - is claude "
+                                          "on PATH?")),
+        (600, lambda: shot(pill, "10d-mic-note-growback")),
+        (0, lambda: pill.bubble.hide()),
+        (400, lambda: shot(pill, "10e-mic-shrunk-again")),
+        (0, lambda: (setattr(pill, "mic_view_on", False), state(State.IDLE)())),
+        # The full row's app slot has the same overrun the mic view's did, and it was
+        # written off as one this row never shows. It does: 69 px of `WindowsTe…` from
+        # x=10, against a mic arc starting at 61. Photographed so the write-off cannot
+        # be made twice.
+        (300, lambda: setattr(sess, "target_app", "WindowsTerminal.exe")),
+        (400, lambda: shot(pill, "10f-full-row-long-name")),
+        (0, lambda: setattr(sess, "target_app", "claude.exe")),
         # -- windows ----------------------------------------------------------
         (300, lambda: pill._open_commands()),
         (900, lambda: shot(pill, "11-help-commands")),
@@ -599,6 +639,11 @@ def main() -> None:
         chosen={"toggle": "ctrl+alt+space", "send": "ctrl+alt+enter",
                 "cancel": "ctrl+alt+esc", "mode": "ctrl+alt+M",
                 "quit": "ctrl+alt+Q"},
+        # A chord, because two things read one: the Settings menu names the gesture in
+        # its own row, and the mic view is offered only while that gesture is the hold.
+        # Without it both are absent from the walk and the shots stop covering them.
+        chord=SimpleNamespace(gesture="hold", action="toggle",
+                              describe=lambda: "Ctrl+Win"),
         failed=[], stop=lambda: None, drain=lambda: [])
     pill = Pill(sess, hotkeys=hotkeys)
     # The editor checks it really holds the foreground before taking keystrokes;

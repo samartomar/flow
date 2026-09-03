@@ -96,7 +96,8 @@ class Menu(unittest.TestCase):
 
     def build(self, profile=None, *, speaker=None, converse=False, clis=(),
               workspace=None, voices=(), recent=(), notes=None,
-              can_take_reply=True, armed=False) -> FakeMenu:
+              can_take_reply=True, armed=False, gesture=None,
+              mic=False) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -123,7 +124,19 @@ class Menu(unittest.TestCase):
         pill.session.notes = notes
         pill.session.can_take_reply = can_take_reply
         pill.settings_path = self.folder / "lexicon.txt"
-        pill.hotkeys = None
+        #: No chord by default — `--no-chord`, or a hook the OS refused — which is the
+        #: state the rows that describe one are absent in. A test that wants those rows
+        #: asks for a gesture, and gets the live `Chord` they read it off.
+        pill.hotkeys = None if gesture is None else mock.Mock(
+            chord=mock.Mock(gesture=gesture, **{"describe.return_value": "Ctrl+Win"}))
+        pill.mic_view_on = mic
+        pill._mic_at = None
+        pill._sync_shell = mock.Mock()
+        #: A monitor to be placed against, for the rows that re-place the window when
+        #: they are chosen — the mic view's width and position both change with its tick.
+        pill.full = (0, 0, 1920, 1080)
+        pill.work = (0, 0, 1920, 1040)
+        pill.x, pill.y = 0, 0
         pill.bubble = mock.Mock()
         pill.card = mock.Mock()
         pill.card.note = self.notes.append
