@@ -41,6 +41,7 @@ class Canvas:
         self.lines: list[tuple] = []
         self.arcs: list[tuple] = []
         self.polys: list[tuple] = []
+        self.texts: list[tuple] = []
         self.bindings: list[tuple] = []
 
     def delete(self, *a, **kw) -> None: ...
@@ -60,10 +61,16 @@ class Canvas:
 
     def create_arc(self, *a, **kw) -> None:
         self.arcs.append((a, kw.get("fill", ""), kw.get("outline", ""),
-                          kw.get("style"), kw.get("width", 1)))
+                          kw.get("style"), kw.get("width", 1),
+                          kw.get("extent")))
 
     def create_polygon(self, *a, **kw) -> None:
         self.polys.append((a, kw.get("fill", ""), kw.get("outline", "")))
+
+    def create_text(self, *a, **kw) -> None:
+        self.texts.append((a, kw.get("text", ""), kw.get("fill", ""),
+                           kw.get("font"), kw.get("anchor", "center"),
+                           kw.get("width", 0)))
 
 
 def session(mode=DICTATE, state=State.IDLE, hearing=True, busy=False,
@@ -73,12 +80,14 @@ def session(mode=DICTATE, state=State.IDLE, hearing=True, busy=False,
     The values are set rather than left as auto-created Mocks for test_pill's
     reason: `not Mock()` is `False`, so a bare Mock would silently answer
     "yes, hearing" and no rest-state test here could ever fail. `events`
-    returns a real list, because `_pump_events` iterates it.
+    returns a real list, because `_pump_events` iterates it. `workspace` is a
+    real string, because the panel's strip prints it.
     """
     s = mock.Mock(mode=mode, state=state, hearing=hearing, busy=busy,
                   level_db=level_db)
     s.draft = mock.Mock(text=draft_text)
     s.events.return_value = []
+    s.workspace = "~/dev/products/flow"
     return s
 
 
@@ -99,7 +108,7 @@ def rings(p) -> list[str]:
     """The state ring's colour, or [] at rest: the only items that may wear a
     state hue are the ring's two cap arcs and two straight runs."""
     hues = (uc.HEARING, uc.WAITING, uc.ERROR)
-    colours = {outline for _a, _f, outline, _s, _w in p.canvas.arcs
+    colours = {outline for _a, _f, outline, *_r in p.canvas.arcs
                if outline in hues}
     colours |= {fill for _a, fill, _w in p.canvas.lines if fill in hues}
     return sorted(colours)
@@ -108,7 +117,7 @@ def rings(p) -> list[str]:
 def ring_items(p) -> list:
     """Every arc and line wearing a state hue, for the 1 px assertions."""
     hues = (uc.HEARING, uc.WAITING, uc.ERROR)
-    items = [(outline, w) for _a, _f, outline, _s, w in p.canvas.arcs
+    items = [(outline, w) for _a, _f, outline, _s, w, *_r in p.canvas.arcs
              if outline in hues]
     items += [(fill, w) for _a, fill, w in p.canvas.lines if fill in hues]
     return items
@@ -116,7 +125,7 @@ def ring_items(p) -> list:
 
 def pieslices(p) -> list:
     """The capsule body's two ends — the only pieslices `_draw` makes."""
-    return [(a, fill) for a, fill, _o, style, _w in p.canvas.arcs
+    return [(a, fill) for a, fill, _o, style, *_r in p.canvas.arcs
             if style == uc.tk.PIESLICE]
 
 
@@ -228,7 +237,7 @@ class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
         # highlight, always; the state ring one pixel further out when armed.
         p = pill(State.LISTENING)
         p._draw()
-        outer = [(tuple(a[:4]), w) for a, _f, outline, _s, w in p.canvas.arcs
+        outer = [(tuple(a[:4]), w) for a, _f, outline, _s, w, *_r in p.canvas.arcs
                  if outline == uc.RING_OUTER]
         outer += [(tuple(a[:4]), w) for a, fill, w in p.canvas.lines
                   if fill == uc.RING_OUTER]
@@ -237,7 +246,7 @@ class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
         self.assertTrue(all(w == 1 for _a, w in outer))
         self.assertIn(((1, 1, uc.PILL_H - 1, uc.PILL_H - 1), 1), outer)
         highlights = [(tuple(a[:4]), outline)
-                      for a, _f, outline, style, _w in p.canvas.arcs
+                      for a, _f, outline, style, *_r in p.canvas.arcs
                       if style == uc.tk.ARC and outline == uc.RING_TOP]
         self.assertEqual(len(highlights), 1)
         # The highlight steps in with the border when a ring takes the edge.
@@ -247,7 +256,7 @@ class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
         p = pill(State.IDLE, armed=False)
         p._draw()
         highlights = [tuple(a[:4])
-                      for a, _f, outline, style, _w in p.canvas.arcs
+                      for a, _f, outline, style, *_r in p.canvas.arcs
                       if style == uc.tk.ARC and outline == uc.RING_TOP]
         self.assertEqual(highlights, [(1, 1, uc.PILL_W - 1, uc.PILL_H - 1)])
 
@@ -274,7 +283,7 @@ class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
         self.assertEqual(p.canvas.ovals, [])
         tint = uc.MODE_TINT[DICTATE]
         self.assertEqual(glyph_stroke(p), tint)
-        cradle = [outline for _a, _f, outline, style, _w in p.canvas.arcs
+        cradle = [outline for _a, _f, outline, style, *_r in p.canvas.arcs
                   if style == uc.tk.ARC and outline == tint]
         self.assertEqual(cradle, [tint])
         stems = [fill for _a, fill, _w in p.canvas.lines if fill == tint]
@@ -558,9 +567,353 @@ class TestTypeSendsEndToEnd(unittest.TestCase):
         # The same RecursionError guard as the drawn attributes above: a bare
         # fixture driving `_frame` or `_pump_events` reads these, and only a
         # class attribute never reaches `tk.Misc.__getattr__`.
-        for name in ("_last_draft", "_send_pending", "paste_target"):
+        for name in ("_last_draft", "_send_pending", "paste_target",
+                     "_panel_open", "_panel_mode", "_panel_heard",
+                     "_panel_heard_final", "_panel_result", "_ask_pending",
+                     "_shell_w", "_shell_h", "_outside_was_down"):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(uc.CompactPill, name), name)
+
+
+def panel_pill(state=State.IDLE, *, mode=CONVERSE, x=100, y=400, **attrs):
+    """A fixture with the Tk calls `_sync_shell` and the frame poll touch
+    replaced by Mocks — a bare fixture has no real window to measure, and the
+    outside-click poll would otherwise read the *test runner's* mouse."""
+    p = pill(state, mode=mode, **attrs)
+    p.geometry = mock.Mock()
+    p.winfo_rootx = mock.Mock(return_value=x)
+    p.winfo_rooty = mock.Mock(return_value=y)
+    p.winfo_screenwidth = mock.Mock(return_value=1920)
+    p._outside_click_now = mock.Mock(return_value=False)
+    return p
+
+
+class TestThePanelOpensForAskAndNeverForType(unittest.TestCase):
+    """The mode → panel map: a hold in a panel mode raises the band, a hold
+    in Type changes nothing (README: "Type never opens a panel")."""
+
+    def test_a_hold_in_ask_opens_the_panel_fresh(self):
+        p = panel_pill(mode=CONVERSE)
+        p._panel_heard, p._panel_result = "an old question", "an old answer"
+        p._talk_start()
+        p.session.talk_start.assert_called_once_with()
+        self.assertTrue(p._panel_open)
+        self.assertEqual(p._panel_mode, CONVERSE)
+        # "The next hold starts fresh" (Ask.dc.html): the old exchange is gone.
+        self.assertEqual(p._panel_heard, "")
+        self.assertEqual(p._panel_result, "")
+
+    def test_a_hold_in_type_opens_nothing(self):
+        p = panel_pill(mode=DICTATE)
+        p._talk_start()
+        self.assertFalse(p._panel_open)
+
+    def test_the_map_is_the_only_place_a_mode_joins_the_panel(self):
+        # Item 4's seam: REFINE arrives as one entry here, not as a branch.
+        self.assertEqual(list(uc.PANEL_SPEC), [CONVERSE])
+        self.assertNotIn(DICTATE, uc.PANEL_SPEC)
+
+
+class TestTheAsksWholeArc(unittest.TestCase):
+    """Hold, partials, release, draft, reply — the panel's question and answer."""
+
+    def test_a_partial_is_the_heard_blocks_live_text(self):
+        from flow.session import Event
+        p = panel_pill(State.LISTENING, mode=CONVERSE)
+        p._talk_start()
+        p.session.events.return_value = [Event("partial", "where does the")]
+        p._pump_events()
+        self.assertEqual(p._panel_heard, "where does the")
+        self.assertFalse(p._panel_heard_final)  # italic until the draft lands
+
+    def test_a_partial_with_no_panel_is_still_nothing(self):
+        from flow.session import Event
+        p = panel_pill(State.LISTENING, mode=CONVERSE)
+        p.session.events.return_value = [Event("partial", "where does the")]
+        p._pump_events()
+        self.assertEqual(p._panel_heard, "")
+
+    def test_the_release_arms_the_ask_and_the_draft_fires_it(self):
+        from flow.session import Event
+        p = panel_pill(State.LISTENING, mode=CONVERSE)
+        p._talk_start()
+        p.session.talk_end.return_value = True  # words are in flight
+        p._talk_end(send=True)
+        self.assertTrue(p._ask_pending)
+        p.session.send.assert_not_called()
+        p.session.events.return_value = [Event("draft", "where does the pill decide?")]
+        p._pump_events()
+        # The question goes to the CLI — session.send() in converse asks —
+        # and is never pasted: on_send is Type's path, not this one's.
+        p.session.send.assert_called_once_with()
+        self.assertFalse(p._ask_pending)
+        self.assertEqual(p._panel_heard, "where does the pill decide?")
+        self.assertTrue(p._panel_heard_final)
+        self.assertEqual(p._panel_result, "")  # cleared for the coming answer
+
+    def test_the_reply_lands_in_the_result_block(self):
+        from flow.session import Event
+        p = panel_pill(State.ASKING, mode=CONVERSE)
+        p._panel_open = True
+        p.session.events.return_value = [Event("reply", "PILL_HOLD_SEC, 0.30 s.")]
+        p._pump_events()
+        self.assertEqual(p._panel_result, "PILL_HOLD_SEC, 0.30 s.")
+
+    def test_a_reply_reopens_a_closed_panel_rather_than_landing_nowhere(self):
+        from flow.session import Event
+        p = panel_pill(State.ASKING, mode=CONVERSE)
+        p.session.events.return_value = [Event("reply", "the answer")]
+        p._pump_events()
+        # P2: Esc was "not looking right now", not "never tell me".
+        self.assertTrue(p._panel_open)
+        self.assertEqual(p._panel_result, "the answer")
+
+
+class TestThePanelCloses(unittest.TestCase):
+    def test_the_cancel_hotkey_is_the_panels_esc(self):
+        p = panel_pill(mode=CONVERSE)
+        p._talk_start()
+        self.assertTrue(p._panel_open)
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["cancel"]
+        p._drain_hotkeys()
+        self.assertFalse(p._panel_open)
+
+    def test_a_mode_switch_closes_the_band_it_does_not_belong_to(self):
+        from flow.session import Event
+        p = panel_pill(mode=CONVERSE)
+        p._talk_start()
+        p.session.events.return_value = [Event("mode", DICTATE)]
+        p._pump_events()
+        self.assertFalse(p._panel_open)
+
+    def test_a_click_outside_closes_via_the_frame_poll(self):
+        p = panel_pill(mode=CONVERSE)
+        p._talk_start()
+        p._outside_click_now.return_value = True
+        p._frame()
+        self.assertFalse(p._panel_open)
+
+    def test_closing_drops_an_armed_ask(self):
+        p = panel_pill(State.LISTENING, mode=CONVERSE)
+        p._talk_start()
+        p.session.talk_end.return_value = True
+        p._talk_end(send=True)
+        self.assertTrue(p._ask_pending)
+        p._close_panel()
+        self.assertFalse(p._ask_pending)
+
+    def test_the_close_chip_closes_and_only_the_band_hit_tested(self):
+        p = panel_pill(mode=CONVERSE)
+        p._talk_start()
+        x = (uc.CLOSE_RECT[0] + uc.CLOSE_RECT[2]) // 2
+        p._on_press(mock.Mock(x=x, y=(uc.CLOSE_RECT[1] + uc.CLOSE_RECT[3]) // 2,
+                              x_root=0, y_root=0))
+        self.assertFalse(p._panel_open)
+        # And a band click that hits no chip is not a hold either — the foot
+        # is the holdable part, the band is buttons and text.
+        p._open_panel()
+        p._on_press(mock.Mock(x=200, y=100, x_root=0, y_root=0))
+        self.assertIsNone(p._press_at)
+
+
+class TestTheFootStaysHoldable(unittest.TestCase):
+    """"The pill never hides and never moves" — a press in the foot band is a
+    hold, which in Ask is the reply path."""
+
+    def test_a_press_in_the_foot_is_a_hold_not_a_chip(self):
+        p = panel_pill(State.IDLE, mode=CONVERSE)
+        p._talk_start()
+        p._talk_end(send=False)
+        p._on_press(mock.Mock(x=60, y=uc.PANEL_H + 17, x_root=0, y_root=0))
+        self.assertIsNotNone(p._press_at)
+
+    def test_a_hold_while_the_panel_is_up_asks_a_reply(self):
+        p = panel_pill(State.IDLE, mode=CONVERSE)
+        # The first exchange is on screen.
+        p._talk_start()
+        p.session.talk_end.return_value = True
+        p._talk_end(send=True)
+        p._ask()
+        p._panel_result = "the first answer"
+        # The foot hold starts fresh — "hold the mic to reply".
+        p._talk_start()
+        self.assertEqual(p._panel_result, "")
+        p.session.talk_end.return_value = True
+        p._talk_end(send=True)
+        self.assertTrue(p._ask_pending)
+        # And it is the ask that is armed, never the paste.
+        self.assertFalse(p._send_pending)
+
+
+class TestTheWindowGrowsAndReturns(unittest.TestCase):
+    def test_the_geometry_is_400_wide_with_the_band_120_without(self):
+        p = panel_pill(mode=CONVERSE, x=100, y=400)
+        p._open_panel()
+        # The foot's bottom edge anchors: 400 + 34 - 234 = 200.
+        p.geometry.assert_called_once_with("400x234+100+200")
+        self.assertEqual((p._shell_w, p._shell_h), (uc.PANEL_W, 234))
+        # The window reports where it landed; closing returns to 120×34 with
+        # the same bottom edge.
+        p.winfo_rooty.return_value = 200
+        p._close_panel()
+        p.geometry.assert_called_with("120x34+100+400")
+
+    def test_the_band_grows_left_rather_than_off_the_right_edge(self):
+        p = panel_pill(mode=CONVERSE, x=1800, y=400)
+        p._open_panel()
+        p.geometry.assert_called_once_with("400x234+1520+200")
+
+    def test_the_shell_sync_no_ops_when_nothing_changed(self):
+        p = panel_pill()
+        p._sync_shell()
+        p.geometry.assert_not_called()
+
+
+class TestThePanelsChips(unittest.TestCase):
+    def test_copy_puts_the_result_on_the_clipboard_and_leaves_the_panel_up(self):
+        p = panel_pill(mode=CONVERSE)
+        p._panel_open = True
+        p._panel_result = "the answer"
+        with mock.patch.object(uc, "_copy_to_clipboard",
+                               return_value="") as copy:
+            p._panel_click(mock.Mock(x=uc.COPY_RECT[0] + 4, y=uc.COPY_RECT[1] + 4))
+        copy.assert_called_once_with(p, "the answer")
+        self.assertTrue(p._panel_open)  # "Copy leaves the panel up"
+
+    def test_copy_falls_back_to_the_heard_question(self):
+        p = panel_pill(mode=CONVERSE)
+        p._panel_heard = "the question"
+        with mock.patch.object(uc, "_copy_to_clipboard",
+                               return_value="") as copy:
+            p._copy_result()
+        copy.assert_called_once_with(p, "the question")
+
+    def test_a_copy_problem_is_a_red_flash(self):
+        p = panel_pill(mode=CONVERSE)
+        p._panel_result = "the answer"
+        with mock.patch.object(uc, "_copy_to_clipboard",
+                               return_value="could not copy: busy"):
+            p._copy_result()
+        self.assertEqual(p._flash, uc.FLASH_FRAMES)
+
+    def test_asks_footer_has_no_send_to_click(self):
+        # The mechanism exists (`_panel_send`) but no two-mode spec sets
+        # "send" — the Send rect is dead while the session has two modes.
+        p = panel_pill(mode=CONVERSE)
+        p._panel_open = True
+        p._panel_result = "the answer"
+        with mock.patch.object(p, "_panel_send") as send:
+            p._panel_click(mock.Mock(x=uc.SEND_RECT[0] + 4, y=uc.SEND_RECT[1] + 4))
+        send.assert_not_called()
+        self.assertFalse(uc.PANEL_SPEC[CONVERSE]["send"])
+
+    def test_the_send_mechanism_pastes_the_result_and_closes(self):
+        # Item 4's Refine flow, wired ahead of it: the result goes where the
+        # user was, through item 1's on_send contract, target included.
+        sent = []
+        p = panel_pill(mode=CONVERSE,
+                       on_send=lambda text, target=None: sent.append((text, target)) or "")
+        p._panel_open = True
+        p._panel_result = "the refined text"
+        p.paste_target = 0xBEEF
+        p._panel_send()
+        self.assertEqual(sent, [("the refined text", 0xBEEF)])
+        self.assertFalse(p._panel_open)
+
+
+class TestThePanelDraws(unittest.TestCase):
+    """The band against the recording fake: strip, heard, result, footer, and
+    the foot below them — the same discipline as the capsule tests."""
+
+    def open(self, **attrs):
+        p = panel_pill(mode=CONVERSE, **attrs)
+        p._panel_open = True
+        p._panel_mode = CONVERSE
+        return p
+
+    def test_the_band_the_seam_and_the_strip(self):
+        p = self.open()
+        p._draw()
+        # The band is SHELL with the RING_OUTER border; the strip is its own
+        # darker fill — both polygons, both present.
+        fills = {(fill, outline) for _a, fill, outline in p.canvas.polys}
+        self.assertIn((uc.SHELL, uc.RING_OUTER), fills)
+        self.assertIn((uc.STRIP, ""), fills)
+        # The seam between panel and foot, and the strip's own divider.
+        seams = [fill for _a, fill, _w in p.canvas.lines if fill == uc.SEAM]
+        self.assertEqual(len(seams), 2)
+
+    def test_the_strip_names_the_workspace(self):
+        p = self.open()
+        p._draw()
+        texts = [t[1] for t in p.canvas.texts]
+        self.assertIn("~/dev/products/flow", texts)
+        self.assertIn("grounded", texts)
+
+    def test_the_strip_says_when_there_is_no_workspace(self):
+        p = self.open()
+        p.session.workspace = ""
+        p._draw()
+        texts = [t[1] for t in p.canvas.texts]
+        self.assertIn("no workspace", texts)
+        self.assertIn("plain talk", texts)
+
+    def test_the_heard_block_is_italic_until_final(self):
+        p = self.open()
+        p._panel_heard = "where does the"
+        p._panel_heard_final = False
+        p._draw()
+        heard = [t for t in p.canvas.texts if t[1] == "where does the"]
+        self.assertEqual(len(heard), 1)
+        self.assertIn("italic", heard[0][3])
+        p._panel_heard_final = True
+        p._draw()
+        heard = [t for t in p.canvas.texts if t[1] == "where does the"]
+        self.assertNotIn("italic", heard[0][3] if len(heard[0][3]) > 3 else ())
+
+    def test_the_result_block_carries_the_modes_accent(self):
+        p = self.open()
+        p._panel_result = "the answer"
+        p._draw()
+        self.assertIn("the answer", [t[1] for t in p.canvas.texts])
+        bars = [r for r in p.canvas.rects if r[4] == uc.CARD_ACCENT]
+        self.assertEqual(len(bars), 1)
+
+    def test_asks_footer_is_copy_and_the_hint_no_send(self):
+        p = self.open()
+        p._draw()
+        texts = [t[1] for t in p.canvas.texts]
+        self.assertIn("Copy", texts)
+        self.assertIn("hold the mic to reply", texts)
+        self.assertNotIn("Send", texts)
+
+    def test_the_foot_is_the_pill_squared_on_the_join(self):
+        p = self.open()
+        p._draw()
+        # Quarter pieslices at the bottom corners only — the top squares off.
+        slices = [extent for _a, _f, _o, style, _w, extent in p.canvas.arcs
+                  if style == uc.tk.PIESLICE]
+        self.assertEqual(slices, [90, 90])
+        # The foot's face: forty bars, not the capsule's fifteen.
+        bars = [r for r in p.canvas.rects if r[4] == uc.DIM]
+        self.assertEqual(len(bars), uc.BARS_FOOT)
+
+    def test_the_state_ring_wraps_the_foot_including_the_top(self):
+        p = self.open(state=State.LISTENING)
+        p._draw()
+        arcs = [(w, extent) for _a, _f, outline, style, w, extent
+                in p.canvas.arcs
+                if style == uc.tk.ARC and outline == uc.HEARING]
+        lines = [(a, w) for a, fill, w in p.canvas.lines if fill == uc.HEARING]
+        # Two quarter arcs and four runs — bottom, two sides, and the top the
+        # box-shadow wraps that border-top: 0 does not. All 1 px.
+        self.assertEqual(arcs, [(1, 90), (1, 90)])
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(all(w == 1 for _a, w in lines))
+        # And the panel band above keeps its own neutral border: nothing
+        # state-coloured up there.
+        self.assertTrue(all(a[1] >= uc.PANEL_H for a, _w in lines))
 
 
 if __name__ == "__main__":

@@ -10,6 +10,9 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   waiting   armed + REFINING: blue ring
   error     a flash frame: red ring, whatever the state
   ask       CONVERSE: violet glyph under the green ring
+  ask panel the 400 px band on its foot: strip, heard, result, footer
+  asking    the same, mid-ask: heard only, the ring wraps the foot
+  closed    120 wide again immediately after the close, proving it returns
   menu      the right-click, the only menu the design allows
 
 The gestures (tap cycles, hold talks) are logic, pinned headless in
@@ -80,6 +83,28 @@ def main() -> None:
             pill.armed = armed
         return fn
 
+    def ask_panel():
+        # The answered Ask: heard final, result in, pill back at rest — the
+        # state talk_end's disarm leaves it in.
+        sess.state, sess.mode = State.IDLE, CONVERSE
+        pill.armed = False
+        pill._panel_mode = CONVERSE
+        pill._panel_heard = "Where does the pill decide it was a hold and not a tap?"
+        pill._panel_heard_final = True
+        pill._panel_result = ("PILL_HOLD_SEC in flow/ui.py — 0.30 s, with a 4 px "
+                              "drag slop beside it so a nudge while holding is "
+                              "not read as a move.")
+        pill._open_panel()
+
+    def asking_panel():
+        # Mid-ask: the question asked, the CLI still working — the ring says
+        # so, and wraps the foot.
+        sess.state = State.ASKING
+        pill.armed = True
+        pill._panel_heard = "…and keep it under twenty words this time"
+        pill._panel_heard_final = True
+        pill._panel_result = ""
+
     def menu():
         pill.lift()
         pill.update_idletasks()
@@ -106,6 +131,12 @@ def main() -> None:
         (0, lambda: setattr(pill, "_flash", 0)),
         (0, state(State.LISTENING, mode=CONVERSE)),
         (600, lambda: shot(pill, "05-compact-ask")),
+        (0, ask_panel),
+        (700, lambda: shot(pill, "07-compact-ask-panel")),
+        (0, asking_panel),
+        (500, lambda: shot(pill, "08-compact-asking")),
+        (0, lambda: pill._close_panel()),
+        (500, lambda: shot(pill, "09-compact-closed")),
         (0, state(State.IDLE, armed=False)),
         (400, menu),
     ]

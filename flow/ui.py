@@ -2313,6 +2313,30 @@ def _panel_chrome(c: tk.Canvas, w: int, h: int, radius, ring_color: str,
         c.create_line(0, h - 1, w, h - 1, fill=RING, tags=tags)
 
 
+def _copy_to_clipboard(widget, text: str) -> str:
+    """Text onto Tk's own clipboard, returning what went wrong, or "".
+
+    Tk's clipboard rather than `inject`'s Win32 one — it is the same three
+    declared dependencies on every OS, and it is the whole of Lite's handoff.
+    `Pill._copy` was the only caller until the compact panel's Copy chip needed
+    the same transaction; the helper moved here rather than being copied
+    (decisions.md, the sibling-surface rule).
+
+    `update_idletasks`, not `update`: Tk owns the selection while the
+    interpreter lives and the copy has to be flushed out to the OS, but a full
+    `update` from inside `_tick` would service the pending `after` callbacks
+    and re-enter the frame pump. Idle tasks are what needs draining here, and
+    they are not timers.
+    """
+    try:
+        widget.clipboard_clear()
+        widget.clipboard_append(text)
+        widget.update_idletasks()
+    except tk.TclError as exc:
+        return f"could not copy: {exc}"
+    return ""
+
+
 def _dark_menu(master, **kw) -> tk.Menu:
     """Every `tk.Menu` in this app, styled once rather than at each of the dozen call
     sites that build one.
@@ -3663,21 +3687,12 @@ class Pill(tk.Tk):
     def _copy(self, text: str) -> str:
         """Lite's way out: the draft onto the clipboard. Returns what went wrong, or "".
 
-        Tk's own clipboard rather than `inject`'s Win32 one — it is the same three
-        declared dependencies on every OS, and it is the whole of Lite's handoff.
-
-        `update_idletasks`, not `update`: Tk owns the selection while the interpreter
-        lives and the copy has to be flushed out to the OS, but a full `update` from
-        inside `_tick` would service the pending `after` callbacks and re-enter the frame
-        pump. Idle tasks are what needs draining here, and they are not timers.
+        The transaction itself is `_copy_to_clipboard` now — the compact
+        surface's Copy chip needed the same one, and a clipboard borrow written
+        down twice is two callers outside item 50's one-at-a-time rule. The
+        method stays: every menu, chip and test in this app says `_copy`.
         """
-        try:
-            self.clipboard_clear()
-            self.clipboard_append(text)
-            self.update_idletasks()
-        except tk.TclError as exc:
-            return f"could not copy: {exc}"
-        return ""
+        return _copy_to_clipboard(self, text)
 
     def _copy_draft(self) -> None:
         """The exit that needs no model, no decode and no target window.
