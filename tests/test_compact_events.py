@@ -430,12 +430,15 @@ class TestASilentHoldKeepsTheAnswer(unittest.TestCase):
         # deferred clear.
         p = self.answered()
         p._talk_start()
-        p._last_draft = "and what about the foot?"
         p.session.talk_end.return_value = True
         p._talk_end(send=True)
+        # The decode lands on the draft, and the frame — not the event —
+        # fires the ask once the decoder is idle (`_pump_send`).
+        p.session.draft.text = "and what about the foot?"
         p.session.events.return_value = [
             Event("draft", "and what about the foot?")]
         p._pump_events()
+        p._pump_send()
         self.assertEqual(p._panel_heard, "and what about the foot?")
         self.assertEqual(p._panel_result, "")
         self.assertFalse(p._hold_fresh)
