@@ -11,10 +11,13 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   error     a flash frame: red ring, whatever the state
   ask       CONVERSE: violet glyph under the green ring
   ask panel the 400 px band on its foot: strip, heard, result, footer
+  ask long  the same band grown to a ten-line answer, footer moved with it
   asking    the same, mid-ask: heard only, the ring wraps the foot
   closed    120 wide again immediately after the close, proving it returns
   refine    REFINE at rest: the gold glyph, no ring
   refine panel  the heard block grey, the result under its gold tag, Send
+  refine bullets  Refine.dc.html's own worked example: a lead line, a blank
+                  line and three bullets, one of them indented
   palette   Switch workspace, mid-search: the query field, the top hit lit
   setup     Workbench setup: mic, CLI, where it pastes
   no-cli    States.dc.html 1: no agent CLI on PATH — grey, not red
@@ -134,6 +137,28 @@ def main() -> None:
                               "not read as a move.")
         pill._open_panel()
 
+    def ask_long():
+        # The band grown to a real answer. The fixed 200 px showed two lines
+        # of this and dropped the other eight on the floor; the band is as
+        # tall as its text now, up to `RESULT_LINES_MAX`, and the footer
+        # travels with its bottom edge.
+        sess.state, sess.mode = State.IDLE, CONVERSE
+        pill.armed = False
+        pill._panel_mode = CONVERSE
+        pill._panel_heard = "How does the compact surface get antialiased?"
+        pill._panel_heard_final = True
+        pill._panel_result = (
+            "Tk 8.6's canvas has no antialiasing, and these windows are "
+            "colour-keyed, so transparency is binary: a pixel is either "
+            "wholly the pill or wholly see-through.\n"
+            "\n"
+            "So flow/paint.py's GdiCanvas draws with GDI+ into a "
+            "premultiplied BGRA bitmap and presents it with "
+            "UpdateLayeredWindow, which is the per-pixel-alpha path — and it "
+            "wears tk.Canvas's own vocabulary, so one body of drawing code "
+            "serves it.")
+        pill._open_panel()
+
     def asking_panel():
         # Mid-ask: the question asked, the CLI still working — the ring says
         # so, and wraps the foot.
@@ -157,6 +182,31 @@ def main() -> None:
                               "flow/ui.py — leave the mic glyph and the meter. "
                               "On release, inject the draft into the window "
                               "that held focus before the pill.")
+        pill._open_panel()
+
+    def refine_bullets():
+        # Refine.dc.html's own worked example, which the panel could not draw
+        # until `_fit` stopped collapsing the text with `text.split()`: a lead
+        # line, a blank line, and three bullets — the middle one indented, the
+        # way spoken "tab dash fix the tests" resolves. Send has always pasted
+        # this shape; this is the first time the panel shows it.
+        sess.state, sess.mode = State.IDLE, REFINE
+        pill.armed = False
+        pill._panel_mode = REFINE
+        pill._panel_heard = ("make the pill not show any controls just the mic "
+                             "press enter press enter then tab dash fix the "
+                             "tests")
+        pill._panel_heard_final = True
+        pill._panel_failed = False
+        pill._panel_result = (
+            "Strip every control from the push-to-talk pill in flow/ui.py — "
+            "leave the mic glyph and the meter.\n"
+            "\n"
+            "- On release, inject the draft into the window that held focus "
+            "before the pill, not the clipboard.\n"
+            "    - fix the tests\n"
+            "- Keep the 34 px height and the PILL_HOLD_SEC threshold as they "
+            "are.")
         pill._open_panel()
 
     def loading(on):
@@ -252,10 +302,16 @@ def main() -> None:
     def copied():
         # States.dc.html 6: Lite — the clipboard, and the line under the pill.
         # Its own clean shot: the amber notice from the case before is done.
+        #
+        # Through `_say`, which is what raises the strip. This set `_copied`,
+        # an attribute the `_say`/`_notice` rework of 2026-09-04 removed — and
+        # since a `__new__`-shy real pill just takes the assignment, nothing
+        # complained: `19-compact-copied.png` was a photograph of a bare pill
+        # with no line under it at all, standing in for the one state this
+        # shot exists to prove.
         pill._recover = 0
         pill.on_send = None
-        pill._copied = COPIED_FRAMES
-        pill._sync_shell()
+        pill._say(uc.COPIED_TEXT, COPIED_FRAMES)
 
     def reset_fallbacks():
         pill._recover = 0
@@ -285,6 +341,10 @@ def main() -> None:
         (600, lambda: shot(pill, "05-compact-ask")),
         (0, ask_panel),
         (700, lambda: shot(pill, "07-compact-ask-panel")),
+        (0, ask_long),
+        (700, lambda: shot(pill, "07b-compact-ask-long")),
+        # `asking_panel` clears the result, so 08 also proves the band comes
+        # back down to its floor when the text it grew for goes away.
         (0, asking_panel),
         (500, lambda: shot(pill, "08-compact-asking")),
         (0, lambda: pill._close_panel()),
@@ -293,6 +353,8 @@ def main() -> None:
         (600, lambda: shot(pill, "10-compact-refine")),
         (0, refine_panel),
         (700, lambda: shot(pill, "11-compact-refine-panel")),
+        (0, refine_bullets),
+        (700, lambda: shot(pill, "11b-compact-refine-bullets")),
         (0, lambda: pill._close_panel()),
         (0, palette_open),
         (600, lambda: box_shot(pill, "12-compact-palette")),
