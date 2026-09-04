@@ -222,19 +222,6 @@ def main() -> None:
             pill.armed = True
         return fn
 
-    def loading(on):
-        def fn():
-            sess.asr.loading = on
-            pill.armed = False
-        return fn
-
-    def mic_open():
-        """Held, open, and hearing a silent room: `IDLE` with the ring lit."""
-        def fn():
-            sess.state, sess.capturing = State.IDLE, True
-            pill.armed = True
-        return fn
-
     def menu():
         pill.lift()
         pill.update_idletasks()
@@ -382,17 +369,6 @@ def main() -> None:
         (500, lambda: shot(pill, "18-compact-recover")),
         (0, copied),
         (500, lambda: shot(pill, "19-compact-copied")),
-        (0, reset_fallbacks),
-        # The three the pill learned to say after "push to talk does not do
-        # anything, I cannot explain the failure to you" — which is what a
-        # surface with no feedback produces: not a wrong description, but none
-        # available at all.
-        (0, loading(True)),
-        (500, lambda: shot(pill, "20-compact-loading")),
-        (0, loading(False)),
-        (0, mic_open()),
-        (500, lambda: shot(pill, "21-compact-mic-open")),
-        (0, state(State.IDLE, armed=False)),
         (0, reset_fallbacks),
         # The three the pill learned to say after "push to talk does not do
         # anything, I cannot explain the failure to you" — which is what a
