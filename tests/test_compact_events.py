@@ -443,6 +443,20 @@ class TestASilentHoldKeepsTheAnswer(unittest.TestCase):
         self.assertEqual(p._panel_result, "")
         self.assertFalse(p._hold_fresh)
 
+    def test_a_hold_over_a_closed_band_starts_clean(self):
+        # Esc dismissed the exchange. A hold that then hears nothing goes
+        # straight back to grey (States.dc.html, third case) — it must not
+        # raise the dismissed answer and leave it standing, which is what
+        # keeping the blocks across a *closed* band did.
+        p = self.answered()
+        p._close_panel()
+        p._talk_start()
+        self.assertTrue(p._panel_open)
+        self.assertEqual((p._panel_heard, p._panel_result), ("", ""))
+        p.session.talk_end.return_value = False
+        p._talk_end(send=True)
+        self.assertFalse(p._panel_open)
+
     def test_an_answer_that_lands_mid_hold_is_not_wiped_by_the_next_word(self):
         # 4-20 s of CLI is long enough that somebody holds again before the
         # answer arrives. When it does, it is newer than the exchange the hold

@@ -1714,6 +1714,18 @@ class CompactPill(tk.Tk):
         self._recover = 0  # a hold ends the launch notice: seen, and moved on
         if self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
+            if not self._panel_open:
+                # Nothing is on screen to keep. The deferred clear above
+                # exists for an exchange somebody is *looking at*; over a band
+                # they dismissed it did the opposite — a hold that heard
+                # nothing raised the old answer and left it standing, because
+                # `_talk_end` saw a band with something to show. States.dc.html's
+                # third case is straight back to grey, and
+                # `16-compact-silence.png` was a picture of the old exchange.
+                self._panel_heard = ""
+                self._panel_heard_final = False
+                self._panel_result = ""
+                self._panel_failed = False
             self._hold_fresh = True
             self._open_panel()
 

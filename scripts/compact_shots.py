@@ -275,7 +275,14 @@ def main() -> None:
         # States.dc.html 3: held, nothing said — the band the hold raised
         # goes straight back down with no toast. FakeSession.talk_end answers
         # "nothing pending", which is what a silent hold is.
+        #
+        # Closed first, because the case this photographs is the band the
+        # *hold* raised. Since 2026-09-04 a silent hold over an exchange that
+        # is already on screen leaves it exactly as it was (a hold no longer
+        # wipes the answer at the press), so without this the shot after the
+        # refine panel was a picture of that other, also-correct case.
         sess.mode = CONVERSE
+        pill._close_panel()
         pill._talk_start()
         pill._talk_end(send=True)
 

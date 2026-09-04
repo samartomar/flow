@@ -911,6 +911,10 @@ class TestThePanelOpensForAskAndNeverForType(unittest.TestCase):
 
     def test_a_hold_in_ask_opens_the_panel_and_arms_the_fresh_start(self):
         p = panel_pill(mode=CONVERSE)
+        # On screen, which is the whole condition: an exchange somebody is
+        # looking at survives the press. Over a *closed* band the hold starts
+        # clean (test_compact_events.py, "a hold over a closed band").
+        p._panel_open = True
         p._panel_heard, p._panel_result = "an old question", "an old answer"
         p._talk_start()
         p.session.talk_start.assert_called_once_with()
