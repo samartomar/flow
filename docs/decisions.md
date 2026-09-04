@@ -120,6 +120,34 @@ shared one typographic string format.
 reason the retry does not fix, or if the frame cost of compositing the panel at
 30 ms shows up in the numbers `docs/speed.md` keeps.
 
+### 2026-09-04 — GDISCALED does nothing for a Tk surface, measured
+
+The compact surface renders at native resolution (see above); the shipped one
+cannot, because `flow/ui.py` hit-tests through canvas items — eighteen `tag_bind`
+sites plus item-based hover — and a `GdiCanvas` has no items to bind to. Porting
+it means rewriting its interaction layer across 7 400 lines with ~1 400 tests
+pinned to it, which is its own piece of work.
+
+`DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED` looked like the cheap middle: a
+context that leaves a process's coordinates virtualised — so no constant moves
+and no hit test shifts — while Windows renders its GDI drawing at the display's
+real resolution. One line, no risk.
+
+**It changes nothing here, and that is measured rather than guessed.** The same
+pill was photographed under both contexts on a 300 % display and the two PNGs
+differ in **zero of 293 040 pixels**. `SetProcessDpiAwarenessContext` returns
+success; Tk simply does not render through the GDI paths the context uplifts —
+it draws into its own offscreen pixmap and its text with its own rasteriser, so
+there is nothing for Windows to re-render at native DPI.
+
+The function is not kept. A tested helper nobody calls, documenting a benefit
+that does not exist, is worse than this paragraph — and the paragraph is the
+thing that stops it being tried a second time.
+
+**Reopens if** Tk is ever built against a backend that does draw through GDI,
+or if the shipped surface's canvases move onto `GdiCanvas` — at which point the
+question is answered by the port and not by a context flag.
+
 ### 2026-09-03 — The compact design keeps the tray, against its own canvas
 
 `Workspace.dc.html` says "There is no preferences window and no tray menu", and the
