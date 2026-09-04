@@ -120,6 +120,49 @@ shared one typographic string format.
 reason the retry does not fix, or if the frame cost of compositing the panel at
 30 ms shows up in the numbers `docs/speed.md` keeps.
 
+### 2026-09-04 — A wordless pill still has to say three things
+
+Five reports in a row of "push to talk does not do anything", ending in "I am
+not sure why, I cannot explain the failure to you". That last sentence is the
+finding. It is not a vague bug report — it is the accurate description of a
+surface with no feedback: **a colour that is missing is not a colour anybody
+can report.** The pill was working the whole time. It simply could not say so,
+and neither could it say what was wrong.
+
+Three facts got a colour, and each was invisible before:
+
+- **The models loading.** ~17.5 s off disk here for `large-v3` on CUDA,
+  measured — which is exactly the window somebody spends finding out whether
+  the thing works, and during all of it the pill looked identical to rest. It
+  is the waiting ring now. `session.activity` has called this "loading the
+  model" for the shipped surface all along; this is the same fact in the only
+  vocabulary this one has.
+- **The microphone being open.** `State.LISTENING` means speech was *detected*,
+  so a mic held open over a silent room reports `IDLE` — correctly, and
+  catastrophically for a surface whose only vocabulary is the ring: holding and
+  doing nothing looked the same. `Session.capturing` is the new public seam,
+  and the ring is green whenever it is true. **Above loading**, and that
+  ordering is the decision: both are true during those first seconds, and "is
+  my microphone on" is the question actually being asked.
+- **A microphone that hears nothing at all.** `States.dc.html` sends "held, but
+  nothing was said" straight back to grey, which is right for a quiet moment in
+  a working room and wrong for a muted device — the pill then looks the same
+  every single time and the only available report is "nothing happens". A hold
+  over `SILENT_AFTER_SEC` whose peak never rose `SILENT_MARGIN_DB` above the
+  meter's floor now says so, in the strip Lite's "copied" line already used,
+  and in `DIM` rather than red: a muted mic is a thing to go and fix, not a
+  failure of Flow's.
+
+**The strip sizes to its sentence.** It kept the capsule's 120 px at first and
+cut its own message in half, which is a special kind of useless.
+
+**The general rule.** A surface that removes words takes on the obligation to
+answer, in whatever vocabulary it has left, the questions the words were
+answering. "Is it on", "is it busy", and "did it hear me" are not decoration.
+
+**Reopens if** the ring runs out of room — five meanings on one ring is already
+the most it can carry, and a sixth needs a different channel, not a sixth hue.
+
 ### 2026-09-04 — The compact menu gets one row the artboard does not draw
 
 `Workspace.dc.html` says "this is everything it offers", and on 2026-09-03 the

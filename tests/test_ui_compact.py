@@ -78,7 +78,7 @@ class Canvas:
 
 
 def session(mode=DICTATE, state=State.IDLE, hearing=True, busy=False,
-            level_db=-120.0, draft_text=""):
+            level_db=-120.0, draft_text="", capturing=False, loading=False):
     """A session Mock with real values for everything the pill reads.
 
     The values are set rather than left as auto-created Mocks for test_pill's
@@ -88,7 +88,12 @@ def session(mode=DICTATE, state=State.IDLE, hearing=True, busy=False,
     real string, because the panel's strip prints it.
     """
     s = mock.Mock(mode=mode, state=state, hearing=hearing, busy=busy,
-                  level_db=level_db)
+                  level_db=level_db, capturing=capturing)
+    # Two more that a bare Mock would answer "yes" to, and both light the
+    # ring: `capturing` is the microphone being open with nobody speaking,
+    # and `asr.loading` is the models coming off disk. Left auto-created, the
+    # pill would draw a lit ring in every test that never mentioned either.
+    s.asr = mock.Mock(loading=loading)
     s.draft = mock.Mock(text=draft_text)
     s.events.return_value = []
     s.workspace = "~/dev/products/flow"
@@ -105,7 +110,13 @@ def pill(state=State.IDLE, *, armed=True, mode=DICTATE, **attrs):
     # recording fake stands in for both.
     p.paint = p.canvas = Canvas()
     p.armed = armed
-    p.session = session(state=state, mode=mode)
+    # A bare fixture has no window to resize, and `_say` resizes one to make
+    # room for its strip — the same reason `panel_pill` mocks the Tk calls
+    # `_sync_shell` makes. Tests that care about the strip use `panel_pill`.
+    p._sync_shell = mock.Mock()
+    p.session = session(state=state, mode=mode,
+                        capturing=attrs.pop("capturing", False),
+                        loading=attrs.pop("loading", False))
     for k, v in attrs.items():
         setattr(p, k, v)
     return p
@@ -269,6 +280,116 @@ class TestTheRingCarriesTheState(unittest.TestCase):
         p = pill(State.LISTENING, armed=False)
         p._draw()
         self.assertEqual(rings(p), [])
+
+
+class TestThePillSaysWhatItIsDoing(unittest.TestCase):
+    """Three things a wordless pill could not say, and had to learn to.
+
+    Every one of them came from the same report: "push to talk does not do
+    anything, I cannot explain the failure to you". That is what a surface
+    with no feedback produces — not a wrong description, but no description
+    available at all. A colour that is missing is not a colour somebody can
+    report.
+    """
+
+    def test_the_models_loading_shows_as_the_waiting_ring(self):
+        # The first hold after launch used to do nothing visible for as long
+        # as the models took to come off disk, with the pill exactly as it
+        # looks at rest. `session.activity` has called this "loading the
+        # model" for the shipped surface all along.
+        p = pill(State.IDLE, armed=False, loading=True)
+        p._draw()
+        self.assertEqual(rings(p), [uc.WAITING])
+
+    def test_loading_shows_even_before_anything_is_armed(self):
+        # It is the application, not the capture: true whether or not a
+        # microphone is open, and the answer to "why did my first hold do
+        # nothing".
+        p = pill(State.IDLE, armed=False, loading=True)
+        self.assertEqual(p._ring_colour(), uc.WAITING)
+
+    def test_an_open_mic_lights_the_ring_even_in_silence(self):
+        # `LISTENING` means speech was *detected*, so a mic held open over a
+        # silent room reports IDLE — correctly. Without this the pill looked
+        # identical whether it was holding the microphone open or doing
+        # nothing at all, which is what made a muted mic impossible to tell
+        # from a dead application.
+        p = pill(State.IDLE, armed=True, capturing=True)
+        p._draw()
+        self.assertEqual(rings(p), [uc.HEARING])
+
+    def test_a_detected_state_still_outranks_a_bare_open_mic(self):
+        # One state, one colour: a CLI in flight is blue even though the
+        # microphone is open behind it.
+        p = pill(State.REFINING, armed=True, capturing=True)
+        self.assertEqual(p._ring_colour(), uc.WAITING)
+
+    def test_a_disarmed_pill_is_still_at_rest(self):
+        p = pill(State.LISTENING, armed=False, capturing=True)
+        self.assertEqual(p._ring_colour(), "")
+
+
+class TestASilentMicrophoneSaysSo(unittest.TestCase):
+    """`States.dc.html` sends "held, but nothing was said" straight back to
+    grey, and that is right for a quiet moment in a working room. It is wrong
+    for a muted device: the pill then looks the same every single time, and
+    the only thing anybody can report is that nothing happens."""
+
+    def held(self, peak, seconds):
+        p = pill()
+        p._hold_peak = peak
+        p._say = mock.Mock()
+        p._check_heard(seconds)
+        return p
+
+    def test_a_hold_that_heard_nothing_says_so(self):
+        p = self.held(uc.DB_FLOOR, uc.SILENT_AFTER_SEC + 0.5)
+        p._say.assert_called_once_with(uc.SILENT_TEXT)
+
+    def test_a_quiet_room_is_not_accused_of_being_a_broken_one(self):
+        # Anything meaningfully above the meter's floor is a live device.
+        p = self.held(uc.DB_FLOOR + uc.SILENT_MARGIN_DB + 1,
+                      uc.SILENT_AFTER_SEC + 0.5)
+        p._say.assert_not_called()
+
+    def test_a_press_somebody_changed_their_mind_about_says_nothing(self):
+        # Under the threshold this is the artboard's own case, and it is
+        # already answered by going back to grey.
+        p = self.held(uc.DB_FLOOR, uc.SILENT_AFTER_SEC - 0.3)
+        p._say.assert_not_called()
+
+    def test_the_peak_is_tracked_only_while_a_hold_is_in_flight(self):
+        p = pill(State.LISTENING, armed=True)
+        p.session.level_db = -20.0
+        p._press_talking = True
+        p._frame()
+        self.assertEqual(p._hold_peak, -20.0)
+
+    def test_no_hold_no_peak(self):
+        p = pill(State.LISTENING, armed=True)
+        p.session.level_db = -20.0
+        p._press_talking = False
+        p._frame()
+        self.assertEqual(p._hold_peak, uc.DB_FLOOR)
+
+
+class TestTheNoticeCarriesAnySentence(unittest.TestCase):
+    def test_say_sets_the_text_and_the_countdown(self):
+        p = panel_pill()
+        p._say("something worth reading")
+        self.assertEqual(p._notice_text, "something worth reading")
+        self.assertEqual(p._notice, uc.COPIED_FRAMES)
+
+    def test_the_strip_draws_whatever_it_was_given(self):
+        p = panel_pill(x=100, y=400, _notice=2,
+                       _notice_text=uc.SILENT_TEXT,
+                       _shell_h=uc.PILL_H + uc.NOTICE_H)
+        p._draw()
+        said = [t for t in p.canvas.texts if t[1] == uc.SILENT_TEXT]
+        self.assertEqual(len(said), 1)
+        # Never in an error colour: a muted mic is a thing to fix, not a
+        # failure of Flow's — the same rule Lite's "copied" line follows.
+        self.assertEqual(said[0][2], uc.DIM)
 
 
 class TestTheCapsuleIsFilled(unittest.TestCase):
@@ -731,7 +852,7 @@ class TestTypeSendsEndToEnd(unittest.TestCase):
                      "_panel_open", "_panel_mode", "_panel_heard",
                      "_panel_heard_final", "_panel_result", "_ask_pending",
                      "_shell_w", "_shell_h", "_outside_was_down",
-                     "_mic_gone", "_recover", "_copied", "_panel_failed",
+                     "_mic_gone", "_recover", "_notice", "_panel_failed",
                      "_capsule_off", "_mode_var"):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(uc.CompactPill, name), name)
@@ -742,6 +863,9 @@ def panel_pill(state=State.IDLE, *, mode=CONVERSE, x=100, y=400, **attrs):
     replaced by Mocks — a bare fixture has no real window to measure, and the
     outside-click poll would otherwise read the *test runner's* mouse."""
     p = pill(state, mode=mode, **attrs)
+    # The real one back: `pill` mocks it because a bare fixture has no window,
+    # and this fixture's whole job is to give it one worth measuring.
+    p._sync_shell = uc.CompactPill._sync_shell.__get__(p)
     p.geometry = mock.Mock()
     # The anchor is *stated*, not faked through `winfo_*`. That is the real
     # contract now: `_sync_shell` tracks where it put the window rather than
@@ -1719,9 +1843,16 @@ class TestLiteCopiesAndSaysSo(unittest.TestCase):
             p._send()
         copy.assert_called_once_with(p, "the words")
         self.assertEqual(p._flash, 0)  # not an error state
-        self.assertEqual(p._copied, uc.COPIED_FRAMES)
-        # The window grew 18 px *under* the capsule — which did not move.
-        p.geometry.assert_called_with("120x52+100+400")
+        self.assertEqual(p._notice, uc.COPIED_FRAMES)
+        # The window grew 18 px *under* the capsule — which did not move —
+        # and out to fit the sentence, because a strip that kept the capsule's
+        # 120 px simply cut its own message in half.
+        geom = p.geometry.call_args.args[0]
+        size, x, y = geom.split("+")
+        w, h = (int(v) for v in size.split("x"))
+        self.assertEqual((h, x, y), (uc.PILL_H + uc.NOTICE_H, "100", "400"))
+        self.assertGreaterEqual(w, uc.PILL_W)
+        self.assertEqual(w, p._notice_w)
 
     def test_a_send_with_a_handler_pastes_instead(self):
         sent = []
@@ -1731,7 +1862,7 @@ class TestLiteCopiesAndSaysSo(unittest.TestCase):
             p._send()
         copy.assert_not_called()
         self.assertEqual(sent, ["the words"])
-        self.assertEqual(p._copied, 0)
+        self.assertEqual(p._notice, 0)
 
     def test_the_panel_send_follows_the_same_path(self):
         p = panel_pill(mode=REFINE)
@@ -1743,19 +1874,19 @@ class TestLiteCopiesAndSaysSo(unittest.TestCase):
                                return_value="") as copy:
             p._panel_send()
         copy.assert_called_once_with(p, "the shaped prompt")
-        self.assertEqual(p._copied, uc.COPIED_FRAMES)
+        self.assertEqual(p._notice, uc.COPIED_FRAMES)
         self.assertFalse(p._panel_open)
 
     def test_the_notice_draws_the_line_and_counts_down_to_120(self):
-        p = panel_pill(x=100, y=400, _copied=2, _shell_h=uc.PILL_H + uc.NOTICE_H)
+        p = panel_pill(x=100, y=400, _notice=2, _shell_h=uc.PILL_H + uc.NOTICE_H)
         p._draw()
         lines = [t for t in p.canvas.texts if t[1] == "copied — press Ctrl+V"]
         self.assertEqual(len(lines), 1)
         self.assertEqual(lines[0][2], uc.DIM)  # never an error colour
         p._frame()
-        self.assertEqual(p._copied, 1)
+        self.assertEqual(p._notice, 1)
         p._frame()
-        self.assertEqual(p._copied, 0)
+        self.assertEqual(p._notice, 0)
         p.geometry.assert_called_with("120x34+100+400")
 
 

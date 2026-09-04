@@ -161,6 +161,21 @@ NOTICE_H = 18
 COPIED_FRAMES = 100
 COPIED_TEXT = "copied — press Ctrl+V"
 
+#: What a hold has to reach before the microphone counts as delivering
+#: anything. `DB_FLOOR` is where the meter bottoms out, and a live room sits
+#: well above it — a muted or silenced device sits at −95 dB and never moves.
+#: Six decibels of margin above the floor, so a genuinely quiet room is not
+#: accused of being a broken one.
+SILENT_MARGIN_DB = 6.0
+#: How long a hold must run before silence means anything. Under this it is
+#: somebody who pressed and changed their mind, which States.dc.html already
+#: answers with "straight back to grey".
+SILENT_AFTER_SEC = 1.2
+SILENT_TEXT = "no sound from the mic — is it muted?"
+#: Air either side of a notice's words. The strip is as wide as it needs to
+#: be and never narrower than the pill.
+NOTICE_PAD = 14
+
 #: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
 #: viewBox after the 12 px left padding, centred in the 34 px height. The
 #: glyph itself is stroked, not filled — `mic()` in gen.py is 1.4 px strokes
@@ -602,7 +617,26 @@ class CompactPill(tk.Tk):
     #: which is a healthy pill.
     _mic_gone = False
     _recover = 0
-    _copied = 0
+    #: Frames of notice strip left, and what it says. `_copied` was this
+    #: with one hardcoded sentence; the strip is the same strip.
+    _notice = 0
+    _notice_text = COPIED_TEXT
+    #: How wide the strip has to be for its words. The pill is 120 px and a
+    #: sentence is not: measured when the notice is set, because a strip that
+    #: keeps the capsule's width simply cuts its own message in half — which
+    #: is what `.shots/22-compact-mic-silent.png` showed the first time.
+    _notice_w = PILL_W
+    #: When the hold in flight opened the microphone. Its own clock rather
+    #: than `_press_at`, because `_on_release` clears that *before* calling
+    #: `_talk_end` — so a release measuring against it measured zero, and the
+    #: silence check below could never fire on a real hold.
+    _hold_since = None
+    #: The loudest level seen during the hold in flight, so a release can tell
+    #: a quiet room from a microphone that is delivering nothing at all.
+    #: `DB_FLOOR` and not zero: zero decibels is louder than anything a
+    #: microphone will ever hand over, so a peak starting there can only ever
+    #: go down and the check below it could never fire.
+    _hold_peak = DB_FLOOR
     #: Whether the CLI's failure line is what's in the result block — so Copy
     #: and Send hand over the raw dictation instead, because unrefined text
     #: beats no text.
@@ -660,7 +694,9 @@ class CompactPill(tk.Tk):
         self._palette = None
         self._mic_gone = False
         self._recover = 0
-        self._copied = 0
+        self._notice = 0
+        self._notice_text = COPIED_TEXT
+        self._hold_peak = DB_FLOOR
         self._panel_failed = False
         self._capsule_off = 0
 
@@ -848,6 +884,11 @@ class CompactPill(tk.Tk):
             hearing = getattr(self.session, "hearing", True)
             target = self._norm(self.session.level_db) if hearing else 0.0
             self._meter_level = self._eased(target)
+            if self._press_talking:
+                # The loudest thing this hold has heard, kept so the release
+                # can tell a quiet room from a device delivering nothing.
+                self._hold_peak = max(self._hold_peak,
+                                      self.session.level_db)
         else:
             # Still collect what the CLI owes us. Disarming must not strand an
             # answer already in flight — the defect ui.py's identical branch
@@ -862,9 +903,9 @@ class CompactPill(tk.Tk):
             self._flash -= 1
         if self._recover:
             self._recover -= 1
-        if self._copied:
-            self._copied -= 1
-            if not self._copied:
+        if self._notice:
+            self._notice -= 1
+            if not self._notice:
                 # The notice strip's time is up; the window is 120×34 again.
                 self._sync_shell()
         self._draw()
@@ -1060,7 +1101,7 @@ class CompactPill(tk.Tk):
         elif _copy_to_clipboard(self, text):
             self._flash = FLASH_FRAMES
         else:
-            self._copied = COPIED_FRAMES
+            self._say(COPIED_TEXT)
             self._sync_shell()
 
     def _track_target(self) -> None:
@@ -1078,6 +1119,27 @@ class CompactPill(tk.Tk):
         hwnd = foreground_hwnd()
         if hwnd and not owned_by_flow(hwnd):
             self.paste_target = hwnd
+
+    def _check_heard(self, held_for: float) -> None:
+        """Say something when a hold heard literally nothing.
+
+        `States.dc.html` has "held, but nothing was said" going straight back
+        to grey, and that is right for a quiet moment in a working room. It is
+        wrong for a microphone that is muted: the pill then looks exactly the
+        same as a pill doing nothing, every time, and the only thing anybody
+        can report is "push to talk does not do anything". A device that never
+        rose a hair above the meter's floor across a whole hold is not a quiet
+        room, and the difference is worth a sentence.
+
+        Below `SILENT_AFTER_SEC` this says nothing at all: that is somebody
+        who pressed and changed their mind, which is the case the artboard
+        already answers.
+        """
+        if held_for < SILENT_AFTER_SEC:
+            return
+        if self._hold_peak > DB_FLOOR + SILENT_MARGIN_DB:
+            return
+        self._say(SILENT_TEXT)
 
     def _pump_press(self) -> None:
         """Turn a press that has outlived `PILL_HOLD_SEC` into an utterance.
@@ -1127,6 +1189,10 @@ class CompactPill(tk.Tk):
             self._flash = FLASH_FRAMES
             return
         self._mic_gone = False
+        # The hold's own clock and its own peak, started together and read
+        # together by `_check_heard` on the release.
+        self._hold_since = time.perf_counter()
+        self._hold_peak = DB_FLOOR
         self._recover = 0  # a hold ends the launch notice: seen, and moved on
         if self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
@@ -1156,8 +1222,14 @@ class CompactPill(tk.Tk):
         has nothing to show, so it goes back down — silence is a normal thing
         to do with a push-to-talk button.
         """
+        was_talking = self._press_talking
+        held_for = (time.perf_counter() - self._hold_since
+                    if self._hold_since is not None else 0.0)
+        self._hold_since = None
         self._press_talking = False
         pending = self.session.talk_end()
+        if was_talking:
+            self._check_heard(held_for)
         if send and pending:
             if self.session.mode == DICTATE:
                 self._send_pending = True
@@ -1686,8 +1758,13 @@ class CompactPill(tk.Tk):
         moves before the panel clips).
         """
         panel_h = PANEL_H if self._panel_open else 0
-        notice_h = NOTICE_H if self._copied else 0
+        notice_h = NOTICE_H if self._notice else 0
         w = PANEL_W if self._panel_open else PILL_W
+        if self._notice:
+            # The capsule keeps its own 120 px — `_draw` still draws it at
+            # `PILL_W` — and the window grows around it so the strip beneath
+            # has room for its sentence.
+            w = max(w, self._notice_w)
         h = PILL_H + panel_h + notice_h
         if (w, h) == (self._shell_w, self._shell_h):
             return
@@ -1799,9 +1876,35 @@ class CompactPill(tk.Tk):
             return ERROR
         if self._recover:
             return RECOVER
-        if not self.armed:
-            return ""
-        return RING.get(self.session.state, "")
+        loading = bool(getattr(self.session.asr, "loading", False))
+        if self.armed:
+            state = RING.get(self.session.state, "")
+            if state:
+                return state
+            if self.session.capturing:
+                # Open and hearing a silent room. `LISTENING` means speech was
+                # *detected*, so without this the pill looked identical
+                # whether it was holding the microphone open or doing nothing
+                # at all — which is what made a muted mic impossible to tell
+                # from a dead application.
+                #
+                # **Above `loading`, and that ordering is the whole point.**
+                # The models take about eighteen seconds to come off disk
+                # here, which is exactly the window somebody spends finding
+                # out whether the thing works — and with loading on top, every
+                # hold in that window answered "loading" to the question "is
+                # my microphone on". Both facts are true; this is the one
+                # being asked.
+                return HEARING
+        if loading:
+            # The models, coming off disk. `session.activity` already calls
+            # this "loading the model" for the shipped surface; this is the
+            # same fact in the only vocabulary this one has, and it is the
+            # answer to "why did my first hold do nothing".
+            return WAITING
+        # A disarmed pill is at rest whatever the session thinks: capture is
+        # off, and a ring would claim otherwise.
+        return ""
 
     def _glyph_tint(self) -> str:
         """This frame's mic tint: the mode's hue — or red, while the mic is
@@ -1822,8 +1925,8 @@ class CompactPill(tk.Tk):
         if self._panel_open:
             self._draw_panel(c)
             self._draw_foot(c)
-            if self._copied:
-                self._draw_copied(c)
+            if self._notice:
+                self._draw_notice(c)
             self._present()
             return
         # The capsule body first, and it is load-bearing rather than cosmetic:
@@ -1860,8 +1963,8 @@ class CompactPill(tk.Tk):
         c.create_line(hi + PILL_H // 2, hi, PILL_W - hi - PILL_H // 2, hi,
                       fill=RING_TOP)
         self._draw_face(c, 0, BARS)
-        if self._copied:
-            self._draw_copied(c)
+        if self._notice:
+            self._draw_notice(c)
         self._present()
 
     def _present(self) -> None:
@@ -1886,7 +1989,36 @@ class CompactPill(tk.Tk):
             # there is no window left to composite onto.
             self._alive = False
 
-    def _draw_copied(self, c) -> None:
+    def _say(self, text: str, frames: int = COPIED_FRAMES) -> None:
+        """Put one sentence under the pill for `frames` frames.
+
+        The wordless pill's only words, and it has them for the same reason
+        Lite's "copied" line has them: there are a handful of facts that no
+        colour can carry, and a surface that cannot say them leaves somebody
+        holding a button that does nothing with no way to find out why.
+        """
+        self._notice_text = text
+        self._notice = frames
+        self._notice_w = self._text_width(text, FONT_TAG) + 2 * NOTICE_PAD
+        self._sync_shell()
+
+    def _text_width(self, text: str, spec) -> int:
+        """How wide `text` is in `spec`, through whatever is drawing.
+
+        Through the painter, because GDI+ and Tk do not agree on metrics and
+        the one that will lay the glyphs down is the one worth asking. Falls
+        back to a nominal advance where neither can answer — a bare fixture,
+        which has no window to size anyway.
+        """
+        measure = getattr(self.paint, "measure", None)
+        if measure is not None:
+            try:
+                return int(measure(text, spec)[0])
+            except Exception:
+                pass
+        return int(len(text) * abs(spec[1]) * 0.55)
+
+    def _draw_notice(self, c) -> None:
         """Lite's last inch, said once and never in an error colour
         (States.dc.html): the words are on the clipboard and the last step is
         the user's. The strip has a body, not just floating glyphs: Tk
@@ -1900,7 +2032,7 @@ class CompactPill(tk.Tk):
                  fill=SHELL, outline="")
         _capsule_ring(c, 0, y, w, self._shell_h, RING_OUTER,
                       square_top=True, top=False)
-        c.create_text(w // 2, y + NOTICE_H // 2, text=COPIED_TEXT,
+        c.create_text(w // 2, y + NOTICE_H // 2, text=self._notice_text,
                       font=FONT_TAG, fill=DIM)
 
     def _draw_foot(self, c) -> None:

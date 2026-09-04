@@ -1544,6 +1544,20 @@ class Session:
         return not (self.talking or self.editing)
 
     @property
+    def capturing(self) -> bool:
+        """Whether the microphone is open right now.
+
+        Not the same question as `state is LISTENING`, and the difference is
+        the whole reason this exists: `LISTENING` means *speech has been
+        detected*, so a mic that is open and hearing a silent room reports
+        `IDLE` — correctly. A surface that lit up only on `LISTENING` therefore
+        looked identical whether it was holding the mic open or doing nothing
+        at all, which made a muted microphone indistinguishable from a dead
+        application. This is the honest answer to "is it on".
+        """
+        return self._mic_started
+
+    @property
     def talking(self) -> bool:
         """Whether a spoken reply is playing right now.
 

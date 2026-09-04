@@ -139,6 +139,20 @@ class FakeVoice:
         return self.name
 
 
+class FakeAsr:
+    """`loading` is all the compact pill asks of a transcriber."""
+
+    def __init__(self) -> None:
+        self.loading = False
+
+
+class FakeAsr:
+    """`loading` is all the compact pill asks of a transcriber."""
+
+    def __init__(self) -> None:
+        self.loading = False
+
+
 class FakeSession:
     """Just enough of the `Session` surface for every UI window to drive.
 
@@ -155,6 +169,22 @@ class FakeSession:
         self.state = State.IDLE
         self.activity = None
         self.hearing = True
+        #: Whether the microphone is open — not the same as `state is
+        #: LISTENING`, which means speech was *detected*. The compact pill
+        #: lights its ring off this so an open mic over a silent room is
+        #: distinguishable from a dead application.
+        self.capturing = False
+        #: The models, coming off disk. `asr.loading` is what the real session
+        #: reads; the pill turns it into the waiting ring.
+        self.asr = FakeAsr()
+        #: Whether the microphone is open — not the same as `state is
+        #: LISTENING`, which means speech was *detected*. The compact pill
+        #: lights its ring off this so an open mic over a silent room is
+        #: distinguishable from a dead application.
+        self.capturing = False
+        #: The models, coming off disk. `asr.loading` is what the real session
+        #: reads; the pill turns it into the waiting ring.
+        self.asr = FakeAsr()
         self.profile = FakeProfile()
         self.workspace = str(REPO)
         self.send_words = ("boom", "enter boom")

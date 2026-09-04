@@ -55,6 +55,7 @@ from flow import paint  # noqa: E402
 paint.make_dpi_aware()
 
 import flow.ui as ui  # noqa: E402
+import flow.ui_compact as uc  # noqa: E402
 import shots  # noqa: E402  — the capture machinery and the fake session
 from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
 from flow.ui_compact import (  # noqa: E402
@@ -158,6 +159,40 @@ def main() -> None:
                               "that held focus before the pill.")
         pill._open_panel()
 
+    def loading(on):
+        def fn():
+            sess.asr.loading = on
+            pill.armed = False
+        return fn
+
+    def mic_open():
+        """Held, open, and hearing a silent room: `IDLE` with the ring lit."""
+        def fn():
+            sess.state, sess.capturing = State.IDLE, True
+            pill.armed = True
+        return fn
+
+    def silent_notice():
+        sess.capturing = False
+        pill._say(uc.SILENT_TEXT)
+
+    def loading(on):
+        def fn():
+            sess.asr.loading = on
+            pill.armed = False
+        return fn
+
+    def mic_open():
+        """Held, open, and hearing a silent room: `IDLE` with the ring lit."""
+        def fn():
+            sess.state, sess.capturing = State.IDLE, True
+            pill.armed = True
+        return fn
+
+    def silent_notice():
+        sess.capturing = False
+        pill._say(uc.SILENT_TEXT)
+
     def menu():
         pill.lift()
         pill.update_idletasks()
@@ -232,12 +267,17 @@ def main() -> None:
 
     def reset_fallbacks():
         pill._recover = 0
-        pill._copied = 0
+        pill._notice = 0
         pill._mic_gone = False
+        sess.capturing = False
+        sess.asr.loading = False
         pill._sync_shell()
         # `del`, not a fresh lambda: the no-CLI step shadowed the fake's own
         # method with an instance attribute, and the menu shot wants the fake.
-        del sess._provider
+        # Guarded, because the walk resets more than once now and the second
+        # `del` of the same shadow is an AttributeError that ends the run.
+        if "_provider" in vars(sess):
+            del sess._provider
 
     steps = [
         (900, state(State.IDLE, armed=False)),
@@ -281,6 +321,32 @@ def main() -> None:
         (500, lambda: shot(pill, "18-compact-recover")),
         (0, copied),
         (500, lambda: shot(pill, "19-compact-copied")),
+        (0, reset_fallbacks),
+        # The three the pill learned to say after "push to talk does not do
+        # anything, I cannot explain the failure to you" — which is what a
+        # surface with no feedback produces: not a wrong description, but none
+        # available at all.
+        (0, loading(True)),
+        (500, lambda: shot(pill, "20-compact-loading")),
+        (0, loading(False)),
+        (0, mic_open()),
+        (500, lambda: shot(pill, "21-compact-mic-open")),
+        (0, state(State.IDLE, armed=False)),
+        (0, silent_notice),
+        (500, lambda: shot(pill, "22-compact-mic-silent")),
+        (0, reset_fallbacks),
+        # The three the pill learned to say after "push to talk does not do
+        # anything, I cannot explain the failure to you" — which is what a
+        # surface with no feedback produces: not a wrong description, but none
+        # available at all.
+        (0, loading(True)),
+        (500, lambda: shot(pill, "20-compact-loading")),
+        (0, loading(False)),
+        (0, mic_open()),
+        (500, lambda: shot(pill, "21-compact-mic-open")),
+        (0, state(State.IDLE, armed=False)),
+        (0, silent_notice),
+        (500, lambda: shot(pill, "22-compact-mic-silent")),
         (0, reset_fallbacks),
         (0, state(State.IDLE, armed=False)),
         (400, menu),
