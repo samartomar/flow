@@ -47,11 +47,15 @@ _PARGB = 0xE200B
 _SMOOTH_AA, _OFFSET_HQ, _TEXT_AA = 4, 2, 3
 #: GDI+ font styles, and the two Tk spellings that map onto them.
 _STYLE_BOLD, _STYLE_ITALIC = 1, 2
-#: Cardinal-spline tension. Tk's `smooth=True` polygon is a Bezier through the
-#: midpoints of the control polygon; GDI+'s closed cardinal spline at the
-#: default 0.5 is the same curve to within a fraction of a pixel, which is what
-#: makes `_round_rect` render as itself rather than as an approximation.
-_TENSION = 0.5
+#: What stands in for a family the machine does not have. Both are shipped with
+#: Windows, and the split is load-bearing rather than tidy: a monospaced family
+#: replaced by a proportional one breaks every caller that positions glyphs on
+#: a fixed pitch, which on this surface is the status label.
+_MONO_HINT = "mono"
+_MONO_FALLBACK, _UI_FALLBACK = "Consolas", "Segoe UI"
+#: Steps per span when flattening Tk's smoothing. Twelve puts the error well
+#: under a pixel at the radii this app draws and costs nothing worth counting.
+_SMOOTH_STEPS = 12
 
 
 class _BLENDFUNCTION(ctypes.Structure):
@@ -217,6 +221,39 @@ def _points(args) -> list:
     return [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2)]
 
 
+def _tk_smooth(pts, closed=True, steps: int = _SMOOTH_STEPS) -> list:
+    """Tk's `smooth=True` curve through `pts`, flattened to a point list.
+
+    Tk draws a smoothed polygon as a chain of **quadratic Beziers whose ends
+    are the midpoints of consecutive control-point segments** and whose control
+    point is the vertex between them. That is a quadratic B-spline, and it
+    pulls *inside* the control polygon.
+
+    GDI+'s own `AddPathClosedCurve` is a cardinal spline, which passes
+    *through* the control points and bulges outside them. Substituting one for
+    the other renders the same twelve points as two different shapes: it took
+    the radius off every corner of the shipped pill, and ballooned the compact
+    panel's Send chip out of its row. So the curve is computed here rather
+    than delegated, and every `_round_rect` in this app — both surfaces — comes
+    out as the shape Tk would have drawn.
+    """
+    n = len(pts)
+    if n < 3:
+        return list(pts)
+    out = []
+    span = range(n) if closed else range(1, n - 1)
+    for i in span:
+        p0, p1, p2 = pts[(i - 1) % n], pts[i], pts[(i + 1) % n]
+        start = ((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
+        end = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+        for s in range(steps + 1):
+            t = s / steps
+            u = 1 - t
+            out.append((u * u * start[0] + 2 * u * t * p1[0] + t * t * end[0],
+                        u * u * start[1] + 2 * u * t * p1[1] + t * t * end[1]))
+    return out
+
+
 class GdiCanvas:
     """`tk.Canvas`'s drawing calls, rendered antialiased and composited whole.
 
@@ -263,11 +300,14 @@ class GdiCanvas:
         _gdiplus.GdipStringFormatGetGenericTypographic(ctypes.byref(self._fmt))
         fmt = ctypes.c_void_p()
         _gdiplus.GdipCloneStringFormat(self._fmt, ctypes.byref(fmt))
-        # 0x800 is MeasureTrailingSpaces: without it a label ending in a space
-        # measures as though it did not.
+        # 0x800 is MeasureTrailingSpaces: without it a label ending in a
+        # space measures as though it did not. 0x1000 is NoWrap, and it is not
+        # optional: GDI+ breaks a string that measures a rounding error wider
+        # than the rectangle it is given, and a single-line label in a fixed
+        # row has nowhere to break to — it came out as "LI STENI NG".
         flags = ctypes.c_int()
         _gdiplus.GdipGetStringFormatFlags(fmt, ctypes.byref(flags))
-        _gdiplus.GdipSetStringFormatFlags(fmt, flags.value | 0x800)
+        _gdiplus.GdipSetStringFormatFlags(fmt, flags.value | 0x800 | 0x1000)
         self._fmt = fmt
         #: Whether the style has been put into the per-pixel-alpha mode. A
         #: hint, not a fact — `present` re-takes it if a frame is refused.
@@ -326,6 +366,24 @@ class GdiCanvas:
             _gdiplus.GdipDeleteStringFormat(self._fmt)
             self._fmt = None
 
+    def offset(self, dx: float, dy: float):
+        """Draw at `(dx, dy)` until the returned token is passed to `restore`.
+
+        One window here holds several canvases — the pill row, the draft
+        panel, the conversation card — each `place`d at its own y. The bitmap
+        covers the whole window, so each canvas's display list is replayed
+        under its own translation; without it, compositing the pill alone
+        blanked everything the other canvases had drawn.
+        """
+        state = ctypes.c_uint()
+        _gdiplus.GdipSaveGraphics(self._g, ctypes.byref(state))
+        _gdiplus.GdipTranslateWorldTransform(self._g, ctypes.c_float(dx),
+                                             ctypes.c_float(dy), 0)
+        return state
+
+    def restore(self, state) -> None:
+        _gdiplus.GdipRestoreGraphics(self._g, state)
+
     def delete(self, *_a, **_kw) -> None:
         """`delete("all")` — back to fully transparent.
 
@@ -364,13 +422,11 @@ class GdiCanvas:
         pts = _points(args)
         path = ctypes.c_void_p()
         _gdiplus.GdipCreatePath(0, ctypes.byref(path))
-        arr = self._floats(pts)
         if kw.get("smooth"):
-            _gdiplus.GdipAddPathClosedCurve2(path, arr, len(pts),
-                                             ctypes.c_float(_TENSION))
-        else:
-            _gdiplus.GdipAddPathLine2(path, arr, len(pts))
-            _gdiplus.GdipClosePathFigure(path)
+            pts = _tk_smooth(pts, closed=True)
+        arr = self._floats(pts)
+        _gdiplus.GdipAddPathLine2(path, arr, len(pts))
+        _gdiplus.GdipClosePathFigure(path)
         if kw.get("fill"):
             self._fill_path(path, kw["fill"])
         if kw.get("outline"):
@@ -482,11 +538,18 @@ class GdiCanvas:
         if _gdiplus.GdipCreateFontFamilyFromName(ctypes.c_wchar_p(family), None,
                                                  ctypes.byref(fam)) != 0:
             # An absent family is a fact about the machine, not something to
-            # raise inside a repaint: Tk substitutes silently, and so does
-            # this — but into the UI font rather than into whatever GDI+ would
-            # have picked.
+            # raise inside a repaint: Tk substitutes silently and so does this.
+            #
+            # **Like for like, though.** None of the IBM Plex faces this app
+            # names are installed here, and substituting a monospaced one with
+            # a proportional one is not a cosmetic difference: `_bar_label`
+            # places every character itself at a fixed 7 px pitch, because Tk
+            # has no letter-spacing. Under a proportional fallback the narrow
+            # glyphs left holes and the wide ones closed up, and LISTENING
+            # rendered as "LI STENI NG".
+            stand_in = _MONO_FALLBACK if _MONO_HINT in family.lower()                 else _UI_FALLBACK
             _gdiplus.GdipCreateFontFamilyFromName(
-                ctypes.c_wchar_p("Segoe UI"), None, ctypes.byref(fam))
+                ctypes.c_wchar_p(stand_in), None, ctypes.byref(fam))
         font = ctypes.c_void_p()
         # Unit 2 is Pixel, so a Tk `-13` is thirteen pixels here too.
         _gdiplus.GdipCreateFont(fam, ctypes.c_float(size), style, 2,
@@ -526,10 +589,9 @@ class GdiCanvas:
         _gdiplus.GdipCreateSolidFill(ctypes.c_uint(_argb(kw.get("fill",
                                                                 "#FFFFFF"))),
                                      ctypes.byref(brush))
-        # A hair of slack on the layout box: GDI+ will wrap a string that
-        # measures a rounding error wider than the rectangle it is given, and
-        # a wrapped label in a fixed row is a label with its tail cut off.
-        layout = _RectF(tx, ty, w + 4, h + 2)
+        # Generous slack as well as NoWrap: the flag stops the break, and the
+        # room stops the last glyph being clipped by a rounding error.
+        layout = _RectF(tx, ty, w + 8, h + 4)
         _gdiplus.GdipDrawString(self._g, ctypes.c_wchar_p(text), -1, font,
                                 ctypes.byref(layout), self._fmt, brush)
         _gdiplus.GdipDeleteBrush(brush)
@@ -610,17 +672,216 @@ class GdiCanvas:
         _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, ex | _WS_EX_LAYERED)
 
 
+class TeeCanvas:
+    """Every drawing call to the real `tk.Canvas` *and* to a `GdiCanvas`.
+
+    `ui_compact` could simply swap its canvas for a `GdiCanvas`, because it
+    hit-tests with explicit rectangles. `ui.py` cannot: it hit-tests through
+    canvas *items* — eighteen `tag_bind` sites plus item-based hover tooltips —
+    and a bitmap has no items to bind to. Rewriting that interaction layer
+    across 7 400 lines is the port this avoids.
+
+    So the real canvas stays, invisible under the composited bitmap, and keeps
+    every item it ever had: `tag_bind`, `tag_raise`, `find_withtag` and the
+    tooltips all work exactly as they did, because they are still talking to
+    the same widget. What is added is a **retained display list** — every
+    create is recorded, every delete forgets, and `present` replays the whole
+    list into GDI+ and composites it.
+
+    Retained rather than forwarded, and that is forced: two of this app's four
+    canvases repaint *partially* (`delete("body")`, `delete("chips")`), so
+    the items a frame does not touch have to survive somewhere the bitmap can
+    be rebuilt from. A `GdiCanvas` keeps no items, so this keeps them for it.
+
+    Anything not a drawing call — `pack`, `bind`, `winfo_*`, `tag_bind` —
+    falls through to the real canvas untouched.
+    """
+
+    #: The calls that put something on screen, and so into the display list.
+    _DRAWS = ("create_line", "create_rectangle", "create_polygon",
+              "create_oval", "create_arc", "create_text", "create_window",
+              "create_image")
+
+    antialiased = True
+
+    def __init__(self, canvas, gdi) -> None:
+        self._c = canvas
+        self._gdi = gdi
+        #: Whether anything has been drawn or deleted since the last present.
+        #: The canvases sharing a window redraw on their own schedule — the
+        #: draft panel repaints when the draft changes, which is not when the
+        #: pill's own key changes — so the compositor cannot key off the pill
+        #: alone. It composited the row and left the panel off the bitmap.
+        self.dirty = True
+        #: `(item_id, tags, method, args, kwargs)` in z-order — the order Tk
+        #: itself stacks them in, kept in step by `tag_raise` / `tag_lower`.
+        self._items: list = []
+
+    def __getattr__(self, name):
+        # Everything this class does not itself define is the real canvas's.
+        return getattr(self._c, name)
+
+    def _record(self, method, a, kw):
+        item = getattr(self._c, method)(*a, **kw)
+        tags = kw.get("tags") or ()
+        if isinstance(tags, str):
+            tags = (tags,)
+        self._items.append((item, tuple(tags), method, a, dict(kw)))
+        self.dirty = True
+        return item
+
+    def __init_subclass__(cls, **kw):  # pragma: no cover - not subclassed
+        super().__init_subclass__(**kw)
+
+    def delete(self, *tags) -> None:
+        self._c.delete(*tags)
+        self.dirty = True
+        if not tags or "all" in tags:
+            self._items.clear()
+            return
+        wanted = set(tags)
+        self._items = [it for it in self._items
+                       if it[0] not in wanted and not (set(it[1]) & wanted)]
+
+    def _matching(self, spec) -> list:
+        return [it for it in self._items
+                if it[0] == spec or spec in it[1]]
+
+    def tag_raise(self, spec, above=None) -> None:
+        self._c.tag_raise(spec) if above is None else self._c.tag_raise(spec,
+                                                                       above)
+        moved = self._matching(spec)
+        if not moved:
+            return
+        rest = [it for it in self._items if it not in moved]
+        if above is None:
+            self._items = rest + moved
+            return
+        at = max((i for i, it in enumerate(rest)
+                  if it[0] == above or above in it[1]), default=len(rest) - 1)
+        self._items = rest[:at + 1] + moved + rest[at + 1:]
+
+    def tag_lower(self, spec, below=None) -> None:
+        self._c.tag_lower(spec) if below is None else self._c.tag_lower(spec,
+                                                                       below)
+        moved = self._matching(spec)
+        if not moved:
+            return
+        rest = [it for it in self._items if it not in moved]
+        if below is None:
+            self._items = moved + rest
+            return
+        at = min((i for i, it in enumerate(rest)
+                  if it[0] == below or below in it[1]), default=0)
+        self._items = rest[:at] + moved + rest[at:]
+
+    def measure(self, text: str, spec) -> tuple:
+        return self._gdi.measure(text, spec) if self._gdi else (0, 0)
+
+    def resize(self, w: int, h: int) -> None:
+        if self._gdi:
+            self._gdi.resize(w, h)
+
+    def close(self) -> None:
+        if self._gdi:
+            self._gdi.close()
+
+    def replay(self, gdi) -> None:
+        """Draw this canvas's display list into `gdi`, in z-order."""
+        for _item, _tags, method, a, kw in self._items:
+            draw = getattr(gdi, method, None)
+            if draw is None:
+                # `create_window` and `create_image` have no GDI+ equivalent
+                # here; nothing in this app draws either onto a composited
+                # canvas, and a missing one is a gap to see rather than an
+                # exception raised inside a repaint.
+                continue
+            try:
+                draw(*a, **kw)
+            except Exception:
+                continue
+
+    def present(self, win, at=None, others=()) -> bool:
+        """Composite this canvas — and any `others` — as one bitmap.
+
+        `others` is `(tee, dx, dy)` for every other canvas sharing this
+        window, drawn under its own translation and *before* this one, which
+        is the stacking Tk gives them: the panel is placed above the pill row
+        and the row is the window's foot.
+        """
+        self._gdi.delete("all")
+        for tee, dx, dy in others:
+            token = self._gdi.offset(dx, dy)
+            try:
+                tee.replay(self._gdi)
+            finally:
+                self._gdi.restore(token)
+        self.replay(self._gdi)
+        self.dirty = False
+        for tee, _dx, _dy in others:
+            tee.dirty = False
+        return self._gdi.present(win, at)
+
+
+def recorder(canvas):
+    """A `TeeCanvas` that records and forwards but owns no bitmap.
+
+    For the canvases that share a window with the one doing the compositing:
+    they need their display list kept so the compositor can replay it, and
+    they have nothing of their own to present.
+    """
+    return TeeCanvas(canvas, None)
+
+
+def _tee_draw(method):
+    def call(self, *a, **kw):
+        return self._record(method, a, kw)
+    call.__name__ = method
+    return call
+
+
+for _m in TeeCanvas._DRAWS:
+    setattr(TeeCanvas, _m, _tee_draw(_m))
+
+
+def unkey(win) -> None:
+    """Take a window off the colour key and off Tk's own alpha.
+
+    Both are answers to the question `GdiCanvas` is now answering, and both
+    get in its way. `-transparentcolor` keys a colour out of whatever is
+    painted, so the surface's own background would be punched out of the
+    bitmap we just antialiased; `-alpha` puts the window into
+    `SetLayeredWindowAttributes` mode, and a window in that mode refuses
+    `UpdateLayeredWindow` outright. The opacity `-alpha` carried is not lost:
+    it moves to the blend's `SourceConstantAlpha`.
+
+    Neither attribute exists off Windows, and neither is worth an exception:
+    this only runs where `available()` has already said yes.
+    """
+    for attr, value in (("-transparentcolor", ""), ("-alpha", 1.0)):
+        try:
+            win.attributes(attr, value)
+        except tk.TclError:
+            pass
+
+
 def painter_for(canvas, w: int, h: int, lite: bool, alpha: float = 1.0,
-                scale: float = 1.0):
+                scale: float = 1.0, tee: bool = False):
     """What this window should draw on: a `GdiCanvas`, or the canvas itself.
 
     Lite draws on the canvas, and deliberately: Lite is the mode that asks
     nothing of the platform, and a layered window is the largest ask this
     surface makes of it.
+
+    `tee` wraps the pair in a `TeeCanvas` instead of replacing the canvas —
+    what `ui.py` needs, because its hit-testing lives on canvas items that
+    have to go on existing. `ui_compact` does not need it and does not pay
+    for it.
     """
     if not lite and available():
         try:
-            return GdiCanvas(w, h, alpha, scale)
+            gdi = GdiCanvas(w, h, alpha, scale)
+            return TeeCanvas(canvas, gdi) if tee else gdi
         except (AttributeError, OSError, ValueError):
             # A machine that has GDI+ but would not give us a bitmap. The
             # canvas still draws; it just draws Tk's stairs.

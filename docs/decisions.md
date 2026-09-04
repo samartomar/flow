@@ -120,6 +120,48 @@ shared one typographic string format.
 reason the retry does not fix, or if the frame cost of compositing the panel at
 30 ms shows up in the numbers `docs/speed.md` keeps.
 
+### 2026-09-04 — The shipped surface cannot be composited: it contains a text editor
+
+Asked to give `flow/ui.py` the GDI+ compositing the compact surface has, and
+it was built far enough to find the wall rather than argue about it. Recorded
+because the wall is structural, and somebody will otherwise try again.
+
+**What worked.** `TeeCanvas` — every drawing call to the real `tk.Canvas`
+*and* into a retained display list — solves the problem that stopped the port
+being attempted at all: the canvas keeps every item, so the eighteen
+`tag_bind` sites and the hover tooltips go on working untouched, and the list
+is what a `GdiCanvas` replays. It composited. The pill row came out antialiased
+with its rounded corners and its status label intact.
+
+**What it cost to get there, and all of it is kept**, because these were bugs
+in the painter rather than in the port: GDI+'s closed cardinal spline is not
+Tk's `smooth=True` — the same twelve points render as two different shapes,
+which took the radius off every corner — so `_tk_smooth` computes Tk's own
+quadratic B-spline instead. A string may never wrap (`StringFormatFlagsNoWrap`)
+or `LISTENING` breaks into `LI STENI NG`. And a missing *monospaced* family
+must be replaced by a monospaced one: none of the IBM Plex faces are installed
+here, and `Pill._bar_label` places every glyph itself on a fixed 7 px pitch,
+which a proportional stand-in tears apart.
+
+**The wall.** The shipped design is a one-window overlay: the draft panel and
+the conversation card are `tk.Frame`s inside the pill's own window, so a
+bitmap covering that window must merge their display lists too — which was
+built, at their placement offsets, with per-canvas dirty tracking. And inside
+`Bubble` is `self._editor`, a real `tk.Text`: focusable, editable, with a
+caret and a selection, drawn by Tk into that same window. **A layered window
+shows the bitmap and nothing else**, so the editor would simply not be there.
+Compositing this surface means writing a text editor, and that is not a
+rendering change.
+
+**So the shipped surface stays as it is** — Tk-drawn, aliased, and working —
+and the decision is not "later", it is "not while it edits text in place". The
+compact surface has no such widget, which is not a coincidence: it was drawn
+without one.
+
+**Reopens if** the hand editor moves out of the composited window — a separate
+Toplevel of its own would be enough, and would cost that window its seam with
+the panel.
+
 ### 2026-09-04 — The chord opened the microphone into a loop that never read it
 
 Six reports of "push to talk does not do anything", and the sixth carried the
