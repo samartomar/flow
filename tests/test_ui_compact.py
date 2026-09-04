@@ -1150,14 +1150,18 @@ class TestThePanelDraws(unittest.TestCase):
 class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
     """The right-click menu: three modes with the check on the current one,
     the hints as disabled entries (Tk has no sub-line row), Switch workspace
-    with the path beneath it, Workbench setup with its hint, then the two
-    window rows the canvas does not name."""
+    with the path beneath it, Workbench setup with its hint, and Design — the
+    one row the artboard does not draw, because without it the two surfaces
+    cannot be reached from each other."""
 
-    def build(self, mode=DICTATE, workspace="~/dev/products/flow"):
+    def build(self, mode=DICTATE, workspace="~/dev/products/flow",
+              design="compact"):
         p = pill(mode=mode)
         p.session.workspace = workspace
+        p.session.profile = mock.Mock(design=design)
         m = FakeMenu()
-        with mock.patch.object(uc.tk, "StringVar", FakeVar):
+        with mock.patch.object(uc.tk, "StringVar", FakeVar), \
+                mock.patch.object(uc, "_dark_menu", FakeMenu):
             p._populate_menu(m)
         return p, m
 
@@ -1168,11 +1172,38 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
             ["Type", "Refine", "Ask",
              "tap the pill to cycle",
              "Switch workspace", "~/dev/products/flow",
-             "Workbench setup", "mic, CLI, where it pastes"])
+             "Workbench setup", "mic, CLI, where it pastes",
+             "Design"])
         # The hints are disabled entries, never verbs.
         for hint in ("tap the pill to cycle", "~/dev/products/flow",
                      "mic, CLI, where it pastes"):
             self.assertIsNone(m.commands[hint])
+
+    def test_design_names_both_surfaces_and_marks_the_one_running(self):
+        # The shipped design's own Design menu, in this surface's idiom: the
+        # same names and the same `(current)` marker, so somebody who has seen
+        # one recognises the other.
+        _p, m = self.build(design="compact")
+        sub = m.cascades["Design"]
+        self.assertEqual(sub.order, ["Current", "Compact   (current)"])
+
+    def test_design_writes_the_choice_and_saves_it(self):
+        p, m = self.build()
+        m.cascades["Design"].commands["Current"]()
+        self.assertEqual(p.session.profile.design, "current")
+        p.session.profile.save.assert_called_once_with()
+
+    def test_a_design_save_that_failed_is_visible(self):
+        p, m = self.build()
+        p.session.profile.save.return_value = False
+        m.cascades["Design"].commands["Current"]()
+        self.assertEqual(p._flash, uc.FLASH_FRAMES)
+
+    def test_no_profile_writes_nothing_and_does_not_raise(self):
+        p, m = self.build()
+        p.session.profile = None
+        m.cascades["Design"].commands["Current"]()
+        self.assertEqual(p._flash, 0)
 
     def test_the_menu_ends_where_the_artboard_ends(self):
         # "There is no preferences window and no tray menu. The pill is the
@@ -1180,8 +1211,10 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
         # (Workspace.dc.html). Hide to tray and Quit were rows here and are
         # not on the canvas; they live on the tray icon, which `_start_tray`
         # raises at launch so that removing them costs nobody the way out.
+        # Design is the one row let back in, on 2026-09-04 and for a named
+        # reason. Everything else the canvas leaves out is still out.
         _p, m = self.build()
-        self.assertEqual(m.order[-1], "mic, CLI, where it pastes")
+        self.assertEqual(m.order[-1], "Design")
         for gone in ("Hide to tray", "Quit"):
             self.assertNotIn(gone, m.order)
 
@@ -1216,7 +1249,8 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
         m = FakeMenu()
         m.delete = mock.Mock()
         p._menu = m
-        with mock.patch.object(uc.tk, "StringVar", FakeVar):
+        p.session.profile = mock.Mock(design="compact")
+        with mock.patch.object(uc.tk, "StringVar", FakeVar),                 mock.patch.object(uc, "_dark_menu", FakeMenu):
             p._on_menu(mock.Mock(x_root=10, y_root=10))
         m.delete.assert_called_once_with(0, "end")
         self.assertIn("Type", m.radios[0])
@@ -1457,8 +1491,9 @@ class TestNoCliMeansTypeOnly(unittest.TestCase):
     def test_the_menu_greys_refine_and_ask_rather_than_hiding_them(self):
         p = pill(mode=DICTATE)
         p.session._provider = lambda: ""
+        p.session.profile = mock.Mock(design="compact")
         m = mock.Mock()
-        with mock.patch.object(uc.tk, "StringVar", FakeVar):
+        with mock.patch.object(uc.tk, "StringVar", FakeVar),                 mock.patch.object(uc, "_dark_menu", FakeMenu):
             p._populate_menu(m)
         for name in ("Refine", "Ask"):
             m.add_radiobutton.assert_any_call(

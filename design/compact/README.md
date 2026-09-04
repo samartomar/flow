@@ -31,9 +31,13 @@ https://claude.ai/code/artifact/0ab88c75-8b24-455b-b96f-f9e5763a45fc
 - The tray stays (decided 2026-09-03, against Workspace.dc.html's "There is no
   preferences window and no tray menu"): it is the escape hatch if the pill is ever
   dragged somewhere unreachable — hidden must not mean gone. That canvas line is
-  superseded — but only that sentence. The menu *drawing* stands exactly as drawn:
-  three modes, Switch workspace, Workbench setup, and nothing after it. The icon
-  goes up at launch instead, and carries Show and Quit.
+  superseded — but only that sentence. The icon goes up at launch instead, and
+  carries Show and Quit.
+- The menu drawing stands as drawn but for **one row: Design** (decided
+  2026-09-04). `profile.design` picks the surface, the control that writes it was
+  a row in the shipped design's Settings menu, and with compact stored that made
+  the switch unreachable from the only surface running. Two designs somebody can
+  choose between have to be reachable from each other.
 
 ## Rebuild and re-save
 

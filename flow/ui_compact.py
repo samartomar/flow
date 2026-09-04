@@ -47,6 +47,7 @@ from pathlib import Path
 
 from . import tray
 from . import paint
+from .profile import DESIGNS, DESIGN_DEFAULT
 from .session import CONVERSE, DICTATE, REFINE, Session, State
 
 # The hues and the fonts are ui.py's own, imported rather than restated: the
@@ -1288,13 +1289,20 @@ class CompactPill(tk.Tk):
         through the chooser API (`toggle_mode(to=)`); a flip cannot serve
         "choose Refine" in a three-mode world.
 
-        **This is the whole menu.** It ends at Workbench setup because the
-        artboard ends there — "this is everything it offers" is the line under
-        it. Hide to tray and Quit were here and are not on the canvas, so they
-        are gone from it; both live on the tray icon's own menu, which
-        `_start_tray` now raises at launch rather than waiting for a menu row
-        that no longer exists to ask for it. Quit is also the `quit` hotkey,
-        which needs no focus and no menu at all.
+        **One row is here that the artboard does not draw**, and it is the
+        one that lets somebody leave. `profile.design` decides which surface
+        launches, and the control that writes it is a row in the *shipped*
+        design's Settings menu — so with compact stored, the only switch there
+        was lived inside the surface you could no longer reach. A one-way
+        door, and `--design current` typed at a shell is not an answer for
+        somebody who launched Flow from a shortcut. The owner relaxed the
+        artboard's "everything it offers" for exactly this on 2026-09-04; the
+        two designs are reachable from each other or they are not two designs
+        somebody can choose between.
+
+        Nothing else was let back in. Hide to tray and Quit are still gone —
+        the tray icon carries those, raised at launch by `_start_tray`, and
+        Quit is also the `quit` hotkey, which needs neither focus nor menu.
         """
         current = self.session.mode
         # On the instance, not the stack: a Tk variable dies with the frame
@@ -1320,6 +1328,52 @@ class CompactPill(tk.Tk):
         m.add_separator()
         m.add_command(label="Workbench setup", command=self._open_setup)
         m.add_command(label="mic, CLI, where it pastes", state="disabled")
+        m.add_separator()
+        self._design_menu(m)
+
+    def _design_menu(self, parent) -> None:
+        """Which surface the *next* launch draws, switchable from this one.
+
+        The shipped design's `_design_menu` (flow/ui.py:3073) in this surface's
+        idiom, and deliberately the same shape: the same names, the same
+        `(current)` marker, and the same promise about when it takes effect. A
+        design's whole window tree is built in its constructor — `__main__`
+        picks the class before the first frame — so the only honest thing a
+        press can do is write the name and say that it lands next time.
+
+        Where the shipped one notes into its bubble, this one prints: a
+        wordless pill has nowhere to put a sentence, and this sentence has to
+        be read or the switch reads as a press that did nothing.
+        """
+        sub = _dark_menu(parent)
+        profile = getattr(self.session, "profile", None)
+        here = getattr(profile, "design", DESIGN_DEFAULT)
+        for name in DESIGNS:
+            sub.add_command(
+                label=name.capitalize() + ("   (current)" if name == here
+                                           else ""),
+                command=lambda n=name: self._choose_design(n),
+            )
+        parent.add_cascade(label="Design", menu=sub)
+
+    def _choose_design(self, name: str) -> None:
+        """Store `name` as the design and say when it takes effect."""
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            # `--no-profile`. The choice has nowhere to live past this process
+            # and a design switch exists only at launch, so there is nothing
+            # even a session-local apply could mean. Said, not swallowed.
+            print("flow: design not saved - launched with --no-profile",
+                  flush=True)
+            return
+        profile.design = name
+        # A setting somebody chooses once, so a save that failed has to be
+        # visible now rather than at the next launch that ignores it.
+        if profile.save():
+            print(f"flow: design: {name} - launches next time", flush=True)
+        else:
+            self._flash = FLASH_FRAMES
+            print(f"flow: could not save {profile.path}", flush=True)
 
     def _on_menu(self, e=None) -> None:
         """Right-click — the only menu the design allows (Workspace.dc.html).

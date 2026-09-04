@@ -120,6 +120,37 @@ shared one typographic string format.
 reason the retry does not fix, or if the frame cost of compositing the panel at
 30 ms shows up in the numbers `docs/speed.md` keeps.
 
+### 2026-09-04 — The compact menu gets one row the artboard does not draw
+
+`Workspace.dc.html` says "this is everything it offers", and on 2026-09-03 the
+compact menu was trimmed to exactly that. It cost more than it looked like.
+
+`profile.design` decides which surface launches, and the control that writes it
+is **Settings → Design in the shipped design's menu** — which is real, rendered
+and photographed (`.shots/16-menu-settings.png`), and completely unreachable
+once `compact` is the stored value. The only switch lived inside the surface you
+had just switched away from. The owner asked where v1 had gone, and the honest
+answer was "behind a door that only opens from the other side".
+
+**So Design is a cascade on the compact menu too**, mirroring the shipped one
+row for row: the same names, the same `(current)` marker, the same promise that
+it lands next launch. Nothing else came back — Hide to tray and Quit are still
+the tray icon's, and the artboard is still the authority on everything the menu
+draws above this row.
+
+**The general rule this is an instance of.** A surface may leave out anything
+the drawing leaves out *except the way out of itself*. An escape hatch that
+lives only in the state you are trying to leave is not an escape hatch.
+
+**Two things the episode also taught.** `--design current` is not an answer for
+somebody who launched from a shortcut, and a menu row with no test is a row
+nobody knows is missing: `_design_menu` had shipped on 2026-09-03 with no test
+asserting it appears anywhere, so the claim that the shipped design could switch
+rested on reading the source. It has tests now, on both surfaces.
+
+**Reopens if** the two designs ever stop being a user-visible choice — one
+surface needs no switch, and the row goes with the choice.
+
 ### 2026-09-04 — GDISCALED does nothing for a Tk surface, measured
 
 The compact surface renders at native resolution (see above); the shipped one
