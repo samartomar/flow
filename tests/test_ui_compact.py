@@ -971,7 +971,10 @@ class TestTheRefinesWholeArc(unittest.TestCase):
         p._panel_mode = REFINE
         p._panel_result = "the shaped prompt"
         p.paste_target = 0xBEEF
-        p._panel_click(mock.Mock(x=uc.SEND_RECT[0] + 4, y=uc.SEND_RECT[1] + 4))
+        # Off the layout, not the module constant: the footer travels with the
+        # band's bottom edge and the band travels with its text.
+        send_rect = p._panel_layout().send
+        p._panel_click(mock.Mock(x=send_rect[0] + 4, y=send_rect[1] + 4))
         self.assertEqual(sent, [("the shaped prompt", 0xBEEF)])
         self.assertFalse(p._panel_open)
 
@@ -1101,10 +1104,14 @@ class TestThePanelCloses(unittest.TestCase):
     def test_the_close_chip_closes_and_only_the_band_hit_tested(self):
         p = panel_pill(mode=CONVERSE)
         p._talk_start()
-        x = (uc.CLOSE_RECT[0] + uc.CLOSE_RECT[2]) // 2
-        p._on_press(mock.Mock(x=x, y=(uc.CLOSE_RECT[1] + uc.CLOSE_RECT[3]) // 2,
+        close = p._panel_layout().close
+        x = (close[0] + close[2]) // 2
+        p._on_press(mock.Mock(x=x, y=(close[1] + close[3]) // 2,
                               x_root=0, y_root=0))
         self.assertFalse(p._panel_open)
+        # The close never moves whatever the band does: it is in the strip,
+        # which is the band's top row.
+        self.assertEqual(close, uc.CLOSE_RECT)
         # And a band click that hits no chip is not a hold either — the foot
         # is the holdable part, the band is buttons and text.
         p._open_panel()
@@ -1120,7 +1127,9 @@ class TestTheFootStaysHoldable(unittest.TestCase):
         p = panel_pill(State.IDLE, mode=CONVERSE)
         p._talk_start()
         p._talk_end(send=False)
-        p._on_press(mock.Mock(x=60, y=uc.PANEL_H + 17, x_root=0, y_root=0))
+        # Below the band, whatever height the band came out at.
+        foot = p._panel_layout().band_h + 17
+        p._on_press(mock.Mock(x=60, y=foot, x_root=0, y_root=0))
         self.assertIsNotNone(p._press_at)
 
     def test_a_hold_while_the_panel_is_up_asks_a_reply(self):
@@ -1151,7 +1160,10 @@ class TestTheWindowGrowsAndReturns(unittest.TestCase):
     def test_the_geometry_is_400_wide_with_the_band_120_without(self):
         p = panel_pill(mode=CONVERSE, x=100, y=400)
         p._open_panel()
-        # The foot's bottom edge anchors: 400 + 34 - 234 = 200.
+        # Nothing has been said, so the band is at its floor — `PANEL_H`, the
+        # resting proportions the artboards drew. The foot's bottom edge
+        # anchors: 400 + 34 - 234 = 200.
+        self.assertEqual(p._panel_h(), uc.PANEL_H)
         p.geometry.assert_called_once_with("400x234+100+200")
         self.assertEqual((p._shell_w, p._shell_h), (uc.PANEL_W, 234))
         # Closing returns to 120×34 on the same capsule top — which needs no
@@ -1175,9 +1187,10 @@ class TestThePanelsChips(unittest.TestCase):
         p = panel_pill(mode=CONVERSE)
         p._panel_open = True
         p._panel_result = "the answer"
+        copy_rect = p._panel_layout().copy
         with mock.patch.object(uc, "_copy_to_clipboard",
                                return_value="") as copy:
-            p._panel_click(mock.Mock(x=uc.COPY_RECT[0] + 4, y=uc.COPY_RECT[1] + 4))
+            p._panel_click(mock.Mock(x=copy_rect[0] + 4, y=copy_rect[1] + 4))
         copy.assert_called_once_with(p, "the answer")
         self.assertTrue(p._panel_open)  # "Copy leaves the panel up"
 
@@ -1203,8 +1216,9 @@ class TestThePanelsChips(unittest.TestCase):
         p = panel_pill(mode=CONVERSE)
         p._panel_open = True
         p._panel_result = "the answer"
+        send_rect = p._panel_layout().send
         with mock.patch.object(p, "_panel_send") as send:
-            p._panel_click(mock.Mock(x=uc.SEND_RECT[0] + 4, y=uc.SEND_RECT[1] + 4))
+            p._panel_click(mock.Mock(x=send_rect[0] + 4, y=send_rect[1] + 4))
         send.assert_not_called()
         self.assertFalse(uc.PANEL_SPEC[CONVERSE]["send"])
 
@@ -1294,18 +1308,19 @@ class TestThePanelDraws(unittest.TestCase):
         # Square on the join, round below it: the foot's top corners are
         # exactly the band's own corners, and its bottom is a pair of
         # quarter-circles (gen.py `.foot`: border-radius 0 0 17px 17px).
-        (pts, bbox), = [b for b in bodies(p, uc.SHELL)
-                        if b[1][1] == uc.PANEL_H]
-        self.assertEqual(bbox, (0, uc.PANEL_H, uc.PANEL_W,
-                                uc.PANEL_H + uc.PILL_H))
-        self.assertIn((0, uc.PANEL_H), pts)
-        self.assertIn((uc.PANEL_W, uc.PANEL_H), pts)
+        # The join is wherever the band ended, not a constant.
+        band = p._panel_layout().band_h
+        (pts, bbox), = [b for b in bodies(p, uc.SHELL) if b[1][1] == band]
+        self.assertEqual(bbox, (0, band, uc.PANEL_W, band + uc.PILL_H))
+        self.assertIn((0, band), pts)
+        self.assertIn((uc.PANEL_W, band), pts)
         # The foot's face: forty bars, not the capsule's fifteen.
         self.assertEqual(len(meter_bars(p, uc.DIM)), uc.BARS_FOOT)
 
     def test_the_state_ring_wraps_the_foot_including_the_top(self):
         p = self.open(state=State.LISTENING)
         p._draw()
+        band = p._panel_layout().band_h
         # One closed 1 px trace round the foot — the top run included, which
         # is the box-shadow wrapping a side that `border-top: 0` does not.
         (ring, width), = strokes(p, uc.HEARING)
@@ -1313,10 +1328,10 @@ class TestThePanelDraws(unittest.TestCase):
         self.assertEqual(ring[0], ring[-1])
         # And the panel band above keeps its own neutral border: nothing
         # state-coloured up there.
-        self.assertTrue(all(y >= uc.PANEL_H for _x, y in ring))
+        self.assertTrue(all(y >= band for _x, y in ring))
         # The foot's own border stops at the seam: open, not closed.
         (outer, _w), = [st for st in strokes(p, uc.RING_OUTER)
-                        if st[0][0][1] >= uc.PANEL_H]
+                        if st[0][0][1] >= band]
         self.assertNotEqual(outer[0], outer[-1])
 
 
@@ -1806,6 +1821,18 @@ class TestRefineFailed(unittest.TestCase):
         # Unrefined text beats no text.
         self.assertEqual(sent, ["make the pill not show any controls"])
         self.assertFalse(p._panel_open)
+
+    def test_the_failure_draws_without_the_gold_tag(self):
+        # The suppression is the layout's now (`result_tag_y` is None on a
+        # failure), so the block starts where the tag would have been rather
+        # than leaving a gap that claims a refinement that did not happen.
+        p = self.failed()
+        layout = p._panel_layout()
+        self.assertIsNone(layout.result_tag_y)
+        p._draw()
+        texts = [t[1] for t in p.canvas.texts]
+        self.assertNotIn("refined for this repo", texts)
+        self.assertIn("refine failed (timed out) — draft unchanged", texts)
 
     def test_copy_on_a_failure_copies_the_raw_text_too(self):
         p = self.failed()

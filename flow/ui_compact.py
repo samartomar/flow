@@ -44,6 +44,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 import traceback
 from pathlib import Path
+from typing import NamedTuple
 
 from . import tray
 from . import paint
@@ -232,9 +233,12 @@ BAR_MAX_HALF = 7.0  # half-height at full level — 14 px of travel inside 34
 #: The docked panel (Refine.dc.html, Ask.dc.html): 400 px of band *above* the
 #: pill, which becomes its foot — one window, one seam, the foot still
 #: holdable for "say more" / reply, closed by Send / Esc / click-outside
-#: (design/compact/README.md). The band is a fixed height: the artboards grow
-#: with their text, and the residual delta is that tkinter here wraps to a
-#: line budget instead — see `LINE_CHARS` / `_fit`.
+#: (design/compact/README.md).
+#:
+#: `PANEL_H` is the band's **minimum**, not its height. The artboards grow
+#: with their text and this band now does too (`_panel_layout`); 200 is what
+#: the resting proportions were drawn at, so a panel whose blocks are short
+#: still photographs as the artboard did.
 PANEL_W = 400
 PANEL_H = 200
 
@@ -252,27 +256,70 @@ STRIP = "#15181D"
 #: mono, 10 px, grey. Tk has no letterspacing; the size carries the read.
 FONT_TAG = (FONT_MONO, -10)
 
-#: Panel layout rows, top to bottom (gen.py `.strip`, the heard/result blocks,
-#: the footer). Fixed, because the band is.
+#: The panel's vertical rhythm, measured off gen.py's Refine and Ask
+#: artboards. These are *spacings*, not rows: the rows themselves are computed
+#: per frame by `_panel_layout`, because the band grows with its text.
+#:
+#:   STRIP_H       the workspace strip (gen.py `.strip`: 10 px padding on an
+#:                 11 px line, plus its divider)
+#:   PANEL_PAD     the strip's bottom edge down to the first tag's centre
+#:                 (`padding: 14px 16px 12px` on the block, minus the tag's
+#:                 own half-height)
+#:   TAG_GAP       a tag's centre down to the first line of its block
+#:   BLOCK_GAP     the heard block's last line down to the result block —
+#:                 the air `.shots/11-compact-refine-panel.png` had none of,
+#:                 which put "refined for this repo" on top of the dictation
+#:   FOOT_PAD      above and below the footer chips (gen.py's
+#:                 `padding: 0 16px 14px`)
 STRIP_H = 35
-HEARD_TAG_Y = 50
-HEARD_Y = 66
-RESULT_Y = 108
-FOOTER_Y = 156
+PANEL_PAD = 15
+TAG_GAP = 16
+BLOCK_GAP = 10
+FOOT_PAD = 14
 CHIP_H = 26
 PAD_X = 16
-COPY_RECT = (PAD_X, FOOTER_Y, 72, FOOTER_Y + CHIP_H)
-SEND_RECT = (PANEL_W - 74, FOOTER_Y, PANEL_W - 16, FOOTER_Y + CHIP_H)
+#: One line of body text where nothing can be asked to measure one — a bare
+#: fixture, or a painter that refused. FONT_BODY is 13 px and its line box is
+#: about 18; `_line_height` asks the painter first, because the painter is
+#: what will lay the glyphs down.
+LINE_NOMINAL = 18
+
+#: The close cross, in the strip. The one panel rect that never moves: the
+#: strip is the band's top row and the band grows downward from it.
 CLOSE_RECT = (PANEL_W - 30, 8, PANEL_W - 6, 30)
+
+
+def _chip_rects(footer_y: int) -> tuple:
+    """`(copy, send)` for a footer whose chips start at `footer_y`.
+
+    One piece of arithmetic, so the resting constants below and the live
+    layout cannot drift: Copy on the left behind the hint, Send hard right
+    (Refine.dc.html's footer row).
+    """
+    return ((PAD_X, footer_y, 72, footer_y + CHIP_H),
+            (PANEL_W - 74, footer_y, PANEL_W - 16, footer_y + CHIP_H))
+
+
+#: The footer's two chips at the *resting* band — what an importer means by
+#: "where Copy is" when nothing has been said yet. A live frame reads them off
+#: `_panel_layout`, which is the authority: the footer travels with the band's
+#: bottom edge, and the band's bottom edge travels with its text.
+COPY_RECT, SEND_RECT = _chip_rects(PANEL_H - FOOT_PAD - CHIP_H)
+
 #: The panel's text budget. Tk wraps canvas text by pixel width and happily
 #: wraps *past the bottom of the block it is given* — `.shots/11` drew a
 #: three-line answer through the footer chips before this was measured. So the
 #: band wraps itself, in characters: FONT_BODY measures about 7 px a
-#: character, the blocks are 356-368 px wide, and the line counts are what the
-#: fixed rows below leave between a block's first row and the next block's.
+#: character and the blocks are 356-368 px wide.
+#:
+#: The caps are what a band may grow *to*, not what it is cut to. Two lines was
+#: the fixed band's leftovers, and it meant a ten-line answer showed two and a
+#: refined prompt could not be read before Send pasted it. Twelve is the
+#: artboards' own scale — 216 px of result at 18 px a line, which with the
+#: heard block, the footer and the foot still stands on a 1080 display.
 LINE_CHARS = 52
-HEARD_LINES = 2
-RESULT_LINES = 2
+HEARD_LINES_MAX = 4
+RESULT_LINES_MAX = 12
 
 #: The mode → panel map: which modes raise the panel on a hold, and what their
 #: panel looks like. The mechanism (open on hold, `heard` ← partials and the
@@ -450,31 +497,87 @@ def _hit(rect, x, y) -> bool:
     return x1 <= x < x2 and y1 <= y < y2
 
 
-def _fit(text: str, line_chars: int, max_lines: int) -> str:
-    """`text` word-wrapped to at most `max_lines` lines of about `line_chars`,
-    with an ellipsis on the last when there was more.
+def _wrap(text: str, line_chars: int):
+    """Every line `text` needs at about `line_chars`, one at a time.
 
-    The fixed-height band's answer to Tk's width-only wrapping: wrapped here,
-    on explicit newlines, the text cannot spill into the block below it — see
-    `LINE_CHARS` for what this costs.
+    Paragraph by paragraph on the explicit newlines, because **the shape is
+    part of the text**. This used to be `text.split()`, which collapses the
+    lot into one run of words — so Refine.dc.html's own worked example, a lead
+    line and three bullets, drew as a single paragraph while Send pasted the
+    real thing. A blank line stays a blank line and a line's leading
+    indentation is kept and paid for out of its own width, so the artboard's
+    indented "- fix the tests" is still indented and still fits.
     """
-    words, lines, cur = text.split(), [], ""
-    truncated = False
-    for word in words:
-        trial = f"{cur} {word}".strip()
-        if cur and len(trial) > line_chars:
-            lines.append(cur)
-            if len(lines) == max_lines:
-                truncated = True
-                break
-            cur = word
-        else:
-            cur = trial
-    if truncated:
-        lines[-1] = lines[-1].rstrip() + "…"
-    else:
-        lines.append(cur)
+    for para in text.split("\n"):
+        body = para.lstrip()
+        indent = para[:len(para) - len(body)]
+        words = body.split()
+        if not words:
+            yield ""  # a paragraph break: a row of its own, as it is in the text
+            continue
+        room = max(1, line_chars - len(indent))
+        cur = ""
+        for word in words:
+            trial = f"{cur} {word}".strip()
+            if cur and len(trial) > room:
+                yield indent + cur
+                cur = word
+            else:
+                cur = trial
+        yield indent + cur
+
+
+def _fit(text: str, line_chars: int, max_lines: int) -> str:
+    """`text` wrapped to at most `max_lines` lines of about `line_chars`, with
+    an ellipsis on the last when there was more.
+
+    The band's answer to Tk's width-only wrapping: wrapped here, on the block's
+    own line budget, the text cannot spill into the block below it. The budget
+    is a cap rather than a fixed row count now — `_panel_layout` grows the band
+    to whatever this returns, up to it.
+    """
+    lines: list[str] = []
+    for line in _wrap(text.strip("\n").rstrip(), line_chars):
+        if len(lines) == max_lines:
+            lines[-1] = lines[-1].rstrip() + "…"
+            break
+        lines.append(line)
     return "\n".join(lines)
+
+
+def _lines(fitted: str) -> int:
+    """How many rows a `_fit` result occupies. Empty text is no rows at all,
+    which is what lets a block with nothing in it cost the band nothing."""
+    return len(fitted.split("\n")) if fitted else 0
+
+
+class _Layout(NamedTuple):
+    """Where every row of the panel goes this frame, and how tall the band is.
+
+    One source of truth for the band: `_draw_panel` draws from it, `_panel_h`
+    sizes the window from it, `_panel_click` and `_on_press` hit-test against
+    it. Before this they were module constants that each described the same
+    200 px band in a slightly different way, and the arithmetic did not close
+    — the result's second line at 124 + 18 + 18 = 160 ran under the footer
+    chips at 156 (`.shots/11-compact-refine-panel.png`).
+
+    `heard` and `result` are the wrapped text, not the raw: the height was
+    computed from these exact strings, so the block cannot draw more rows than
+    the band was grown for.
+    """
+
+    band_h: int
+    line_h: int
+    heard: str
+    heard_tag_y: int | None
+    heard_y: int
+    result: str
+    result_tag_y: int | None
+    result_y: int
+    footer_y: int
+    copy: tuple
+    send: tuple
+    close: tuple = CLOSE_RECT
 
 
 class _Palette:
@@ -558,6 +661,12 @@ class CompactPill(tk.Tk):
     _drag = (0, 0)
     #: `tkfont.Font(...).measure` per font spec, built on demand by `_measure`.
     _fonts: dict = {}
+    #: One line's height per font spec, asked of the painter once by
+    #: `_line_height` — the same cache `_fonts` is and for the same reason: the
+    #: panel's layout is recomputed every frame and a measurement that cannot
+    #: change between frames should be paid for once. A bare fixture reads the
+    #: empty class default and gets `LINE_NOMINAL` back.
+    _line_h: dict = {}
     #: Where the frame draws, and where a box's frame draws. `None` on a bare
     #: fixture, which never presents; `_draw` sets `paint` from the canvas in
     #: `__init__`, and the tests hand it their recording fake directly.
@@ -748,6 +857,7 @@ class CompactPill(tk.Tk):
         self._press_talking = False
         self._drag = (0, 0)
         self._fonts = {}
+        self._line_h = {}
         self._last_draft = ""
         self._send_pending = False
         self._send_since = None
@@ -1684,10 +1794,14 @@ class CompactPill(tk.Tk):
 
         Except where: with the panel open, a press in the band is a chip
         click, never a hold — the foot is the part that stays holdable
-        (README), and the band is the part with buttons on it.
+        (README), and the band is the part with buttons on it. The split is
+        the band's *real* height, not `PANEL_H`: with a tall answer up, the
+        old constant fell inside the band, so a press on the footer chips was
+        read as a press on the foot and started a hold instead of copying.
         """
         if (self._panel_open and e is not None
-                and self.design(getattr(e, "y", self.dev(PILL_H))) < PANEL_H):
+                and self.design(getattr(e, "y", self.dev(PILL_H)))
+                < self._panel_h()):
             self._panel_click(e)
             return
         self._press_at = time.perf_counter()
@@ -2219,6 +2333,106 @@ class CompactPill(tk.Tk):
         """
         return PANEL_SPEC.get(self._panel_mode, PANEL_SPEC[CONVERSE])
 
+    def _line_height(self, spec) -> int:
+        """One line of `spec`, through whatever is drawing.
+
+        Through the painter for `_text_width`'s reason: GDI+ and Tk do not
+        agree on metrics, and the one that will lay the glyphs down is the one
+        whose line box the band has to be built out of. A bare fixture — and a
+        painter that refused — gets `LINE_NOMINAL`, which is what FONT_BODY
+        measures here anyway. "Ag" rather than the text itself: a line box is
+        the font's, not the string's, and asking per string would make the
+        band's height depend on whether the answer happened to contain a
+        descender.
+        """
+        cached = self._line_h.get(spec)
+        if cached is not None:
+            return cached
+        h = LINE_NOMINAL
+        measure = getattr(self.paint, "measure", None)
+        if measure is not None:
+            try:
+                h = max(1, int(round(measure("Ag", spec)[1])))
+            except Exception:
+                h = LINE_NOMINAL
+        self._line_h[spec] = h
+        return h
+
+    def _panel_layout(self) -> _Layout:
+        """Where the band's rows go this frame, and how tall it therefore is.
+
+        **The band grows with its text**, which is what the artboards do and
+        what the fixed 200 px did not: `RESULT_Y` put the result's first line
+        at 124, a second line of an 18 px font ended at 160, and the footer
+        chips began at 156 — so a two-line refined prompt was drawn *through*
+        Copy and Send (`.shots/11-compact-refine-panel.png`). Cutting both
+        blocks to two lines was the other half of the same mistake: an Ask
+        answer of ten lines showed two, and the Refine result — the text Send
+        is about to paste — could not be read before it was sent.
+
+        Top to bottom: the strip, the heard tag where the spec has one, the
+        heard block, air, the result tag and block where there is a result,
+        and the footer pinned to the band's bottom edge. `PANEL_H` is the
+        floor, so short blocks keep the resting proportions the artboards drew.
+
+        The one thing that shrinks it back is the screen: the band grows
+        *upward* from the capsule, so the result's line budget is cut to
+        whatever fits between the capsule's top and the work area's, rather
+        than growing off the top of the display. On a fixture — and on a pill
+        parked against the top edge, where nothing would fit anyway — that
+        room is the minimum band.
+        """
+        spec = self._spec()
+        line_h = self._line_height(FONT_BODY)
+        room = max(PANEL_H, int(self.design(self._capsule_y - self.work[1])))
+        heard = _fit(self._panel_heard, LINE_CHARS, HEARD_LINES_MAX)
+
+        def lay(result_cap: int) -> _Layout:
+            result = _fit(self._panel_result, LINE_CHARS, result_cap)
+            y = STRIP_H + PANEL_PAD
+            heard_tag_y = y if spec["heard_tag"] is not None else None
+            if heard_tag_y is not None:
+                y += TAG_GAP
+            heard_y = y
+            y += _lines(heard) * line_h
+            result_tag_y = None
+            if result:
+                y += BLOCK_GAP
+                if spec["result_tag"] is not None and not self._panel_failed:
+                    # Suppressed on a failure for `_draw_panel`'s reason:
+                    # "refined for this repo" over the CLI's last line would
+                    # claim a refinement that did not happen.
+                    result_tag_y = y
+                    y += TAG_GAP
+            result_y = y
+            y += _lines(result) * line_h
+            band = max(PANEL_H, y + FOOT_PAD + CHIP_H + FOOT_PAD)
+            footer_y = band - FOOT_PAD - CHIP_H
+            copy, send = _chip_rects(footer_y)
+            return _Layout(band, line_h, heard, heard_tag_y, heard_y,
+                           result, result_tag_y, result_y, footer_y,
+                           copy, send)
+
+        out = lay(RESULT_LINES_MAX)
+        if out.band_h > room and _lines(out.result) > 1:
+            # It does not fit above the capsule. Drop whole lines off the
+            # result — the block that grows — rather than let the band leave
+            # the screen; `_fit` puts the ellipsis on whatever is left, so the
+            # cut says it happened. Floored at one line, because a result
+            # block with no rows is a panel that answered nothing.
+            over = out.band_h - room
+            keep = max(1, _lines(out.result) - -(-over // line_h))
+            out = lay(keep)
+        return out
+
+    def _panel_h(self) -> int:
+        """The band's height in the window: 0 with no panel, else the layout's.
+
+        The one number `_sync_shell` needs, and the reason it is a method: the
+        band is no longer a constant anybody can read.
+        """
+        return self._panel_layout().band_h if self._panel_open else 0
+
     def _open_panel(self) -> None:
         """Raise the band above the foot. Idempotent — a reply that reopens a
         closed panel and a fresh hold that reuses an open one both land here.
@@ -2226,6 +2440,12 @@ class CompactPill(tk.Tk):
         Only the flag and the geometry: the text blocks are their own state,
         cleared by the hold that starts fresh (`_talk_start`) and filled by
         the events that have something to say (`_pump_events`).
+
+        Which is why the idempotence earns its keep now that the band grows
+        with its text: a reply landing in an already-open panel comes back
+        through here, and the `_sync_shell` at the end sizes the window to the
+        answer rather than leaving a ten-line result drawn past the bottom of
+        a 234 px window.
         """
         self._panel_open = True
         self._sync_shell()
@@ -2242,8 +2462,10 @@ class CompactPill(tk.Tk):
         self._sync_shell()
 
     def _sync_shell(self) -> None:
-        """Resize the one window around the capsule: 120×34 alone, 400×(200+34)
-        with the band, 18 px taller while Lite's copied notice is showing.
+        """Resize the one window around the capsule: 120×34 alone, 400 wide by
+        the band's own height plus 34 with the panel up, 18 px taller while
+        Lite's copied notice is showing. The band's height is `_panel_h()`,
+        not a constant: it is as tall as its text needs (`_panel_layout`).
 
         The capsule's screen position is the anchor — "the pill never hides
         and never moves" (README) — tracked in `_capsule_off` rather than read
@@ -2254,7 +2476,7 @@ class CompactPill(tk.Tk):
         it stops at the work area's top and bottom rather than at the
         taskbar's face.
         """
-        panel_h = PANEL_H if self._panel_open else 0
+        panel_h = self._panel_h()
         notice_h = NOTICE_H if self._notice else 0
         w = PANEL_W if self._panel_open else PILL_W
         if self._notice:
@@ -2306,13 +2528,19 @@ class CompactPill(tk.Tk):
 
     def _panel_click(self, e) -> None:
         """A press in the band: the only live things there are the strip's
-        close, the footer's Copy, and Send when the mode has one."""
+        close, the footer's Copy, and Send when the mode has one.
+
+        Off the layout, not off the module constants: the footer travels with
+        the band's bottom edge, so the rects a tall panel drew its chips at
+        are the only rects a press on them can be tested against.
+        """
         x, y = self.design(e.x), self.design(e.y)
-        if _hit(CLOSE_RECT, x, y):
+        layout = self._panel_layout()
+        if _hit(layout.close, x, y):
             self._close_panel()
-        elif _hit(COPY_RECT, x, y):
+        elif _hit(layout.copy, x, y):
             self._copy_result()
-        elif self._spec()["send"] and _hit(SEND_RECT, x, y):
+        elif self._spec()["send"] and _hit(layout.send, x, y):
             self._panel_send()
 
     def _panel_text(self) -> str:
@@ -2504,8 +2732,17 @@ class CompactPill(tk.Tk):
         c = self.paint
         c.delete("all")
         if self._panel_open:
-            self._draw_panel(c)
-            self._draw_foot(c)
+            # Sized before it is drawn, and this is the whole of "the window
+            # fits what is on it": the band's height is its text's, and the
+            # text changes on a partial, on the release's draft, on a reply
+            # and on a CLI failure. Syncing here rather than at each of those
+            # four is one place that cannot be forgotten — and `_sync_shell`
+            # no-ops unless the size actually moved, so a resting frame pays
+            # nothing.
+            self._sync_shell()
+            layout = self._panel_layout()
+            self._draw_panel(c, layout)
+            self._draw_foot(c, layout.band_h)
             if self._notice:
                 self._draw_notice(c)
             self._present()
@@ -2616,9 +2853,12 @@ class CompactPill(tk.Tk):
         c.create_text(w // 2, y + NOTICE_H // 2, text=self._notice_text,
                       font=FONT_TAG, fill=DIM)
 
-    def _draw_foot(self, c) -> None:
+    def _draw_foot(self, c, y0: int) -> None:
         """The pill as the panel's foot: the same face, 400 wide, squared on
         the join.
+
+        `y0` is the band's height — where the foot starts — and it is passed
+        rather than read off a constant because the band grows with its text.
 
         gen.py's `.foot`: `border-radius: 0 0 17px 17px`, `border-top: 0`, no
         inset highlight — the seam above is the panel's to draw, and the light
@@ -2627,7 +2867,6 @@ class CompactPill(tk.Tk):
         wraps all four sides. The ring is the foot's, not the window's — the
         panel band above keeps its own neutral border.
         """
-        y0 = PANEL_H
         _capsule(c, 0, y0, PANEL_W, y0 + PILL_H, square_top=True,
                  fill=SHELL, outline="")
         ring = self._ring_colour()
@@ -2685,25 +2924,28 @@ class CompactPill(tk.Tk):
                 c.create_rectangle(x, mid - h, x + BAR_W, mid + h,
                                    fill=shade, outline="")
 
-    def _draw_panel(self, c) -> None:
-        """The 400 px band above the foot: strip, heard, result, footer.
+    def _draw_panel(self, c, layout: _Layout) -> None:
+        """The band above the foot: strip, heard, result, footer.
 
         gen.py's `.shell`: SHELL fill, a 1 px `RING_OUTER` border on the
         rounded top corners (18 px) and the sides, and a `SEAM`-coloured
         bottom border that is the one line between panel and foot — the join
         reads as an internal divider, not two windows touching
-        (flow/ui.py:4985-5000's `seam="top"`, adapted to the capsule). Text is
-        `create_text` with ui.py's own font tuples, wrapped to a line budget
-        by `_fit` rather than by Tk — the band is fixed-height where the
-        artboards grow, and that is the residual delta.
+        (flow/ui.py:4985-5000's `seam="top"`, adapted to the capsule).
+
+        Every row comes from `layout`, which is also what sized the window:
+        the band grows with its text the way the artboards do, and one piece
+        of arithmetic deciding both the height and the rows is what stops a
+        block being drawn somewhere the band does not reach.
         """
         spec = self._spec()
+        band_h = layout.band_h
         # The band, then the seam, then the strip — the foot's fill, drawn
         # after this, covers the border's bottom stroke, which is why the
         # seam is a line of its own rather than the border's fourth side.
-        _round_rect(c, 0, 0, PANEL_W - 1, PANEL_H, (18, 18, 0, 0),
+        _round_rect(c, 0, 0, PANEL_W - 1, band_h, (18, 18, 0, 0),
                     fill=SHELL, outline=RING_OUTER)
-        c.create_line(0, PANEL_H - 1, PANEL_W, PANEL_H - 1, fill=SEAM)
+        c.create_line(0, band_h - 1, PANEL_W, band_h - 1, fill=SEAM)
         _round_rect(c, 1, 1, PANEL_W - 2, STRIP_H, (16, 16, 0, 0),
                     fill=STRIP, outline="")
         c.create_line(0, STRIP_H, PANEL_W, STRIP_H, fill=SEAM)
@@ -2715,56 +2957,57 @@ class CompactPill(tk.Tk):
         c.create_text(PAD_X + 20, STRIP_H // 2, anchor="w",
                       text=ws or "no workspace", font=FONT_TAG,
                       fill=CODE if ws else PLACEHOLDER)
-        c.create_text(CLOSE_RECT[0] - 10, STRIP_H // 2, anchor="e",
+        c.create_text(layout.close[0] - 10, STRIP_H // 2, anchor="e",
                       text="grounded" if ws else "plain talk",
                       font=FONT_TAG, fill=DIM)
-        cx, cy = (CLOSE_RECT[0] + CLOSE_RECT[2]) // 2, STRIP_H // 2
+        cx, cy = (layout.close[0] + layout.close[2]) // 2, STRIP_H // 2
         c.create_line(cx - 4, cy - 4, cx + 4, cy + 4, fill=DIM, width=1)
         c.create_line(cx - 4, cy + 4, cx + 4, cy - 4, fill=DIM, width=1)
         # The heard block: the question, live. Partials draw italic until the
         # release's draft makes them final — the same honesty FONT_PARTIAL
         # gives the shipped bubble.
-        y = HEARD_TAG_Y
-        lines = 3
-        if spec["heard_tag"] is not None:
-            c.create_text(PAD_X, y, anchor="w", text=spec["heard_tag"],
-                          font=FONT_TAG, fill=DIM)
-            y = HEARD_Y
-            lines = HEARD_LINES
-        heard = _fit(self._panel_heard, LINE_CHARS, lines)
-        if heard:
-            c.create_text(PAD_X, y, anchor="nw", text=heard,
+        if layout.heard_tag_y is not None:
+            c.create_text(PAD_X, layout.heard_tag_y, anchor="w",
+                          text=spec["heard_tag"], font=FONT_TAG, fill=DIM)
+        if layout.heard:
+            c.create_text(PAD_X, layout.heard_y, anchor="nw", text=layout.heard,
                           font=FONT_BODY if self._panel_heard_final
                           else FONT_PARTIAL,
                           fill=spec["heard_fill"])
         # The result block: the answer, on its accent bar (Ask.dc.html's
         # card) or under its tag (Refine.dc.html). Nothing at all while the
         # CLI is still working — the foot's blue ring is already saying that.
-        result = _fit(self._panel_result, LINE_CHARS, RESULT_LINES)
+        result = layout.result
         if result:
             accent = spec["result_accent"]
-            if spec["result_tag"] is not None and not self._panel_failed:
+            if layout.result_tag_y is not None:
                 # Refine.dc.html: the tag carries the hue, the text is plain.
-                # Suppressed on a failure — "refined for this repo" over the
-                # CLI's last line would claim a refinement that did not happen.
-                c.create_text(PAD_X, RESULT_Y, anchor="w",
+                # `result_tag_y` is None on a failure — "refined for this repo"
+                # over the CLI's last line would claim a refinement that did
+                # not happen — and the block simply starts where the tag would.
+                c.create_text(PAD_X, layout.result_tag_y, anchor="w",
                               text=spec["result_tag"], font=FONT_TAG,
                               fill=accent)
-                c.create_text(PAD_X, RESULT_Y + 16, anchor="nw", text=result,
+                c.create_text(PAD_X, layout.result_y, anchor="nw", text=result,
                               font=FONT_BODY, fill=TEXT)
             elif spec["result_tag"] is not None:
-                c.create_text(PAD_X, RESULT_Y, anchor="nw", text=result,
+                c.create_text(PAD_X, layout.result_y, anchor="nw", text=result,
                               font=FONT_BODY, fill=TEXT)
             else:
-                # Ask.dc.html's card: a violet left bar, no tag.
+                # Ask.dc.html's card: a violet left bar, no tag. The bar spans
+                # the block it belongs to — it was a fixed 44 px, which under
+                # a one-line answer hung past it and under a long one stopped
+                # a third of the way down.
                 if accent:
-                    c.create_rectangle(PAD_X, RESULT_Y, PAD_X + 2,
-                                       RESULT_Y + 44, fill=accent, outline="")
-                c.create_text(PAD_X + 12, RESULT_Y, anchor="nw", text=result,
-                              font=FONT_BODY, fill=TEXT)
+                    c.create_rectangle(
+                        PAD_X, layout.result_y, PAD_X + 2,
+                        layout.result_y + _lines(result) * layout.line_h,
+                        fill=accent, outline="")
+                c.create_text(PAD_X + 12, layout.result_y, anchor="nw",
+                              text=result, font=FONT_BODY, fill=TEXT)
         # The footer: Copy, the hold hint, and Send in the modes that have one
         # (Refine.dc.html; Ask's footer stops at the hint).
-        x1, y1, x2, y2 = COPY_RECT
+        x1, y1, x2, y2 = layout.copy
         _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
         # gen.py's chip is `{COPY_ICON}Copy` — two offset rounded rectangles,
         # the back one open where the front overlaps it. The label sits after
@@ -2780,7 +3023,7 @@ class CompactPill(tk.Tk):
         c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
                       text=spec["hint"], font=FONT_TAG, fill=DIM)
         if spec["send"]:
-            x1, y1, x2, y2 = SEND_RECT
+            x1, y1, x2, y2 = layout.send
             _round_rect(c, x1, y1, x2, y2, CHIP_H // 2,
                         fill=PRIMARY_FILL, outline="")
             c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Send",
