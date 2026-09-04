@@ -494,14 +494,59 @@ class _MONITORINFO(ctypes.Structure):
     ]
 
 
-def _pointer_monitor(sw: int, sh: int, win=None) -> tuple[tuple, tuple]:
-    """`(full, work)` for the monitor under the mouse, each `(left, top, right, bottom)`.
+def _one_screen(sw: int, sh: int, win=None) -> tuple[tuple, tuple]:
+    """The single rectangle a machine with no `MonitorFromPoint` can answer with.
+
+    Off Windows there is no `rcWork` either, so `full` and `work` collapse into the one
+    Tk can measure. `win` is optional because this has to keep working for the callers
+    that have no window yet.
+    """
+    work = _tk_work_area(win, sw, sh) if win is not None else _work_area(sw, sh)
+    return work, work
+
+
+def _monitor_at(x: int, y: int, sw: int, sh: int, win=None) -> tuple[tuple, tuple]:
+    """`(full, work)` for the monitor holding `(x, y)`, each `(left, top, right, bottom)`.
 
     **Two rectangles, because FluidVoice places against two.** `positionWindow` centres
     on `screen.frame` but sits the overlay on `screen.visibleFrame`, and the asymmetry is
     deliberate: centred on the *physical* display, so it lands where the eye expects it,
     but lifted clear of the Dock. Windows hands back exactly that pair — `rcMonitor` and
     `rcWork` — from one call, so the rule ports without being reinterpreted.
+
+    **Keyed on a point, because two callers ask about two different points.** The pill
+    is placed under the *pointer* at launch (`_pointer_monitor`) and then has to keep
+    being clamped against whichever monitor the *window itself* ended up on — and a drag
+    is exactly the moment those two disagree, because the pointer leads the window
+    across the seam. `MONITOR_DEFAULTTONEAREST` means a point in the gap between two
+    monitors still answers, so a caller never has to check first.
+
+    Coordinates are the virtual screen's, which is what `geometry` and `GetCursorPos`
+    both speak: on a monitor to the right of the primary, `left` is 1920 and not 0.
+
+    Falls back to the primary work area, then to the whole screen, so a machine where
+    the call is unavailable places exactly where it placed before.
+    """
+    try:
+        user32 = ctypes.windll.user32
+        handle = user32.MonitorFromPoint(_POINT(int(x), int(y)),
+                                         _MONITOR_DEFAULTTONEAREST)
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if handle and user32.GetMonitorInfoW(handle, ctypes.byref(info)):
+            full = (info.rcMonitor.left, info.rcMonitor.top,
+                    info.rcMonitor.right, info.rcMonitor.bottom)
+            work = (info.rcWork.left, info.rcWork.top,
+                    info.rcWork.right, info.rcWork.bottom)
+            if full[2] > full[0] and work[2] > work[0]:
+                return full, work
+    except (AttributeError, OSError):
+        pass
+    return _one_screen(sw, sh, win)
+
+
+def _pointer_monitor(sw: int, sh: int, win=None) -> tuple[tuple, tuple]:
+    """`(full, work)` for the monitor under the mouse.
 
     **The monitor under the pointer, not the primary one.** `_work_area` asks
     `SystemParametersInfoW`, which only ever answers for the primary display, so on a
@@ -511,30 +556,17 @@ def _pointer_monitor(sw: int, sh: int, win=None) -> tuple[tuple, tuple]:
     in the notch path does the same), and the pointer is the right proxy: it is where
     the user's attention is, and it costs nothing to ask.
 
-    Falls back to the primary work area, then to the whole screen, so a machine where
-    the call is unavailable places exactly where it placed before.
+    The cursor is read here and the monitor arithmetic is `_monitor_at`'s: a window that
+    has been dragged asks the same question about its own centre, and one of the two
+    rectangles being wrong is the whole width of a monitor either way.
     """
     pt = _POINT()
     try:
-        user32 = ctypes.windll.user32
-        if user32.GetCursorPos(ctypes.byref(pt)):
-            handle = user32.MonitorFromPoint(pt, _MONITOR_DEFAULTTONEAREST)
-            info = _MONITORINFO()
-            info.cbSize = ctypes.sizeof(_MONITORINFO)
-            if handle and user32.GetMonitorInfoW(handle, ctypes.byref(info)):
-                full = (info.rcMonitor.left, info.rcMonitor.top,
-                        info.rcMonitor.right, info.rcMonitor.bottom)
-                work = (info.rcWork.left, info.rcWork.top,
-                        info.rcWork.right, info.rcWork.bottom)
-                if full[2] > full[0] and work[2] > work[0]:
-                    return full, work
+        if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+            return _monitor_at(pt.x, pt.y, sw, sh, win)
     except (AttributeError, OSError):
         pass
-    # Off Windows there is no `MonitorFromPoint` and no `rcWork`, so the two rectangles
-    # collapse into the one Tk can answer for. `win` is optional because the fallback
-    # has to keep working for the callers that have no window yet.
-    work = _tk_work_area(win, sw, sh) if win is not None else _work_area(sw, sh)
-    return work, work
+    return _one_screen(sw, sh, win)
 
 
 #: `GetSystemMetrics` indices for the bounding box of every monitor together.

@@ -114,6 +114,12 @@ def pill(state=State.IDLE, *, armed=True, mode=DICTATE, **attrs):
     # room for its strip — the same reason `panel_pill` mocks the Tk calls
     # `_sync_shell` makes. Tests that care about the strip use `panel_pill`.
     p._sync_shell = mock.Mock()
+    # And no window to ask a monitor about: `_frame` re-asks every fourth
+    # frame, through `winfo_screenwidth`, which on a `__new__`-built instance
+    # recurses through `tk.Misc.__getattr__` rather than answering. Tests that
+    # care about the monitor are in `test_compact_screen.py` and put the real
+    # method back, the way `panel_pill` puts back `_sync_shell`.
+    p._sync_monitor = mock.Mock()
     p.session = session(state=state, mode=mode,
                         capturing=attrs.pop("capturing", False),
                         loading=attrs.pop("loading", False))

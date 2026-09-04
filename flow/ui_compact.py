@@ -91,11 +91,13 @@ from .ui import (
     _copy_to_clipboard,
     _dark_menu,
     _mix,
+    _monitor_at,
     _no_activate,
     _pointer_monitor,
     _round_rect as _tk_round_rect,
     _shell_window,
     _user32,
+    _virtual_desktop,
     foreground_hwnd,
     owned_by_flow,
     toplevel_hwnd,
@@ -576,8 +578,19 @@ class CompactPill(tk.Tk):
     #: The monitor this window is placed against, as the two rectangles the
     #: shipped design places against — `full` to centre on, `work` to stand on.
     #: Class defaults so a `__new__`-built fixture can read them without a Tk.
+    #: Refreshed by `_sync_monitor`, because a pill that can be dragged can be
+    #: dragged onto another monitor and these were read once, in `__init__`.
     full = (0, 0, 1920, 1080)
     work = (0, 0, 1920, 1080)
+    #: Every monitor's bounding box — what a *drag* may cross, as against the
+    #: one monitor a placed window is clamped into. `None` until a
+    #: `_sync_monitor` has answered, which is what makes `_move_window` fall
+    #: back to `work` on a fixture that has no Win32 to ask.
+    desktop = None
+    #: `_sync_monitor`'s frame counter, on the class for the reason all of
+    #: these are: `_frame` increments it, and a fixture that drives `_frame`
+    #: directly has no `__init__` to have set it.
+    _frame_no = 0
     #: The right-click menu, built in `__init__`. None on a fixture, and
     #: `_on_menu` checks rather than assuming. `_mode_var` is the radios'
     #: tick, on the instance because a Tk variable dies with the frame that
@@ -924,6 +937,7 @@ class CompactPill(tk.Tk):
         if not self._drain_hotkeys():
             return
         self._drain_tray()
+        self._sync_monitor()
         self._track_target()
         if self.armed:
             self.session.tick()
@@ -959,6 +973,55 @@ class CompactPill(tk.Tk):
         if key != self._drawn_key:
             self._drawn_key = key
             self._draw()
+
+    def _sync_monitor(self) -> None:
+        """Which monitor the *window* is on, re-asked every fourth frame.
+
+        `self.full` and `self.work` were read once, in `__init__`, off the
+        pointer — and then never again for the life of the process. Everything
+        that keeps this surface on screen clamps against them: `_move_window`'s
+        drag bounds, `_sync_shell`'s four edges, the box's right edge. So a
+        pill dragged to a second monitor spent the rest of the session being
+        clamped into a rectangle it had left, and the first panel it opened
+        was thrown back onto the primary display. That is not a rounding
+        error; it is the whole width of a monitor.
+
+        **Keyed on the window, where `Pill._sync_monitor` (flow/ui.py:4233) is
+        keyed on the pointer.** The shipped design re-places its stack when the
+        pointer changes screen, so the pointer *is* the question there. This
+        one is dragged by hand and stays where it was put, so the question is
+        where the capsule is standing — and during a drag those two differ for
+        as long as the seam takes to cross. The point asked about is the
+        capsule's centre in device pixels: the window is 400 px wide with the
+        band up and the capsule is 120, so asking about the window's corner
+        near a seam would hand the far monitor's rectangle to a pill standing
+        on this one.
+
+        Every fourth frame (~120 ms), for the reason `Pill._frame` states at
+        flow/ui.py:4318: the question is three ctypes calls, the answer changes
+        a few times an hour, and a tenth of a second is fast enough to follow a
+        window across a seam.
+        """
+        if not self._alive:
+            # The tray's Quit is drained one line above the call to this, and
+            # it destroys the window inside the frame that is still running —
+            # so this is the first line afterwards that asks Tk for anything,
+            # and "application has been destroyed" would land as a traceback
+            # on the console of somebody who has just pressed quit. `_present`
+            # catches the same thing at the other end of the frame.
+            return
+        self._frame_no += 1
+        if self._frame_no % 4 != 1:
+            return
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.full, self.work = _monitor_at(
+            self._shell_xy[0] + self.dev(self._shell_w) // 2,
+            self._capsule_y + self.dev(PILL_H) // 2, sw, sh, self)
+        # What a drag is allowed to cross: every monitor there is, the union
+        # `park_spot` already places against. Asked here rather than inside
+        # `_move_window` so a drag costs no Win32 calls of its own — a motion
+        # event arrives far more often than every 120 ms.
+        self.desktop = _virtual_desktop(sw, sh)
 
     def _drain_hotkeys(self) -> bool:
         """Act on every hotkey that arrived since the last drain. False after a quit.
@@ -1462,7 +1525,7 @@ class CompactPill(tk.Tk):
         self._move_window(x - self._drag[0], y - self._drag[1])
 
     def _move_window(self, x: int, y: int) -> None:
-        """Put the window's top-left at `(x, y)`, clamped to the screen.
+        """Put the window's top-left at `(x, y)`, clamped to the desktop.
 
         Its own method because it is the only part of a drag that touches Tk,
         and `_on_motion`'s other job — telling a drag from a hold — has to
@@ -1470,8 +1533,18 @@ class CompactPill(tk.Tk):
         be thrown somewhere only the tray could get it back from; the window
         is the capsule plus whatever the panel and the notice have added, so
         the bound is the drawn size and not `PILL_W`/`PILL_H`.
+
+        **Clamped to every monitor, not to the one it is on.** "Drag it
+        anywhere" (Main.dc.html), and `self.work` is one screen: with that as
+        the bound the pill stopped dead at the seam, because the pointer had
+        crossed to the next monitor and the window was being pinned to the
+        edge of this one — which reads as a pill that has snagged on nothing.
+        `desktop` is the union `park_spot` already places against, refreshed by
+        `_sync_monitor`, and the same sync brings `work` up to date a frame or
+        four after the capsule lands on the other side. `None` on a fixture
+        with no Win32 to ask, which then clamps to the single screen it has.
         """
-        left, top, right, bottom = self.work
+        left, top, right, bottom = self.desktop or self.work
         dw, dh = self.dev(self._shell_w), self.dev(self._shell_h)
         nx = max(left, min(x, right - dw))
         ny = max(top, min(y, bottom - dh))
@@ -1685,20 +1758,32 @@ class CompactPill(tk.Tk):
         if not self._start_tray():
             self._flash = FLASH_FRAMES
             return False
-        self._home = (self.winfo_rootx(), self.winfo_rooty())
+        # The tracked anchor, not `winfo_*`: this is the position the window
+        # was last *given*, and `winfo_rootx` lags a `geometry` call by a
+        # frame or two — so a hide within a frame of a panel closing recorded
+        # the position before last and put the pill back there.
+        self._home = self._shell_xy
         self._hidden = True
         self.withdraw()
         return True
 
     def show_from_tray(self) -> None:
         """Bring the window back where the user left it. The icon stays:
-        somebody who hid Flow once will hide it again."""
+        somebody who hid Flow once will hide it again.
+
+        The anchor goes back with it. `_shell_xy` is what `_sync_shell` grows
+        the band from and what `_outside_click_now` hit-tests against, and a
+        pill returned to `_home` while those still described somewhere else is
+        a pill whose next panel opens off its own capsule.
+        """
         if not self._hidden:
             return
         self._hidden = False
         if self._home is not None:
             x, y = self._home
             self.geometry(f"+{x}+{y}")
+            self._shell_xy = (x, y)
+            self._capsule_y = y + self.dev(self._capsule_off)
         self.deiconify()
         self.lift()
         # A layered window that has just been mapped again has nothing on it:
@@ -1787,13 +1872,22 @@ class CompactPill(tk.Tk):
                                             self.lite, PILL_ALPHA, self.k)
         if getattr(self._box_paint, "antialiased", False):
             _unkey(box)
-        x, y = self.winfo_rootx(), self.winfo_rooty()
-        # Tracked, not read back: `winfo_*` lags the window manager by a
-        # frame or two after a `geometry` call, and `_sync_box` re-anchoring
-        # off a stale read parked the box above the screen's top edge —
-        # `.shots/12-compact-palette.png` was a picture of the backdrop.
+        # Tracked, not read back — and this line said so while reading
+        # `winfo_rootx()` two lines above it. `winfo_*` lags the window
+        # manager by a frame or two after a `geometry` call, and `_sync_box`
+        # re-anchoring off a stale read parked the box above the screen's top
+        # edge; `.shots/12-compact-palette.png` was a picture of the backdrop.
+        # `_shell_xy` is the anchor the window was actually placed at.
+        x, y = self._shell_xy
+        # A 360 px box at a 120 px pill's x runs off the right of the display
+        # whenever the pill is parked near that edge — the same clamp the band
+        # gets in `_sync_shell`, for the same reason: the box is the only
+        # thing on screen with the answer on it. The top is the work area's,
+        # not zero, because a monitor above the primary has a negative one.
+        left, top, right, _bottom = self.work
+        x = max(left, min(x, right - self.dev(BOX_W)))
         self._box_x = x
-        self._box_foot = max(0, y - self.dev(h + 8)) + self.dev(h)
+        self._box_foot = max(top, y - self.dev(h + 8)) + self.dev(h)
         box.geometry(f"{self.dev(BOX_W)}x{self.dev(h)}"
                      f"+{x}+{self._box_foot - self.dev(h)}")
         box.bind("<Key>", self._on_box_key)
@@ -1828,7 +1922,14 @@ class CompactPill(tk.Tk):
     def _sync_box(self) -> None:
         """Re-height and redraw the box after a keystroke changed its rows.
         Bottom-anchored, like the panel: the box grows upward, off the anchor
-        `_open_box` recorded — see there for why not `winfo_*`."""
+        `_open_box` recorded — see there for why not `winfo_*`.
+
+        It inherits that anchor's clamps rather than repeating them, and can,
+        because a palette is at its tallest the moment it opens: the query is
+        empty, so every workspace is a row, and typing only ever narrows. A
+        foot placed to keep *that* height inside the work area keeps every
+        shorter one inside it too.
+        """
         if self._box is None:
             return
         h = self._box_height()
@@ -1862,10 +1963,19 @@ class CompactPill(tk.Tk):
 
     def _on_box_click(self, e) -> None:
         """A row tap is the same choice as Enter on it. Read-only boxes
-        (setup) swallow the click and stay."""
+        (setup) swallow the click and stay.
+
+        The event's y is a device length and the row heights are design ones,
+        so it is converted first — `_on_press` and `_panel_click` already do
+        the same, and this was the one hit test left comparing across units.
+        At 300 % that divided the click's y by nothing and the rows by three:
+        every tap below the first row chose a workspace three rows above the
+        one under the pointer, which for a "switch workspace" palette is the
+        gesture picking somebody else's answer.
+        """
         if self._box_kind != "palette" or self._palette is None:
             return
-        i = (e.y - PALETTE_FIELD_H) // PALETTE_ROW_H
+        i = int((self.design(e.y) - PALETTE_FIELD_H) // PALETTE_ROW_H)
         if 0 <= i < len(self._palette.rows()):
             self.session.set_workspace(self._palette.choose(i))
             self._close_box()
@@ -1928,9 +2038,11 @@ class CompactPill(tk.Tk):
         The capsule's screen position is the anchor — "the pill never hides
         and never moves" (README) — tracked in `_capsule_off` rather than read
         back off `winfo_*`, which lags the window manager. The band grows
-        upward from it, the notice strip downward. The one clamp is the
-        screen's right edge: the band goes left rather than off it (the mic
-        moves before the panel clips).
+        upward from it, the notice strip downward, and the result is clamped
+        into the monitor's work area on all four edges: the band goes left
+        rather than off the right (the mic moves before the panel clips), and
+        it stops at the work area's top and bottom rather than at the
+        taskbar's face.
         """
         panel_h = PANEL_H if self._panel_open else 0
         notice_h = NOTICE_H if self._notice else 0
@@ -1943,23 +2055,41 @@ class CompactPill(tk.Tk):
         h = PILL_H + panel_h + notice_h
         if (w, h) == (self._shell_w, self._shell_h):
             return
-        # Screen arithmetic is in device pixels — `winfo_*` and the screen
-        # width both report them — so design lengths are converted before they
-        # meet it, never after.
+        # Screen arithmetic is in device pixels — `geometry`, `GetCursorPos`
+        # and the monitor rectangles all speak them — so design lengths are
+        # converted before they meet it, never after.
         # Off the tracked anchor, never off `winfo_*`: the capsule's top edge
         # is the fixed point of this whole surface — "the pill never hides and
         # never moves" (README) — and the band grows upward from it while the
-        # notice grows downward. The one clamp is the screen's right edge: the
-        # band goes left rather than off it, because the mic moving is a
-        # smaller lie than the panel being cut in half.
-        x = self._shell_xy[0]
-        if x + self.dev(w) > self.winfo_screenwidth():
-            x = self.winfo_screenwidth() - self.dev(w)
-        y = max(0, self._capsule_y - self.dev(panel_h))
+        # notice grows downward.
+        #
+        # **Against `self.work`, and this used to be `winfo_screenwidth()`.**
+        # On Windows that call reports the *primary* monitor's width, while
+        # the pill is placed on the monitor under the pointer, whose rectangle
+        # is in virtual-screen coordinates — so on any right-hand monitor
+        # `x + w` was trivially greater than it, and opening the panel threw
+        # the whole window back onto the primary display. The same read gave
+        # the top edge a floor of 0, which is somebody else's monitor when the
+        # one in use is above the primary and its `top` is negative.
+        left, top, right, bottom = self.work
+        dw, dh = self.dev(w), self.dev(h)
+        x = max(left, min(self._shell_xy[0], right - dw))
+        # The notice strip grows *downward* from a capsule already standing
+        # PANEL_BOTTOM_OFFSET above the taskbar, so it is the one thing here
+        # that can leave the bottom of the work area — and it did, running
+        # under the taskbar with its sentence half-covered. Shifted up by the
+        # overflow instead: a capsule that moved a few pixels is a smaller lie
+        # than a message nobody can read at all.
+        y = max(top, min(self._capsule_y - self.dev(panel_h), bottom - dh))
         self._shell_w, self._shell_h = w, h
         self._capsule_off = panel_h
         self._shell_xy = (x, y)
-        self.geometry(f"{self.dev(w)}x{self.dev(h)}+{x}+{y}")
+        # Where the capsule actually ended up, which is only where it was when
+        # no clamp bit. The anchor has to be re-derived rather than kept, or
+        # the next sync grows its band from a capsule that is no longer there
+        # and walks the window off the edge the clamp just pulled it back from.
+        self._capsule_y = y + self.dev(panel_h)
+        self.geometry(f"{dw}x{dh}+{x}+{y}")
         resize = getattr(self.paint, "resize", None)
         if resize is not None:
             resize(w, h)
@@ -2020,6 +2150,16 @@ class CompactPill(tk.Tk):
         edge with the cursor outside our rect. Two read-only Win32 calls a
         frame, and Lite does not ask — no target awareness there, and
         `_user32` is `_NoHands`.
+
+        **Every length here is a device length.** `GetCursorPos` answers in
+        device pixels and so does the tracked anchor, but `_shell_w` and
+        `_shell_h` are the *design* sizes this module writes everything in —
+        so the rect being tested was the window scaled down by `k`. At 300 %
+        that is a third of the real window, and a click in the right or lower
+        two-thirds of an open panel read as a click outside it and closed the
+        panel under the pointer. `_shell_xy` rather than `winfo_rootx`, for
+        the reason `_shell_xy` exists: `winfo_*` lags a `geometry` call, and
+        this runs every frame.
         """
         if self.lite:
             return False
@@ -2029,9 +2169,9 @@ class CompactPill(tk.Tk):
             return False
         pt = _POINT()
         _user32.GetCursorPos(ctypes.byref(pt))
-        x, y = self.winfo_rootx(), self.winfo_rooty()
-        return not (x <= pt.x < x + self._shell_w
-                    and y <= pt.y < y + self._shell_h)
+        x, y = self._shell_xy
+        return not (x <= pt.x < x + self.dev(self._shell_w)
+                    and y <= pt.y < y + self.dev(self._shell_h))
 
     # -- the drawing ---------------------------------------------------------
 
