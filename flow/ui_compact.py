@@ -46,6 +46,7 @@ import traceback
 from pathlib import Path
 
 from . import tray
+from . import paint
 from .session import CONVERSE, DICTATE, REFINE, Session, State
 
 # The hues and the fonts are ui.py's own, imported rather than restated: the
@@ -88,7 +89,7 @@ from .ui import (
     _dark_menu,
     _mix,
     _no_activate,
-    _round_rect,
+    _round_rect as _tk_round_rect,
     _shell_window,
     _user32,
     foreground_hwnd,
@@ -267,6 +268,45 @@ SETUP_ROW_H = 42
 #: TODO: spoken punctuation ("press enter", "tab"), resolved locally so Type
 #: gets it without a CLI (design/compact/README.md). The session's decode
 #: pipeline owns words; this belongs beside it, not in the pill.
+
+
+def _round_rect(c, x1, y1, x2, y2, r, **kw) -> None:
+    """A rounded rectangle on whichever target is drawing.
+
+    `GdiCanvas` has a real one, built from quarter-circles; a `tk.Canvas` has
+    only the smoothed polygon `ui.py` has always used. Dispatched rather than
+    always sending the polygon, because GDI+ renders that spline wider than Tk
+    does and a 26 px chip at radius 13 came out visibly ballooned.
+    """
+    rr = getattr(c, "round_rect", None)
+    if rr is not None:
+        rr(x1, y1, x2, y2, r, **kw)
+        return
+    _tk_round_rect(c, x1, y1, x2, y2, r, **kw)
+
+
+def _unkey(win) -> None:
+    """Take a window off the colour key and off Tk's own alpha, for the
+    layered path.
+
+    Both are answers to the question `GdiCanvas` is now answering, and both
+    get in its way. `-transparentcolor` keys a colour out of whatever is
+    painted, so the pill's own `SHELL` pixels would be punched out of the
+    bitmap we just antialiased; `-alpha` puts the window into
+    `SetLayeredWindowAttributes` mode, and a window in that mode refuses
+    `UpdateLayeredWindow` outright — which photographed as the key colour
+    standing in a solid rectangle where the pill should be. The opacity
+    `-alpha` was carrying is not lost: it moves to the blend's
+    `SourceConstantAlpha` (`GdiCanvas.constant_alpha`).
+
+    Neither attribute exists off Windows, and neither is worth an exception
+    here: this only runs where `paint.available()` already said yes.
+    """
+    for attr, value in (("-transparentcolor", ""), ("-alpha", 1.0)):
+        try:
+            win.attributes(attr, value)
+        except tk.TclError:
+            pass
 
 
 def _capsule_points(x1, y1, x2, y2, square_top=False, inset=0.0) -> list:
@@ -465,6 +505,11 @@ class CompactPill(tk.Tk):
     _drag = (0, 0)
     #: `tkfont.Font(...).measure` per font spec, built on demand by `_measure`.
     _fonts: dict = {}
+    #: Where the frame draws, and where a box's frame draws. `None` on a bare
+    #: fixture, which never presents; `_draw` sets `paint` from the canvas in
+    #: `__init__`, and the tests hand it their recording fake directly.
+    paint = None
+    _box_paint = None
     #: The right-click menu, built in `__init__`. None on a fixture, and
     #: `_on_menu` checks rather than assuming. `_mode_var` is the radios'
     #: tick, on the instance because a Tk variable dies with the frame that
@@ -608,6 +653,20 @@ class CompactPill(tk.Tk):
             highlightthickness=0, bd=0,
         )
         self.canvas.pack(fill="both", expand=True)
+        # What the frame actually draws on. `painter_for` answers with a
+        # `GdiCanvas` where Windows can composite per-pixel alpha and with
+        # this canvas everywhere else — same calls either way, which is why
+        # every `_draw_*` below takes the target as an argument and none of
+        # them knows which it got.
+        #
+        # The key comes off when it does: `-transparentcolor` and a layered
+        # window are two answers to the same question, and Windows honours the
+        # key, so leaving it set would punch the pill's own `SHELL` pixels out
+        # of the bitmap we just antialiased.
+        self.paint = paint.painter_for(self.canvas, PILL_W, PILL_H, lite,
+                                       PILL_ALPHA)
+        if getattr(self.paint, "antialiased", False):
+            _unkey(self)
 
         # Three gestures on one button (README: "Tap (< PILL_HOLD_SEC) cycles
         # the mode; hold talks; right-click is the only menu"). The hold is
@@ -677,6 +736,10 @@ class CompactPill(tk.Tk):
             if self.hotkeys is not None:
                 self.hotkeys.stop()
             self.session.close()
+            for painter in (self.paint, self._box_paint):
+                close = getattr(painter, "close", None)
+                if close is not None:
+                    close()
         finally:
             self.destroy()
 
@@ -1330,6 +1393,11 @@ class CompactPill(tk.Tk):
             self._box.destroy()
             self._box = None
             self._box_canvas = None
+            if self._box_paint is not None:
+                close = getattr(self._box_paint, "close", None)
+                if close is not None:
+                    close()
+                self._box_paint = None
         self._box_kind = kind
         box = tk.Toplevel(self)
         bg = _shell_window(box, self.lite, PILL_ALPHA)
@@ -1338,6 +1406,10 @@ class CompactPill(tk.Tk):
         self._box_canvas = tk.Canvas(box, bg=bg, highlightthickness=0, bd=0)
         self._box_canvas.pack(fill="both", expand=True)
         h = self._box_height()
+        self._box_paint = paint.painter_for(self._box_canvas, BOX_W, h,
+                                            self.lite, PILL_ALPHA)
+        if getattr(self._box_paint, "antialiased", False):
+            _unkey(box)
         x, y = self.winfo_rootx(), self.winfo_rooty()
         # Tracked, not read back: `winfo_*` lags the window manager by a
         # frame or two after a `geometry` call, and `_sync_box` re-anchoring
@@ -1349,7 +1421,15 @@ class CompactPill(tk.Tk):
         box.bind("<Key>", self._on_box_key)
         box.bind("<ButtonPress-1>", self._on_box_click)
         box.bind("<FocusOut>", lambda _e: self._close_box())
+        # Redrawn when Windows puts it on screen, and not only now. A layered
+        # window's content does not survive its own mapping: the frame
+        # presented before the map is discarded, and a box that is only ever
+        # drawn at open and on a keystroke then has nothing on it at all —
+        # which is what an empty `.shots/12-compact-palette.png` was a picture
+        # of, with `present` returning True the whole time.
+        box.bind("<Map>", lambda _e: self._draw_box())
         box.focus_force()
+        box.update_idletasks()
         self._draw_box()
 
     def _close_box(self) -> None:
@@ -1361,6 +1441,11 @@ class CompactPill(tk.Tk):
             self._box = None
             self._box_canvas = None
             self._box_kind = ""
+        if self._box_paint is not None:
+            close = getattr(self._box_paint, "close", None)
+            if close is not None:
+                close()
+            self._box_paint = None
 
     def _sync_box(self) -> None:
         """Re-height and redraw the box after a keystroke changed its rows.
@@ -1371,6 +1456,9 @@ class CompactPill(tk.Tk):
         h = self._box_height()
         self._box.geometry(
             f"{BOX_W}x{h}+{self._box_x}+{self._box_foot - h}")
+        resize = getattr(self._box_paint, "resize", None)
+        if resize is not None:
+            resize(BOX_W, h)
         self._draw_box()
 
     def _on_box_key(self, e) -> None:
@@ -1404,14 +1492,21 @@ class CompactPill(tk.Tk):
             self._close_box()
 
     def _draw_box(self) -> None:
-        if self._box_canvas is None:
+        if self._box_paint is None:
             return
-        c = self._box_canvas
+        c = self._box_paint
         c.delete("all")
         if self._box_kind == "palette":
             self._draw_palette(c)
         else:
             self._draw_setup(c)
+        present = getattr(c, "present", None)
+        if self._box is not None and present is not None:
+            # Told where, not asked: the box has just been given its geometry
+            # and `winfo_*` has not caught up, which composited the first
+            # frame off screen and photographed as an empty backdrop.
+            present(self._box, at=(self._box_x,
+                                   self._box_foot - self._box_height()))
 
     # -- the panel -----------------------------------------------------------
 
@@ -1471,6 +1566,9 @@ class CompactPill(tk.Tk):
         self._shell_w, self._shell_h = w, h
         self._capsule_off = panel_h
         self.geometry(f"{w}x{h}+{x}+{y}")
+        resize = getattr(self.paint, "resize", None)
+        if resize is not None:
+            resize(w, h)
 
     def _panel_click(self, e) -> None:
         """A press in the band: the only live things there are the strip's
@@ -1577,13 +1675,14 @@ class CompactPill(tk.Tk):
         which is why every attribute this reads that a fixture does not set is
         a class-level default above.
         """
-        c = self.canvas
+        c = self.paint
         c.delete("all")
         if self._panel_open:
             self._draw_panel(c)
             self._draw_foot(c)
             if self._copied:
                 self._draw_copied(c)
+            self._present()
             return
         # The capsule body first, and it is load-bearing rather than cosmetic:
         # `_shell_window` keyed the canvas background out with
@@ -1621,6 +1720,19 @@ class CompactPill(tk.Tk):
         self._draw_face(c, 0, BARS)
         if self._copied:
             self._draw_copied(c)
+        self._present()
+
+    def _present(self) -> None:
+        """Hand the finished frame to the desktop, where there is one to hand.
+
+        A no-op on the real canvas — Tk has already painted it — and the whole
+        of the layered path everywhere else: nothing `_draw` drew is visible
+        until this runs, which is also why this surface cannot flicker. The
+        frame is composited whole rather than assembled in front of the user.
+        """
+        present = getattr(self.paint, "present", None)
+        if present is not None:
+            present(self)
 
     def _draw_copied(self, c) -> None:
         """Lite's last inch, said once and never in an error colour
@@ -1869,7 +1981,7 @@ class CompactPill(tk.Tk):
                 # step up to `TEXT`. The wash is a blend rather than an alpha
                 # — this window is colour-keyed and cannot composite, which is
                 # the rule `_mix` exists for (flow/ui.py:1850).
-                m = self._measure(font)
+                m = self._measure(c, font)
                 x0 = 38 + m(label[:hit])
                 x1 = x0 + m(label[hit:hit + len(query)])
                 c.create_rectangle(x0 - 1, cy - 8, x1 + 1, cy + 8,
@@ -1898,10 +2010,23 @@ class CompactPill(tk.Tk):
         return [("Microphone", mic), ("Agent CLI", cli),
                 ("On release", on_release)]
 
-    def _measure(self, spec):
-        """A text-width function for `spec`, the `tkfont.Font` cached per
-        spec. Built lazily and kept, because constructing a `Font` asks Tk for
-        metrics and the palette would otherwise do it per row per keystroke."""
+    def _measure(self, c, spec):
+        """A text-width function for `spec` on the target that is drawing.
+
+        Through `c` and not always through Tk, because the two do not agree:
+        the palette measures a prefix to place the `.hit` tint over the
+        letters that matched, and measuring in Tk's metrics while GDI+ draws
+        the glyphs put the tint further off with every character
+        (`.shots/12-compact-palette.png`, where the highlight and the text it
+        was highlighting had come apart).
+
+        The Tk answer is cached per spec, because building a `tkfont.Font`
+        asks the interpreter for metrics and the palette would otherwise do it
+        per row per keystroke. `GdiCanvas` does its own caching.
+        """
+        measure = getattr(c, "measure", None)
+        if measure is not None:
+            return lambda text: measure(text, spec)[0]
         fn = self._fonts.get(spec)
         if fn is None:
             try:

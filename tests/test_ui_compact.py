@@ -100,7 +100,10 @@ def pill(state=State.IDLE, *, armed=True, mode=DICTATE, **attrs):
     test_pill builds one: `__new__`, so every attribute `_draw` reads has to
     come from a class default or from here."""
     p = uc.CompactPill.__new__(uc.CompactPill)
-    p.canvas = Canvas()
+    # `paint` is what `_draw` draws on, `canvas` what takes the events; on a
+    # real pill those are a `GdiCanvas` and a `tk.Canvas`, and here one
+    # recording fake stands in for both.
+    p.paint = p.canvas = Canvas()
     p.armed = armed
     p.session = session(state=state, mode=mode)
     for k, v in attrs.items():
@@ -486,7 +489,7 @@ class TestTheClassDefaultsADrawNeeds(unittest.TestCase):
 
     def test_a_bare_instance_draws_the_resting_pill(self):
         p = uc.CompactPill.__new__(uc.CompactPill)
-        p.canvas = Canvas()
+        p.paint = p.canvas = Canvas()
         p.session = session()
         p._draw()
         # Rest: no ring, and the meter is there in its grey — rest claims no

@@ -75,6 +75,51 @@ serve "choose Converse" in a three-mode world.
 **Reopens if** a fourth mode is ever proposed — the audit was sized for three, and
 the answer then is a mode registry, not a fourth constant beside three.
 
+### 2026-09-03 — The compact surface is composited, not painted
+
+Beside the artboard, the built pill was visibly stair-stepped where the design
+is smooth, and the owner's review would not pass it. The cause is not the
+drawing code: **Tk 8.6's canvas has no antialiasing**, so every curve it draws
+is a hard-edged stair, and these windows are colour-keyed
+(`-transparentcolor`), which makes transparency *binary* — a pixel is either
+wholly the pill or wholly see-through, so the silhouette has no partial
+coverage available to be smooth with. No amount of redrawing reaches the
+artboard from there.
+
+**So the compact surface renders itself and hands Windows the result.**
+`flow/paint.py`'s `GdiCanvas` draws with GDI+ into a premultiplied BGRA bitmap
+and presents it with `UpdateLayeredWindow`, which is the per-pixel-alpha path.
+Antialiased shapes, antialiased text, a feathered edge. **No new dependency** —
+`ctypes` and `gdiplus.dll` are both already on the machine, so R16's
+three-package install is untouched.
+
+**It wears `tk.Canvas`'s own vocabulary rather than one of its own.** The
+drawing code in `ui_compact.py` was already a display list written in
+`create_line` / `create_polygon` / `create_arc` / `create_text`; making the
+painter speak those means one body of code draws the surface whichever backend
+renders it, and the real canvas is the fallback rather than a second
+implementation to keep in step. `painter_for` hands back the canvas itself on a
+Mac, on Linux, and in Lite — where every line of drawing code is unchanged and
+Tk's stairs are what a Flow looks like, which is a Flow.
+
+**The shipped design is untouched.** This is the compact surface's module, and
+`flow/ui.py` still paints its canvas the way it always has. Whether the shipped
+pill wants the same treatment is a separate question with a separate cost.
+
+**Three things this cost, all recorded because they will be met again.** A
+layered window keeps whichever of Windows' two alpha modes it is put in first,
+and Tk's `-alpha` is the other one — so `-alpha` comes off, its opacity moves
+to the blend's `SourceConstantAlpha`, and a refused present re-takes the style
+and retries rather than trusting a flag. A layered window's content does not
+survive its own mapping, so a box drawn once at open had nothing on it until
+`<Map>` redrew it. And GDI+ measures text with padding Tk does not, which put
+the palette's `.hit` tint further off with every character until both calls
+shared one typographic string format.
+
+**Reopens if** a machine turns up where `UpdateLayeredWindow` is refused for a
+reason the retry does not fix, or if the frame cost of compositing the panel at
+30 ms shows up in the numbers `docs/speed.md` keeps.
+
 ### 2026-09-03 — The compact design keeps the tray, against its own canvas
 
 `Workspace.dc.html` says "There is no preferences window and no tray menu", and the
