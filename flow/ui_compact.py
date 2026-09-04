@@ -1873,8 +1873,18 @@ class CompactPill(tk.Tk):
         frame is composited whole rather than assembled in front of the user.
         """
         present = getattr(self.paint, "present", None)
-        if present is not None:
+        if present is None:
+            return
+        try:
             present(self)
+        except tk.TclError:
+            # "application has been destroyed". `quit_app` destroys the window
+            # while a frame that began before it is still running, and this is
+            # the first line of that frame to ask Tk for anything — so the
+            # whole traceback lands on the console of somebody who has just
+            # pressed quit and thinks they broke something. Nothing is wrong:
+            # there is no window left to composite onto.
+            self._alive = False
 
     def _draw_copied(self, c) -> None:
         """Lite's last inch, said once and never in an error colour

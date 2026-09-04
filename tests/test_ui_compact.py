@@ -434,6 +434,20 @@ class TestTapAndHoldShareOneButton(unittest.TestCase):
         p.session.toggle_mode.assert_not_called()
 
 
+class TestQuittingIsQuiet(unittest.TestCase):
+    def test_a_frame_that_outlives_the_window_says_nothing(self):
+        # `quit_app` destroys the window while a frame begun before it is
+        # still running, and `_present` is the first line of that frame to ask
+        # Tk for anything. Un-caught it printed a whole traceback at somebody
+        # who had just pressed quit and made them think they had broken it.
+        p = pill()
+        p.paint = mock.Mock()
+        p.paint.present.side_effect = uc.tk.TclError(
+            "can't invoke \"winfo\" command: application has been destroyed")
+        p._present()
+        self.assertFalse(p._alive)
+
+
 class TestTheDragMovesIt(unittest.TestCase):
     """"Drag it anywhere" (Main.dc.html). It was the one gesture on the canvas
     with nothing behind it: `_on_motion` recorded that the press had travelled
