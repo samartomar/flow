@@ -67,6 +67,7 @@ from .ui import (
     DB_FLOOR,
     DIM,
     ERROR,
+    FAST_TICK_MS,
     FLASH_FRAMES,
     FONT_BODY,
     FONT_CHIP,
@@ -622,6 +623,11 @@ class CompactPill(tk.Tk):
     #: already say *which* wait is armed, so this says only when. None is no
     #: wait, which is what a fixture reads.
     _send_since: float | None = None
+    #: Whether `_fast_tick` is scheduled. Its own flag rather than a read of
+    #: the wait, because the clock outlives one turn of it: the release arms,
+    #: the tick fires, and the same tick decides whether to book the next one.
+    #: `_quicken` looks in `__dict__` rather than here — see there.
+    _fast_ticking = False
     #: The window Send is aimed at, polled by `_track_target` the way ui.py's
     #: own `paste_target` is (flow/ui.py:2486). None on a fixture, which is
     #: also the Lite answer: no target-window awareness, and `paste()` asks
@@ -745,6 +751,11 @@ class CompactPill(tk.Tk):
         self._last_draft = ""
         self._send_pending = False
         self._send_since = None
+        # The instance's own False, and it is what `_quicken` tests for: the
+        # class default above is a real lookup for `_fast_tick` to read, and
+        # `__dict__.get` — which is how `_quicken` avoids recursing on a bare
+        # fixture — never sees a class attribute.
+        self._fast_ticking = False
         self.paste_target = None
         self._panel_open = False
         self._panel_mode = None
@@ -938,6 +949,26 @@ class CompactPill(tk.Tk):
         except Exception:
             self._flash = FLASH_FRAMES
             traceback.print_exc()
+            # And repaint anyway, because the line that raised was in front of
+            # the one that draws: `_draw()` is the last thing `_frame` does, so
+            # anything raising in a pump aborts the frame *before* the repaint.
+            # NEEDS_YOU.md records the same failure on the shipped surface —
+            # "an exception in the frame pump leaves the row painted at the
+            # last width, under a window that has already been resized" — and
+            # here it is worse: with the layered path there is no Tk canvas
+            # underneath still holding the last frame's items, so the last
+            # *presented bitmap* stays on screen — at whatever size
+            # `_sync_shell` has since changed to — until a frame succeeds. It
+            # never does, if the pump raises every frame. The flash above is
+            # the report; this is what makes it visible.
+            try:
+                self._draw()
+            except Exception:
+                # A draw that itself raises cannot recurse into this handler or
+                # take the clock down with it. One frame that drew nothing is a
+                # stale pill; a broken `after` chain is a dead one, and the
+                # `finally` below is the only thing standing between them.
+                pass
         finally:
             if self._alive:
                 self.after(30, self._tick)
@@ -1079,6 +1110,67 @@ class CompactPill(tk.Tk):
                 self.quit_app()
                 return False
         return True
+
+    def _fast_tick(self) -> None:
+        """The gesture's own clock: `FAST_TICK_MS`, between the 30 ms frames.
+
+        `Pill._fast_tick` (flow/ui.py:4415), for the reason the 2026-09-01
+        felt-latency pass gives: the chord's release and the moment the final
+        decode lands are two things that had been waiting for a repaint that
+        has nothing to do with them, and they are in series. This surface
+        drains hotkeys only on the frame, so a release-to-paste carried up to
+        two extra frames — ~60 ms on Windows' 15.6 ms timer, which
+        `Pill.__init__` lowers to 1 ms for the whole process.
+
+        This loop does exactly those two things and nothing else. Drawing stays
+        on the frame, where the meter needs it, and so does the wait's ceiling:
+        this only ever looks at a decoder that has *finished*.
+
+        Only while something is in flight. A queue check every 5 ms is cheap
+        but it is not free, and an idle pill has nothing to be quick about.
+        """
+        try:
+            if not self._alive:
+                return
+            if not self._drain_hotkeys():
+                return
+            if ((self._send_pending or self._ask_pending)
+                    and not self.session.busy):
+                # The same three calls `_frame` makes, in the same order and
+                # for its reason: the decode's words have to be on
+                # `session.draft` before `_pump_send` looks for them.
+                self.session.pump_results()
+                self._pump_events()
+                self._pump_send()
+        except Exception:
+            # `_tick`'s rule, and this clock needs it more: an exception here
+            # must not stop the clock and must not be silent. The red flash is
+            # this surface's whole vocabulary for "something is wrong", and the
+            # frame that draws it is 30 ms away at most.
+            self._flash = FLASH_FRAMES
+            traceback.print_exc()
+        finally:
+            if self._alive and (self._press_talking or self._send_pending
+                                or self._ask_pending):
+                self.after(FAST_TICK_MS, self._fast_tick)
+            else:
+                # Nothing in flight: the clock stops rather than idling, and
+                # the next `_quicken` starts it again. A press that has not
+                # yet become a hold is deliberately not on this list —
+                # `_pump_press` is the frame's, and the frame is the only
+                # clock it has ever had.
+                self._fast_ticking = False
+
+    def _quicken(self) -> None:
+        """Start `_fast_tick` if it is not already running."""
+        # `__dict__`, not `getattr`: a bare fixture built with `__new__` has no
+        # clock and no `after`, and `tk.Misc.__getattr__` would recurse looking
+        # for either — the RecursionError this module's class defaults exist to
+        # prevent. `__init__` is what puts the False there, so this is a no-op
+        # on a fixture and a real start on a real window.
+        if self.__dict__.get("_fast_ticking") is False:
+            self._fast_ticking = True
+            self.after(FAST_TICK_MS, self._fast_tick)
 
     def _check_workspace_gone(self) -> None:
         """States.dc.html's amber case: the workspace the profile remembers is
@@ -1499,6 +1591,10 @@ class CompactPill(tk.Tk):
         # sample pumped for the whole hold. The chord is the documented
         # push-to-talk gesture, so that was every hold that mattered.
         self.armed = True
+        # The 5 ms clock, for the release that ends this hold: the chord's
+        # keyup lands on the hotkey queue, and the 30 ms frame is otherwise the
+        # only thing that would look at it.
+        self._quicken()
         # The hold's own clock: `_on_release` clears `_press_at` before
         # `_talk_end` runs, so anything measuring the hold needs its own.
         self._hold_since = time.perf_counter()
@@ -1559,6 +1655,11 @@ class CompactPill(tk.Tk):
                 self._send_pending = True
             elif self.session.mode in PANEL_SPEC:
                 self._ask_pending = True
+            # The 5 ms clock again, for the other half of the gesture: the
+            # decode landing. On the frame alone the release-to-paste path
+            # carries up to two more repaints of latency, which the
+            # 2026-09-01 felt-latency pass measured and refused.
+            self._quicken()
         elif (not words and self._panel_open
                 and not (self._panel_heard or self._panel_result)):
             self._close_panel()

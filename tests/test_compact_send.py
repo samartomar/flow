@@ -1,7 +1,8 @@
 """The compact release's wait: what arms it, what fires it, what it says.
 
 The shipped surface solved this shape once and wrote down why
-(`Pill._talk_end` and `_pump_talk`, flow/ui.py:2803-2877). This file pins the
+(`Pill._talk_end` / `_pump_talk` / `_fast_tick`, flow/ui.py:2803-2877 and
+4415-4460; decisions.md 2026-09-01, the felt-latency pass). This file pins the
 same contract for `CompactPill`, against the two ways the compact surface got
 it wrong: a release whose decode had *already* landed armed nothing, and a
 release whose decode was still landing fired on the first half of it.
@@ -292,6 +293,178 @@ class TestTheWaitEndsWithoutPasting(unittest.TestCase):
         # reaches `tk.Misc.__getattr__` on a bare fixture.
         self.assertIsNone(uc.CompactPill._send_since)
         self.assertEqual(uc.CompactPill._draft_at_hold, "")
+
+
+class TestABrokenFrameStillRepaints(unittest.TestCase):
+    """NEEDS_YOU.md's "an exception in the frame pump leaves the row painted at
+    the last width, under a window that has already been resized" — the
+    compact half of it, where the layered path makes it worse: nothing is on
+    screen but the last presented bitmap until a frame succeeds.
+    """
+
+    def broken(self, **attrs):
+        p = panel_pill(State.LISTENING, mode=CONVERSE, **attrs)
+        p.after = mock.Mock()
+        p._pump_events = mock.Mock(side_effect=RuntimeError("the pump fell over"))
+        return p
+
+    def test_a_frame_whose_pump_raises_still_draws(self):
+        p = self.broken()
+        with mock.patch.object(uc.traceback, "print_exc") as printed:
+            p._tick()
+        printed.assert_called_once_with()
+        self.assertEqual(p._flash, uc.FLASH_FRAMES)
+        # The capsule reached the canvas: the frame's last line ran after all.
+        self.assertTrue(p.canvas.polys)
+        self.assertTrue(any(fill == uc.SHELL for _c, fill, _o in p.canvas.polys))
+        p.after.assert_called_once_with(30, p._tick)
+
+    def test_a_draw_that_also_raises_leaves_the_clock_running(self):
+        p = self.broken()
+        p._draw = mock.Mock(side_effect=RuntimeError("and the painter, too"))
+        with mock.patch.object(uc.traceback, "print_exc"):
+            p._tick()  # must not raise, must not recurse
+        p._draw.assert_called_once_with()
+        # One dead frame is a stale pill; a broken `after` chain is a dead one.
+        p.after.assert_called_once_with(30, p._tick)
+
+
+class TestTheFastClock(unittest.TestCase):
+    """`_fast_tick` / `_quicken`, `Pill`'s (flow/ui.py:4415-4460) on this
+    surface: the release and the decode landing are acted on in 5 ms rather
+    than at the next 30 ms repaint — the 2026-09-01 felt-latency pass's
+    measurement, and the reason it refused to leave them on the frame."""
+
+    def quick(self, s, sent=None):
+        p = sending_pill(s, sent if sent is not None else [])
+        p.after = mock.Mock()
+        p._fast_ticking = True
+        return p
+
+    def test_the_wait_fires_between_frames(self):
+        sent = []
+        s = session(state=State.LISTENING, draft_text="the words")
+        s.send.return_value = "the words"
+        p = self.quick(s, sent)
+        p._send_pending = True
+        p._send_since = time.perf_counter()
+        p._fast_tick()
+        self.assertEqual(sent, ["the words"])
+        s.pump_results.assert_called_once_with()
+        # Nothing left in flight: the clock stops rather than idling.
+        p.after.assert_not_called()
+        self.assertFalse(p._fast_ticking)
+
+    def test_it_pumps_the_session_before_it_looks_at_the_draft(self):
+        order = []
+        s = session(state=State.LISTENING)
+        s.pump_results.side_effect = lambda: order.append("pump_results")
+        p = self.quick(s)
+        p._send_pending = True
+        p._pump_events = lambda: order.append("_pump_events")
+        p._pump_send = lambda: order.append("_pump_send")
+        p._fast_tick()
+        self.assertEqual(order, ["pump_results", "_pump_events", "_pump_send"])
+
+    def test_a_busy_decoder_is_left_alone_and_the_clock_keeps_running(self):
+        sent = []
+        s = session(state=State.LISTENING, busy=True, draft_text="the words")
+        p = self.quick(s, sent)
+        p._send_pending = True
+        p._send_since = time.perf_counter()
+        p._fast_tick()
+        s.pump_results.assert_not_called()
+        s.send.assert_not_called()
+        self.assertEqual(sent, [])
+        p.after.assert_called_once_with(uc.FAST_TICK_MS, p._fast_tick)
+        self.assertTrue(p._fast_ticking)
+
+    def test_it_drains_the_hotkeys_that_end_the_hold(self):
+        sent = []
+        s = session(state=State.LISTENING, draft_text="the words")
+        s.talk_end.return_value = True
+        s.send.return_value = "the words"
+        p = self.quick(s, sent)
+        p._press_talking = True
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["talk-end"]
+        p._fast_tick()
+        s.talk_end.assert_called_once_with()
+        # The release and the paste inside one 5 ms tick, which is the whole
+        # of what this clock buys: neither waited for a repaint.
+        self.assertEqual(sent, ["the words"])
+
+    def test_a_hold_keeps_the_clock_and_an_idle_pill_stops_it(self):
+        p = self.quick(session())
+        p._press_talking = True
+        p._fast_tick()
+        p.after.assert_called_once_with(uc.FAST_TICK_MS, p._fast_tick)
+        p._press_talking = False
+        p.after.reset_mock()
+        p._fast_tick()
+        p.after.assert_not_called()
+        self.assertFalse(p._fast_ticking)
+
+    def test_a_quit_books_no_next_tick(self):
+        p = self.quick(session())
+        p._press_talking = True
+        p._alive = False
+        p._fast_tick()
+        p.after.assert_not_called()
+        self.assertFalse(p._fast_ticking)
+
+    def test_an_exception_flashes_and_the_clock_survives_it(self):
+        p = self.quick(session())
+        p._press_talking = True
+        p._drain_hotkeys = mock.Mock(side_effect=RuntimeError("boom"))
+        with mock.patch.object(uc.traceback, "print_exc") as printed:
+            p._fast_tick()
+        printed.assert_called_once_with()
+        self.assertEqual(p._flash, uc.FLASH_FRAMES)
+        p.after.assert_called_once_with(uc.FAST_TICK_MS, p._fast_tick)
+
+    def test_the_hold_and_the_release_both_start_the_clock(self):
+        s = session(state=State.LISTENING)
+        s.talk_end.return_value = True
+        p = self.quick(s)
+        p._fast_ticking = False
+        p._talk_start()
+        p.after.assert_called_once_with(uc.FAST_TICK_MS, p._fast_tick)
+        self.assertTrue(p._fast_ticking)
+        p._fast_ticking = False
+        p.after.reset_mock()
+        p._talk_end(send=True)
+        p.after.assert_called_once_with(uc.FAST_TICK_MS, p._fast_tick)
+
+    def test_quicken_starts_one_clock_and_only_one(self):
+        p = self.quick(session())
+        p._fast_ticking = False
+        p._quicken()
+        p._quicken()
+        p.after.assert_called_once_with(uc.FAST_TICK_MS, p._fast_tick)
+        self.assertTrue(p._fast_ticking)
+
+    def test_quicken_on_a_bare_fixture_does_nothing(self):
+        # The RecursionError guard this module's class defaults exist for: a
+        # `__new__`-built pill has no clock and no `after`, and `getattr` here
+        # would go looking for both through `tk.Misc.__getattr__`.
+        p = pill()
+        self.assertNotIn("_fast_ticking", p.__dict__)
+        p._quicken()
+        self.assertNotIn("_fast_ticking", p.__dict__)
+
+    def test_the_real_constructor_puts_the_flag_where_quicken_looks(self):
+        # `_quicken` reads `__dict__`, which never sees a class attribute — so
+        # the class default alone would leave the clock unstartable on a real
+        # window. Read off the constructor rather than by building one: a real
+        # Tk window is what this whole fixture idiom exists to avoid.
+        self.assertIn("_fast_ticking",
+                      uc.CompactPill.__init__.__code__.co_names)
+
+    def test_the_clocks_own_flag_is_a_class_attribute_too(self):
+        # Read by `_fast_tick`'s `finally` on a fixture that never had an
+        # `__init__` to set it — the same guard as every default above it.
+        self.assertFalse(uc.CompactPill._fast_ticking)
 
 
 if __name__ == "__main__":  # pragma: no cover
