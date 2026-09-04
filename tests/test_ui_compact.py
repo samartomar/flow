@@ -743,7 +743,11 @@ class TestTypeSendsEndToEnd(unittest.TestCase):
         self.assertEqual(sent, [])
         s.send.assert_not_called()
         s.events.return_value = [Event("draft", "the plan for Tuesday")]
+        s.draft.text = "the plan for Tuesday"
         p._pump_events()
+        # The frame's own order: the drain lands the words, `_pump_send` finds
+        # the decoder finished with them and fires.
+        p._pump_send()
         s.send.assert_called_once_with()
         self.assertEqual(sent, ["the plan for Tuesday"])
 
@@ -786,16 +790,23 @@ class TestTypeSendsEndToEnd(unittest.TestCase):
         self.assertTrue(p._send_pending)
         p.hotkeys.drain.return_value = ["talk"]
         p._drain_hotkeys()
+        # The new hold supersedes the wait outright, which is what makes a
+        # segment final inside it harmless: there is nothing left armed.
+        self.assertFalse(p._send_pending)
         s.events.return_value = [Event("draft", "the first segment")]
+        s.draft.text = "the first segment"
         p._pump_events()
+        p._pump_send()
         s.send.assert_not_called()
         self.assertEqual(sent, [])
-        # The words are cumulative in the draft; the next release's draft
-        # sends them all.
+        # The words are cumulative in the draft; the next release sends them
+        # all.
         p.hotkeys.drain.return_value = ["talk-end"]
         p._drain_hotkeys()
         s.events.return_value = [Event("draft", "everything, cumulatively")]
+        s.draft.text = "everything, cumulatively"
         p._pump_events()
+        p._pump_send()
         self.assertEqual(sent, ["everything, cumulatively"])
 
     def test_the_send_hotkey_sends_and_cancel_is_a_documented_no_op(self):
@@ -1015,7 +1026,7 @@ class TestTheAsksWholeArc(unittest.TestCase):
         p._pump_events()
         self.assertEqual(p._panel_heard, "")
 
-    def test_the_release_arms_the_ask_and_the_draft_fires_it(self):
+    def test_the_release_arms_the_ask_and_the_pump_fires_it(self):
         from flow.session import Event
         p = panel_pill(State.LISTENING, mode=CONVERSE)
         p._talk_start()
@@ -1024,7 +1035,9 @@ class TestTheAsksWholeArc(unittest.TestCase):
         self.assertTrue(p._ask_pending)
         p.session.send.assert_not_called()
         p.session.events.return_value = [Event("draft", "where does the pill decide?")]
+        p.session.draft.text = "where does the pill decide?"
         p._pump_events()
+        p._pump_send()
         # The question goes to the CLI — session.send() in converse asks —
         # and is never pasted: on_send is Type's path, not this one's.
         p.session.send.assert_called_once_with()

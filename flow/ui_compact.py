@@ -83,6 +83,7 @@ from .ui import (
     PLACEHOLDER,
     PRIMARY_FILL,
     PRIMARY_TEXT,
+    PTT_PASTE_WAIT_SEC,
     RING_OUTER,
     RING_TOP,
     SHELL,
@@ -607,10 +608,20 @@ class CompactPill(tk.Tk):
     #: over, and what item 3's panel `heard` block will read. "" on a fixture,
     #: which is also the true answer for a pill that has heard nothing.
     _last_draft = ""
-    #: Armed by a release whose `talk_end` reported words in flight; fired by
-    #: the `draft` event that brings them. The send path's whole state, and
+    #: Armed by a release that has words to send; fired by `_pump_send` once
+    #: the decoder is finished with them. The send path's whole state, and
     #: False on a fixture for the same reason the press flags are idle there.
     _send_pending = False
+    #: What the draft held when the hold in flight began. `_talk_end` compares
+    #: against it to tell "the decode landed early" from "there were already
+    #: words here" — see there. "" on a fixture, and "" is also the true answer
+    #: for a pill whose session has never drafted anything.
+    _draft_at_hold = ""
+    #: When the wait above was armed, for its ceiling (`PTT_PASTE_WAIT_SEC`).
+    #: `Pill._ptt_wait` is one attribute doing both jobs; here the two flags
+    #: already say *which* wait is armed, so this says only when. None is no
+    #: wait, which is what a fixture reads.
+    _send_since: float | None = None
     #: The window Send is aimed at, polled by `_track_target` the way ui.py's
     #: own `paste_target` is (flow/ui.py:2486). None on a fixture, which is
     #: also the Lite answer: no target-window awareness, and `paste()` asks
@@ -733,6 +744,7 @@ class CompactPill(tk.Tk):
         self._fonts = {}
         self._last_draft = ""
         self._send_pending = False
+        self._send_since = None
         self.paste_target = None
         self._panel_open = False
         self._panel_mode = None
@@ -951,6 +963,10 @@ class CompactPill(tk.Tk):
             self.session.pump_results()
             self._meter_level = self._eased(0.0)
         self._pump_events()
+        # Immediately after the drain, and never before it: the words a wait is
+        # waiting for arrive as a `draft` event, and `_pump_send` reads the
+        # draft the event has just settled.
+        self._pump_send()
         self._pump_press()
         if self._panel_open and self._outside_click_now():
             self._close_panel()
@@ -1139,14 +1155,13 @@ class CompactPill(tk.Tk):
         The pill itself owns two persistent kinds — an error turns the ring
         red (and a CLI's failure line joins the panel's result block; a
         `disarm` that is not a release means the device is gone, and the
-        slash stays until a capture answers). The send path owns `draft`: the
-        decode landing, its text what `_send` hands over when a Type release
-        is waiting — release, draft, paste, and no panel (README: "Type never
-        opens a panel"). The panel owns the rest: a `partial` is the heard
-        block's live text, a `draft` against an armed ask is the question
-        going to the CLI, a `reply` is the answer landing in the result
-        block, and a `mode` closes the band — it belongs to the mode that
-        raised it.
+        slash stays until a capture answers). `draft` is a *record*, not a
+        trigger: it says the decode landed, and `_pump_send` decides on the
+        frame whether that finished the utterance a release is waiting for —
+        see there for why the event cannot decide it. The panel owns the rest:
+        a `partial` is the heard block's live text, a `reply` is the answer
+        landing in the result block, and a `mode` closes the band — it belongs
+        to the mode that raised it.
 
         And the four kinds after `disarm` are the ones that used to fall
         through, which on a wordless surface is not the same as "nothing to
@@ -1159,17 +1174,13 @@ class CompactPill(tk.Tk):
         """
         for ev in self.session.events():
             if ev.kind == "draft":
+                # Kept, not acted on. Firing here was two defects: a draft that
+                # lands *mid-hold* (the gate closes on any trailing pause, so a
+                # decode can arrive before the release) had to be skipped, and
+                # the skip is what made a release after a pause paste nothing;
+                # and a hold long enough to queue two finals fired on the first
+                # of them, pasting half an utterance and stranding the rest.
                 self._last_draft = ev.text
-                if not ev.text or self._press_talking:
-                    # Not mid-hold: a flag still armed from an earlier release
-                    # must not fire on a segment final inside the *next*
-                    # utterance. The words are cumulative in the draft either
-                    # way — the next release re-arms and sends them all.
-                    continue
-                if self._send_pending:
-                    self._send()
-                elif self._ask_pending:
-                    self._ask()
             elif ev.kind == "partial":
                 if self._panel_open:
                     if self._hold_fresh:
@@ -1254,6 +1265,59 @@ class CompactPill(tk.Tk):
                 # and why.
                 self._say(ev.text)
 
+    def _pump_send(self) -> None:
+        """Fire the release's armed send, once there is something to send it.
+
+        `Pill._pump_talk`'s second half (flow/ui.py:2858-2877), and it is here
+        for the two defects that come of letting the `draft` event fire
+        instead:
+
+        - **A release after a trailing pause never pasted.** The gate's 800 ms
+          hangover closes mid-hold whenever the speaker pauses, so `_finalise`
+          runs and the `draft` event arrives while the button is still down.
+          `_pump_events` had to skip it — a stale flag must not fire inside the
+          *next* utterance — and by the release `talk_end` had nothing left to
+          report, so nothing ever armed. The words sat in the draft. That is
+          "push to talk does nothing", reported six times against this class of
+          surface.
+        - **A split utterance pasted only its first half.** A hold that crosses
+          `MAX_UTTERANCE_SEC` queues two finals; firing on the first pasted
+          half a sentence and stranded the rest in a draft nothing would come
+          back for.
+
+        Both are the same missing condition, and it is `busy`: the decoder has
+        to be *finished*, not merely to have said something. An empty draft
+        when it finishes simply ends the wait — silence is a normal thing to do
+        with a push-to-talk button, and `_talk_end` has already taken the panel
+        back down.
+        """
+        if not (self._send_pending or self._ask_pending):
+            return
+        if not self.session.busy:
+            paste = self._send_pending
+            self._send_pending = self._ask_pending = False
+            self._send_since = None
+            if not self.session.draft.text.strip():
+                return
+            if paste:
+                self._send()
+            else:
+                self._ask()
+            return
+        if (self._send_since is not None
+                and time.perf_counter() - self._send_since
+                >= PTT_PASTE_WAIT_SEC):
+            # The ceiling, and it is not a discard: the words are in the draft
+            # and the next release sends them all. A paste this far from the
+            # gesture would land in whatever window the user has since moved
+            # to, which is worse than not pasting — and giving up silently is
+            # worse than both (P2), so the wordless pill says this one out
+            # loud, in the strip it keeps for facts no colour can carry.
+            self._send_pending = self._ask_pending = False
+            self._send_since = None
+            self._say(f"still decoding after {PTT_PASTE_WAIT_SEC:.0f}s — "
+                      "press send when it lands")
+
     def _ask(self) -> None:
         """The panel-mode release: the heard block's final text goes to the CLI.
 
@@ -1268,9 +1332,16 @@ class CompactPill(tk.Tk):
         starts fresh.
         """
         self._ask_pending = False
+        self._send_since = None
         self._hold_fresh = False
         self._panel_failed = False
-        self._panel_heard = self._last_draft
+        # The draft at *fire* time, not the last `draft` event's text: a hold
+        # that queued two finals has two of those events, and the second
+        # carries only its own half. `session.send()` is about to hand the CLI
+        # the whole draft, and the heard block has to show what was asked.
+        # `_last_draft` behind it, for an ask that fires against a draft
+        # already cleared: the same words, one event older.
+        self._panel_heard = self.session.draft.text or self._last_draft
         self._panel_heard_final = True
         self._panel_result = ""
         self.session.send()
@@ -1280,9 +1351,13 @@ class CompactPill(tk.Tk):
 
         The shape is ui.py's `_send` (flow/ui.py:3756-3770) — the text from
         `session.send()`, the paste target this surface polls, the problem the
-        handler hands back — down to the first line, which is what stops a
-        release and the `send` hotkey pasting the same words twice. The way
-        out itself is `_deliver`'s, shared with the panel's Send.
+        handler hands back — down to the first lines, which are what stops a
+        release and the `send` hotkey pasting the same words twice. Both waits
+        go, not just the paste's: in a panel mode the hotkey has already put
+        the draft to the CLI, and an ask still armed behind it would ask the
+        emptied draft and be refused with "nothing to ask". A hold owns one
+        send, and whoever gets there first has it. The way out itself is
+        `_deliver`'s, shared with the panel's Send.
 
         `submit` presses Enter after the paste and arrives from one place
         only: the spoken "enter boom", routed here as a `send` event. No chip
@@ -1296,7 +1371,8 @@ class CompactPill(tk.Tk):
         here needs to know which happened: an empty return delivers nothing,
         and the refusal notes say why when the answer is neither.
         """
-        self._send_pending = False
+        self._send_pending = self._ask_pending = False
+        self._send_since = None
         text = self.session.send()
         if text:
             self._deliver(text, submit=submit)
@@ -1394,7 +1470,17 @@ class CompactPill(tk.Tk):
         outright (States.dc.html): the refusal is the persistent slashed
         glyph and red ring, not a flash that forgets by morning. A capture
         that answers clears the slash — it was about then, not now.
+
+        A hold that begins while a release is still waiting for its decode
+        supersedes it — `Pill._talk_start`'s rule (flow/ui.py:2783-2786), and
+        the words are not dropped by it: the wait is only the *send*, and what
+        was said stays in the draft for this hold's own release to take. Which
+        is also what makes the old skip unnecessary: nothing armed can fire
+        inside the utterance that follows it, because nothing stays armed.
         """
+        self._send_pending = False
+        self._ask_pending = False
+        self._send_since = None
         self._press_talking = True
         try:
             self.session.talk_start()
@@ -1416,6 +1502,9 @@ class CompactPill(tk.Tk):
         # The hold's own clock: `_on_release` clears `_press_at` before
         # `_talk_end` runs, so anything measuring the hold needs its own.
         self._hold_since = time.perf_counter()
+        # And the hold's own baseline, for the release to measure the draft
+        # against: what is in there *now* was not said into this hold.
+        self._draft_at_hold = self.session.draft.text
         self._recover = 0  # a hold ends the launch notice: seen, and moved on
         if self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
@@ -1430,12 +1519,27 @@ class CompactPill(tk.Tk):
         they simply do not paste themselves into whatever window a desktop
         switch just moved to. ui.py states the same at flow/ui.py:2760-2768.
 
-        The send is *armed*, not fired: the decode is still in flight, and the
-        `draft` event that brings the words is what fires it (`_pump_events`).
+        The send is *armed*, not fired: the decode is usually still in flight,
+        and `_pump_send` fires it on the frame that finds the decoder finished.
         What it arms is the mode's own path — Type's paste, a panel mode's ask
         — and the paste rule stays Type-only: an Ask hold while the panel is
         up is a reply, and its result lands in the panel, never in the window
         you were in (README: "Type never opens a panel").
+
+        **`talk_end` is not the only witness that there are words**, and
+        believing it alone was the whole of "a release after a pause pastes
+        nothing". It reports what is still in flight (`_utter`), and the gate's
+        800 ms hangover closes on any trailing pause — so a speaker who pauses
+        before letting go has already had their final decoded, `_utter` is
+        empty, and the words are sitting in `session.draft`. The draft is the
+        second witness, and either one arms the wait.
+
+        The draft is asked *what changed*, not whether it is empty, and that
+        distinction is `ctrl+win+d`'s: a break leaves words in the draft
+        deliberately unpasted, and a later hold with nothing said into it must
+        not be what finally pastes them into whatever window the desktop switch
+        moved to. `_talk_start` took the baseline; this compares against it, so
+        the second witness only ever testifies about *this* hold.
 
         A hold with nothing said into it ends in nothing: straight back to
         grey, no panel, no toast (States.dc.html). The band the hold raised
@@ -1445,12 +1549,17 @@ class CompactPill(tk.Tk):
         self._hold_since = None
         self._press_talking = False
         pending = self.session.talk_end()
-        if send and pending:
+        draft = self.session.draft.text
+        words = bool(pending or (draft.strip()
+                                 and draft != self._draft_at_hold))
+        self._draft_at_hold = draft
+        if send and words:
+            self._send_since = time.perf_counter()
             if self.session.mode == DICTATE:
                 self._send_pending = True
             elif self.session.mode in PANEL_SPEC:
                 self._ask_pending = True
-        elif (not pending and self._panel_open
+        elif (not words and self._panel_open
                 and not (self._panel_heard or self._panel_result)):
             self._close_panel()
 
