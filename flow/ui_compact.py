@@ -512,6 +512,20 @@ class CompactPill(tk.Tk):
     #: `__init__`, and the tests hand it their recording fake directly.
     paint = None
     _box_paint = None
+    #: Device pixels per design pixel on this window's monitor. 1.0 until
+    #: `__init__` asks, and 1.0 for good on a DPI-unaware process, a Mac or a
+    #: Linux desktop — so a fixture that never asked reads the identity.
+    k = 1.0
+    #: Where the window is, and where the capsule's top edge is, both in
+    #: device pixels and both *tracked* rather than read back. `winfo_rootx`
+    #: and `winfo_rooty` lag a `geometry` call by a frame or two — the same
+    #: staleness `_open_box` records for its own anchor — so a `_sync_shell`
+    #: that read them re-anchored off the position before last and walked the
+    #: window down the screen by the panel's height each time. At 100 % that
+    #: was survivable and unnoticed; at 300 % it is 600 px a step, and the
+    #: pill left the bottom of the display.
+    _shell_xy = (0, 0)
+    _capsule_y = 0
     #: The monitor this window is placed against, as the two rectangles the
     #: shipped design places against — `full` to centre on, `work` to stand on.
     #: Class defaults so a `__new__`-built fixture can read them without a Tk.
@@ -659,15 +673,21 @@ class CompactPill(tk.Tk):
         # design's own arithmetic (FluidVoice's `positionWindow`): centred on
         # the monitor under the pointer, stood clear of the taskbar. The same
         # place, on every machine, whatever is docked to which edge.
+        # Asked once the window exists, because it is a property of the
+        # monitor the window is on and there is no window before now.
+        self.k = paint.scale_for(self)
         self.full, self.work = _pointer_monitor(
             self.winfo_screenwidth(), self.winfo_screenheight(), self)
-        x, y = bottom_centre(PILL_W, PILL_H, self.full, self.work,
-                             PANEL_BOTTOM_OFFSET)
-        self.geometry(f"{PILL_W}x{PILL_H}+{x}+{y}")
+        x, y = bottom_centre(self.dev(PILL_W), self.dev(PILL_H),
+                             self.full, self.work,
+                             round(PANEL_BOTTOM_OFFSET * self.k))
+        self.geometry(f"{self.dev(PILL_W)}x{self.dev(PILL_H)}+{x}+{y}")
+        self._shell_xy = (x, y)
+        self._capsule_y = y
         bg = _shell_window(self, lite, PILL_ALPHA)
         self.configure(bg=bg)
         self.canvas = tk.Canvas(
-            self, width=PILL_W, height=PILL_H, bg=bg,
+            self, width=self.dev(PILL_W), height=self.dev(PILL_H), bg=bg,
             highlightthickness=0, bd=0,
         )
         self.canvas.pack(fill="both", expand=True)
@@ -682,7 +702,7 @@ class CompactPill(tk.Tk):
         # key, so leaving it set would punch the pill's own `SHELL` pixels out
         # of the bitmap we just antialiased.
         self.paint = paint.painter_for(self.canvas, PILL_W, PILL_H, lite,
-                                       PILL_ALPHA)
+                                       PILL_ALPHA, self.k)
         if getattr(self.paint, "antialiased", False):
             _unkey(self)
 
@@ -737,6 +757,33 @@ class CompactPill(tk.Tk):
     # `mainloop` is tk.Tk's own, and that is deliberate: __main__.py drives
     # this class exactly as it drives Pill — construct, `mainloop()`, and
     # `quit_app()` out of the KeyboardInterrupt clause.
+
+    def dev(self, v) -> int:
+        """A design length in device pixels — what Tk geometry now takes.
+
+        Every size in this module is written in the units
+        `design/compact/gen.py` uses, and the whole DPI story is that those are
+        no longer the units the screen is measured in: on a 300 % display a
+        120 px capsule is a 360 px window holding a bitmap GDI+ drew at 360 px.
+        Rounded, not floored, so a 34 px pill at 150 % is 51 and not 50 — half
+        a pixel of drift at the bottom edge is a hairline outside the window.
+
+        Not clamped to a minimum, because this converts offsets as well as
+        sizes and a zero offset is a real answer: floored at one, a closed
+        panel moved the capsule a pixel every time it was drawn. Sizes here
+        are constants that are never zero, and the bitmap clamps its own.
+        """
+        return round(v * self.k)
+
+    def design(self, v) -> float:
+        """A device length back in design pixels, for hit-testing.
+
+        Tk reports pointer coordinates in device pixels once the process is
+        DPI-aware, and every rectangle this module tests against is written in
+        design pixels. Without this the panel's chips move out from under the
+        pointer by exactly the scale factor.
+        """
+        return v / self.k
 
     def quit_app(self) -> None:
         # Idempotent, for the reason ui.py's is: ctrl+C reaches here down
@@ -1142,7 +1189,7 @@ class CompactPill(tk.Tk):
         (README), and the band is the part with buttons on it.
         """
         if (self._panel_open and e is not None
-                and getattr(e, "y", PILL_H) < PANEL_H):
+                and self.design(getattr(e, "y", self.dev(PILL_H))) < PANEL_H):
             self._panel_click(e)
             return
         self._press_at = time.perf_counter()
@@ -1178,8 +1225,13 @@ class CompactPill(tk.Tk):
         if self._press_at is None or self._press_talking:
             return
         x, y = getattr(e, "x_root", 0), getattr(e, "y_root", 0)
-        if not (abs(x - self._press_xy[0]) > PILL_DRAG_SLOP
-                or abs(y - self._press_xy[1]) > PILL_DRAG_SLOP):
+        # The slop is a design length and the travel is a device one, so the
+        # threshold is converted rather than compared across units: at 300 % an
+        # unconverted 4 px slop is a pixel and a third of real movement, and
+        # every hold by a hand that is not perfectly still becomes a drag.
+        slop = PILL_DRAG_SLOP * self.k
+        if not (abs(x - self._press_xy[0]) > slop
+                or abs(y - self._press_xy[1]) > slop):
             return
         self._press_moved = True
         self._move_window(x - self._drag[0], y - self._drag[1])
@@ -1195,9 +1247,14 @@ class CompactPill(tk.Tk):
         the bound is the drawn size and not `PILL_W`/`PILL_H`.
         """
         left, top, right, bottom = self.work
-        nx = max(left, min(x, right - self._shell_w))
-        ny = max(top, min(y, bottom - self._shell_h))
-        self.geometry(f"{self._shell_w}x{self._shell_h}+{nx}+{ny}")
+        dw, dh = self.dev(self._shell_w), self.dev(self._shell_h)
+        nx = max(left, min(x, right - dw))
+        ny = max(top, min(y, bottom - dh))
+        self._shell_xy = (nx, ny)
+        # The capsule moved with the window, so the anchor the band grows from
+        # moves too — it sits below whatever panel height is currently drawn.
+        self._capsule_y = ny + self.dev(self._capsule_off)
+        self.geometry(f"{dw}x{dh}+{nx}+{ny}")
         # No box to re-anchor: the palette and the setup box hold the keyboard
         # and close on `FocusOut`, so the press that starts this drag has
         # already dismissed either of them.
@@ -1426,7 +1483,7 @@ class CompactPill(tk.Tk):
         self._box_canvas.pack(fill="both", expand=True)
         h = self._box_height()
         self._box_paint = paint.painter_for(self._box_canvas, BOX_W, h,
-                                            self.lite, PILL_ALPHA)
+                                            self.lite, PILL_ALPHA, self.k)
         if getattr(self._box_paint, "antialiased", False):
             _unkey(box)
         x, y = self.winfo_rootx(), self.winfo_rooty()
@@ -1435,8 +1492,9 @@ class CompactPill(tk.Tk):
         # off a stale read parked the box above the screen's top edge —
         # `.shots/12-compact-palette.png` was a picture of the backdrop.
         self._box_x = x
-        self._box_foot = max(0, y - h - 8) + h
-        box.geometry(f"{BOX_W}x{h}+{x}+{self._box_foot - h}")
+        self._box_foot = max(0, y - self.dev(h + 8)) + self.dev(h)
+        box.geometry(f"{self.dev(BOX_W)}x{self.dev(h)}"
+                     f"+{x}+{self._box_foot - self.dev(h)}")
         box.bind("<Key>", self._on_box_key)
         box.bind("<ButtonPress-1>", self._on_box_click)
         box.bind("<FocusOut>", lambda _e: self._close_box())
@@ -1474,7 +1532,8 @@ class CompactPill(tk.Tk):
             return
         h = self._box_height()
         self._box.geometry(
-            f"{BOX_W}x{h}+{self._box_x}+{self._box_foot - h}")
+            f"{self.dev(BOX_W)}x{self.dev(h)}"
+            f"+{self._box_x}+{self._box_foot - self.dev(h)}")
         resize = getattr(self._box_paint, "resize", None)
         if resize is not None:
             resize(BOX_W, h)
@@ -1524,8 +1583,9 @@ class CompactPill(tk.Tk):
             # Told where, not asked: the box has just been given its geometry
             # and `winfo_*` has not caught up, which composited the first
             # frame off screen and photographed as an empty backdrop.
-            present(self._box, at=(self._box_x,
-                                   self._box_foot - self._box_height()))
+            present(self._box,
+                    at=(self._box_x,
+                        self._box_foot - self.dev(self._box_height())))
 
     # -- the panel -----------------------------------------------------------
 
@@ -1577,14 +1637,23 @@ class CompactPill(tk.Tk):
         h = PILL_H + panel_h + notice_h
         if (w, h) == (self._shell_w, self._shell_h):
             return
-        x = self.winfo_rootx()
-        capsule_top = self.winfo_rooty() + self._capsule_off
-        if x + w > self.winfo_screenwidth():
-            x = self.winfo_screenwidth() - w
-        y = max(0, capsule_top - panel_h)
+        # Screen arithmetic is in device pixels — `winfo_*` and the screen
+        # width both report them — so design lengths are converted before they
+        # meet it, never after.
+        # Off the tracked anchor, never off `winfo_*`: the capsule's top edge
+        # is the fixed point of this whole surface — "the pill never hides and
+        # never moves" (README) — and the band grows upward from it while the
+        # notice grows downward. The one clamp is the screen's right edge: the
+        # band goes left rather than off it, because the mic moving is a
+        # smaller lie than the panel being cut in half.
+        x = self._shell_xy[0]
+        if x + self.dev(w) > self.winfo_screenwidth():
+            x = self.winfo_screenwidth() - self.dev(w)
+        y = max(0, self._capsule_y - self.dev(panel_h))
         self._shell_w, self._shell_h = w, h
         self._capsule_off = panel_h
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        self._shell_xy = (x, y)
+        self.geometry(f"{self.dev(w)}x{self.dev(h)}+{x}+{y}")
         resize = getattr(self.paint, "resize", None)
         if resize is not None:
             resize(w, h)
@@ -1592,7 +1661,7 @@ class CompactPill(tk.Tk):
     def _panel_click(self, e) -> None:
         """A press in the band: the only live things there are the strip's
         close, the footer's Copy, and Send when the mode has one."""
-        x, y = e.x, e.y
+        x, y = self.design(e.x), self.design(e.y)
         if _hit(CLOSE_RECT, x, y):
             self._close_panel()
         elif _hit(COPY_RECT, x, y):

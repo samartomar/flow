@@ -729,6 +729,13 @@ def panel_pill(state=State.IDLE, *, mode=CONVERSE, x=100, y=400, **attrs):
     outside-click poll would otherwise read the *test runner's* mouse."""
     p = pill(state, mode=mode, **attrs)
     p.geometry = mock.Mock()
+    # The anchor is *stated*, not faked through `winfo_*`. That is the real
+    # contract now: `_sync_shell` tracks where it put the window rather than
+    # reading it back, because `winfo_*` lags a `geometry` call and a sync
+    # that re-anchored off a stale read walked the window down the screen by
+    # the panel's height every time it ran.
+    p._shell_xy = (x, y)
+    p._capsule_y = y
     p.winfo_rootx = mock.Mock(return_value=x)
     p.winfo_rooty = mock.Mock(return_value=y)
     p.winfo_screenwidth = mock.Mock(return_value=1920)
@@ -974,9 +981,8 @@ class TestTheWindowGrowsAndReturns(unittest.TestCase):
         # The foot's bottom edge anchors: 400 + 34 - 234 = 200.
         p.geometry.assert_called_once_with("400x234+100+200")
         self.assertEqual((p._shell_w, p._shell_h), (uc.PANEL_W, 234))
-        # The window reports where it landed; closing returns to 120×34 with
-        # the same bottom edge.
-        p.winfo_rooty.return_value = 200
+        # Closing returns to 120×34 on the same capsule top — which needs no
+        # help from the test, because the anchor never moved.
         p._close_panel()
         p.geometry.assert_called_with("120x34+100+400")
 

@@ -114,6 +114,66 @@ def _start():
     return _token
 
 
+#: `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`. The context, not the older
+#: `SetProcessDpiAwareness` enum: v2 is the one that also scales the non-client
+#: area and keeps child windows in step on a DPI change.
+_PER_MONITOR_V2 = -4
+
+
+def make_dpi_aware() -> bool:
+    """Tell Windows this process draws in real pixels. True if it took.
+
+    Must run **before any window exists** — awareness is fixed for the process
+    the moment the first one is created, and after that this is a no-op that
+    reports failure.
+
+    Until this is called, a process is *DPI-unaware*: on a 300 % display
+    Windows tells it the screen is a third of its real size, lets it draw a
+    third-size image, and stretches the result by three with a bilinear
+    filter. Everything Flow drew was arriving on screen as an upscaled
+    thumbnail of itself — which is most of what "it does not look clean" was,
+    far more than any antialiasing.
+
+    Reported rather than assumed, and false is survivable: a Windows too old
+    for the v2 context, or a process something else already declared for, goes
+    on drawing at `scale_for` = 1 exactly as before.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        fn = user32.SetProcessDpiAwarenessContext
+        # The context is a `DPI_AWARENESS_CONTEXT` — a pointer-sized handle
+        # whose values happen to be small negative numbers. Declared, because
+        # ctypes defaults an int argument to 32 bits: on 64-bit Windows the
+        # -4 arrived as a truncated handle the call did not recognise, and it
+        # answered False with nothing to say about why.
+        fn.argtypes = [ctypes.c_void_p]
+        fn.restype = ctypes.c_int
+        return bool(fn(ctypes.c_void_p(_PER_MONITOR_V2)))
+    except (AttributeError, OSError):
+        return False
+
+
+def scale_for(win) -> float:
+    """How many device pixels a design pixel is worth on `win`'s monitor.
+
+    1.0 on a plain display, 3.0 on the 300 % one this was written against, and
+    1.0 whenever the answer cannot be had — including every DPI-unaware
+    process, where Windows is doing the scaling itself and a second factor on
+    top would square it.
+    """
+    if sys.platform != "win32":
+        return 1.0
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetAncestor(win.winfo_id(), 2)
+        dpi = user32.GetDpiForWindow(hwnd)
+    except (AttributeError, OSError):
+        return 1.0
+    return (dpi / 96.0) if dpi else 1.0
+
+
 def available() -> bool:
     """Whether this machine can present a layered window at all.
 
@@ -170,7 +230,8 @@ class GdiCanvas:
     #: is the honest question.
     antialiased = True
 
-    def __init__(self, w: int, h: int, alpha: float = 1.0) -> None:
+    def __init__(self, w: int, h: int, alpha: float = 1.0,
+                 scale: float = 1.0) -> None:
         # Started here rather than left to the caller. `painter_for` happens
         # to ask `available()` first, but an invariant that holds because of
         # the order two functions are written in is not an invariant — and the
@@ -180,6 +241,12 @@ class GdiCanvas:
             raise OSError("GDI+ is not available on this machine")
         self._buf = self._bitmap = self._g = None
         self._w = self._h = 0
+        #: Device pixels per design pixel. Every drawing call stays in the
+        #: units `design/compact/gen.py` is written in; the bitmap is this much
+        #: larger and a world transform does the rest, so a 120x34 capsule on a
+        #: 300 % display is rendered as 360x102 real pixels rather than drawn
+        #: small and stretched by the compositor.
+        self.scale = max(0.1, float(scale))
         self._fonts: dict = {}
         #: The window-wide opacity, as `-alpha` used to carry it. It moves
         #: here because the two cannot coexist — see `present` — and this is
@@ -210,21 +277,37 @@ class GdiCanvas:
     # -- lifecycle ---------------------------------------------------------
 
     def resize(self, w: int, h: int) -> None:
+        """Size the bitmap for a window `w` x `h` **design** pixels across."""
         w, h = max(1, int(w)), max(1, int(h))
         if (w, h) == (self._w, self._h):
             return
         self._release()
         self._w, self._h = w, h
-        self._buf = ctypes.create_string_buffer(w * h * 4)
+        pw, ph = self.device_size
+        self._buf = ctypes.create_string_buffer(pw * ph * 4)
         bitmap = ctypes.c_void_p()
-        _gdiplus.GdipCreateBitmapFromScan0(w, h, w * 4, _PARGB, self._buf,
+        _gdiplus.GdipCreateBitmapFromScan0(pw, ph, pw * 4, _PARGB, self._buf,
                                            ctypes.byref(bitmap))
         g = ctypes.c_void_p()
         _gdiplus.GdipGetImageGraphicsContext(bitmap, ctypes.byref(g))
+        # The whole of the DPI story, in one call: the caller keeps drawing in
+        # design pixels and GDI+ lays them down at device resolution. Curves
+        # are re-tessellated at the larger size and glyphs are hinted for it,
+        # which is the difference between a sharp pill and a magnified one.
+        if self.scale != 1.0:
+            _gdiplus.GdipScaleWorldTransform(g, ctypes.c_float(self.scale),
+                                             ctypes.c_float(self.scale), 0)
         _gdiplus.GdipSetSmoothingMode(g, _SMOOTH_AA)
         _gdiplus.GdipSetPixelOffsetMode(g, _OFFSET_HQ)
         _gdiplus.GdipSetTextRenderingHint(g, _TEXT_AA)
         self._bitmap, self._g = bitmap, g
+
+    @property
+    def device_size(self) -> tuple:
+        """The bitmap's real size in device pixels, which is what Windows is
+        handed and what the window must be sized to."""
+        return (max(1, round(self._w * self.scale)),
+                max(1, round(self._h * self.scale)))
 
     def _release(self) -> None:
         for handle, drop in ((self._g, "GdipDeleteGraphics"),
@@ -470,14 +553,15 @@ class GdiCanvas:
         memdc = _gdi32.CreateCompatibleDC(screen)
         bi = _BITMAPINFOHEADER()
         bi.biSize = ctypes.sizeof(bi)
-        bi.biWidth, bi.biHeight = self._w, -self._h  # negative: top-down
+        pw, ph = self.device_size
+        bi.biWidth, bi.biHeight = pw, -ph  # negative: top-down
         bi.biPlanes, bi.biBitCount, bi.biCompression = 1, 32, 0
         bits = ctypes.c_void_p()
         hbmp = _gdi32.CreateDIBSection(memdc, ctypes.byref(bi), 0,
                                        ctypes.byref(bits), None, 0)
-        ctypes.memmove(bits, self._buf, self._w * self._h * 4)
+        ctypes.memmove(bits, self._buf, pw * ph * 4)
         old = _gdi32.SelectObject(memdc, hbmp)
-        size = wintypes.SIZE(self._w, self._h)
+        size = wintypes.SIZE(pw, ph)
         src = wintypes.POINT(0, 0)
         # `at` when the caller knows where the window is going, because
         # `winfo_*` lags a `geometry` call by a frame or two — the same
@@ -526,7 +610,8 @@ class GdiCanvas:
         _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, ex | _WS_EX_LAYERED)
 
 
-def painter_for(canvas, w: int, h: int, lite: bool, alpha: float = 1.0):
+def painter_for(canvas, w: int, h: int, lite: bool, alpha: float = 1.0,
+                scale: float = 1.0):
     """What this window should draw on: a `GdiCanvas`, or the canvas itself.
 
     Lite draws on the canvas, and deliberately: Lite is the mode that asks
@@ -535,7 +620,7 @@ def painter_for(canvas, w: int, h: int, lite: bool, alpha: float = 1.0):
     """
     if not lite and available():
         try:
-            return GdiCanvas(w, h, alpha)
+            return GdiCanvas(w, h, alpha, scale)
         except (AttributeError, OSError, ValueError):
             # A machine that has GDI+ but would not give us a bitmap. The
             # canvas still draws; it just draws Tk's stairs.

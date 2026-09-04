@@ -46,6 +46,14 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from PIL import ImageGrab  # noqa: E402
 
+from flow import paint  # noqa: E402
+
+# Before any window: awareness is fixed for the process the moment the
+# first one exists, and these shots are the record of what the surface
+# looks like on the machine taking them. Photographed unaware, every one
+# of them was a third-size image the compositor had stretched.
+paint.make_dpi_aware()
+
 import flow.ui as ui  # noqa: E402
 import shots  # noqa: E402  — the capture machinery and the fake session
 from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
@@ -60,9 +68,15 @@ def shot(pill, name: str, margin: int = 26) -> None:
     pill.lift()
     pill.update_idletasks()
     x, y = pill.winfo_rootx(), pill.winfo_rooty()
+    w, h = pill.winfo_width(), pill.winfo_height()
+    if w <= 1 or h <= 1:
+        # A window caught between two geometries reports 1x1, and a box built
+        # from that crops to nothing — which aborted the whole walk on the
+        # frame after a panel closed rather than costing it one picture.
+        print(f"  ! {name} skipped: window is {w}x{h}", flush=True)
+        return
     shots._grab((x - margin, y - margin,
-                 x + pill.winfo_width() + margin,
-                 y + pill.winfo_height() + margin), name)
+                 x + w + margin, y + h + margin), name)
 
 
 def box_shot(pill, name: str, margin: int = 26) -> None:

@@ -769,6 +769,25 @@ def main(argv: list[str] | None = None) -> int:
               or (profile.design if profile is not None else DESIGN_DEFAULT))
     if design != DESIGN_DEFAULT:
         say(f"design: {design}")
+    if design == "compact":
+        # Before any window exists, which is the only moment this can be said:
+        # DPI awareness is fixed for the process the instant the first one is
+        # created. Without it Windows tells a 300 % display's app that the
+        # screen is a third of its real size, lets it draw a third-size image,
+        # and stretches the result — everything Flow drew was arriving as an
+        # upscaled thumbnail of itself, which was most of what "it does not
+        # look clean" turned out to be.
+        #
+        # Gated on the design because awareness is *process-wide* and the two
+        # surfaces cannot both have it at once: `flow/ui.py` writes its
+        # geometry in absolute pixels, so a DPI-aware process would draw the
+        # shipped pill at a third of its intended size. Only one design runs
+        # per process, so gating it here is exact rather than a compromise —
+        # and it is what keeps the shipped surface untouched until its own
+        # constants are scaled.
+        from . import paint
+        if paint.make_dpi_aware():
+            say("rendering at native resolution")
 
     hotkeys = None
     if not args.no_hotkeys and not lite:
