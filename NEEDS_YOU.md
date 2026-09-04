@@ -9,8 +9,31 @@ what is live: desk work, and the two decisions parked on evidence.
 
 ## Decisions still open
 
-(none — the record is [docs/decisions.md](docs/decisions.md); two evidence-parked
-entries are further down)
+- [ ] **One surface, and which one.** Added 2026-09-04. Both designs are real now — the
+  compact build brief landed in full — and the 2026-09-03 decision's own reopen bar says
+  a second surface is a standing cost once parity is reached and one of the two stops
+  being used. You have said which one you use. [docs/one-surface.md](docs/one-surface.md)
+  is the recommendation: the compact surface becomes the product, the shipped one is
+  retired in five steps, and it lists the five things the compact surface has to absorb
+  first (settings behind the setup rows, Help, a hand editor as its own box, the notes
+  loop on the strip, Refine's "say more" meaning what it says). The one question in it
+  that is a taste call rather than a build — whether a Type hold names the window the
+  words are going to — is yours. Nothing is blocked on this: the 2026-09-04 review's
+  fixes land either way, and step 2 (moving the shared code out of `ui.py`) is safe to
+  start before the decision because it changes no behaviour.
+
+- [ ] **Spoken punctuation eats five ordinary words.** Added 2026-09-04 by the compact
+  review ([docs/audit-2026-09-04/compact-surface.md](docs/audit-2026-09-04/compact-surface.md)).
+  `edits._SHAPE_TABLE` resolves "tab", "period", "dash", "colon" and "comma" wherever
+  they appear — *"unconditional, by design"*, the send-trigger convention one level down
+  — so "open a new tab" pastes an indent and "the trial period" pastes "the trial." Undo
+  holds the words, and the 2026-09-03 decision priced the trade against a small table.
+  The alternative costs one rule: the marks that are only ever keys ("question mark",
+  "full stop", "newline", "press enter", "press tab") stay bare, and the five words that
+  are also English need a lead-in ("press", "then") to be a key. The artboard's own
+  example — *then tab dash fix the tests* — still resolves under it, because "then"
+  leads the tab and the dash follows a key. Taste call: which mistake you would rather
+  make, a key that needs a word before it or a word that becomes a key.
 
 ## The selfdrive tripwire — closed 2026-08-02, fixed rather than quarantined
 

@@ -242,6 +242,60 @@ answering. "Is it on", "is it busy", and "did it hear me" are not decoration.
 **Reopens if** the ring runs out of room — five meanings on one ring is already
 the most it can carry, and a sixth needs a different channel, not a sixth hue.
 
+### 2026-09-04 — The compact review: the release waits for the decoder, and the band grows
+
+The build brief's seven items had landed and the owner had said the compact surface is
+the one they use, so it was read the way the shipped surface was read on 2026-08-02: for
+where it fails, with every suspicion tested rather than argued. Twelve findings, in
+[audit-2026-09-04/compact-surface.md](audit-2026-09-04/compact-surface.md), fixed in
+ten commits — nine by five agents in parallel worktrees, one where two of their fixes
+met. Two of the fixes changed a contract this record had stated, and those are the
+decisions.
+
+**The release arms a wait; the decoder's idleness fires it.** The 2026-09-03 send path
+fired the paste on the `draft` event that brought the words. That was wrong in both
+directions and both were reproduced headlessly: a hold ending in a pause longer than
+the gate's 800 ms hangover had its final decoded *during* the hold, so the release
+found nothing in flight and armed nothing — the words sat in the draft and nothing
+pasted, said, or showed; and a hold long enough to queue two finals fired on the first,
+pasting half. The shipped `Pill._pump_talk` had the rule all along: the decode has to be
+*finished*, not merely to have said something. The compact surface now arms on the
+release whenever there are words — in flight or already in the draft, measured against
+what the draft held when the hold began, so a break's deliberately unpasted words are
+not sent by a later silent hold — and a per-frame pump fires on `not session.busy`,
+with the shipped surface's ceiling and a strip line when it is hit. A 5 ms clock runs
+while a hold or a wait is in flight, as it does on the shipped surface.
+
+**The band grows with its text, to a cap.** The panel was a fixed 200 px of fixed
+rows, and `11-compact-refine-panel.png` showed the refined prompt drawn through the
+Copy and Send chips: `RESULT_Y + 16 + 2 × 18 = 160`, past a footer at 156. Both blocks
+were also cut to two lines, so an answer could not be read and the text Send was about
+to paste could not be checked. The artboards grow with their text; the band does now
+(`_panel_layout`, one source of truth for the drawing, the window and the hit tests),
+up to four heard lines and twelve result lines, shrinking its result rather than leaving
+the screen when the capsule stands too close to the top. `PANEL_H` is the floor, so a
+short exchange still photographs as drawn. Paragraph breaks and indentation survive
+`_fit`, so a refined prompt's bullets display as bullets.
+
+**Three more that were measured rather than guessed.** GDI+ never saw the bundled IBM
+Plex faces — `FR_PRIVATE` is a GDI registration and GDI+ keeps its own collection — so
+the whole surface had been composited in Segoe UI and Consolas; a private collection
+fixes it, and a Plex string now measures 158 px where Consolas measured 145. Every
+frame repainted and re-presented: 0.78 ms idle and 4.5 ms with the panel open at 300 %,
+now 0.01 ms for an unchanged frame under a draw key. And the panel's clamp used
+`winfo_screenwidth()`, the primary monitor's width, so opening it on a right-hand
+monitor threw the window onto the primary; the monitor is re-asked every fourth frame
+about the capsule's own centre now, and drags may cross the seam.
+
+**What the review raised rather than took** is in `NEEDS_YOU.md`: whether the two
+surfaces become one ([one-surface.md](one-surface.md)), and whether spoken
+punctuation's five bare words should need a lead-in.
+
+**Reopens if** the wait's ceiling is ever hit in ordinary use — that is a decoder
+problem wearing a send problem's clothes — or if twelve result lines turn out to be
+too few for the answers people actually ask for, at which point the panel scrolls
+rather than grows further.
+
 ### 2026-09-04 — The compact menu gets one row the artboard does not draw
 
 `Workspace.dc.html` says "this is everything it offers", and on 2026-09-03 the
