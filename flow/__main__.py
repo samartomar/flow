@@ -855,10 +855,25 @@ def main(argv: list[str] | None = None) -> int:
 
         _threading.Thread(target=go, daemon=True, name="identity").start()
 
-    say(
-        ("listening | " if args.arm else "click the pill to arm | ")
-        + f"right-click for the menu | {quits}"
-    )
+    # Two surfaces, two sets of hands. The shipped pill arms on a click and the
+    # compact one does not — a tap there cycles the mode, and a hold is the
+    # whole gesture — so telling a compact user to "click the pill to arm" sent
+    # them clicking at a pill that answered by changing colour. The line names
+    # the gesture the surface in front of them actually has.
+    if design == "compact":
+        # The chord names itself if there is one — it is printed in full a few
+        # lines above, so this is a pointer rather than a repeat, and it stays
+        # honest on a run started with `--no-chord`.
+        chord = getattr(hotkeys, "chord", None)
+        held = f"the pill or {chord.describe()}" if chord is not None \
+            else "the pill"
+        say(f"hold {held} to talk | tap the pill to cycle "
+            f"Type / Refine / Ask | right-click for the menu | {quits}")
+    else:
+        say(
+            ("listening | " if args.arm else "click the pill to arm | ")
+            + f"right-click for the menu | {quits}"
+        )
     # `--no-lexicon` points the loader at a path inside the package that must never
     # exist, so the menu is sent to the real settings folder instead: the profile lives
     # there either way, and creating a template beside the source is nobody's idea of

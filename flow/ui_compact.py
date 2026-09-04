@@ -89,6 +89,7 @@ from .ui import (
     _dark_menu,
     _mix,
     _no_activate,
+    _pointer_monitor,
     _round_rect as _tk_round_rect,
     _shell_window,
     _user32,
@@ -96,6 +97,7 @@ from .ui import (
     owned_by_flow,
     toplevel_hwnd,
 )
+from .ui import PANEL_BOTTOM_OFFSET, bottom_centre
 from .ui import RING as SEAM
 
 if sys.platform == "win32":
@@ -510,6 +512,11 @@ class CompactPill(tk.Tk):
     #: `__init__`, and the tests hand it their recording fake directly.
     paint = None
     _box_paint = None
+    #: The monitor this window is placed against, as the two rectangles the
+    #: shipped design places against — `full` to centre on, `work` to stand on.
+    #: Class defaults so a `__new__`-built fixture can read them without a Tk.
+    full = (0, 0, 1920, 1080)
+    work = (0, 0, 1920, 1080)
     #: The right-click menu, built in `__init__`. None on a fixture, and
     #: `_on_menu` checks rather than assuming. `_mode_var` is the radios'
     #: tick, on the instance because a Tk variable dies with the frame that
@@ -645,7 +652,18 @@ class CompactPill(tk.Tk):
         # The window. `_shell_window` applies the five probed attributes and
         # answers with the background the canvas must agree with — see its
         # docstring for why the background is returned rather than assumed.
-        self.geometry(f"{PILL_W}x{PILL_H}")
+        # Where it opens, and this was missing: the window was given a size and
+        # no position, so Windows dropped it in the top-left corner — over the
+        # menu bar of whatever was behind it, which is the one place a
+        # always-on-top pill must not be. `bottom_centre` is the shipped
+        # design's own arithmetic (FluidVoice's `positionWindow`): centred on
+        # the monitor under the pointer, stood clear of the taskbar. The same
+        # place, on every machine, whatever is docked to which edge.
+        self.full, self.work = _pointer_monitor(
+            self.winfo_screenwidth(), self.winfo_screenheight(), self)
+        x, y = bottom_centre(PILL_W, PILL_H, self.full, self.work,
+                             PANEL_BOTTOM_OFFSET)
+        self.geometry(f"{PILL_W}x{PILL_H}+{x}+{y}")
         bg = _shell_window(self, lite, PILL_ALPHA)
         self.configure(bg=bg)
         self.canvas = tk.Canvas(
@@ -1176,8 +1194,9 @@ class CompactPill(tk.Tk):
         is the capsule plus whatever the panel and the notice have added, so
         the bound is the drawn size and not `PILL_W`/`PILL_H`.
         """
-        nx = max(0, min(x, self.winfo_screenwidth() - self._shell_w))
-        ny = max(0, min(y, self.winfo_screenheight() - self._shell_h))
+        left, top, right, bottom = self.work
+        nx = max(left, min(x, right - self._shell_w))
+        ny = max(top, min(y, bottom - self._shell_h))
         self.geometry(f"{self._shell_w}x{self._shell_h}+{nx}+{ny}")
         # No box to re-anchor: the palette and the setup box hold the keyboard
         # and close on `FocusOut`, so the press that starts this drag has
