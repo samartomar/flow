@@ -172,10 +172,6 @@ def main() -> None:
             pill.armed = True
         return fn
 
-    def silent_notice():
-        sess.capturing = False
-        pill._say(uc.SILENT_TEXT)
-
     def loading(on):
         def fn():
             sess.asr.loading = on
@@ -188,10 +184,6 @@ def main() -> None:
             sess.state, sess.capturing = State.IDLE, True
             pill.armed = True
         return fn
-
-    def silent_notice():
-        sess.capturing = False
-        pill._say(uc.SILENT_TEXT)
 
     def menu():
         pill.lift()
@@ -332,8 +324,6 @@ def main() -> None:
         (0, mic_open()),
         (500, lambda: shot(pill, "21-compact-mic-open")),
         (0, state(State.IDLE, armed=False)),
-        (0, silent_notice),
-        (500, lambda: shot(pill, "22-compact-mic-silent")),
         (0, reset_fallbacks),
         # The three the pill learned to say after "push to talk does not do
         # anything, I cannot explain the failure to you" — which is what a
@@ -345,8 +335,6 @@ def main() -> None:
         (0, mic_open()),
         (500, lambda: shot(pill, "21-compact-mic-open")),
         (0, state(State.IDLE, armed=False)),
-        (0, silent_notice),
-        (500, lambda: shot(pill, "22-compact-mic-silent")),
         (0, reset_fallbacks),
         (0, state(State.IDLE, armed=False)),
         (400, menu),

@@ -329,48 +329,55 @@ class TestThePillSaysWhatItIsDoing(unittest.TestCase):
         self.assertEqual(p._ring_colour(), "")
 
 
-class TestASilentMicrophoneSaysSo(unittest.TestCase):
-    """`States.dc.html` sends "held, but nothing was said" straight back to
-    grey, and that is right for a quiet moment in a working room. It is wrong
-    for a muted device: the pill then looks the same every single time, and
-    the only thing anybody can report is that nothing happens."""
+class TestEveryHoldPumpsTheSession(unittest.TestCase):
+    """`_frame` reads the microphone only while `armed` — `session.tick()` is
+    what pulls the audio — so anything that opens the device and leaves
+    `armed` false opens it into a loop that never reads it.
 
-    def held(self, peak, seconds):
-        p = pill()
-        p._hold_peak = peak
-        p._say = mock.Mock()
-        p._check_heard(seconds)
-        return p
+    That was the chord, which is the documented push-to-talk gesture: it went
+    through `_talk_start` while `armed = True` lived in `_pump_press`, the
+    *mouse* path. `capturing` true, ring green, and not one sample pumped for
+    the whole hold — which then read as a microphone delivering nothing.
+    """
 
-    def test_a_hold_that_heard_nothing_says_so(self):
-        p = self.held(uc.DB_FLOOR, uc.SILENT_AFTER_SEC + 0.5)
-        p._say.assert_called_once_with(uc.SILENT_TEXT)
+    def test_the_chord_arms(self):
+        p = pill(armed=False)
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["talk"]
+        p._drain_hotkeys()
+        self.assertTrue(p.armed)
+        p.session.talk_start.assert_called_once_with()
 
-    def test_a_quiet_room_is_not_accused_of_being_a_broken_one(self):
-        # Anything meaningfully above the meter's floor is a live device.
-        p = self.held(uc.DB_FLOOR + uc.SILENT_MARGIN_DB + 1,
-                      uc.SILENT_AFTER_SEC + 0.5)
-        p._say.assert_not_called()
+    def test_the_mouse_hold_arms(self):
+        p = pill(armed=False)
+        p._press_at = time.perf_counter() - uc.PILL_HOLD_SEC - 0.01
+        p._pump_press()
+        self.assertTrue(p.armed)
 
-    def test_a_press_somebody_changed_their_mind_about_says_nothing(self):
-        # Under the threshold this is the artboard's own case, and it is
-        # already answered by going back to grey.
-        p = self.held(uc.DB_FLOOR, uc.SILENT_AFTER_SEC - 0.3)
-        p._say.assert_not_called()
+    def test_arming_is_the_one_seam_both_go_through(self):
+        # Whichever gesture starts the hold, the same call arms it — so a
+        # third one cannot arrive and quietly skip the pump.
+        p = pill(armed=False)
+        p._talk_start()
+        self.assertTrue(p.armed)
 
-    def test_the_peak_is_tracked_only_while_a_hold_is_in_flight(self):
-        p = pill(State.LISTENING, armed=True)
-        p.session.level_db = -20.0
-        p._press_talking = True
+    def test_a_refused_capture_does_not_claim_to_be_armed(self):
+        p = pill(armed=False)
+        p.session.talk_start.side_effect = OSError("device is busy")
+        p._talk_start()
+        self.assertFalse(p.armed)
+        self.assertTrue(p._mic_gone)
+
+    def test_an_armed_frame_actually_ticks_the_session(self):
+        p = pill(armed=True)
         p._frame()
-        self.assertEqual(p._hold_peak, -20.0)
+        p.session.tick.assert_called_once_with()
 
-    def test_no_hold_no_peak(self):
-        p = pill(State.LISTENING, armed=True)
-        p.session.level_db = -20.0
-        p._press_talking = False
+    def test_an_unarmed_frame_collects_but_does_not_tick(self):
+        p = pill(armed=False)
         p._frame()
-        self.assertEqual(p._hold_peak, uc.DB_FLOOR)
+        p.session.tick.assert_not_called()
+        p.session.pump_results.assert_called_once_with()
 
 
 class TestTheNoticeCarriesAnySentence(unittest.TestCase):
@@ -382,10 +389,10 @@ class TestTheNoticeCarriesAnySentence(unittest.TestCase):
 
     def test_the_strip_draws_whatever_it_was_given(self):
         p = panel_pill(x=100, y=400, _notice=2,
-                       _notice_text=uc.SILENT_TEXT,
+                       _notice_text="a sentence of its own",
                        _shell_h=uc.PILL_H + uc.NOTICE_H)
         p._draw()
-        said = [t for t in p.canvas.texts if t[1] == uc.SILENT_TEXT]
+        said = [t for t in p.canvas.texts if t[1] == "a sentence of its own"]
         self.assertEqual(len(said), 1)
         # Never in an error colour: a muted mic is a thing to fix, not a
         # failure of Flow's — the same rule Lite's "copied" line follows.

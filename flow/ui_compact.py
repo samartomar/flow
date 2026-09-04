@@ -160,20 +160,8 @@ RECOVER_FRAMES = 300
 NOTICE_H = 18
 COPIED_FRAMES = 100
 COPIED_TEXT = "copied — press Ctrl+V"
-
-#: What a hold has to reach before the microphone counts as delivering
-#: anything. `DB_FLOOR` is where the meter bottoms out, and a live room sits
-#: well above it — a muted or silenced device sits at −95 dB and never moves.
-#: Six decibels of margin above the floor, so a genuinely quiet room is not
-#: accused of being a broken one.
-SILENT_MARGIN_DB = 6.0
-#: How long a hold must run before silence means anything. Under this it is
-#: somebody who pressed and changed their mind, which States.dc.html already
-#: answers with "straight back to grey".
-SILENT_AFTER_SEC = 1.2
-SILENT_TEXT = "no sound from the mic — is it muted?"
-#: Air either side of a notice's words. The strip is as wide as it needs to
-#: be and never narrower than the pill.
+#: Air either side of a notice's words. The strip is as wide as it needs
+#: to be and never narrower than the pill.
 NOTICE_PAD = 14
 
 #: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
@@ -633,10 +621,6 @@ class CompactPill(tk.Tk):
     _hold_since = None
     #: The loudest level seen during the hold in flight, so a release can tell
     #: a quiet room from a microphone that is delivering nothing at all.
-    #: `DB_FLOOR` and not zero: zero decibels is louder than anything a
-    #: microphone will ever hand over, so a peak starting there can only ever
-    #: go down and the check below it could never fire.
-    _hold_peak = DB_FLOOR
     #: Whether the CLI's failure line is what's in the result block — so Copy
     #: and Send hand over the raw dictation instead, because unrefined text
     #: beats no text.
@@ -696,7 +680,6 @@ class CompactPill(tk.Tk):
         self._recover = 0
         self._notice = 0
         self._notice_text = COPIED_TEXT
-        self._hold_peak = DB_FLOOR
         self._panel_failed = False
         self._capsule_off = 0
 
@@ -884,11 +867,6 @@ class CompactPill(tk.Tk):
             hearing = getattr(self.session, "hearing", True)
             target = self._norm(self.session.level_db) if hearing else 0.0
             self._meter_level = self._eased(target)
-            if self._press_talking:
-                # The loudest thing this hold has heard, kept so the release
-                # can tell a quiet room from a device delivering nothing.
-                self._hold_peak = max(self._hold_peak,
-                                      self.session.level_db)
         else:
             # Still collect what the CLI owes us. Disarming must not strand an
             # answer already in flight — the defect ui.py's identical branch
@@ -1120,27 +1098,6 @@ class CompactPill(tk.Tk):
         if hwnd and not owned_by_flow(hwnd):
             self.paste_target = hwnd
 
-    def _check_heard(self, held_for: float) -> None:
-        """Say something when a hold heard literally nothing.
-
-        `States.dc.html` has "held, but nothing was said" going straight back
-        to grey, and that is right for a quiet moment in a working room. It is
-        wrong for a microphone that is muted: the pill then looks exactly the
-        same as a pill doing nothing, every time, and the only thing anybody
-        can report is "push to talk does not do anything". A device that never
-        rose a hair above the meter's floor across a whole hold is not a quiet
-        room, and the difference is worth a sentence.
-
-        Below `SILENT_AFTER_SEC` this says nothing at all: that is somebody
-        who pressed and changed their mind, which is the case the artboard
-        already answers.
-        """
-        if held_for < SILENT_AFTER_SEC:
-            return
-        if self._hold_peak > DB_FLOOR + SILENT_MARGIN_DB:
-            return
-        self._say(SILENT_TEXT)
-
     def _pump_press(self) -> None:
         """Turn a press that has outlived `PILL_HOLD_SEC` into an utterance.
 
@@ -1161,7 +1118,6 @@ class CompactPill(tk.Tk):
             # press is over, so it cannot become a tap either.
             self._press_at = None
             return
-        self.armed = True
 
     # -- the gestures --------------------------------------------------------
 
@@ -1189,10 +1145,18 @@ class CompactPill(tk.Tk):
             self._flash = FLASH_FRAMES
             return
         self._mic_gone = False
-        # The hold's own clock and its own peak, started together and read
-        # together by `_check_heard` on the release.
+        # **Armed here, and this is the whole of "push to talk does nothing".**
+        # `_frame` pumps the session only while armed — `session.tick()` is
+        # what reads the microphone — and this used to be set in
+        # `_pump_press`, which is the *mouse* path. A chord hold went through
+        # here instead, opened the device, and then sat in a frame loop that
+        # never once read from it: `capturing` true, the ring green, and not a
+        # sample pumped for the whole hold. The chord is the documented
+        # push-to-talk gesture, so that was every hold that mattered.
+        self.armed = True
+        # The hold's own clock: `_on_release` clears `_press_at` before
+        # `_talk_end` runs, so anything measuring the hold needs its own.
         self._hold_since = time.perf_counter()
-        self._hold_peak = DB_FLOOR
         self._recover = 0  # a hold ends the launch notice: seen, and moved on
         if self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
@@ -1222,14 +1186,9 @@ class CompactPill(tk.Tk):
         has nothing to show, so it goes back down — silence is a normal thing
         to do with a push-to-talk button.
         """
-        was_talking = self._press_talking
-        held_for = (time.perf_counter() - self._hold_since
-                    if self._hold_since is not None else 0.0)
         self._hold_since = None
         self._press_talking = False
         pending = self.session.talk_end()
-        if was_talking:
-            self._check_heard(held_for)
         if send and pending:
             if self.session.mode == DICTATE:
                 self._send_pending = True

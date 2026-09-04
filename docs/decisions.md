@@ -120,6 +120,43 @@ shared one typographic string format.
 reason the retry does not fix, or if the frame cost of compositing the panel at
 30 ms shows up in the numbers `docs/speed.md` keeps.
 
+### 2026-09-04 — The chord opened the microphone into a loop that never read it
+
+Six reports of "push to talk does not do anything", and the sixth carried the
+fact that settled it: **the shipped design worked on the same microphone,
+minute for minute.** Every diagnosis that blamed the device died there.
+
+`_frame` pumps the session only while `armed` — `session.tick()` is what reads
+the audio — and `self.armed = True` lived in `_pump_press`, the *mouse* path.
+A chord hold goes through `_talk_start` instead. So the chord opened the
+device, lit the ring green, reported `capturing` true, and sat in a frame loop
+that never once read a sample from it. The chord is the documented push-to-talk
+gesture, so that was every hold that mattered. Arming now happens in
+`_talk_start`, the one seam both gestures pass through, and six tests pin that
+each of them arms.
+
+**The mic accusation is withdrawn.** The notice added hours earlier — a hold
+that heard nothing saying "is it muted?" — was built on top of this bug and
+told the owner their working microphone was muted. Measured afterwards, an
+*idle but healthy* device ranges -97 to -90 dB, which is where a muted one
+sits too: absolute level cannot separate "muted" from "quiet", and the check
+was guessing. `States.dc.html` was right the first time — silence goes back to
+grey and says nothing.
+
+**What survives is the part that was not a guess.** The waiting ring while the
+models load, and the green ring while the microphone is open, are both facts
+the session already knows and neither infers anything. That is the line: a
+surface that removed its words may report what it *knows*, and may not diagnose
+what it does not.
+
+**The rule this cost.** A diagnostic built on an untested assumption does not
+merely fail to help — it actively misdirects, and it spends the owner's trust
+to do it. The accusation should have been the last thing added, after the
+mechanism was proven, not the first.
+
+**Reopens if** a device ever reports something that genuinely distinguishes a
+muted input from a quiet one — a mute flag from the OS, not a level.
+
 ### 2026-09-04 — A wordless pill still has to say three things
 
 Five reports in a row of "push to talk does not do anything", ending in "I am
