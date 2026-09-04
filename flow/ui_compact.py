@@ -160,9 +160,39 @@ RECOVER_FRAMES = 300
 NOTICE_H = 18
 COPIED_FRAMES = 100
 COPIED_TEXT = "copied — press Ctrl+V"
+#: The same line for the enter-variant of the spoken trigger, on ui.py's
+#: `COPIED_ENTER` argument (flow/ui.py:1085): "enter boom" collapses to a copy
+#: here like every other send, and the Enter it asked for is the one step the
+#: clipboard cannot take for you. Said rather than dropped — a suffix that
+#: sometimes does something with no signal either way is how somebody learns
+#: to distrust the one that does.
+COPIED_ENTER_TEXT = "copied — press Ctrl+V, then Enter"
 #: Air either side of a notice's words. The strip is as wide as it needs
 #: to be and never narrower than the pill.
 NOTICE_PAD = 14
+
+#: The notes the strip says out loud, matched on their opening words.
+#:
+#: Most notes are progress the ring is already carrying, and the strip stayed
+#: empty for all of them — including the handful that are the only answer to
+#: "I pressed it and nothing happened". Send's three refusals are the sharp
+#: case: press the `send` hotkey on an empty draft and this surface did
+#: *nothing at all*, no colour, no motion, no sentence. A wordless surface
+#: takes on the obligation to answer the questions its words used to answer
+#: (decisions.md, 2026-09-04), and these are questions no hue can be an answer
+#: to: the three "nothing to send/ask/refine", the two "still" refusals of a
+#: send while the last one is in flight, the two truncations that say the CLI
+#: was handed less than was said, the stale rewrite that was thrown away, and
+#: the long hold that was stopped for you.
+#:
+#: What is deliberately *not* here is everything else. The mode notes are the
+#: glyph's own hue, said a second time. "asking claude · in ~/dev/flow" and
+#: the rest of the progress lines are true for exactly as long as the ring is
+#: blue, which is a better channel for them than a strip that expires. The
+#: draft-shaped notes have the panel. A 400 px sentence under the pill on
+#: every tap is noise, and noise is how the strip that matters gets ignored.
+SAID_NOTES = ("nothing to", "still ", "only the last", "discarded",
+              "stopped after")
 
 #: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
 #: viewBox after the 12 px left padding, centred in the 34 px height. The
@@ -541,6 +571,12 @@ class CompactPill(tk.Tk):
     #: created it (see `_populate_menu`).
     _menu = None
     _mode_var = None
+    #: The Design cascade's submenu, built once and kept. `_populate_menu`
+    #: clears the top-level menu on every open, and Tk's `delete` unlinks a
+    #: cascade *entry* while the submenu behind it is a widget of its own that
+    #: outlives it — so a fresh `_dark_menu` per right-click leaked one
+    #: `tk.Menu` per right-click, for the life of a process that is always on.
+    _design_sub = None
     #: What the last `draft` event carried — the text the send path hands
     #: over, and what item 3's panel `heard` block will read. "" on a fixture,
     #: which is also the true answer for a pill that has heard nothing.
@@ -567,6 +603,14 @@ class CompactPill(tk.Tk):
     _panel_heard_final = False
     _panel_result = ""
     _ask_pending = False
+    #: Whether the hold in flight has yet to say anything. Set by a panel-mode
+    #: `_talk_start` and cleared by the first thing that arrives — a `partial`,
+    #: or `_ask` when the question fires. It is what moves "the next hold
+    #: starts fresh" (Ask.dc.html) from the press to the words: a hold that
+    #: hears nothing must leave the answer on screen exactly as it was, and
+    #: clearing at the press destroyed it before a syllable had landed. False
+    #: on a fixture, which is a pill holding nothing.
+    _hold_fresh = False
     #: The window's current size: PILL_W × PILL_H alone, PANEL_W ×
     #: (PANEL_H + PILL_H) with the band. `_sync_shell` no-ops on equality,
     #: which is what a bare fixture's values describe.
@@ -665,6 +709,7 @@ class CompactPill(tk.Tk):
         self._panel_heard_final = False
         self._panel_result = ""
         self._ask_pending = False
+        self._hold_fresh = False
         self._shell_w = PILL_W
         self._shell_h = PILL_H
         self._outside_was_down = False
@@ -944,8 +989,11 @@ class CompactPill(tk.Tk):
         """Whether Refine and Ask exist on this machine right now
         (States.dc.html: with no agent CLI on PATH they are simply not
         offered). The same answer the setup box's "none found" gives —
-        `_provider`'s own cache pays the PATH lookup."""
-        return bool(self.session._provider())
+        `Session.provider`'s own cache pays the PATH lookup, and it is the
+        public seam for it: this is a surface asking the session a question,
+        not a surface reading the session's implementation."""
+        return bool(self.session.provider)
+
     def _cycle_mode(self) -> None:
         """The tap's and the `mode` chord's cycle, filtered by what the
         machine offers.
@@ -955,15 +1003,45 @@ class CompactPill(tk.Tk):
         surface's, and it is grey, not red: no flash, no error, Type simply
         does not cycle. Already off Type (the CLI vanished mid-session), the
         one cycle that still runs is the way back to it.
+
+        Both endings go through `_choose_mode`, which is where the pending
+        send is dropped — this method used to carry that rule alone, and the
+        menu's radios, which change the mode just as completely, did not.
         """
-        # A pending paste belongs to the mode it was spoken in — ui.py:4363-
-        # 4369's rule, whose words the `mode` chord used to carry here. The
-        # words stay in the draft; Send in the new mode does what it now means.
-        self._send_pending = False
         if self._cli_offered():
-            self.session.toggle_mode()
+            self._choose_mode(None)
         elif self.session.mode != DICTATE:
-            self.session.toggle_mode(to=DICTATE)
+            self._choose_mode(DICTATE)
+
+    def _choose_mode(self, to: str | None) -> None:
+        """Change mode, from whichever gesture asked. `None` is the cycle.
+
+        **The one seam, because the rule under it was in one of two places.**
+        A pending paste belongs to the mode it was spoken in (ui.py:4363-4369)
+        — so the arm is dropped here, and the words themselves stay in the
+        draft, which is `toggle_mode`'s own promise. `_cycle_mode` had that;
+        `_populate_menu`'s radios called `session.toggle_mode(to=)` straight
+        and did not. Choose Ask from the menu with a Type paste waiting and the
+        arm survived the switch: the next `draft` fired `session.send()` in
+        CONVERSE, which asks — so the words went to the CLI as a question
+        instead of into the window they were dictated for, and the only sign
+        was an answer to something nobody had asked.
+
+        `_ask_pending` goes with it, for the mirror of the same reason: a
+        release in Ask that is still waiting on its decode must not fire an
+        ask into a session that is now in Type.
+
+        The cycle keeps its own call rather than passing `to=None`. They are
+        the same thing to the session and not the same thing to read: one is
+        "next mode", the other is "this mode", and the session's API says so
+        with two forms.
+        """
+        self._send_pending = False
+        self._ask_pending = False
+        if to is None:
+            self.session.toggle_mode()
+        else:
+            self.session.toggle_mode(to=to)
 
     def _pump_events(self) -> None:
         """Drain what the session said since the last frame.
@@ -978,9 +1056,16 @@ class CompactPill(tk.Tk):
         block's live text, a `draft` against an armed ask is the question
         going to the CLI, a `reply` is the answer landing in the result
         block, and a `mode` closes the band — it belongs to the mode that
-        raised it. `note` alone still falls through: the failure sentence the
-        artboards care about arrives as an `error`, and the rest draw no
-        surface here.
+        raised it.
+
+        And the four kinds after `disarm` are the ones that used to fall
+        through, which on a wordless surface is not the same as "nothing to
+        draw": a spoken `send` trigger did nothing at all, and a `drop`, an
+        `edit` and Send's refusal notes were the surface's whole answer to
+        "why did that not work". They go on the notice strip, which is the
+        channel that now exists for exactly this — see `SAID_NOTES` for which
+        notes, and for the ones deliberately left silent. `conversation` still
+        needs nothing: there is nothing of it on this screen to clear.
         """
         for ev in self.session.events():
             if ev.kind == "draft":
@@ -997,12 +1082,28 @@ class CompactPill(tk.Tk):
                     self._ask()
             elif ev.kind == "partial":
                 if self._panel_open:
+                    if self._hold_fresh:
+                        # The words of this hold have arrived, so *now* the
+                        # exchange before it goes. `_talk_start` marks the
+                        # hold and clears nothing — see there for the answer
+                        # this used to wipe off the screen at the press.
+                        self._hold_fresh = False
+                        self._panel_result = ""
+                        self._panel_failed = False
                     # The heard block's live text — italic until the release's
                     # draft makes it final.
                     self._panel_heard = ev.text
                     self._panel_heard_final = False
             elif ev.kind == "reply":
                 if ev.text:
+                    # Whatever hold is in flight has been overtaken: this
+                    # answer is newer than the exchange that hold was going to
+                    # clear, so the arming goes and the next partial leaves it
+                    # standing. Hold again before the CLI has answered — 4-20 s
+                    # is long enough that people do — and without this the
+                    # answer appeared and was wiped by the first word of the
+                    # follow-up, which is a fact arriving and being taken away.
+                    self._hold_fresh = False
                     self._panel_failed = False
                     self._panel_result = ev.text
                     # Never silent (P2): if the panel was closed while the CLI
@@ -1032,6 +1133,36 @@ class CompactPill(tk.Tk):
                     # come back (ui.py:4526-4532's case, the same words). The
                     # slash and the red ring persist until a capture answers.
                     self._mic_gone = True
+            elif ev.kind == "send":
+                # The spoken trigger — "boom", or "enter boom" for a paste
+                # that presses Enter after itself (`edits.enter_word`). It
+                # presses the same button the `send` hotkey does, arrived at
+                # by a different route, which is ui.py:4558-4562's rule and
+                # the reason the paste is decided here rather than in the
+                # session: it belongs to this thread and to `paste_target`.
+                # Without this branch the trigger word was simply inert on
+                # this surface, and "enter boom" had nowhere to put its Enter.
+                self._send(submit=ev.text == "enter")
+            elif ev.kind == "drop":
+                # An utterance Flow rejected. Said, never swallowed: P2 is
+                # that a rejection is never silent, and on a pill with no
+                # words the alternative was speech vanishing with no event
+                # anybody could see.
+                self._say(ev.text)
+            elif ev.kind == "edit":
+                # A correction Flow applied — "changed 'thursday' to
+                # 'Tuesday'". The whole feedback a spoken correction gets, and
+                # invisible here until now: the draft is not on screen in Type
+                # mode, so the strip is the only place the change can be seen
+                # at all. The shipped surface offers a way back with it
+                # (`undoable=True`); this one has no chip to offer, and saying
+                # what happened is the half it can do.
+                self._say(ev.text)
+            elif ev.kind == "note" and ev.text.startswith(SAID_NOTES):
+                # The few notes no colour on this pill can carry — see
+                # `SAID_NOTES`, which is also the list of what stays silent
+                # and why.
+                self._say(ev.text)
 
     def _ask(self) -> None:
         """The panel-mode release: the heard block's final text goes to the CLI.
@@ -1040,30 +1171,47 @@ class CompactPill(tk.Tk):
         are never pasted, which is the Type-only paste rule `_talk_end`'s gate
         states: Ask results land here, not in the window you were in. The
         answer itself arrives 4-20 s later as a `reply` event.
+
+        The other end of `_talk_start`'s deferred clear: the question is
+        leaving, so the exchange before it goes now if no partial already took
+        it — a short hold whose only words land in the release's draft still
+        starts fresh.
         """
         self._ask_pending = False
+        self._hold_fresh = False
+        self._panel_failed = False
         self._panel_heard = self._last_draft
         self._panel_heard_final = True
         self._panel_result = ""
         self.session.send()
 
-    def _send(self) -> None:
+    def _send(self, submit: bool = False) -> None:
         """Hand the draft over: the words paste, or the ring says they could not.
 
         The shape is ui.py's `_send` (flow/ui.py:3756-3770) — the text from
         `session.send()`, the paste target this surface polls, the problem the
         handler hands back — down to the first line, which is what stops a
-        release and the `send` hotkey pasting the same words twice. The CLI is
-        not on this path — Type is dictate, and `session.send()` in dictate
-        never asks. The way out itself is `_deliver`'s, shared with the
-        panel's Send.
+        release and the `send` hotkey pasting the same words twice. The way
+        out itself is `_deliver`'s, shared with the panel's Send.
+
+        `submit` presses Enter after the paste and arrives from one place
+        only: the spoken "enter boom", routed here as a `send` event. No chip
+        and no hotkey can set it, which is the same rule the shipped surface
+        runs under.
+
+        Type is dictate and `session.send()` in dictate never asks — but this
+        is not a Type-only path any more, because the trigger word can be
+        spoken in any mode. In a panel mode `send()` returns "" and starts the
+        ask instead, exactly as it does for the shipped `_send`, and nothing
+        here needs to know which happened: an empty return delivers nothing,
+        and the refusal notes say why when the answer is neither.
         """
         self._send_pending = False
         text = self.session.send()
         if text:
-            self._deliver(text)
+            self._deliver(text, submit=submit)
 
-    def _deliver(self, text: str) -> None:
+    def _deliver(self, text: str, submit: bool = False) -> None:
         """The words' way out, shared by both sends: paste where the user
         was, or Lite's clipboard — which is not an error state, and says so
         under the pill rather than flashing (States.dc.html's last case).
@@ -1071,15 +1219,26 @@ class CompactPill(tk.Tk):
         no words to say it with: a problem is the red flash, the whole
         vocabulary for "something is wrong" that is not a fallback with its
         own artboard.
+
+        With no handler the copy is what is left, and a `submit` there is
+        still just a copy: the clipboard cannot press Enter for anybody, so
+        the strip names the step that is theirs. Refusing the enter-variant
+        was the alternative and it is wrong on `edits.enter_word`'s own
+        argument — a decode that drops a word from "enter boom" yields
+        "boom", so refusing would make the degraded decode the working case.
         """
         if self.on_send:
-            problem = self.on_send(text, self.paste_target) or ""
+            # Passed only when it is true, the idiom ui.py:3803-3806 keeps for
+            # the same reason: a handler written before the flag existed —
+            # `send_check.py`'s two-argument fixture is one — still works.
+            extra = {"submit": True} if submit else {}
+            problem = self.on_send(text, self.paste_target, **extra) or ""
             if problem:
                 self._flash = FLASH_FRAMES
         elif _copy_to_clipboard(self, text):
             self._flash = FLASH_FRAMES
         else:
-            self._say(COPIED_TEXT)
+            self._say(COPIED_ENTER_TEXT if submit else COPIED_TEXT)
             self._sync_shell()
 
     def _track_target(self) -> None:
@@ -1125,11 +1284,21 @@ class CompactPill(tk.Tk):
         """The hold beginning, shared by the mouse pump and the `talk` hotkey.
 
         A hold in a panel mode raises the panel at once — the heard block is
-        where the partials land — and starts fresh: "the next hold starts
-        fresh" (Ask.dc.html), which is also what makes the foot's "hold to
-        reply" a reply rather than an append. Type is not in `PANEL_SPEC`, so
-        its holds change nothing on screen (README: "Type never opens a
+        where the partials land — and arms a fresh start: "the next hold
+        starts fresh" (Ask.dc.html), which is also what makes the foot's "hold
+        to reply" a reply rather than an append. Type is not in `PANEL_SPEC`,
+        so its holds change nothing on screen (README: "Type never opens a
         panel").
+
+        **Armed, not done.** The blocks used to be emptied right here, and
+        that read the artboard's sentence as being about the press when it is
+        about the thread: hold to reply, hear nothing or change your mind, let
+        go, and `_talk_end` found nothing pending over an empty band and took
+        the panel down — so the answer somebody was reading vanished because
+        they touched the button, before a single word had arrived. The clear
+        waits for words now (`_hold_fresh`), and a hold that hears nothing
+        leaves the last exchange exactly as it was — which the release's own
+        rule then keeps on screen, the band having something to show.
 
         A hold into a dead microphone is the one gesture the pill refuses
         outright (States.dc.html): the refusal is the persistent slashed
@@ -1160,10 +1329,7 @@ class CompactPill(tk.Tk):
         self._recover = 0  # a hold ends the launch notice: seen, and moved on
         if self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
-            self._panel_heard = ""
-            self._panel_heard_final = False
-            self._panel_result = ""
-            self._panel_failed = False
+            self._hold_fresh = True
             self._open_panel()
 
     def _talk_end(self, *, send: bool) -> None:
@@ -1316,9 +1482,12 @@ class CompactPill(tk.Tk):
         and a stale check over a new mode is the same lie as no check.
 
         Tk has no sub-line row, so the canvas's `msub` lines are disabled
-        entries — `_dark_menu` already greys them. The mode rows choose
-        through the chooser API (`toggle_mode(to=)`); a flip cannot serve
-        "choose Refine" in a three-mode world.
+        entries — `_dark_menu` already greys them. The mode rows go through
+        `_choose_mode`, which is the chooser API (`toggle_mode(to=)`) plus the
+        rule that has to travel with it: a flip cannot serve "choose Refine"
+        in a three-mode world, and a mode change from here drops a pending
+        paste for the same reason the tap does — see `_choose_mode`, which the
+        radios used to bypass.
 
         **One row is here that the artboard does not draw**, and it is the
         one that lets somebody leave. `profile.design` decides which surface
@@ -1350,7 +1519,7 @@ class CompactPill(tk.Tk):
             kw = {} if mode == DICTATE or offered else {"state": "disabled"}
             m.add_radiobutton(
                 label=name, value=name, variable=self._mode_var,
-                command=lambda t=mode: self.session.toggle_mode(to=t), **kw)
+                command=lambda t=mode: self._choose_mode(t), **kw)
         m.add_command(label="tap the pill to cycle", state="disabled")
         m.add_separator()
         m.add_command(label="Switch workspace", command=self._open_palette)
@@ -1375,8 +1544,22 @@ class CompactPill(tk.Tk):
         Where the shipped one notes into its bubble, this one prints: a
         wordless pill has nowhere to put a sentence, and this sentence has to
         be read or the switch reads as a press that did nothing.
+
+        **Built once, refreshed after.** `_on_menu` rebuilds the whole menu on
+        every open, because the mode check and the workspace path are the
+        values of now — and `delete(0, "end")` removes the *cascade entry*
+        while the submenu behind it is a window of its own that goes on
+        existing, unreferenced and undestroyed. A fresh `_dark_menu` per
+        right-click was therefore one leaked `tk.Menu` per right-click, on the
+        one surface in this app that is never closed. The rows are the part
+        that changes — the `(current)` marker moves — and refreshing them is
+        all that ever needed to happen.
         """
-        sub = _dark_menu(parent)
+        sub = self._design_sub
+        if sub is None:
+            sub = self._design_sub = _dark_menu(parent)
+        else:
+            sub.delete(0, "end")
         profile = getattr(self.session, "profile", None)
         here = getattr(profile, "design", DESIGN_DEFAULT)
         for name in DESIGNS:
@@ -2244,10 +2427,10 @@ class CompactPill(tk.Tk):
     def _setup_rows(self) -> list:
         """The workbench's three answers (Workspace.dc.html), each a value
         Flow already found: the microphone PortAudio opened, the CLI
-        `_provider` would use — "none found" when there isn't one, which item
-        6's no-CLI fallback needs too — and where a release's words go."""
+        `Session.provider` names — "none found" when there isn't one, which
+        item 6's no-CLI fallback needs too — and where a release's words go."""
         mic = self.session.mic.device_name or "none found"
-        cli = self.session._provider() or "none found"
+        cli = self.session.provider or "none found"
         on_release = ("paste into last window" if self.session.pastes
                       else "copy — you paste it")
         return [("Microphone", mic), ("Agent CLI", cli),

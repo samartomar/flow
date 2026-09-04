@@ -1487,6 +1487,26 @@ class Session:
             cli = found[0] if found else None
         return cli.name if cli is not None else ""
 
+    @property
+    def provider(self) -> str:
+        """Which agent CLI will answer, as a fact a surface may read. "" for none.
+
+        `_provider` above is the same answer and is private because it is on the note
+        paths' side of the wall; this is the seam for the question a *UI* asks, which
+        is a different question with the same answer — "is there a CLI here at all",
+        which decides whether the compact pill offers Refine and Ask, and which CLI to
+        name in its Workbench setup box. Both were reaching through the underscore for
+        it, which is a UI reading the session's implementation and would have gone on
+        being true after any rename.
+
+        **Safe to read from a frame**, which is the property it needs and the reason
+        the docstring says so: underneath is either a pin (`--cli`) or `_available`'s
+        `CLI_LOOKUP_SEC` cache, so the two PATH walks are paid at most once every few
+        seconds however often this is asked. Read-only for the same reason `capturing`
+        is: the surface pulls facts, and the session is never told one.
+        """
+        return self._provider()
+
     def _available(self) -> list:
         """`refine.available()`, remembered for `CLI_LOOKUP_SEC`.
 

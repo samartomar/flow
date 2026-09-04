@@ -73,6 +73,20 @@ class FakeMenu:
 
     def add_separator(self) -> None: ...
 
+    def delete(self, first=0, last=None) -> None:
+        """Empty it, whatever range was asked for.
+
+        The one call is `delete(0, "end")` — a menu rebuilt on open, and the
+        Design submenu refreshed rather than replaced — so a fake that clears
+        everything answers it exactly. A range that meant something else would
+        be a fake with more opinions than the code it stands in for.
+        """
+        self.commands.clear()
+        self.radios.clear()
+        self.checks.clear()
+        self.cascades.clear()
+        self.order.clear()
+
     def add_cascade(self, label="", menu=None, **kw) -> None:
         self.cascades[label] = menu
         self.order.append(label)

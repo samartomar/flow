@@ -892,16 +892,19 @@ class TestThePanelOpensForAskAndNeverForType(unittest.TestCase):
     """The mode → panel map: a hold in a panel mode raises the band, a hold
     in Type changes nothing (README: "Type never opens a panel")."""
 
-    def test_a_hold_in_ask_opens_the_panel_fresh(self):
+    def test_a_hold_in_ask_opens_the_panel_and_arms_the_fresh_start(self):
         p = panel_pill(mode=CONVERSE)
         p._panel_heard, p._panel_result = "an old question", "an old answer"
         p._talk_start()
         p.session.talk_start.assert_called_once_with()
         self.assertTrue(p._panel_open)
         self.assertEqual(p._panel_mode, CONVERSE)
-        # "The next hold starts fresh" (Ask.dc.html): the old exchange is gone.
-        self.assertEqual(p._panel_heard, "")
-        self.assertEqual(p._panel_result, "")
+        # "The next hold starts fresh" (Ask.dc.html) is about the thread, not
+        # about wiping a visible answer before a word has arrived — so the
+        # hold *arms* the clear and the first partial does it
+        # (test_compact_events.py pins both halves).
+        self.assertTrue(p._hold_fresh)
+        self.assertEqual(p._panel_result, "an old answer")
 
     def test_a_hold_in_type_opens_nothing(self):
         p = panel_pill(mode=DICTATE)
@@ -1102,6 +1105,7 @@ class TestTheFootStaysHoldable(unittest.TestCase):
         self.assertIsNotNone(p._press_at)
 
     def test_a_hold_while_the_panel_is_up_asks_a_reply(self):
+        from flow.session import Event
         p = panel_pill(State.IDLE, mode=CONVERSE)
         # The first exchange is on screen.
         p._talk_start()
@@ -1109,8 +1113,13 @@ class TestTheFootStaysHoldable(unittest.TestCase):
         p._talk_end(send=True)
         p._ask()
         p._panel_result = "the first answer"
-        # The foot hold starts fresh — "hold the mic to reply".
+        # The foot hold starts fresh — "hold the mic to reply" — and the
+        # clearing waits for the words, so the answer is still readable until
+        # the reply's own first partial lands.
         p._talk_start()
+        self.assertEqual(p._panel_result, "the first answer")
+        p.session.events.return_value = [Event("partial", "and what about")]
+        p._pump_events()
         self.assertEqual(p._panel_result, "")
         p.session.talk_end.return_value = True
         p._talk_end(send=True)
@@ -1519,7 +1528,7 @@ class TestThePaletteAndSetupDraw(unittest.TestCase):
     def test_the_setup_box_draws_three_read_only_lines(self):
         p = panel_pill(mode=CONVERSE)
         p.session.mic = mock.Mock(device_name="Yeti Nano")
-        p.session._provider = lambda: "claude"
+        p.session.provider = "claude"
         p.session.pastes = True
         c = Canvas()
         p._draw_setup(c)
@@ -1531,7 +1540,7 @@ class TestThePaletteAndSetupDraw(unittest.TestCase):
     def test_the_setup_lines_say_none_found_and_the_clipboard_answer(self):
         p = panel_pill(mode=CONVERSE)
         p.session.mic = mock.Mock(device_name="")
-        p.session._provider = lambda: ""
+        p.session.provider = ""
         p.session.pastes = False
         rows = p._setup_rows()
         self.assertEqual(rows, [("Microphone", "none found"),
@@ -1605,7 +1614,7 @@ class TestNoCliMeansTypeOnly(unittest.TestCase):
 
     def test_a_tap_with_no_cli_does_not_cycle(self):
         p = pill(mode=DICTATE)
-        p.session._provider = lambda: ""
+        p.session.provider = ""
         p._on_press()
         p._on_release()
         p.session.toggle_mode.assert_not_called()
@@ -1619,7 +1628,7 @@ class TestNoCliMeansTypeOnly(unittest.TestCase):
 
     def test_the_mode_chord_follows_the_same_rule(self):
         p = pill(mode=DICTATE)
-        p.session._provider = lambda: ""
+        p.session.provider = ""
         p.hotkeys = mock.Mock()
         p.hotkeys.drain.return_value = ["mode"]
         p._drain_hotkeys()
@@ -1628,14 +1637,14 @@ class TestNoCliMeansTypeOnly(unittest.TestCase):
     def test_already_off_type_the_cycle_is_the_way_back(self):
         # The CLI vanished mid-session: Type is the one mode left to offer.
         p = pill(mode=REFINE)
-        p.session._provider = lambda: ""
+        p.session.provider = ""
         p._on_press()
         p._on_release()
         p.session.toggle_mode.assert_called_once_with(to=DICTATE)
 
     def test_the_menu_greys_refine_and_ask_rather_than_hiding_them(self):
         p = pill(mode=DICTATE)
-        p.session._provider = lambda: ""
+        p.session.provider = ""
         p.session.profile = mock.Mock(design="compact")
         m = mock.Mock()
         with mock.patch.object(uc.tk, "StringVar", FakeVar),                 mock.patch.object(uc, "_dark_menu", FakeMenu):

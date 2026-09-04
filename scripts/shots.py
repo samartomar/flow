@@ -215,6 +215,18 @@ class FakeSession:
     def _provider(self) -> str:
         """The CLI the setup box names and the no-CLI cycle asks about."""
         return "claude"
+
+    @property
+    def provider(self) -> str:
+        """`Session.provider`, the public read of the same fact — which is
+        what the compact surface asks now.
+
+        Over `_provider` rather than beside it, exactly as the real session
+        has it, so `compact_shots.py`'s no-CLI step goes on working: that step
+        shadows `_provider` with an instance attribute, and a property reading
+        through it finds the shadow. Two constants would have needed the walk
+        to know about both."""
+        return self._provider()
     def tick(self) -> None: ...
     def pump_results(self) -> None: ...
     def pause(self) -> None: ...
