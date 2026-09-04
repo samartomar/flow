@@ -690,6 +690,11 @@ class CompactPill(tk.Tk):
     #: from `_no_activate`'s read-back; False on a fixture, which is the
     #: Lite/Mac answer `_on_menu`'s foreground borrow keys off.
     no_activate = False
+    #: What `_draw_key` answered for the frame currently on screen, or None
+    #: for "whatever is up there, do not trust it". A class default because
+    #: `_frame` reads it before anything has ever set it — and None on a bare
+    #: fixture is the honest answer: nothing has been composited at all.
+    _drawn_key = None
 
     def __init__(
         self, session: Session, on_send=None, hotkeys=None, arm=False,
@@ -944,7 +949,16 @@ class CompactPill(tk.Tk):
             if not self._notice:
                 # The notice strip's time is up; the window is 120×34 again.
                 self._sync_shell()
-        self._draw()
+        # Only when the picture has changed. `_draw` rebuilds every item and
+        # composites a whole bitmap, and an idle pill asked it to draw the
+        # same pill thirty times a second — see `_draw_key` for the numbers
+        # and for what makes the key trustworthy. Stored before the draw, the
+        # way the shipped surface does it: a `_draw` that raises is a frame
+        # `_tick` turns into a flash, and the flash moves the key itself.
+        key = self._draw_key()
+        if key != self._drawn_key:
+            self._drawn_key = key
+            self._draw()
 
     def _drain_hotkeys(self) -> bool:
         """Act on every hotkey that arrived since the last drain. False after a quit.
@@ -1687,6 +1701,12 @@ class CompactPill(tk.Tk):
             self.geometry(f"+{x}+{y}")
         self.deiconify()
         self.lift()
+        # A layered window that has just been mapped again has nothing on it:
+        # the bitmap presented before the withdraw is not the window's to keep,
+        # and the key is unchanged by hiding — so the next frame would skip the
+        # draw and the pill would come back invisible. `_open_box` learned the
+        # same thing on `<Map>`; this is the one place the key cannot see.
+        self._drawn_key = None
 
     def _drain_tray(self) -> None:
         """What the icon decided, acted on from Tk's own thread — the only
@@ -2067,6 +2087,62 @@ class CompactPill(tk.Tk):
         if self._mic_gone:
             return ERROR
         return MODE_TINT.get(self.session.mode, TEXT)
+
+    def _draw_key(self) -> tuple:
+        """Everything `_draw` and its helpers read, as one comparable value.
+
+        The frame repainted whether or not anything had moved: `delete("all")`,
+        every item back, and a whole bitmap through `UpdateLayeredWindow`,
+        thirty times a second for as long as Flow is open. Measured here at
+        300 % — 0.78 ms a frame with the pill alone and **4.53 ms with the
+        panel open**, 15 % of the 30 ms budget, all of it spent drawing the
+        same picture as last time. `Pill._draw_key` (flow/ui.py:4973) is the
+        shipped surface's answer to exactly this, and decisions.md's
+        "composited, not painted" says the choice reopens if compositing's
+        frame cost ever shows up. It showed up.
+
+        Built from the same reads the drawing makes, under the same guards, so
+        a fixture that can be drawn can be keyed:
+
+          `_ring_colour` folds the flash, the mic, the recover countdown, the
+          session state, `capturing` and `asr.loading` into one colour — which
+          is all the ring is; `_glyph_tint` folds `_mic_gone` and the mode into
+          the other. `_flash` and `_recover` ride along as booleans anyway,
+          because they are countdowns and the frame they reach zero on is a
+          frame that changes.
+
+          `_draw_face` reads the level, rounded to the thousandth here — a
+          thousandth of `BAR_MAX_HALF` is seven thousandths of a pixel of bar.
+
+          `_draw_panel` reads `_panel_mode` (through `_spec`), the session's
+          `workspace`, both heard fields, the result and `_panel_failed`;
+          `_draw_notice` reads `_notice_text` and the two shell dimensions.
+
+        The shell size is in here for a second reason: it is also how a
+        resize invalidates itself. `_sync_shell` only ever reaches the painter
+        after `(w, h)` has changed, and it recreates the bitmap when it does —
+        so the frame after a resize is a frame whose key has already moved,
+        and no second mechanism is needed to force the redraw. A remapped
+        window is the case the key *cannot* see, and `show_from_tray` clears
+        it by hand for the reason `_open_box` binds `<Map>`.
+        """
+        session = self.session
+        return (
+            self._ring_colour(), self._glyph_tint(),
+            round(self._meter_level, 3), self._mic_gone,
+            bool(self._flash), bool(self._recover),
+            self._panel_open, self._panel_mode,
+            self._panel_heard, self._panel_heard_final,
+            self._panel_result, self._panel_failed,
+            bool(self._notice), self._notice_text, self._notice_w,
+            self._shell_w, self._shell_h,
+            # The two the drawing reads off the session directly: the strip
+            # prints the workspace, and the mode is what `_glyph_tint` has
+            # already folded in — kept separate because a mode with no tint of
+            # its own would otherwise be a mode change nothing could see.
+            getattr(session, "workspace", "") or "",
+            getattr(session, "mode", DICTATE),
+        )
 
     def _draw(self) -> None:
         """Draw the whole window onto `self.canvas`. Pure: state in, shapes out.
