@@ -57,6 +57,8 @@ from .session import CONVERSE, DICTATE, REFINE, Session, State
 # `SEAM` is ui.py's `RING` hairline under the name the docked design gives it:
 # the one line between the panel and its foot.
 from .ui import (
+    _FONT_DIR,
+    _FONT_FILES,
     _POINT,
     CARD_ACCENT,
     CHIP,
@@ -100,6 +102,17 @@ from .ui import (
 )
 from .ui import PANEL_BOTTOM_OFFSET, bottom_centre
 from .ui import RING as SEAM
+
+# The same five files `ui._load_fonts` registers, handed to GDI+ as well.
+# `AddFontResourceExW(FR_PRIVATE)` is a GDI registration, and GDI+ keeps its
+# own collection: measured on this machine, "IBM Plex Sans" answered
+# FontFamilyNotFound to GDI+ *after* `_load_fonts` had run, so every string
+# this surface composites came out in `paint`'s stand-ins — Segoe UI where the
+# design says Plex Sans, Consolas where it says Plex Mono. Here rather than in
+# `__init__` because the painter is built there and this has to be true before
+# the first font is asked for; `load_fonts` is idempotent and answers 0 off
+# Windows, so an import costs nothing where there is no GDI+ to tell.
+paint.load_fonts(str(_FONT_DIR / name) for name in _FONT_FILES)
 
 if sys.platform == "win32":
     # The click-outside poll's two reads, declared for the reason inject.py

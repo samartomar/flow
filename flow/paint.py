@@ -30,6 +30,7 @@ and R16's three-package install is untouched.
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 import tkinter as tk
 from ctypes import wintypes
@@ -187,6 +188,79 @@ def available() -> bool:
     canvas instead.
     """
     return _start() is not None
+
+
+#: GDI+'s copy of the bundled type, and the files already in it.
+#:
+#: `ui._load_fonts` registers the five IBM Plex files with
+#: `AddFontResourceExW(FR_PRIVATE)`, which GDI and Tk both honour — and GDI+
+#: does not. Measured here: after that registration
+#: `GdipCreateFontFamilyFromName("IBM Plex Sans", None, …)` answers 14,
+#: FontFamilyNotFound, and so do "IBM Plex Mono" and "IBM Plex Sans Medm". So
+#: every string this module drew fell to the stand-ins below, and the compact
+#: surface was composited in Segoe UI and Consolas — the whole surface in a
+#: typeface the canvas it is drawn from has never seen.
+#:
+#: A private collection is GDI+'s own answer to the same question, and it
+#: resolves the same GDI-truncated names `flow/ui.py` already spells
+#: (`FONT_SANS_MEDIUM` is "IBM Plex Sans Medm"), so nothing downstream changes.
+#: Never released: GDI+ frees a private collection at `GdiplusShutdown`, which
+#: this module never calls — the process ends and the whole of GDI+ goes with
+#: it, exactly as `_token` does.
+_collection = None
+_font_files: set = set()
+
+
+def load_fonts(paths) -> int:
+    """Put font files into GDI+'s private collection. How many went in.
+
+    Idempotent: a path already added is skipped, so this can be called from a
+    module import that runs more than once without growing the collection.
+    Nothing here raises. A file that is missing, or that GDI+ refuses, is
+    skipped and not counted — a font is a fact about the machine, and a
+    machine that is short one is not a reason for a repaint to fail. `_font`
+    already substitutes like for like for whatever did not arrive.
+    """
+    global _collection
+    if _start() is None:
+        return 0
+    added = 0
+    for path in paths:
+        try:
+            path = str(path)
+            if path in _font_files or not os.path.isfile(path):
+                continue
+            if _collection is None:
+                coll = ctypes.c_void_p()
+                if _gdiplus.GdipNewPrivateFontCollection(
+                        ctypes.byref(coll)) != 0:
+                    return added
+                _collection = coll
+            if _gdiplus.GdipPrivateAddFontFile(_collection,
+                                               ctypes.c_wchar_p(path)) != 0:
+                continue
+        except (AttributeError, OSError, TypeError, ValueError):
+            continue
+        _font_files.add(path)
+        added += 1
+    return added
+
+
+def _family(name: str, out) -> int:
+    """Resolve `name` to a GDI+ font family in `out`. 0 when it took.
+
+    The private collection first and the installed one second, because the
+    families this app names live in the private one and the fallbacks
+    (Consolas, Segoe UI) live in the installed one — asked the other way round,
+    a machine that happens to have some *other* "IBM Plex Sans" installed would
+    beat the file we shipped.
+    """
+    if _collection is not None:
+        if _gdiplus.GdipCreateFontFamilyFromName(ctypes.c_wchar_p(name),
+                                                 _collection, out) == 0:
+            return 0
+    return _gdiplus.GdipCreateFontFamilyFromName(ctypes.c_wchar_p(name), None,
+                                                 out)
 
 
 def _argb(colour: str, alpha=255) -> int:
@@ -535,10 +609,14 @@ class GdiCanvas:
             style |= _STYLE_BOLD if "bold" in spec[2] else 0
             style |= _STYLE_ITALIC if "italic" in spec[2] else 0
         fam = ctypes.c_void_p()
-        if _gdiplus.GdipCreateFontFamilyFromName(ctypes.c_wchar_p(family), None,
-                                                 ctypes.byref(fam)) != 0:
+        if _family(family, ctypes.byref(fam)) != 0:
             # An absent family is a fact about the machine, not something to
             # raise inside a repaint: Tk substitutes silently and so does this.
+            #
+            # Absent from *both* collections, now: `load_fonts` puts the
+            # bundled faces where GDI+ can see them, and `_family` asks there
+            # first — without which this branch was taken by every string on
+            # the surface, because `FR_PRIVATE` is invisible to GDI+.
             #
             # **Like for like, though.** None of the IBM Plex faces this app
             # names are installed here, and substituting a monospaced one with
