@@ -539,8 +539,9 @@ class MeasuringCanvas:
     def itemconfigure(self, *a, **kw) -> None: ...
 
     def create_window(self, *a, **kw) -> None:
-        """The embedded editor's slot. Recorded as nothing: this fake measures text, and
-        a `tk.Text` measures itself — see `FakeBox`."""
+        """Nothing in `ui.py` embeds a widget any more — the editor is a `Toplevel` of
+        its own and the canvas keeps only the well it stands in. Left here so a fake
+        that stops matching the code fails loudly rather than by `AttributeError`."""
         ...
 
     def create_text(self, x, y, text="", **kw):

@@ -343,7 +343,10 @@ def _grab(bbox, name: str) -> None:
 
 def _visible(pill):
     out = [pill]
-    for w in (pill.bubble, pill.card, pill._help):
+    # The hand editor's own `Toplevel` last, so `_front` lifts it over the panel it
+    # stands in: both windows are `-topmost` and the last one raised is the one in
+    # front. Left out, `07-editor.png` was a picture of the well with nothing in it.
+    for w in (pill.bubble, pill.card, pill._help, pill.bubble._edit_box):
         if w is not None and w.winfo_viewable():
             out.append(w)
     return out

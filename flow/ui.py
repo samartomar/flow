@@ -6471,6 +6471,14 @@ class Bubble(tk.Frame):
     #: Same reason as the rest of this block: a fixture built with `__new__` must find a
     #: real value rather than fall through `tk.Misc.__getattr__` into `self.tk`.
     _for_note: float | None = None
+    #: The `Toplevel` the hand editor lives in, while one is open — see `_edit`. Its own
+    #: window rather than a `create_window` on this canvas, and a class default for the
+    #: reason the rest of this block is: every editor fixture in the suite sets `_editor`
+    #: and none of them sets this, so `_render` has to find a real `None`.
+    _edit_box: tk.Toplevel | None = None
+    #: Where in the panel the editor's box was last laid out, as `(y, height)` in design
+    #: pixels — so a drag of the pill can re-place the window without re-rendering.
+    _edit_slot: tuple | None = None
 
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
@@ -6520,6 +6528,9 @@ class Bubble(tk.Frame):
         #: The hand editor, while one is open, and the window to give the foreground
         #: back to when it closes — which is never Flow's own, by `_track_target`.
         self._editor: tk.Text | None = None
+        #: The `Toplevel` that holds it, and the slot on the canvas it is placed over.
+        self._edit_box: tk.Toplevel | None = None
+        self._edit_slot: tuple | None = None
         self._previous_focus = 0
         #: Where a drag on the editor's scroll bar was last seen.
         self._bar_y = 0
@@ -6786,6 +6797,10 @@ class Bubble(tk.Frame):
         else:
             self.place_forget()
             self._placed_band = None
+        # The hand editor is a window of its own and is not carried by that `place`, so
+        # every move of the shell has to be answered — a drag of the pill calls this and
+        # nothing else (`Pill._bind_drag`). A no-op when no box is open.
+        self._place_editor()
 
     # -- holding still under the hand --------------------------------------
 
@@ -6947,6 +6962,44 @@ class Bubble(tk.Frame):
         except (AttributeError, TypeError, IndexError, ValueError, tk.TclError):
             return 0
         return max(0, round(visible * (1.0 - shown) / shown))
+
+    def _place_editor(self, y: int | None = None, height: int | None = None) -> None:
+        """Put the editor's window over the well the panel reserved for it.
+
+        Called with the slot from `_render`, and with no arguments from `reposition` —
+        which is what a drag of the pill goes through. The box is a `Toplevel` of its
+        own (see `_edit`) and so is not carried by the panel's `place`: every move of
+        the shell has to be answered with a `geometry` here, or the box stays where the
+        panel used to be.
+
+        **Off the pill's tracked position, never off `winfo_rootx()`.** Tk's `winfo_*`
+        lags a `geometry` call by a frame or two — the staleness `_open_box` records in
+        the compact surface and `_sync_shell` avoids by comparing against the window —
+        and this runs in the same breath as the `geometry` that moved the shell. The
+        panel is the band at the window's own origin, so the pill's `x`/`y` *is* this
+        canvas's origin, in the device pixels Tk geometry takes.
+
+        Lifted as well as placed: both windows are `-topmost`, so the last one raised is
+        the one in front, and anything that raises the pill — `scripts/shots.py` does it
+        before every capture — would otherwise put the panel over the box.
+        """
+        shell = self._edit_box
+        if shell is None:
+            return
+        if y is None or height is None:
+            slot = self._edit_slot
+            if slot is None:
+                return
+            y, height = slot
+        self._edit_slot = (y, height)
+        pill = self.pill
+        try:
+            shell.geometry(
+                f"{dev(BUBBLE_W - 2 * PAD - EDIT_GUTTER)}x{dev(height)}"
+                f"+{pill.x + dev(PAD)}+{pill.y + dev(y)}")
+            shell.lift()
+        except tk.TclError:
+            pass
 
     def _edit_hint(self, hint_y: int, box_y: int, height: int) -> None:
         """Say how much of the draft is outside the box, and draw the bar beside it.
@@ -7249,9 +7302,17 @@ class Bubble(tk.Frame):
             # The box takes the body's slot rather than opening below it, so the words
             # do not move under the cursor at the moment somebody reaches for them.
             box_y = y
-            c.create_window(
-                PAD, y, anchor="nw", window=self._editor,
-                width=BUBBLE_W - 2 * PAD - EDIT_GUTTER, height=edit_h, tags="body")
+            # The **well**, where a `create_window` embedding the `tk.Text` used to be.
+            # The box is a window of its own now (`_edit`), so what the canvas keeps is
+            # the hole it stands in: a `SHELL` rectangle in a `RING` outline, which is
+            # the box's own colouring. Drawn rather than left empty, because the two are
+            # a `geometry` call apart — a resize lands here a frame before the window
+            # follows it, and what shows through in between should be the same rectangle
+            # arriving early rather than the draft behind it.
+            c.create_rectangle(
+                PAD, y, BUBBLE_W - PAD - EDIT_GUTTER, y + edit_h,
+                fill=SHELL, outline=RING, tags="body")
+            self._place_editor(y, edit_h)
             y += edit_h + 6
         elif body:
             if earlier:
@@ -7633,6 +7694,23 @@ class Bubble(tk.Frame):
         has the foreground, so Flow holding it makes the refusal *fire*, which is the
         correct answer while somebody is typing. `_track_target` keeps the last
         foreground that was not Flow's own, so the window Send is aimed at survives.
+
+        **The box is a `Toplevel` of its own, and that is the price of compositing.**
+        decisions.md's "the shipped surface cannot be composited: it contains a text
+        editor" named exactly one way out — *"the hand editor moves out of the composited
+        window — a separate Toplevel of its own would be enough, and would cost that
+        window its seam with the panel"* — and this is it. A layered window shows the
+        bitmap Windows was handed and nothing else, so a `tk.Text` inside the pill's
+        window would simply not be on screen; a window of its own is drawn by Tk, in
+        front, over a well the panel reserves for it (`_render`).
+
+        What it costs is that seam: the box is a second window butted against a hole in
+        the first, so it cannot share the panel's rounded corners or its feathered edge,
+        and it is one `geometry` call rather than a `place` away from being in the wrong
+        place — which is why `_place_editor` is called from `reposition` as well as from
+        `_render`. What it buys is every other pixel of this surface: the row, the panel,
+        the card and the chips all antialiased, on the same painter the compact surface
+        uses, for the two seconds a year somebody is typing in the box.
         """
         text = self.pill.session.begin_edit()
         if text is None:
@@ -7643,6 +7721,15 @@ class Bubble(tk.Frame):
         # editor and report that "Windows kept the focus" on a machine with no Windows.
         lite = self.lite
         self._previous_focus = 0 if lite else foreground_hwnd()
+        # A bare, always-on-top window with nothing in it but the box. No key colour and
+        # no `-alpha`: it is opaque by construction, so it needs neither, and either one
+        # would be a second answer to a question this window does not ask. Deliberately
+        # *not* `_no_activate` — this is the one window in Flow that must take the
+        # keyboard, which is the whole reason it exists.
+        shell = self._edit_box = tk.Toplevel(self)
+        _bare_window(shell)
+        shell.attributes("-topmost", True)
+        shell.configure(bg=SHELL)
         # Neutral, not `self.accent`: amber's only remaining job is the "Bring it back"
         # chip, and an editing box is not that (Phase 6, decisions.md 2026-08-09).
         # The one widget on this surface that is not a canvas, so it converts its own:
@@ -7650,11 +7737,12 @@ class Bubble(tk.Frame):
         # `tk.Text` left at the design font would be a third-height column of type
         # inside a box sized for three times that.
         box = self._editor = tk.Text(
-            self, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
+            shell, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
             highlightthickness=dev(1), highlightbackground=RING,
             highlightcolor=RING, wrap="word",
             font=scaled_font(FONT_BODY), undo=True, padx=dev(6), pady=dev(4),
         )
+        box.pack(fill="both", expand=True)
         box.insert("1.0", text)
         # Escape cancels and Ctrl+Enter commits; a bare Enter is a newline, because a
         # prompt is not a single line and the chips are the discoverable way out anyway.
@@ -7666,7 +7754,13 @@ class Bubble(tk.Frame):
         box.bind("<KeyRelease>", lambda _e: self._render(), add="+")
         self._render()
         if not lite:
-            _user32.SetForegroundWindow(toplevel_hwnd(self))
+            # The *editor's* toplevel, which is what has to come forward now: the pill's
+            # window is out of the activation chain and always was, and a foreground call
+            # aimed at it would have moved the focus to a window that refuses it. The
+            # verification below still holds, because this window is Flow's process —
+            # `owned_by_flow` asks about the process and not about which window.
+            shell.update_idletasks()
+            _user32.SetForegroundWindow(toplevel_hwnd(shell))
         box.focus_force()
         box.mark_set("insert", "end")
 
@@ -7693,8 +7787,14 @@ class Bubble(tk.Frame):
         self.after(20, self._render)
 
     def _close_editor(self) -> str:
-        """Tear the box down and hand the foreground back. Returns what was in it."""
+        """Tear the box down and hand the foreground back. Returns what was in it.
+
+        The `Toplevel` goes with it, not just the `tk.Text` inside — a window left
+        behind would be an empty always-on-top rectangle over the panel, which is a
+        worse failure than the one it replaced.
+        """
         box, self._editor = self._editor, None
+        shell, self._edit_box, self._edit_slot = self._edit_box, None, None
         text = ""
         if box is not None:
             try:
@@ -7702,6 +7802,11 @@ class Bubble(tk.Frame):
             except tk.TclError:
                 text = ""
             box.destroy()
+        if shell is not None:
+            try:
+                shell.destroy()
+            except tk.TclError:
+                pass
         previous, self._previous_focus = self._previous_focus, 0
         # Back to whatever had it, which by construction is the window the user was
         # dictating into — never Flow, because `_track_target` filters those out.

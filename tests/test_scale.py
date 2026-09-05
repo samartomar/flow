@@ -199,8 +199,9 @@ class TestTheScaledCanvasScalesWhatItDraws(ScaleCase):
                          (ui.FONT_SANS, -39))
 
     def test_an_embedded_window_takes_its_box_in_device_pixels(self):
-        # The hand editor: a `tk.Text` in a `create_window`, whose own font this file
-        # scales separately. A box left in design pixels would be a third of the type.
+        # This was the hand editor's slot; the editor is a `Toplevel` of its own now, so
+        # nothing in `ui.py` embeds a widget. Kept because the proxy still forwards the
+        # call and a length left unscaled is the defect either way.
         self.c.create_window(ui.PAD, 20, width=100, height=50)
         name, args, kw = self.rec.last("create_window")
         self.assertEqual(args, (3 * ui.PAD, 60))
