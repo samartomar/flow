@@ -42,7 +42,7 @@ from .lexicon import (
     ensure as ensure_lexicon,
     pairs,
 )
-from . import tray
+from . import paint, tray
 from .notes import Notes
 from .profile import DESIGNS, DESIGN_DEFAULT, path_key, resolve_workspace
 from .refine import EFFORT_DEFAULT, EFFORTS, available
@@ -50,6 +50,80 @@ from .session import CONVERSE, DICTATE, REFINE, Session, State
 from .stats import today_note
 from .thread import MAX_TURNS as THREAD_MAX_TURNS
 from .version import version
+
+
+#: How many device pixels one of this file's pixels is worth. 1.0 everywhere but a
+#: scaled display, and read once from the pill's own monitor in `Pill.__init__`.
+#:
+#: **Every number in this module is a *design* pixel** — the units §02's mocks are
+#: drawn in, the units `PILL_H = 34` and `BUBBLE_W = 400` have always been — and until
+#: now they were device pixels too, because the process was DPI-*unaware* and Windows
+#: was quietly stretching the result. `flow/ui_compact.py` settled the rule for the
+#: other surface: keep every size in design pixels and convert at the point it meets Tk
+#: geometry or the screen. This is that rule here, with `paint.ScaledCanvas` standing at
+#: the largest of those points so the drawing code does not have to know.
+#:
+#: A module global, rebound once before anything is drawn, for exactly the reason
+#: `apply_panel_width` gives for `BUBBLE_W`: the alternative is threading a factor
+#: through two window classes and the free functions that draw their chrome, and
+#: rebinding one name is the smaller change whose failure mode is visible immediately.
+SCALE = 1.0
+
+
+def apply_scale(k: float) -> None:
+    """Set the display scale. Call once, after the root window exists.
+
+    Guarded rather than trusted, like `panel_width`: `paint.scale_for` answers 1.0
+    when it cannot ask, and a zero or a negative from a machine that answered oddly
+    would divide by nothing in `design`.
+    """
+    global SCALE
+    SCALE = float(k) if k and k > 0 else 1.0
+
+
+def dev(v) -> int:
+    """A design length in device pixels — what Tk *geometry* and Win32 take.
+
+    Rounded, not floored, so a 34 px row at 150 % is 51 and not 50: half a pixel of
+    drift at the bottom edge is a hairline outside the window. `ui_compact.dev` says
+    the same thing about the same number, and for the same reason.
+
+    Not clamped to a minimum, because this converts offsets as well as sizes and a
+    zero offset is a real answer.
+    """
+    return round(v * SCALE)
+
+
+def design(v) -> float:
+    """A device length back in design pixels — for anything Windows measured.
+
+    Two kinds of number arrive already in device pixels and have to be brought back
+    before they meet a constant in this file: the work-area rectangles Win32 answers
+    with, and the pointer coordinates Tk reports on a DPI-aware process. Without this
+    the drag slop is a third of what it says, and the panel's chips move out from
+    under the pointer by exactly the scale factor.
+    """
+    return v / SCALE
+
+
+def scaled_font(spec):
+    """A font spec for a widget that is *not* a canvas — the hand editor's `tk.Text`.
+
+    `paint.ScaledCanvas` does this for every string drawn on a canvas. The editor is
+    a real Tk widget with its own font option, so it asks here.
+    """
+    return paint.scale_font(spec, SCALE)
+
+
+def _scaled(canvas):
+    """`canvas` in design pixels, or `canvas` itself at 100 %.
+
+    Unwrapped at `SCALE == 1` rather than wrapped with a factor of one: a 100 %
+    display, a Mac and every test that builds a real Tk canvas then run precisely the
+    code they ran before this file learned about DPI, with no proxy in the path to be
+    wrong.
+    """
+    return canvas if SCALE == 1.0 else paint.ScaledCanvas(canvas, SCALE)
 
 
 class _RECT(ctypes.Structure):
@@ -630,8 +704,12 @@ def park(win) -> None:
     window is re-placed by `reposition` on the way back, which `_render` already calls,
     so there is no unparking step to forget.
     """
-    w = max(1, win.width)
-    h = max(1, getattr(win, "_h", 1))
+    # `width` and `_h` are the design pixels every size in this file is written in;
+    # `_virtual_desktop` is Win32's and is device pixels. Converted here, at the one
+    # line where the two meet, so a parked panel clears the desktop it is actually
+    # measured against rather than a third of it.
+    w = max(1, dev(win.width))
+    h = max(1, dev(getattr(win, "_h", 1)))
     x, y = park_spot(w, h, _virtual_desktop(
         win.winfo_screenwidth(), win.winfo_screenheight()))
     win.geometry(f"{w}x{h}+{x}+{y}")
@@ -667,33 +745,22 @@ def bottom_centre(w: int, h: int, full, work, offset: int = 0) -> tuple[int, int
     return x, y
 
 
-def _dpi_aware() -> float:
-    """Tell Windows this process draws its own pixels, and return the scale factor.
-
-    Without this the pill is bitmap-stretched by the compositor — visibly soft next to
-    native text — and, worse, every coordinate goes wrong: `winfo_screenwidth` reports
-    *logical* pixels while the window is placed in *physical* ones, so on a 150%
-    display the pill computes a position for a 1280-wide screen and lands somewhere in
-    the corner of a 1920-wide one, dragging the bubble off the edge with it.
-
-    Must run before the first Tk window exists. `ctypes` is stdlib, so R16 holds.
-    """
-    try:
-        # Per-monitor v2 where it exists: the scale can differ per display, and a
-        # window dragged between them has to be told.
-        ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
-    except (AttributeError, OSError):
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)
-        except (AttributeError, OSError):
-            try:
-                ctypes.windll.user32.SetProcessDPIAware()
-            except (AttributeError, OSError):
-                return 1.0
-    try:
-        return ctypes.windll.user32.GetDpiForSystem() / 96.0
-    except (AttributeError, OSError):
-        return 1.0
+#: `_dpi_aware` was here, and for two years it did nothing at all.
+#:
+#: It called `SetProcessDpiAwarenessContext(-4)` with no `argtypes`, so ctypes passed a
+#: 32-bit -4 where a pointer-sized `DPI_AWARENESS_CONTEXT` was wanted: on 64-bit Windows
+#: the handle arrived truncated, the call answered 0, and — because a *return* of zero is
+#: not an exception — the two fallbacks below it never ran either. Probed on this 300 %
+#: machine before it was removed: return 0, `GetDpiForSystem()` 96, so the scale it
+#: reported was 1.0 and the process stayed DPI-*unaware*. Everything this file drew was a
+#: third-size image the compositor stretched by three with a bilinear filter, which is
+#: the whole of why the shipped pill looked soft beside native text and why the
+#: colour-keyed edge showed a magenta fringe — the key was blended at every edge it had.
+#:
+#: `paint.make_dpi_aware` is the same call with its argument declared, and it is what
+#: `Pill.__init__` uses now. Not two functions doing one job: awareness is process-wide,
+#: both surfaces have to agree about it to run in one process, and the compact one got
+#: there first.
 
 
 #: Bundled rather than system-installed, so a checkout runs the intended type without
@@ -2502,15 +2569,28 @@ class Pill(tk.Tk):
         settings_path=None, lite=False,
     ) -> None:
         _load_fonts()  # before the first Tk window exists, or a font object beats it here
-        scale = _dpi_aware()  # before the first Tk window exists, or it has no effect
+        # Before the first Tk window exists, or awareness is fixed for the process
+        # without it. Idempotent and reported rather than assumed: `__main__` calls it
+        # earlier on a launch that came through there, and this second call answers
+        # False having changed nothing — which is why nothing here reads the result.
+        # See the note where `_dpi_aware` used to be for what it is replacing.
+        paint.make_dpi_aware()
         _timer_resolution(1)  # so `after(5)` and `after(30)` mean what they say
         super().__init__()
+        # The scale of the monitor this window opened on, read once, now that there is
+        # a window to ask about. Once, like the compact surface: a window *dragged* to a
+        # display of a different scale keeps the one it was built with, which is a known
+        # follow-up rather than an oversight — per-monitor-v2 sends a `WM_DPICHANGED`
+        # that nothing here listens for yet.
+        apply_scale(paint.scale_for(self))
         #: Whether `_fast_tick` is scheduled — see `_quicken`.
         self._fast_ticking = False
         self._frame_no = 0
         #: What the last repaint drew, so an identical frame draws nothing (`_draw_key`).
         self._drawn_key = None
-        self.scale = scale
+        #: The factor this window was built at, for anything that wants to report it.
+        #: `SCALE` is where the drawing actually reads it from.
+        self.scale = SCALE
         self.session = session
         self.on_send = on_send
         self.hotkeys = hotkeys
@@ -2598,7 +2678,7 @@ class Pill(tk.Tk):
         # jump `_sync_shell` exists to prevent everywhere else.
         _w0 = self.pill_w
         self.x, self.y = self._placed(_w0)
-        self.geometry(f"{_w0}x{PILL_H}+{self.x}+{self.y}")
+        self.geometry(f"{dev(_w0)}x{dev(PILL_H)}+{self.x}+{self.y}")
         #: The width last drawn, so `_sync_dock` can tell whether a panel appeared or
         #: went away since the last frame — and, holding the right edge fixed, by how
         #: much the left edge has to move to match. Neither panel exists yet at this
@@ -2613,9 +2693,13 @@ class Pill(tk.Tk):
         #: on every frame whether or not anybody has ever hidden the window.
         self._tray_events: queue.Queue = queue.Queue()
 
-        self.canvas = tk.Canvas(
-            self, width=BUBBLE_W, height=PILL_H, bg=self.bg, highlightthickness=0
-        )
+        # Wrapped, so every `create_*` below this line goes on being written in the
+        # design pixels §02 draws in — see `paint.ScaledCanvas`. At 100 % it is the bare
+        # `tk.Canvas` and nothing is in the path.
+        self.canvas = _scaled(tk.Canvas(
+            self, width=dev(BUBBLE_W), height=dev(PILL_H), bg=self.bg,
+            highlightthickness=0
+        ))
         # `place`, not `pack`: this canvas is the *foot* of a window whose top edge moves
         # when a panel opens, so it has to be positioned rather than filled.
         self.canvas.place(x=0, y=0, width=BUBBLE_W, height=PILL_H)
@@ -2683,11 +2767,14 @@ class Pill(tk.Tk):
             self._drag = (e.x_root - self.x, e.y_root - self.y)
 
         def drag(e):
+            # `self.work` and `e.*_root` are Windows' pixels; `pill_w` and `PILL_H` are
+            # this file's. The clamp has to be done in one of the two, and device is the
+            # one the answer is stored in — `self.x`/`self.y` are what `geometry` takes.
             left, top, right, bottom = self.work
-            w = self.pill_w
+            w, h = dev(self.pill_w), dev(PILL_H)
             self.x = max(left, min(e.x_root - self._drag[0], right - w))
-            self.y = max(top, min(e.y_root - self._drag[1], bottom - PILL_H))
-            self.geometry(f"{w}x{PILL_H}+{self.x}+{self.y}")
+            self.y = max(top, min(e.y_root - self._drag[1], bottom - h))
+            self.geometry(f"{w}x{h}+{self.x}+{self.y}")
             self.bubble.reposition()
 
         self.canvas.bind("<B1-Motion>", drag)
@@ -2773,7 +2860,11 @@ class Pill(tk.Tk):
         if self._press_at is None or self._press_talking:
             return
         x, y = self._press_xy
-        if abs(e.x_root - x) > PILL_DRAG_SLOP or abs(e.y_root - y) > PILL_DRAG_SLOP:
+        # In device pixels, because that is what the pointer is measured in. The slop
+        # is a *hand* tremor — 4 px of it at 100 % is 12 px of screen at 300 %, and a
+        # comparison left in design pixels would call a third of a tremor a drag.
+        slop = dev(PILL_DRAG_SLOP)
+        if abs(e.x_root - x) > slop or abs(e.y_root - y) > slop:
             self._press_moved = True
 
     def _toggle(self, _e=None) -> None:
@@ -4327,8 +4418,11 @@ class Pill(tk.Tk):
         the bottom of it.
         """
         _left, top, _right, bottom = self.work
-        room = (bottom - top) - 2 * EDGE_AIR - PILL_H
-        return max(0, min(PANEL_MAX_H, room))
+        # The work area is Win32's and is device pixels; everything it is spent on here
+        # is this file's. Brought back once, at the subtraction, so the answer is a band
+        # height in the units the band is drawn in.
+        room = design(bottom - top) - 2 * EDGE_AIR - PILL_H
+        return int(max(0, min(PANEL_MAX_H, room)))
 
     def _placed(self, w: int) -> tuple[int, int]:
         """Where a stack `w` wide belongs on the current monitor, per `PLACE`.
@@ -4347,7 +4441,12 @@ class Pill(tk.Tk):
         `"corner"` is what Flow shipped, kept because somebody who has spent months
         with the pill in the bottom right should not have it moved by an upgrade.
         """
+        # Everything returned from here is a device-pixel position on the desktop, so
+        # the two design lengths that reach it — the stack's width and the row's height
+        # — are converted rather than the rectangle, which is Windows' own.
         left, top, right, bottom = self.work
+        w = dev(w)
+        row = dev(PILL_H)
         if self.mic_view and self._mic_at is not None:
             # The third answer, and only this view gets it. `PLACES` is two entries
             # because the pill anchors a stack that must fit a 400/480/580 px panel;
@@ -4355,12 +4454,14 @@ class Pill(tk.Tk):
             # itself. Clamped against the monitor that is actually under the pointer
             # rather than trusted, which is what makes a position saved on a display
             # that is no longer here land somewhere visible instead of off-screen.
+            # The stored pair is already device pixels — `_remember_mic_at` writes
+            # `self.x`/`self.y` — so only the clamp's own lengths convert here.
             x, y = self._mic_at
             return (max(left, min(x, right - w)),
-                    max(top + EDGE_AIR, min(y, bottom - PILL_H)))
+                    max(top + dev(EDGE_AIR), min(y, bottom - row)))
         if PLACE == "corner":
-            return right - w - 28, bottom - PILL_H - 24
-        return bottom_centre(w, PILL_H, self.full, self.work, PANEL_BOTTOM_OFFSET)
+            return right - w - dev(28), bottom - row - dev(24)
+        return bottom_centre(w, row, self.full, self.work, dev(PANEL_BOTTOM_OFFSET))
 
     def _sync_monitor(self) -> None:
         """Follow the pointer's monitor, and re-place the stack when it changes.
@@ -5029,9 +5130,16 @@ class Pill(tk.Tk):
         # `_placed` is still the answer at startup and whenever the pointer changes
         # monitor — `_sync_monitor` asks it there, which is the one place a reposition is
         # actually wanted.
-        foot = self.y + self._shell_h
-        x = max(left, min(self.x, right - w))
-        y = max(top + EDGE_AIR, min(foot - h, bottom - h))
+        #
+        # **`x` and `y` are device pixels; `h`, `w` and `_shell_h` are design ones.**
+        # That split is deliberate rather than untidy: the position comes from the work
+        # area and from the pointer, which are Windows', and the sizes come from this
+        # file's constants and are what `_draw` measures the row against. So the clamp
+        # converts, once, and `_shell_h` stays the number `_draw` compares to `PILL_H`.
+        dev_h, dev_w = dev(h), dev(w)
+        foot = self.y + dev(self._shell_h)
+        x = max(left, min(self.x, right - dev_w))
+        y = max(top + dev(EDGE_AIR), min(foot - dev_h, bottom - dev_h))
         # The width is compared too, and leaving it out was a defect. `apply_panel_width`
         # rebinds `BUBBLE_W` while Flow is running — the panel-size setting — so `w`
         # changes without x, y or the height changing with it. The row then kept the
@@ -5041,10 +5149,13 @@ class Pill(tk.Tk):
         # against, so it has to move in the same breath as the canvas.
         if (self.x, self.y, self._shell_h, self._docked_w) != (x, y, h, w):
             self.x, self.y, self._shell_h, self._docked_w = x, y, h, w
+            # In design pixels: the canvas converts its own (`paint.ScaledCanvas`).
             self.canvas.configure(width=w)
             self.canvas.place(x=0, y=h - PILL_H, width=w, height=PILL_H)
-        if self.window_geometry() != (w, self.x, self.y):
-            self.geometry(f"{w}x{h}+{self.x}+{self.y}")
+        # Device against device: `window_geometry` reads `winfo_*`, which on a DPI-aware
+        # process answers in the pixels the window actually occupies.
+        if self.window_geometry() != (dev_w, self.x, self.y):
+            self.geometry(f"{dev_w}x{dev_h}+{self.x}+{self.y}")
 
     #: Kept under the old name because every caller in the app and the suite says it, and
     #: the two never meant different things — the dock *was* the shell, badly.
@@ -5363,6 +5474,11 @@ class Pill(tk.Tk):
         try:
             font = self.__dict__.get("_note_font")
             if font is None:
+                # At the *design* size, and that is the measurement wanted rather than
+                # an oversight: `budget` is a design length (`APP_SLOT_W`), and a font
+                # object built at `FONT_NOTE`'s own 11 px answers in device pixels that
+                # are design pixels by construction. Scaling this to 33 px and the
+                # budget with it would give the same cut for three times the work.
                 font = self._note_font = tkfont.Font(root=self, font=FONT_NOTE)
             cut = text
             while cut and font.measure(cut) > budget:
@@ -5627,7 +5743,7 @@ class HelpWindow(tk.Toplevel):
         self.pill = pill
         self.bg = _shell_window(self, pill.lite, 0.0)
         self.configure(bg=self.bg)
-        self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
+        self.canvas = _scaled(tk.Canvas(self, bg=self.bg, highlightthickness=0))
         self.canvas.pack()
         #: Reported rather than assumed, exactly as the pill and bubble do it: a style
         #: that failed to apply would give this window the focus the moment it opened,
@@ -5706,19 +5822,23 @@ class HelpWindow(tk.Toplevel):
         self._scroll(-3 * (e.delta // 120 or (1 if e.delta > 0 else -1)))
 
     def _grab(self, e) -> None:
-        self._drag_y, self._drag_px = e.y, 0
+        # `e.y` is a device pixel and `HELP_LINE_H` is a design one, so the accumulator
+        # is kept in design pixels: left in device, a drag would scroll a third as far
+        # as the hand moved at 300 %.
+        self._drag_y, self._drag_px = design(e.y), 0
 
     def _drag(self, e) -> None:
         if self._drag_y is None:
             return
-        self._drag_px += self._drag_y - e.y
-        self._drag_y = e.y
+        y = design(e.y)
+        self._drag_px += self._drag_y - y
+        self._drag_y = y
         # Content follows the hand: dragging up moves the page up, which is the direction
         # every touch surface has taught. Whole rows, so the accumulator keeps the
         # remainder rather than dropping it and making a slow drag do nothing.
         steps, self._drag_px = divmod(self._drag_px, HELP_LINE_H)
         if steps:
-            self._scroll(steps)
+            self._scroll(int(steps))
 
     # -- painting ----------------------------------------------------------
 
@@ -5727,8 +5847,10 @@ class HelpWindow(tk.Toplevel):
         accent = self.pill.accent
         content = sum(self._row_h(kind) for kind, _l, _r in self._rows)
         _l, top, _r, bottom = self.pill.work
+        # The work area is Windows' pixels and everything else on this line is this
+        # file's, so the desktop's budget comes back to design before it is compared.
         self._h = min(HELP_HEAD_BAND + content + HELP_FOOT_BAND, HELP_MAX_H,
-                      max(200, bottom - top - HELP_MARGIN))
+                      max(200, design(bottom - top) - HELP_MARGIN))
         c.configure(width=HELP_W, height=self._h)
         self._place()
 
@@ -5772,9 +5894,10 @@ class HelpWindow(tk.Toplevel):
         display it has to work on.
         """
         left, top, right, bottom = self.pill.work
-        x = left + ((right - left) - HELP_W) // 2
-        y = top + ((bottom - top) - self._h) // 2
-        self.geometry(f"{HELP_W}x{self._h}+{max(left, x)}+{max(top, y)}")
+        w, h = dev(HELP_W), dev(self._h)
+        x = left + ((right - left) - w) // 2
+        y = top + ((bottom - top) - h) // 2
+        self.geometry(f"{w}x{h}+{max(left, x)}+{max(top, y)}")
 
     def _scrollbar(self, drawn: int) -> None:
         """A thumb, only when there is something off screen to point at."""
@@ -5862,7 +5985,7 @@ class ConversationCard(tk.Frame):
         # kept it touching the pill. See `Pill._sync_shell`.
         self.bg = pill.bg
         self.configure(bg=self.bg)
-        self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
+        self.canvas = _scaled(tk.Canvas(self, bg=self.bg, highlightthickness=0))
         self.canvas.pack()
         self.no_activate = _no_activate(self)
         #: Exchanges already answered, oldest first, as `(kind, text)` with kind in
@@ -6022,18 +6145,21 @@ class ConversationCard(tk.Frame):
         self._scroll(-(e.delta // 120 or (1 if e.delta > 0 else -1)))
 
     def _grab(self, e) -> None:
-        self._drag_y, self._drag_px = e.y, 0
+        # Design pixels, for `HelpWindow._grab`'s reason: `e.y` is what the pointer
+        # moved on the screen and the 40 below is a turn's height as this file draws it.
+        self._drag_y, self._drag_px = design(e.y), 0
 
     def _drag(self, e) -> None:
         if self._drag_y is None:
             return
-        self._drag_px += self._drag_y - e.y
-        self._drag_y = e.y
+        y = design(e.y)
+        self._drag_px += self._drag_y - y
+        self._drag_y = y
         # Content follows the hand, whole turns at a time. A turn is the unit here
         # rather than a line, because a turn is what the eye is looking for.
         steps, self._drag_px = divmod(self._drag_px, 40)
         if steps:
-            self._scroll(steps)
+            self._scroll(int(steps))
 
     # -- geometry ----------------------------------------------------------
 
@@ -6087,7 +6213,9 @@ class ConversationCard(tk.Frame):
         if self._visible:
             band = (CARD_W, self._h)
             if self.__dict__.get("_placed_band") != band:
-                self.place(x=0, y=0, width=CARD_W, height=self._h)
+                # A `Frame`, so this is Tk geometry and takes device pixels — the
+                # canvas inside it is the thing that speaks design ones.
+                self.place(x=0, y=0, width=dev(CARD_W), height=dev(self._h))
                 self._placed_band = band
         else:
             self.place_forget()
@@ -6423,7 +6551,7 @@ class Bubble(tk.Frame):
         # kept it touching the pill. See `Pill._sync_shell`.
         self.bg = pill.bg
         self.configure(bg=self.bg)
-        self.canvas = tk.Canvas(self, bg=self.bg, highlightthickness=0)
+        self.canvas = _scaled(tk.Canvas(self, bg=self.bg, highlightthickness=0))
         self.canvas.pack()
         self._visible = False
         self._text = ""
@@ -6720,7 +6848,9 @@ class Bubble(tk.Frame):
             # and a partial renders on every decode.
             band = (BUBBLE_W, self._h)
             if self.__dict__.get("_placed_band") != band:
-                self.place(x=0, y=0, width=BUBBLE_W, height=self._h)
+                # A `Frame`, so this is Tk geometry and takes device pixels — the
+                # canvas inside it is the thing that speaks design ones.
+                self.place(x=0, y=0, width=dev(BUBBLE_W), height=dev(self._h))
                 self._placed_band = band
         else:
             self.place_forget()
@@ -6874,6 +7004,10 @@ class Bubble(tk.Frame):
         if shown >= 1.0 or shown <= 0.0:
             return 0
         try:
+            # Device pixels on both sides, and deliberately not converted: `@0,y` is an
+            # index into the *widget's own* pixel space, which is the space
+            # `winfo_height` answers in. Bringing either back to design pixels would
+            # ask the box how many lines fit in a third of itself.
             height = int(self._editor.winfo_height())
             if height <= 1:
                 return 0
@@ -6958,13 +7092,16 @@ class Bubble(tk.Frame):
         c.tag_bind("editbar", "<B1-Motion>", lambda e: self._bar_drag(e, top, height))
 
     def _bar_grab(self, e) -> None:
-        self._bar_y = e.y
+        # In design pixels, because `height` below is the bar's drawn height and this
+        # is divided by it — the same conversion the two page drags make.
+        self._bar_y = design(e.y)
 
     def _bar_drag(self, e, top: int, height: int) -> None:
         if self._editor is None or height <= 0:
             return
-        moved = (e.y - getattr(self, "_bar_y", e.y)) / height
-        self._bar_y = e.y
+        y = design(e.y)
+        moved = (y - getattr(self, "_bar_y", y)) / height
+        self._bar_y = y
         first, _last = self._view()
         self._editor.yview_moveto(max(0.0, min(1.0, first + moved)))
         self._render()
@@ -7577,11 +7714,15 @@ class Bubble(tk.Frame):
         self._previous_focus = 0 if lite else foreground_hwnd()
         # Neutral, not `self.accent`: amber's only remaining job is the "Bring it back"
         # chip, and an editing box is not that (Phase 6, decisions.md 2026-08-09).
+        # The one widget on this surface that is not a canvas, so it converts its own:
+        # `paint.ScaledCanvas` is what does this for every string the panel draws, and a
+        # `tk.Text` left at the design font would be a third-height column of type
+        # inside a box sized for three times that.
         box = self._editor = tk.Text(
             self, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
-            highlightthickness=1, highlightbackground=RING,
+            highlightthickness=dev(1), highlightbackground=RING,
             highlightcolor=RING, wrap="word",
-            font=FONT_BODY, undo=True, padx=6, pady=4,
+            font=scaled_font(FONT_BODY), undo=True, padx=dev(6), pady=dev(4),
         )
         box.insert("1.0", text)
         # Escape cancels and Ctrl+Enter commits; a bare Enter is a newline, because a

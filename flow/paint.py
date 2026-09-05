@@ -922,6 +922,185 @@ for _m in TeeCanvas._DRAWS:
     setattr(TeeCanvas, _m, _tee_draw(_m))
 
 
+def scale_font(spec, k: float):
+    """A Tk font spec `k` times as large — for the sizes that are in pixels.
+
+    Tk spells a **pixel** size as a negative number and a **point** size as a
+    positive one, and only the first needs help. A point is a physical unit, so
+    Tk's own `tk scaling` already carries it: measured here on the 300 % display,
+    `tk scaling` is 3.996 once the process is DPI-aware against 1.333 while it
+    is not, and an 11 pt face comes back with a 60 px linespace against 15 px
+    for the 13 px one beside it. Scaling a point size here as well would square
+    the factor.
+
+    Anything that is not a `(family, size, ...)` sequence — a named font, a
+    plain family string, a font object — is returned untouched: it either
+    carries no number to scale or is not this function's to interpret.
+    """
+    if not isinstance(spec, (tuple, list)) or len(spec) < 2:
+        return spec
+    size = spec[1]
+    if not isinstance(size, (int, float)) or isinstance(size, bool) or size >= 0:
+        return spec
+    return (spec[0], -round(-size * k), *spec[2:])
+
+
+def _scale_coords(value, k: float):
+    """Tk's several spellings of a point list, each `k` times further out.
+
+    `create_line(x1, y1, x2, y2)`, `create_line([x1, y1, x2, y2])` and
+    `create_line([(x1, y1), (x2, y2)])` are all legal Tk and all appear in this
+    app — `_points` says so for the painter — so the shape is preserved rather
+    than normalised: what Tk was handed is what Tk is handed.
+    """
+    if isinstance(value, (list, tuple)):
+        return type(value)(_scale_coords(v, k) for v in value)
+    return value * k
+
+
+class ScaledCanvas:
+    """A `tk.Canvas` addressed in design pixels and drawn in device ones.
+
+    `flow/ui_compact.py` converts at the point a number meets Tk, because it
+    has a few dozen such points. `flow/ui.py` has some hundreds — every
+    `create_line`, every radius, every wrap column across 7 500 lines — and
+    converting them one at a time is a change nobody could review and a rule
+    the next drawing call would forget. So the conversion moves to the seam
+    they all pass through: the canvas itself.
+
+    Every coordinate, every `width` (a stroke on a line, an outline on a box, a
+    wrap column on a string, a box on an embedded widget — one name, four jobs,
+    all of them pixels), every `height` and every pixel-sized `font` is
+    multiplied on the way in; `bbox` and `coords` are divided on the way back,
+    so a probe that measures text answers in the units the layout is written
+    in. Anything else — `tag_bind`, `tag_raise`, `delete`, `bind`, `winfo_*`,
+    `pack` — is the real canvas's and is forwarded untouched.
+
+    **Hit-testing keeps working, and that is the reason this is a proxy rather
+    than a rewrite.** The items are real Tk items at real device coordinates,
+    which is where the mouse is, so the eighteen `tag_bind` sites and the
+    item-based hover tooltips go on meaning what they meant. `TeeCanvas` next
+    door exists for the same reason and pays a much larger cost for it.
+
+    At `k = 1` it is transparent, and `ui.py` does not wrap at all there — so a
+    100 % display, a Mac, and every test that builds a real Tk canvas run
+    exactly the code they ran before.
+    """
+
+    #: The calls that take coordinates. `create_bitmap` is absent because
+    #: nothing in this app draws one; it would fall through `__getattr__`
+    #: unscaled, which is a gap to notice rather than a wrong picture.
+    _DRAWS = ("create_line", "create_rectangle", "create_polygon",
+              "create_oval", "create_arc", "create_text", "create_window",
+              "create_image")
+
+    #: Item options that are lengths. `height` is only ever an embedded
+    #: window's or the widget's own; `width` is the four jobs above.
+    _LENGTHS = ("width", "height")
+
+    #: `place`'s lengths. The `rel*` family is a fraction of the parent and
+    #: must not be touched; `bordermode` and `anchor` are words.
+    _PLACE_LENGTHS = ("x", "y", "width", "height")
+
+    def __init__(self, canvas, k: float) -> None:
+        self._c = canvas
+        self._k = float(k)
+
+    def __getattr__(self, name):
+        # Everything this class does not define is the real canvas's. `_c` and
+        # `_k` are named so an instance whose `__init__` has not run raises
+        # `AttributeError` rather than recursing here forever.
+        if name in ("_c", "_k"):
+            raise AttributeError(name)
+        return getattr(self._c, name)
+
+    # -- in ----------------------------------------------------------------
+
+    def _coords(self, args) -> tuple:
+        return tuple(_scale_coords(a, self._k) for a in args)
+
+    def _options(self, kw: dict) -> dict:
+        if not kw:
+            return kw
+        out = dict(kw)
+        for name in self._LENGTHS:
+            value = out.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                out[name] = value * self._k
+        if "font" in out:
+            out["font"] = scale_font(out["font"], self._k)
+        return out
+
+    @staticmethod
+    def _merged(cnf, kw):
+        """`cnf` and `kw` as one dict, or `None` for a query.
+
+        Tk's `configure` is also its getter: a bare call answers with every
+        option and a *string* `cnf` answers with one. Neither has a length in
+        it to scale, and both would break on a dict unpacking, so they go
+        straight through.
+        """
+        if cnf is not None and not isinstance(cnf, dict):
+            return None
+        return {**(cnf or {}), **kw}
+
+    def itemconfigure(self, item, cnf=None, **kw):
+        merged = self._merged(cnf, kw)
+        if merged is None:
+            return self._c.itemconfigure(item, cnf, **kw)
+        return self._c.itemconfigure(item, **self._options(merged))
+
+    itemconfig = itemconfigure
+
+    def configure(self, cnf=None, **kw):
+        merged = self._merged(cnf, kw)
+        if merged is None:
+            return self._c.configure(cnf, **kw)
+        return self._c.configure(**self._options(merged))
+
+    config = configure
+
+    def place(self, cnf=None, **kw):
+        merged = self._merged(cnf, kw)
+        if merged is None:
+            return self._c.place(cnf, **kw)
+        k = self._k
+        for name in self._PLACE_LENGTHS:
+            value = merged.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                merged[name] = round(value * k)
+        return self._c.place(**merged)
+
+    place_configure = place
+
+    def move(self, item, dx, dy):
+        return self._c.move(item, dx * self._k, dy * self._k)
+
+    # -- out ---------------------------------------------------------------
+
+    def bbox(self, *args):
+        got = self._c.bbox(*args)
+        if got is None:
+            return None
+        return tuple(v / self._k for v in got)
+
+    def coords(self, item, *new):
+        if new:
+            return self._c.coords(item, *self._coords(new))
+        return [v / self._k for v in self._c.coords(item)]
+
+
+def _scaled_draw(method):
+    def call(self, *a, **kw):
+        return getattr(self._c, method)(*self._coords(a), **self._options(kw))
+    call.__name__ = method
+    return call
+
+
+for _m in ScaledCanvas._DRAWS:
+    setattr(ScaledCanvas, _m, _scaled_draw(_m))
+
+
 def unkey(win) -> None:
     """Take a window off the colour key and off Tk's own alpha.
 

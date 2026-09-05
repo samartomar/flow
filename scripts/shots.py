@@ -56,6 +56,19 @@ sys.path.insert(0, str(REPO))
 
 from PIL import ImageGrab  # noqa: E402
 
+from flow import paint  # noqa: E402
+
+# Before any window: awareness is fixed for the process the moment the
+# first one exists, and these shots are the record of what the surface
+# looks like on the machine taking them. Photographed unaware, every one
+# of them was a third-size image the compositor had stretched.
+#
+# `Pill.__init__` calls this too, so a shot is at native resolution either
+# way; it is said here as well because this file opens a backdrop
+# `Toplevel` of its own and the first window to exist is the one that
+# settles the question.
+paint.make_dpi_aware()
+
 import flow.ui as ui  # noqa: E402
 from flow.session import CONVERSE, DICTATE, Activity, Event, State  # noqa: E402
 from flow.ui import Pill  # noqa: E402
@@ -303,6 +316,12 @@ def _ratio(img) -> float:
     Measured every grab rather than assumed: a DPI-virtualized process on a 4K
     display reports 1280x720 while `ImageGrab` returns 3840x2160, and the same
     code has to work unchanged where the two agree.
+
+    Since `make_dpi_aware` at the top of this file it measures **1.0** on the
+    300 % machine as well — `GetSystemMetrics` now answers in the same pixels
+    `ImageGrab` returns — which is the point: the crop is right either way, and
+    the difference is that the pixels inside it are the surface's own rather
+    than a stretch of a third-size one.
     """
     return img.width / max(1, user32.GetSystemMetrics(SM_CXVIRTUALSCREEN))
 
