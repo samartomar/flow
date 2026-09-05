@@ -48,6 +48,7 @@ from typing import NamedTuple
 
 from . import tray
 from . import paint
+from . import glyphs
 from .profile import DESIGNS
 from .session import CONVERSE, DICTATE, REFINE, Session, State
 
@@ -215,11 +216,11 @@ SAID_NOTES = ("nothing to", "still ", "only the last", "discarded",
 #: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
 #: viewBox after the 12 px left padding, centred in the 34 px height. The
 #: glyph itself is stroked, not filled — `mic()` in gen.py is 1.4 px strokes
-#: with round caps. Tk has no fractional rasterizer; 1.4 is passed through
-#: and lands as it lands (see the shots).
+#: with round caps. The drawing and its stroke weight moved to `flow/glyphs.py`
+#: (`glyphs.mic`, `glyphs.STROKE`) the day the shipped surface started drawing
+#: the same mic; only the frame it sits in is this module's business.
 MIC_X = 12
 MIC_Y = (PILL_H - 18) // 2
-MIC_STROKE = 1.4
 
 #: The level meter, gen.py's `.meter`: 15 bars 2 px wide on a 2 px gap, 3 px
 #: at rest, in a 14 px band, blooming around the centre line. It starts after
@@ -2981,23 +2982,14 @@ class CompactPill(tk.Tk):
         """The mic and the meter, shared by the capsule (y0=0, 15 bars) and
         the foot (y0=PANEL_H, 40): one face, two window sizes."""
         tint = self._glyph_tint()
-        # The mic, stroked not filled — gen.py's `mic()`: a rounded-rect
-        # capsule, an arc cradle, a stem, in a 14×18 viewBox with round caps.
-        # The coordinates are the viewBox's, offset by its frame in the window.
-        x, y = MIC_X, y0 + MIC_Y
-        _round_rect(c, x + 4.3, y + 1.2, x + 9.7, y + 10.8, 2.7,
-                    fill="", outline=tint, width=MIC_STROKE)
-        c.create_arc(x + 1.8, y + 3.2, x + 12.2, y + 13.6,
-                     start=180, extent=180, style=tk.ARC,
-                     outline=tint, width=MIC_STROKE)
-        c.create_line(x + 7, y + 13.6, x + 7, y + 16.4,
-                      fill=tint, width=MIC_STROKE, capstyle=tk.ROUND)
-        if self._mic_gone:
-            # The slashed variant (States.dc.html, gen.py's `mic(slash=True)`):
-            # one diagonal across the glyph — "the one gesture the pill
-            # refuses outright", in the same red the ring wears.
-            c.create_line(x + 1.6, y + 1.8, x + 12.4, y + 16.4,
-                          fill=tint, width=MIC_STROKE, capstyle=tk.ROUND)
+        # The mic, stroked not filled — gen.py's `mic()`: a capsule, an arc
+        # cradle, a stem, in a 14×18 viewBox with round caps, and the slashed
+        # variant (States.dc.html) when the device is gone: one diagonal across
+        # the glyph, "the one gesture the pill refuses outright", in the same
+        # red the ring wears. `flow/glyphs.py` draws it for both surfaces now —
+        # the shipped row drew a filled capsule with a stroked cradle, which was
+        # two mics for one microphone.
+        glyphs.mic(c, MIC_X, y0 + MIC_Y, tint, slash=self._mic_gone)
         # The meter (R13's live level, restated wordless): 2 px bars on a 2 px
         # gap, 3 px at rest, blooming around the centre line so quiet reads as
         # a flat line rather than an empty box. Rest is gen.py's `DIM` — grey
@@ -3058,8 +3050,9 @@ class CompactPill(tk.Tk):
                       text="grounded" if ws else "plain talk",
                       font=FONT_TAG, fill=DIM)
         cx, cy = (layout.close[0] + layout.close[2]) // 2, STRIP_H // 2
-        c.create_line(cx - 4, cy - 4, cx + 4, cy + 4, fill=DIM, width=1)
-        c.create_line(cx - 4, cy + 4, cx + 4, cy - 4, fill=DIM, width=1)
+        # gen.py's close cross, in the same box it was drawn at by hand: the
+        # 16-unit glyph puts its two lines 8 px apart, which is where they were.
+        glyphs.close(c, cx - 8, cy - 8, DIM)
         # The heard block: the question, live. Partials draw italic until the
         # release's draft makes them final — the same honesty FONT_PARTIAL
         # gives the shipped bubble.
@@ -3109,12 +3102,10 @@ class CompactPill(tk.Tk):
         # gen.py's chip is `{COPY_ICON}Copy` — two offset rounded rectangles,
         # the back one open where the front overlaps it. The label sits after
         # the glyph rather than centred in the chip, which is what the flex
-        # row with its 6 px gap does.
+        # row with its 6 px gap does. `glyphs.copy` is the same drawing the
+        # shipped panel's Copy mark makes, at gen.py's own 13 px.
         gx, gy = x1 + 11, (y1 + y2) // 2
-        _round_rect(c, gx - 1, gy - 2, gx + 7, gy + 6, 2,
-                    fill="", outline=MUTED, width=1)
-        c.create_line(gx + 2, gy - 2, gx - 4, gy - 2, gx - 4, gy + 3,
-                      fill=MUTED, width=1)
+        glyphs.copy(c, x1 + 6, gy - 6.5, MUTED, size=13)
         c.create_text(gx + 13, gy, anchor="w", text="Copy",
                       font=FONT_CHIP, fill=CODE)
         c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
@@ -3127,16 +3118,19 @@ class CompactPill(tk.Tk):
                           font=FONT_CHIP_PRIMARY, fill=PRIMARY_TEXT)
 
     def _draw_folder(self, c, x: int, cy: int, colour: str = DIM) -> None:
-        """The strip's folder glyph, stroked like the mic: a tab and a body,
-        13 px square, gen.py's `FOLDER` reduced to its two readable lines.
+        """The strip's folder glyph, stroked like the mic: gen.py's `FOLDER`,
+        13 px square, drawn by `glyphs.folder`.
+
+        It was a square-cornered rectangle with a tab line over it — a folder
+        reduced to two readable lines while this module drew its own marks. The
+        shared glyph has the canvas's rounded body, which is the same folder the
+        artboard shows.
 
         `colour` because gen.py's `strip()` and `wsrow()` both take one, and
         it carries meaning rather than decoration: green says this workspace
         is real and grounded, grey says there is none. Drawn `DIM` whatever
         the state, the strip claimed "no workspace" over a live path."""
-        c.create_line(x, cy - 4, x + 4, cy - 4, x + 6, cy - 2,
-                      fill=colour, width=1)
-        c.create_rectangle(x, cy - 2, x + 13, cy + 5, outline=colour, width=1)
+        glyphs.folder(c, x, cy - 6.5, colour, size=13)
 
     def _draw_box_chrome(self, c, h: int) -> None:
         """The `.box` shell both standalone windows share: SHELL, the 1 px
@@ -3157,9 +3151,9 @@ class CompactPill(tk.Tk):
         font is nothing at that rate."""
         h = self._box_height()
         self._draw_box_chrome(c, h)
-        # The field: search glyph, the query so far, the caret.
-        c.create_oval(16, 13, 26, 23, outline=DIM, width=1)
-        c.create_line(25, 22, 30, 27, fill=DIM, width=1)
+        # The field: search glyph, the query so far, the caret. gen.py's
+        # `search_icon` at its own 14 px, centred in the field's height.
+        glyphs.search(c, 15, PALETTE_FIELD_H / 2 - 7, DIM, size=14)
         query = self._palette.query
         c.create_text(38, PALETTE_FIELD_H // 2, anchor="w", text=query,
                       font=(FONT_MONO, -13), fill=TEXT)
@@ -3250,24 +3244,24 @@ class CompactPill(tk.Tk):
         """Workbench setup's three glyphs (gen.py's `workspace` page), stroked
         at 14 px like every other glyph on this surface: a microphone and a
         terminal in `HEARING`, and a muted arrow-into-a-baseline for where the
-        words land."""
-        if row == 0:  # Microphone — the mic, minus the meter's stem
-            _round_rect(c, x + 4, cy - 6, x + 10, cy + 1, 3,
-                        fill="", outline=HEARING, width=1)
-            c.create_arc(x + 1, cy - 4, x + 13, cy + 5, start=180, extent=180,
-                         style=tk.ARC, outline=HEARING, width=1)
-            c.create_line(x + 7, cy + 5, x + 7, cy + 7, fill=HEARING, width=1)
+        words land.
+
+        All three are `flow/glyphs.py`'s now, and the first two stopped being
+        near-copies of drawings that already existed: the row's own mic was a
+        second, slightly shorter mic, and the arrow is the same arrow the
+        shipped panel's "Use this" mark draws (`glyphs.take`).
+
+        The mic is drawn at 11, not 14, because it is the one glyph here that
+        is taller than it is wide: 11 across is 14 tall, which is the height
+        the other two are and the height the artboard's row is drawn to. The
+        artboard reaches that by dropping the stem; keeping it and shrinking
+        the box keeps this the same microphone as the pill's."""
+        if row == 0:  # Microphone — the pill's own glyph, at the row's height
+            glyphs.mic(c, x + 1.5, cy - 7, HEARING, size=11)
         elif row == 1:  # Agent CLI — a prompt chevron and its line, in a box
-            _round_rect(c, x + 1, cy - 6, x + 13, cy + 6, 2,
-                        fill="", outline=HEARING, width=1)
-            c.create_line(x + 4, cy - 3, x + 6, cy, x + 4, cy + 3,
-                          fill=HEARING, width=1)
-            c.create_line(x + 8, cy + 3, x + 11, cy + 3, fill=HEARING, width=1)
+            glyphs.terminal(c, x, cy - 7, HEARING, size=14)
         else:  # On release — down into a baseline
-            c.create_line(x + 7, cy - 6, x + 7, cy + 1, fill=MUTED, width=1)
-            c.create_line(x + 4, cy - 2, x + 7, cy + 1, x + 10, cy - 2,
-                          fill=MUTED, width=1)
-            c.create_line(x + 2, cy + 5, x + 12, cy + 5, fill=MUTED, width=1)
+            glyphs.into_baseline(c, x, cy - 7, MUTED, size=14)
 
     def _draw_setup(self, c) -> None:
         """Workbench setup: three read-only lines. Open it when something is

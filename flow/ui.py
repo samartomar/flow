@@ -25,6 +25,7 @@ from collections import deque
 from pathlib import Path
 
 from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
+from . import glyphs
 from .help import (
     AUTO_ASK_OFF_LABEL,
     WELCOME_TITLE,
@@ -2014,49 +2015,34 @@ def app_label(process: str) -> str:
     return stem
 
 
-#: The gear's three radii, as fractions of `ICON_SIZE`: the tooth tip, the body it sits
-#: on, and the hole in the middle.
-_GEAR_TIP, _GEAR_BODY, _GEAR_HUB = 0.47, 0.34, 0.14
-
-#: Half a tooth, in radians, at the body and at the tip. Narrower at the tip is what
-#: makes a tooth a tooth rather than a spoke.
-_GEAR_WIDE, _GEAR_NARROW = 0.21, 0.13
+#: Where the row's marks come from now: `flow/glyphs.py`, which draws the compact
+#: canvas's language — 1.5 px round-capped strokes in a 14-16 px box, no fills — for
+#: both surfaces. The functions below keep their names and their signatures, because
+#: `COMMAND_GLYPHS`, `PRIMARY_GLYPHS`, `_row_icons`, `draw_primary` and the tests all
+#: address them by those; what changed is that each one is a call rather than a
+#: drawing, and that the shipped surface and the compact one are now the same hand.
+#:
+#: The colours are untouched. `ICON_SETTINGS`/`ICON_VOICE`/`ICON_MODE` and
+#: `COMMAND_COLOURS` were argued for on their own terms and settled; unifying two
+#: drawings is not licence to relitigate two palettes.
 
 
 def _gear(c: tk.Canvas, cx: float, cy: float, colour: str, tags) -> None:
-    """A settings gear, drawn rather than fonted.
+    """A settings gear, drawn rather than fonted, centred on `(cx, cy)`.
 
     Same reasoning as the mic glyph beside it: a font that is missing, substituted or
     scaled differently turns a control into a box, and the one thing every control on
     this row has to be is recognisable.
 
-    **The first version was spokes on a ring and it read as a sun.** Eight lines poking
-    out of a circle is what an asterisk looks like; a gear is a solid body with
-    *trapezoidal* teeth and a hole through the middle, and at sixteen pixels the hole is
-    what carries it. So: eight tapered quads on a filled disc, then the hub punched back
-    out in `SHELL`. Nothing here composites — the canvas has no alpha — so punching a
-    hole means drawing the background colour over the middle, which is exact as long as
-    the row's fill is the one behind it.
+    **The first version was spokes on a ring and it read as a sun**, and the answer
+    then was eight trapezoidal teeth on a filled disc with the hub punched back out in
+    `SHELL`. `glyphs.gear` keeps the lesson and drops the fill: the rim and the teeth
+    are one closed outline, so a tooth is still an edge of a body rather than a mark
+    beside it, and the hub is a stroked circle — which means the gear no longer has to
+    know what colour is behind it to have a hole.
     """
-    size = ICON_SIZE
-    for i in range(8):
-        a = math.pi * i / 4
-        corners = []
-        for radius, half in ((_GEAR_BODY, _GEAR_WIDE), (_GEAR_TIP, _GEAR_NARROW)):
-            for side in (-1, 1):
-                angle = a + side * half
-                corners.append((cx + math.cos(angle) * radius * size,
-                                cy + math.sin(angle) * radius * size))
-        # body-left, body-right, tip-right, tip-left: a quad walked in order, so the
-        # tooth is a trapezoid rather than a bow tie.
-        c.create_polygon(*corners[0], *corners[1], *corners[3], *corners[2],
-                         fill=colour, outline=colour, tags=tags)
-    body = _GEAR_BODY * size
-    c.create_oval(cx - body, cy - body, cx + body, cy + body,
-                  fill=colour, outline=colour, tags=tags)
-    hub = _GEAR_HUB * size
-    c.create_oval(cx - hub, cy - hub, cx + hub, cy + hub,
-                  fill=SHELL, outline=SHELL, tags=tags)
+    glyphs.gear(c, cx - ICON_SIZE / 2, cy - ICON_SIZE / 2, colour,
+                size=ICON_SIZE, tags=tags)
 
 
 def _speaker(c: tk.Canvas, cx: float, cy: float, colour: str, muted: bool, tags) -> None:
@@ -2066,18 +2052,8 @@ def _speaker(c: tk.Canvas, cx: float, cy: float, colour: str, muted: bool, tags)
     without remembering what "on" looked like, and an icon that disappears when a setting
     is off is a setting nobody can find their way back to.
     """
-    r = ICON_SIZE / 2
-    c.create_rectangle(cx - r, cy - 3, cx - r + 4, cy + 3,
-                       fill=colour, outline=colour, tags=tags)
-    c.create_polygon(cx - r + 4, cy - 3, cx - 1, cy - r, cx - 1, cy + r,
-                     cx - r + 4, cy + 3, fill=colour, outline=colour, tags=tags)
-    if muted:
-        c.create_line(cx + 1, cy - 5, cx + r, cy + 5, fill=colour, width=2, tags=tags)
-    else:
-        for i in (0, 1):
-            c.create_arc(cx - 1 + i * 4, cy - 5 - i * 3, cx + 5 + i * 4, cy + 5 + i * 3,
-                         start=-60, extent=120, style=tk.ARC,
-                         outline=colour, width=2, tags=tags)
+    glyphs.speaker(c, cx - ICON_SIZE / 2, cy - ICON_SIZE / 2, colour,
+                   muted=muted, size=ICON_SIZE, tags=tags)
 
 
 #: What each session mode is called where a human reads it — the settings-row
@@ -2095,24 +2071,12 @@ def _mode_glyph(c: tk.Canvas, cx: float, cy: float, colour: str, mode: str,
     the marks are "text", "a pen" and "a reply", not abstractions somebody has to
     learn. Read `mode`, not a converse bool: the two-way read treated REFINE as
     CONVERSE, and a speech bubble over a mode that pastes is exactly the lie the
-    third mode was not supposed to introduce silently.
+    third mode was not supposed to introduce silently — and `glyphs.mode` now
+    *raises* on a name it does not know rather than falling through to the last
+    branch, which is where that lie used to land.
     """
-    r = ICON_SIZE / 2
-    if mode == CONVERSE:
-        _round_rect(c, cx - r, cy - r + 1, cx + r, cy + r - 4, 4,
-                    fill="", outline=colour, tags=tags)
-        c.create_line(cx - 2, cy + r - 4, cx - 4, cy + r, fill=colour, width=2,
-                      tags=tags)
-    elif mode == REFINE:
-        # A pen: the shaft, and the nib pointing back at the draft it shapes.
-        c.create_line(cx - r + 3, cy + r - 3, cx + r - 2, cy - r + 2,
-                      fill=colour, width=2, tags=tags)
-        c.create_line(cx - r + 3, cy + r - 3, cx - r, cy + r,
-                      fill=colour, width=2, tags=tags)
-    else:
-        for i, width in enumerate((r * 2, r * 2, r * 1.2)):
-            y = cy - r + 3 + i * 5
-            c.create_line(cx - r, y, cx - r + width, y, fill=colour, width=2, tags=tags)
+    glyphs.mode(c, cx - ICON_SIZE / 2, cy - ICON_SIZE / 2, colour, mode,
+                size=ICON_SIZE, tags=tags)
 
 
 def command_x(slot: int, right: float = None) -> float:
@@ -2151,110 +2115,80 @@ def command_slots(keys_labels) -> list:
     return out
 
 
-def _glyph_refine(c, x, y, colour, tags) -> None:
-    """A wand with a spark at its tip: this rewrites what you said.
+#: Every mark below is `glyphs.<name>` on the 16 px grid the row lays out for
+#: (`MARK_GLYPH`). The wrappers stay because `COMMAND_GLYPHS` and `PRIMARY_GLYPHS` map
+#: a command *key* to a drawing function and the tables read better naming the mark
+#: than naming the shape — and because the tests address them by these names.
 
-    The first attempt was a stroke and two dots, and at sixteen pixels that reads as a
-    slash with specks on it. A four-point spark — two crossed strokes, the vertical
-    longer — is what carries "magic" at this size, so the wand got shorter to make room
-    for it.
-    """
-    c.create_line(x + 2.5, y + 13.5, x + 9, y + 7, fill=colour, width=2, tags=tags)
-    c.create_line(x + 11.5, y + 1.5, x + 11.5, y + 8.5, fill=colour, width=2, tags=tags)
-    c.create_line(x + 8, y + 5, x + 15, y + 5, fill=colour, width=2, tags=tags)
+
+def _glyph_refine(c, x, y, colour, tags) -> None:
+    """A wand with a spark at its tip: this rewrites what you said."""
+    glyphs.refine(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_continue(c, x, y, colour, tags) -> None:
     """A plus: keep going, and add to what is there."""
-    c.create_line(x + 8, y + 3, x + 8, y + 13, fill=colour, width=2, tags=tags)
-    c.create_line(x + 3, y + 8, x + 13, y + 8, fill=colour, width=2, tags=tags)
+    glyphs.continue_(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_edit(c, x, y, colour, tags) -> None:
     """A pencil, nib down-left.
 
-    The body is drawn as a thick stroke and the nib as a triangle *past* its end, which
-    is the whole difference between a pencil and a diagonal line — the first version put
-    a 2 px nib on a 2 px stroke and the two merged.
+    Drawn as an outline now rather than as a thick stroke with a filled triangle for a
+    nib. The old shape's whole problem was that a 2 px nib on a 2 px stroke merged, so
+    the nib had to be *wider* than the body to be seen; an outlined pencil has two long
+    edges with air between them and a nib where they meet, which is a pencil for the
+    same reason a drawn one is.
     """
-    c.create_line(x + 5.5, y + 10.5, x + 12, y + 4, fill=colour, width=3, tags=tags)
-    c.create_line(x + 10.5, y + 2.5, x + 13.5, y + 5.5, fill=colour, width=2, tags=tags)
-    c.create_polygon(x + 2, y + 14, x + 3.4, y + 9.4, x + 6.6, y + 12.6,
-                     fill=colour, outline=colour, tags=tags)
+    glyphs.edit(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_command(c, x, y, colour, tags) -> None:
     """The command loop — the owner's suggestion, and the right one.
 
     "for command universally we can use ⌘". It is the mark everybody already reads as
-    *this was an instruction, not text*, which is exactly what the chip meant.
-
-    Four open loops on the corners of a square, which is the knot itself: each arc
-    starts and ends *on* the square's edges, so the two read as one continuous line.
-
-    **The stroke is thinner than every other mark here, and that is the whole trick.** At
-    2 px on a 6 px loop the hole is 2 px across and the glyph renders as a smudge — it
-    did, twice, once as arcs and once as closed rings. 1.4 px on a 6.8 px loop leaves 4 px
-    of air, which is what makes it read as ⌘ rather than as four blobs.
-
-    Tk's arc angles are degrees counterclockwise from 3 o'clock. Each loop's 90° gap
-    faces the square, so the top-left starts at 0 and sweeps 270 (east round to south),
-    leaving the south-east quadrant open for the corner it joins.
+    *this was an instruction, not text*, which is exactly what the chip meant. Its
+    thinner-than-2 stroke is the argument `glyphs.STROKE` now makes for every mark
+    here: at 2 px on a 6 px loop the hole is 2 px across and the glyph renders as a
+    smudge.
     """
-    r, ring = 3.4, 1.4
-    for cx, cy, start_deg in ((5, 5, 0), (11, 5, 270), (5, 11, 90), (11, 11, 180)):
-        c.create_arc(x + cx - r, y + cy - r, x + cx + r, y + cy + r,
-                     start=start_deg, extent=270, style=tk.ARC,
-                     outline=colour, width=ring, tags=tags)
-    c.create_rectangle(x + 5, y + 5, x + 11, y + 11,
-                       outline=colour, width=ring, fill="", tags=tags)
+    glyphs.command(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_cancel(c, x, y, colour, tags) -> None:
-    c.create_line(x + 4, y + 4, x + 12, y + 12, fill=colour, width=2, tags=tags)
-    c.create_line(x + 12, y + 4, x + 4, y + 12, fill=colour, width=2, tags=tags)
+    """A cross: stop this. The same drawing the compact panel closes with."""
+    glyphs.cancel(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_take(c, x, y, colour, tags) -> None:
     """An arrow down into a line: put this answer into the draft."""
-    c.create_line(x + 8, y + 2, x + 8, y + 9, fill=colour, width=2, tags=tags)
-    c.create_line(x + 4.5, y + 6, x + 8, y + 9.5, fill=colour, width=2, tags=tags)
-    c.create_line(x + 11.5, y + 6, x + 8, y + 9.5, fill=colour, width=2, tags=tags)
-    c.create_line(x + 3, y + 13, x + 13, y + 13, fill=colour, width=2, tags=tags)
+    glyphs.take(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_copy(c, x, y, colour, tags) -> None:
-    """Two sheets, the near one offset — the mark every OS uses for copy."""
-    c.create_rectangle(x + 2.5, y + 2.5, x + 9.5, y + 9.5,
-                       outline=colour, width=2, fill="", tags=tags)
-    c.create_rectangle(x + 6.5, y + 6.5, x + 13.5, y + 13.5,
-                       outline=colour, width=2, fill=SHELL, tags=tags)
+    """Two sheets, the near one offset — the mark every OS uses for copy.
+
+    Both sheets are outlines. The near one used to be filled `SHELL` to punch the far
+    one out behind it, which was only ever right while the mark sat on the shell; the
+    canvas's own copy icon stops the back sheet's path where the front one covers it,
+    and needs no background at all.
+    """
+    glyphs.copy(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_new(c, x, y, colour, tags) -> None:
     """A speech bubble with a plus: start the conversation again."""
-    _round_rect(c, x + 2, y + 3, x + 14, y + 11, 3, fill="", outline=colour, tags=tags)
-    c.create_line(x + 5, y + 11, x + 4, y + 14, fill=colour, width=2, tags=tags)
-    c.create_line(x + 8, y + 5, x + 8, y + 9, fill=colour, width=2, tags=tags)
-    c.create_line(x + 6, y + 7, x + 10, y + 7, fill=colour, width=2, tags=tags)
+    glyphs.new(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_send(c, x, y, colour, tags) -> None:
     """Two chevrons: the words go *out*, into the window Flow is aimed at."""
-    for dx in (1.5, 7.5):
-        c.create_line(x + dx, y + 3, x + dx + 5, y + 8, x + dx, y + 13,
-                      fill=colour, width=2, tags=tags)
+    glyphs.send(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 def _glyph_agent(c, x, y, colour, tags) -> None:
     """A small agent — a head with two eyes and an antenna: the question goes to one."""
-    _round_rect(c, x + 2.5, y + 5.5, x + 13.5, y + 14, 3, fill="", outline=colour,
-                tags=tags)
-    c.create_line(x + 8, y + 5.5, x + 8, y + 2.5, fill=colour, width=2, tags=tags)
-    c.create_oval(x + 6.5, y + 1, x + 9.5, y + 4, fill=colour, outline=colour, tags=tags)
-    for ex in (5.5, 10.5):
-        c.create_oval(x + ex - 1, y + 8.5, x + ex + 1, y + 10.5, fill=colour,
-                      outline=colour, tags=tags)
+    glyphs.agent(c, x, y, colour, size=MARK_GLYPH, tags=tags)
 
 
 #: The two primaries that draw as a glyph rather than a word — asked for by name:
@@ -5307,17 +5241,16 @@ class Pill(tk.Tk):
                                               APP_SLOT_W),
                           fill=accent if converse else MUTED, font=FONT_NOTE)
 
-        # Mic glyph: capsule + stand, drawn rather than fonted so there is no
+        # Mic glyph: capsule + cradle + stem, drawn rather than fonted so there is no
         # dependency on an emoji font being present and correctly sized.
         # Twelve left of the meter's first bar: the capsule's arc reaches 7 px either
         # side of centre, which leaves 5 px of air before the bars.
+        #
+        # The same `glyphs.mic` the compact pill draws, and the same box — 14 wide by
+        # 18 tall. It was a filled capsule with a stroked cradle here and a stroked
+        # capsule there, which is two mics for one microphone.
         cx, cy = METER_X - 12 + shift, PILL_H // 2
-        c.create_oval(cx - 4, cy - 9, cx + 4, cy + 1, fill=accent, outline=accent)
-        c.create_arc(
-            cx - 7, cy - 5, cx + 7, cy + 6, start=180, extent=180,
-            style=tk.ARC, outline=accent, width=2,
-        )
-        c.create_line(cx, cy + 6, cx, cy + 10, fill=accent, width=2)
+        glyphs.mic(c, cx - MIC_GLYPH_R, cy - glyphs.MIC_UNIT_H / 2, accent)
         # P9's marker — which CLI would answer — is in the app slot above, in converse.
 
         mid = PILL_H // 2
@@ -5399,11 +5332,9 @@ class Pill(tk.Tk):
         name = self._mic_name()
         if name:
             c.create_text(PAD, mid, anchor="w", text=name, fill=MUTED, font=FONT_NOTE)
-        cx, r = MIC_CX, MIC_GLYPH_R
-        c.create_oval(cx - 4, mid - 9, cx + 4, mid + 1, fill=accent, outline=accent)
-        c.create_arc(cx - r, mid - 5, cx + r, mid + 6, start=180, extent=180,
-                     style=tk.ARC, outline=accent, width=2)
-        c.create_line(cx, mid + 6, cx, mid + 10, fill=accent, width=2)
+        # `glyphs.mic`, the compact surface's own — `MIC_GLYPH_R` is half its width,
+        # which is what the row's arithmetic has always measured this glyph by.
+        glyphs.mic(c, MIC_CX - MIC_GLYPH_R, mid - glyphs.MIC_UNIT_H / 2, accent)
 
     def _draw_mic_meter(self, c: tk.Canvas, mid: int, accent: str) -> None:
         """The held frame: `BARS` bars from `PAD`, drawn the way the full row draws them.

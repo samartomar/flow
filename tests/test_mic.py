@@ -174,7 +174,10 @@ class TestTheViewDrawsNothingElse(unittest.TestCase):
                 p = mic_pill(state=State.REFINING, talking=talking)
                 p._dots_frame = 0
                 p._draw()
-                self.assertEqual(len(p.canvas.ovals), 0 if talking else 1)
+                # The dots are the only ovals either frame could draw, now that
+                # the glyph language changed and `glyphs.mic` strokes its capsule
+                # from arcs and lines rather than filling one.
+                self.assertEqual(p.canvas.ovals, [])
 
 
 class TestTheTwoFrames(unittest.TestCase):
@@ -201,9 +204,12 @@ class TestTheTwoFrames(unittest.TestCase):
         p = mic_pill(talking=False, app="Code.exe")
         p._draw()
         self.assertEqual([t for _x, _y, t, _f in p.canvas.texts], ["Code"])
-        self.assertEqual(len(p.canvas.arcs), 1)   # the capsule's shoulder
-        self.assertEqual(len(p.canvas.ovals), 1)  # the capsule
-        self.assertTrue(p.canvas.lines)           # the stand
+        # The glyph language changed: `glyphs.mic` strokes the capsule as two
+        # caps and two sides instead of filling an oval, so the capsule is two
+        # of the three arcs and the cradle is the third.
+        self.assertEqual(len(p.canvas.arcs), 3)   # two caps and the cradle
+        self.assertEqual(p.canvas.ovals, [])      # nothing is filled
+        self.assertTrue(p.canvas.lines)           # the sides and the stem
 
     def test_while_held_there_is_nothing_but_the_bars(self):
         p = mic_pill(talking=True, app="Code.exe")

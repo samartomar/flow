@@ -433,9 +433,13 @@ class TestTheModeSwitchIsContinuous(unittest.TestCase):
         half = ui._mix(ui.HEARING, ui.CARD_ACCENT, 0.5)
         self.assertEqual({f for _x, y, _t, f in p.canvas.texts if y == mid}, {half})
         # The mic's capsule sits left of the meter, past the app slot the CLI's name
-        # takes in converse.
+        # takes in converse. Read off arcs and lines rather than an oval since the
+        # glyph language changed: `glyphs.mic` strokes its capsule from arcs and
+        # straight runs where the shipped mic used to fill an oval.
         left = ui.METER_X + p._row_shift()
-        self.assertEqual({o[-1] for o in p.canvas.ovals if o[0] < left}, {half})
+        mic = {colour for coords, colour in p.canvas.arcs + p.canvas.lines
+               if max(coords[0::2]) < left}
+        self.assertEqual(mic, {half})
 
 
 class TestTheMeterBloomsFromItsCentre(unittest.TestCase):
@@ -1408,14 +1412,28 @@ class TestTheRowIcons(unittest.TestCase):
         # The two-way read (`mode != DICTATE`) drew converse's speech bubble
         # over a mode that pastes — the exact defect the third mode was not to
         # introduce silently. The pen is its own mark: shaft and nib.
+        #
+        # Counted as arcs as well as lines since the glyph language changed:
+        # the bubble was a smoothed polygon and is four corner arcs and four
+        # sides now, so "not a polygon" no longer tells the three marks apart.
         shapes = {}
         for mode in (DICTATE, REFINE, CONVERSE):
             c = Canvas()
             ui._mode_glyph(c, 10, 10, "#fff", mode, ())
-            shapes[mode] = (len(c.polys), len(c.lines))
+            shapes[mode] = (len(c.arcs), len(c.lines))
         self.assertEqual(shapes[DICTATE], (0, 3))   # three lines of text
-        self.assertEqual(shapes[REFINE], (0, 2))    # the pen: shaft and nib
-        self.assertEqual(shapes[CONVERSE], (1, 1))  # the bubble and its tail
+        # The pen: shaft, band, and the draft line it rewrites. Its nib used to
+        # be a second line off the shaft's lower end — collinear with it, so the
+        # two drew one diagonal and the pen had no pen.
+        self.assertEqual(shapes[REFINE], (0, 3))
+        self.assertEqual(shapes[CONVERSE], (4, 5))  # the bubble and its tail
+
+    def test_a_mode_with_no_mark_says_so_rather_than_drawing_the_wrong_one(self):
+        # The old glyph fell through to dictate's three lines for anything it
+        # did not recognise, which is how a bubble ended up over a mode that
+        # pastes. A fourth mode is a decision, not a default.
+        with self.assertRaises(ValueError):
+            ui._mode_glyph(Canvas(), 10, 10, "#fff", "translate", ())
 
     def test_the_speaker_toggles_replies(self):
         c, p, _x = self.row(speaker=mock.Mock())

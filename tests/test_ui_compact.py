@@ -195,14 +195,56 @@ def off_stadium(pts, x1, y1, x2, y2) -> float:
     return worst
 
 
+def mic_items(p, y0: int = 0) -> list:
+    """Every item drawn inside the mic glyph's own 14×18 box, as
+    `(kind, colour, filled)`.
+
+    The box is the frame `_draw_face` reserves (`MIC_X`, `MIC_Y`), and nothing
+    else on the pill fits inside it: the meter starts at `METER_X`, and the
+    capsule, its ring and the inset highlight all span the whole window. So
+    "what is in the box" is exactly "what the mic drew".
+    """
+    x1, y1 = uc.MIC_X, y0 + uc.MIC_Y
+    x2, y2 = x1 + uc.glyphs.MIC_UNIT_W, y1 + uc.glyphs.MIC_UNIT_H
+
+    def inside(coords) -> bool:
+        pts = coords[0] if len(coords) == 1 else coords
+        xs, ys = list(pts)[0::2], list(pts)[1::2]
+        return (xs and min(xs) >= x1 - 1 and max(xs) <= x2 + 1
+                and min(ys) >= y1 - 1 and max(ys) <= y2 + 1)
+
+    out = []
+    for a, fill, outline, _style, _w, *_r in p.canvas.arcs:
+        if inside(a):
+            out.append(("arc", outline, bool(fill)))
+    for a, fill, _w in p.canvas.lines:
+        if inside(a):
+            out.append(("line", fill, False))
+    for coords, fill, outline in p.canvas.polys:
+        if inside(coords):
+            out.append(("poly", outline or fill, bool(fill)))
+    for x1o, y1o, x2o, y2o, fill in p.canvas.ovals:
+        if inside((x1o, y1o, x2o, y2o)):
+            out.append(("oval", fill, bool(fill)))
+    return out
+
+
 def glyph_stroke(p) -> str:
-    """The mic's colour: the body is the pill's only *unfilled* polygon — an
-    outlined `_round_rect`. The meter's bars are polygons too now that they
-    carry gen.py's 1 px cap radius, and they are filled, which is what tells
-    the two apart."""
-    (body,) = [it for it in p.canvas.polys if it[1] == ""]
-    _coords, _fill, outline = body
-    return outline
+    """The mic's colour, read off the glyph's own box.
+
+    It used to be "the pill's only *unfilled* polygon" — the body was a
+    `_round_rect`, which on a Tk canvas is a smoothed polygon. The glyph
+    language moved to `flow/glyphs.py`, whose rounded rectangle is arcs and
+    straight runs (it has to render the same through `GdiCanvas` as through
+    Tk), so there is no polygon left to find. The idea is unchanged and said
+    about the box instead: everything the mic draws is stroked, none of it is
+    filled, and it is all one colour.
+    """
+    items = mic_items(p)
+    assert items, "the mic drew nothing"
+    assert not any(filled for _kind, _colour, filled in items), items
+    (colour,) = {colour for _kind, colour, _filled in items}
+    return colour
 
 
 def meter_bars(p, colour) -> list:
@@ -508,17 +550,21 @@ class TestTheCapsuleMatchesTheCanvas(unittest.TestCase):
 
     def test_the_mic_is_stroked_not_filled(self):
         # gen.py's `mic()`: an outlined capsule body, an arc cradle, a stem —
-        # and no filled oval anywhere.
+        # and no filled anything anywhere.
+        #
+        # The capsule was a `_round_rect` and is `glyphs.mic`'s arcs and
+        # straight runs now (the shared glyph builds a rounded rectangle from
+        # arcs so it renders the same through `GdiCanvas` as through Tk), so
+        # the count is by kind rather than by primitive: two caps and a cradle
+        # are the arcs, two sides and the stem are the lines.
         p = pill(State.LISTENING)
         p._draw()
         self.assertEqual(p.canvas.ovals, [])
         tint = uc.MODE_TINT[DICTATE]
         self.assertEqual(glyph_stroke(p), tint)
-        cradle = [outline for _a, _f, outline, style, *_r in p.canvas.arcs
-                  if style == uc.tk.ARC and outline == tint]
-        self.assertEqual(cradle, [tint])
-        stems = [fill for _a, fill, _w in p.canvas.lines if fill == tint]
-        self.assertEqual(stems, [tint])
+        kinds = [kind for kind, _c, _filled in mic_items(p)]
+        self.assertEqual(sorted(kinds), ["arc", "arc", "arc",
+                                         "line", "line", "line"])
 
 
 class TestTapAndHoldShareOneButton(unittest.TestCase):
