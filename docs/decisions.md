@@ -327,6 +327,71 @@ rested on reading the source. It has tests now, on both surfaces.
 **Reopens if** the two designs ever stop being a user-visible choice — one
 surface needs no switch, and the row goes with the choice.
 
+### 2026-09-04 — Two designs, one product: the switch is live
+
+The 2026-09-03 entry above says *"the switch is launch-time, said out loud"*, and
+gives the reason: a design's whole window tree is built in its constructor, so a live
+swap is "a rebuild-the-world pattern nothing here has". The owner's verdict on the
+built surfaces was that two designs you can only reach by relaunching are two products,
+not one — and the review that morning had already found the premise under the other
+reason (below: the shipped surface was never DPI-aware, so the two could not share a
+process). Both reasons gone, the pattern is built, at the one seam that already
+existed.
+
+**`main()` runs a loop.** It builds the class for the chosen design, runs `mainloop()`,
+and reads `switch_to` when that returns: `None` is a quit, a name is a switch, and the
+loop builds the other class **around the same session, the same hotkeys, the same
+`on_send`**. Each surface grew `switch_design(name)` — store the preference, name the
+successor, hand the window back — and `detach()`, which is `quit_app` minus three lines:
+the session is not closed, the hotkeys are not stopped, the fonts are not unloaded,
+because the next surface needs all three. What survives the press is everything that was
+never the window's: the draft, the thread, the workspace, the mode, the chord. What does
+not is the window, an open panel, and the arm — `detach` pauses an armed session on the
+way out, because a microphone left open under a surface that is not pumping it is the
+"chord never pumped the session" failure of the same day, and the new surface starts
+disarmed.
+
+**Measured on the real desktop through the real menu rows**, both directions: one
+`Session` object across three surfaces, the draft intact on the far side, `main`
+returning 0. Two facts the episode settled: a second `tk.Tk` in one process is fine
+once `_load_fonts` is idempotent and the old window's `after` callbacks are cancelled
+before the new interpreter pumps the same thread; and a menu row may destroy its own
+window, because Tk on Windows dispatches a popup's command after `tk_popup` returns —
+which is why the shipped Quit row was always safe.
+
+**Reopens if** a third surface ever arrives — the loop is written for two names, and a
+registry is the answer then, the way a fourth mode wants a mode registry.
+
+### 2026-09-04 — One glyph language, and the colours stay where their decisions put them
+
+Side by side, the two surfaces read as two products before they read as two layouts:
+the shipped row's gear was a filled body with a hub punched out in the background
+colour, its speaker a filled wedge, its marks 2 px strokes in 16 px boxes; the compact
+pill's mic, folder and copy were 1.4 px round-capped strokes in the canvas's language
+(`design/compact/gen.py`). The owner asked for one product, and the icons were the most
+visible seam.
+
+**`flow/glyphs.py` is the one hand.** Every glyph both surfaces draw — mic, folder,
+copy, close, search, gear, speaker, the three mode marks, and the command marks — is a
+pure drawing function in the compact canvas's language: strokes only at one weight
+(`STROKE = 1.5`: 1 px on an aliased Tk canvas, antialiased under GDI+, 4-5 px at 300 %),
+round caps, no fills except a dot the stroke's own size, a rounded rect built from arcs
+and lines so it renders the same through `GdiCanvas` and Tk. `ui.py`'s `_gear`,
+`_speaker`, `_mode_glyph` and `_glyph_*` keep their names and delegate, so the eighteen
+`tag_bind` sites and the tests that name them are untouched; the shipped mic and the
+compact mic are now literally one drawing.
+
+**What did not change is colour.** The shipped marks carry the four canvas hues and the
+row's gold/cyan/pink because the owner insisted on them ("this is what you build, this is
+what you promise", the 2026-09-01 coloured-marks commit), and the compact pill is
+monochrome because its canvas is.
+The language unifies shape and weight; the hues stay with the decisions that chose them,
+and `glyphs.py` takes colour from its caller for exactly that reason.
+
+**Reopens if** the compact surface becomes the only one (one-surface.md) — then the
+shipped hues have no row to live on, and the question of whether the compact panel's
+chips want a hue is a fresh one.
+
 ### 2026-09-04 — The shipped surface renders at native resolution too, without the port
 
 Two questions had been travelling as one, and separating them is the decision.

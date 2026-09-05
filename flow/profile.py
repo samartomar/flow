@@ -448,9 +448,10 @@ class Profile:
         self.gesture: str = GESTURE_DEFAULT
         #: Which UI design to launch. A name and not a module path, for `panel`'s
         #: reason: this module is read on every launch and must not need the modules
-        #: that know what the names draw. The switch applies at next launch — a design's
-        #: whole window tree is built once, in its constructor — so nothing running
-        #: reads this back.
+        #: that know what the names draw. Read at launch to pick the first surface, and
+        #: written by either surface's Design row — which switches the running surface
+        #: in the same press (`switch_design`, 2026-09-04), so this is the preference
+        #: the next launch starts from rather than the only way the switch happens.
         self.design: str = DESIGN_DEFAULT
         #: Which model to ask the agent CLI for, "" meaning whatever it defaults to, and
         #: how hard to let it think. Both apply to whichever CLI answers - `refine.tuned`
