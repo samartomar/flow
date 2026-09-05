@@ -327,6 +327,58 @@ rested on reading the source. It has tests now, on both surfaces.
 **Reopens if** the two designs ever stop being a user-visible choice — one
 surface needs no switch, and the row goes with the choice.
 
+### 2026-09-04 — The shipped surface is composited after all: the editor moved out
+
+The entry below this run of four — "The shipped surface cannot be composited: it
+contains a text editor" — ended with its own reopen bar: *"if the hand editor moves out
+of the composited window — a separate Toplevel of its own would be enough, and would
+cost that window its seam with the panel."* The owner asked for the two designs to be
+one product, and the shipped surface's soft, aliased, colour-keyed row was the most
+visible way they were not. So the bar was taken up.
+
+**The editor is a window of its own.** `Bubble._edit` builds the `tk.Text` inside a
+bare `-topmost` Toplevel and places it over a *well* the panel now draws in the slot
+(`SHELL` in a `RING` outline, recorded and composited like everything else), off the
+pill's tracked `x`/`y` — never `winfo_rootx`, which lags — and re-places it from
+`_render` on every key and from `reposition` on every drag. `SetForegroundWindow`
+targets the editor's own toplevel; the `owned_by_flow` verification is unchanged
+because it asks about the process. The cost the bar named is paid: the box no longer
+shares the window's seam, and it is a Tk-drawn text box over a composited panel. It is
+also the right price, because a text box is the one thing on this surface that has to
+*take keystrokes*, and a layered window shows a bitmap and nothing else.
+
+**Then the port that stopped in the morning finished in the evening.** `TeeCanvas`
+over the row's `ScaledCanvas` and a `GdiCanvas` the size of the window;
+`paint.recorder` on both panel frames; one present per frame, bands at the origin and
+the row last under `at_self=(0, h - PILL_H)`, only when a tee is dirty; `_sync_shell`
+resizes the bitmap; the idle dim writes `constant_alpha` because `-alpha` is the other
+layered mode and a window put into it refuses every present after; the Help sheet is
+composited the same way. The interaction layer is untouched — the real canvas keeps
+every item at device coordinates, which is the whole reason the tee exists, and
+`18-draft-context.png` is a right-click landing on the composited panel.
+
+**Three painter bugs the photographs found, all measured.** A GDI+ pen in `UnitPixel`
+is not touched by the world transform — at scale 3, widths of 1, 1.5 and 2 all rendered
+the same two device rows, so every stroked mark came out a third of its weight; an
+explicit width is a design length and scales now, an absent one stays a one-device-pixel
+hairline, which is what `_panel_chrome` relies on. A Tk *point* size taken for a pixel
+size is three-quarters of the face; GDI+'s own `UnitPoint` was three times too large, so
+points are converted at 96/72 design pixels, the arithmetic `tk scaling` does (3.996
+measured against 96·3/72). And a `create_text` `width` is a wrap column: under the
+label format the draft, the note and the answer ran off the panel in one line, so there
+are two string formats and the width selects the wrapping one. The first of these
+changes the compact surface too — its ring and mic go from a hairline to the one design
+pixel its canvas draws — and it was re-photographed.
+
+**Frame cost on the 300 % display:** an idle frame is 0.03 ms with the panel up (the
+`_draw_key` skip plus the dirty check), a present of the 400×149 shell is 5.7 ms and is
+paid only while something moves — the same order as the compact surface's own 4.5 ms.
+
+**Reopens if** the editor's separate window is reported as jarring — a box that lifts
+above a panel instead of sitting in it — in which case the answer is a composited text
+box drawn by hand, which is the "writing a text editor" the morning entry refused, and
+would want its own decision.
+
 ### 2026-09-04 — Two designs, one product: the switch is live
 
 The 2026-09-03 entry above says *"the switch is launch-time, said out loud"*, and

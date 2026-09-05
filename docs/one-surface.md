@@ -22,7 +22,9 @@ the owner has said which one they use.
 | Type | Draft held in a bubble with Send, Refine, Edit, Undo chips; sent card | Paste on release, no panel (the mini mic, drawn as the whole surface) |
 | Refine | A spoken instruction, or a Refine chip, rewrites the draft in place | A mode: the panel shows heard → refined-for-this-repo → Send on purpose |
 | Ask | A conversation card: question pinned, answer, older turns, Take / Copy / New | The panel: question, answer card, Copy, hold to reply |
-| Rendering | Tk canvas, colour-keyed, aliased, DPI-unaware | GDI+ composited, per-pixel alpha, native resolution |
+| Rendering | GDI+ composited at native resolution since the evening of 2026-09-04, through the same painter; the hand editor is a Tk text box in its own window over the panel | GDI+ composited, per-pixel alpha, native resolution |
+| Icons | One stroked glyph set shared with the compact surface since 2026-09-04 (`flow/glyphs.py`); the row and the marks keep their colours | The same glyphs, monochrome |
+| Switching | Design row switches the running surface in place, keeping the session | The same row, the same switch |
 | Settings | Right-click → Settings cascade: gesture, mic, model, effort, triggers, voice, panel, place, workspace, lexicon, notes, design, mic view | Right-click → three modes, Switch workspace (palette), Workbench setup (read-only), Design |
 | Help | Commands sheet, welcome card, guide | None |
 | Feedback | Notes on the bubble; the card; the sent card | The ring, the glyph, and a one-line strip under the pill |
@@ -43,10 +45,14 @@ shipped pill grew a control for every capability the session gained, which is ho
 came to carry eleven things on a 34 px row; the compact design started from the three
 jobs and gave each one a place.
 
-The shipped surface does not get reskinned, ported or composited — the 2026-09-04
-decision already found the wall (it contains a text editor). It gets **retired**, in
-stages, once the compact surface has absorbed the five things it still lacks. Until then
-both stay selectable, exactly as they are now, and the compact one becomes the default.
+The shipped surface is not reskinned further. Later the same day it was brought to the
+compact surface's rendering — native DPI, GDI+ compositing, one glyph set — and the
+design switch became live, so the two are one product in every sense but the layout;
+that work is what makes the retirement below a choice about *layout* rather than a
+rescue from a soft, aliased row. It still gets **retired**, in stages, once the compact
+surface has absorbed the five things it lacks: a second layout is a standing cost
+whatever it renders like. Until then both stay selectable, one press apart, and the
+compact one becomes the default.
 
 ## What the compact surface must absorb first
 
