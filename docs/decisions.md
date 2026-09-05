@@ -327,13 +327,63 @@ rested on reading the source. It has tests now, on both surfaces.
 **Reopens if** the two designs ever stop being a user-visible choice — one
 surface needs no switch, and the row goes with the choice.
 
+### 2026-09-04 — The shipped surface renders at native resolution too, without the port
+
+Two questions had been travelling as one, and separating them is the decision.
+*Composite this surface with GDI+* is blocked by the text editor inside it (see
+above) and by its item-based hit testing. *Render it at the display's real
+resolution* is neither of those things, and it had been left undone because
+`flow/ui.py` was **already claiming to do it** and silently failing.
+
+`_dpi_aware` called `SetProcessDpiAwarenessContext(-4)` with no `argtypes`. On
+64-bit Windows ctypes then passes a 32-bit -4 where a pointer-sized
+`DPI_AWARENESS_CONTEXT` is wanted, the handle arrives truncated, and the call
+answers **0** — and a *return* of zero is not an exception, so the two fallbacks
+underneath it never ran either. Probed on the 300 % machine: return 0,
+`GetDpiForSystem()` 96, reported scale 1.0. The process was DPI-*unaware* for the
+whole of the surface's life: Windows told it the screen was 1280×720, it drew a
+third-size pill, and the compositor stretched the result by three with a bilinear
+filter. **That stretch was the softness**, and it was also the magenta fringe —
+`-transparentcolor` keys an exact colour, and a bilinear filter blends that colour
+with its neighbour along every edge the key has. `paint.make_dpi_aware` is the
+same call with its argument declared, which is where the bug was found first.
+
+**The conversion is `ui_compact.py`'s rule, moved to the canvas.** Every size in
+`flow/ui.py` stays in design pixels; `SCALE`, `dev()` and `design()` convert where
+a number meets Tk geometry or a Win32 rectangle, and `paint.ScaledCanvas` — a
+proxy that multiplies coordinates, widths and pixel-sized fonts on the way in and
+divides `bbox`/`coords` on the way back — stands at the one seam every drawing
+call already passes through. That is what makes this a change nobody has to
+remember: the next `create_line` written in this file is correct by default.
+Point-sized fonts are left alone because Tk's own `tk scaling` already carries
+them — 3.996 aware against 1.333 unaware, measured. At 100 % nothing is wrapped
+at all, so a Mac and a 1:1 display run the code they ran before.
+
+**Hit-testing is why this works where compositing does not.** The items are real
+Tk items at real device coordinates, which is where the mouse is — so the eighteen
+`tag_bind` sites and the item-based hover are untouched, and the interaction-layer
+rewrite the port needs is not needed here.
+
+Photographed, 32 shots, the same walk: the fringe is gone, the type is sharp, and
+the chips and marks are where they were. Three converse-mode panels came out one
+body line taller, because a line of the note font measures 14.33 design pixels at
+288 dpi against 14 at 96 and `_settled_h` snaps to whole lines — the honest
+measurement, and more room rather than less.
+
+**Reopens if** a window is dragged between monitors of different scales. The
+factor is read once at construction, as the compact surface reads its own;
+per-monitor-v2 sends a `WM_DPICHANGED` that neither surface listens for yet, so
+until then a dragged window keeps the scale it was born with.
+
 ### 2026-09-04 — GDISCALED does nothing for a Tk surface, measured
 
 The compact surface renders at native resolution (see above); the shipped one
-cannot, because `flow/ui.py` hit-tests through canvas items — eighteen `tag_bind`
-sites plus item-based hover — and a `GdiCanvas` has no items to bind to. Porting
-it means rewriting its interaction layer across 7 400 lines with ~1 400 tests
-pinned to it, which is its own piece of work.
+cannot **be composited**, because `flow/ui.py` hit-tests through canvas items —
+eighteen `tag_bind` sites plus item-based hover — and a `GdiCanvas` has no items
+to bind to. Porting it means rewriting its interaction layer across 7 400 lines
+with ~1 400 tests pinned to it, which is its own piece of work. (Native
+*resolution* turned out to be a separate question with a separate answer — see
+the entry above, taken the same day this one was.)
 
 `DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED` looked like the cheap middle: a
 context that leaves a process's coordinates virtualised — so no constant moves
