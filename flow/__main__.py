@@ -374,8 +374,10 @@ def main(argv: list[str] | None = None) -> int:
         "--design", default=None, choices=DESIGNS, metavar="NAME",
         # A setting, not a one-run override, for `--cli-model`'s reason: the menu has no
         # way to type a name, so a flag that vanished at exit would be the only place
-        # the choice could ever be made. Applies at next launch either way — a design's
-        # whole window tree is built in its constructor, so nothing running can swap.
+        # the choice could ever be made. This is the *launch* answer and stays one —
+        # either menu switches the running surface now, and writes the same field, so a
+        # flag that also applied mid-session would be a second way to say the same
+        # thing.
         help=f"which UI design to launch ({', '.join(DESIGNS)}; default "
              f"{DESIGN_DEFAULT}, remembered)",
     )
@@ -760,34 +762,33 @@ def main(argv: list[str] | None = None) -> int:
     apply_panel_width(panel_width(profile.panel if profile is not None else None))
     apply_place(profile.place if profile is not None else "bottom")
 
-    # Which surface launches. Read once, here, because the choice is launch-time by
-    # construction: a design's whole window tree is built in its constructor, so a
-    # switch written mid-session (the menu writes `profile.design`) takes effect on the
-    # next launch, exactly as `--lite` does. An explicit flag is a decision, a stored
-    # value is a preference, and the default is the design Flow shipped.
+    # Which surface launches — which is no longer the same question as which surface
+    # runs. An explicit flag is a decision, a stored value is a preference, and the
+    # default is the design Flow shipped; from here the name is a variable, because the
+    # loop at the foot of this function rebuilds whichever surface the menu asks for
+    # next. `--design` keeps its old meaning exactly: a remembered setting, applied at
+    # launch.
     design = (args.design
               or (profile.design if profile is not None else DESIGN_DEFAULT))
     if design != DESIGN_DEFAULT:
         say(f"design: {design}")
-    if design == "compact":
-        # Before any window exists, which is the only moment this can be said:
-        # DPI awareness is fixed for the process the instant the first one is
-        # created. Without it Windows tells a 300 % display's app that the
-        # screen is a third of its real size, lets it draw a third-size image,
-        # and stretches the result — everything Flow drew was arriving as an
-        # upscaled thumbnail of itself, which was most of what "it does not
-        # look clean" turned out to be.
-        #
-        # Gated on the design because awareness is *process-wide* and the two
-        # surfaces cannot both have it at once: `flow/ui.py` writes its
-        # geometry in absolute pixels, so a DPI-aware process would draw the
-        # shipped pill at a third of its intended size. Only one design runs
-        # per process, so gating it here is exact rather than a compromise —
-        # and it is what keeps the shipped surface untouched until its own
-        # constants are scaled.
-        from . import paint
-        if paint.make_dpi_aware():
-            say("rendering at native resolution")
+    # Before any window exists, which is the only moment this can be said: DPI
+    # awareness is fixed for the process the instant the first one is created.
+    # Without it Windows tells a 300 % display's app that the screen is a third
+    # of its real size, lets it draw a third-size image, and stretches the
+    # result — everything Flow drew was arriving as an upscaled thumbnail of
+    # itself, which was most of what "it does not look clean" turned out to be.
+    #
+    # Unconditional, where this used to be gated on `design == "compact"`. The
+    # gate was exact while one design ran per process — awareness is
+    # process-wide, and the shipped surface's geometry was written in absolute
+    # pixels — and a live switch removes the premise it stood on: both surfaces
+    # now run in this process, in either order, and a gate could only be right
+    # for whichever of them happened to be built first. The shipped surface
+    # scales its own constants now, so there is nothing left to gate.
+    from . import paint
+    if paint.make_dpi_aware():
+        say("rendering at native resolution")
 
     hotkeys = None
     if not args.no_hotkeys and not lite:
@@ -874,45 +875,68 @@ def main(argv: list[str] | None = None) -> int:
 
         _threading.Thread(target=go, daemon=True, name="identity").start()
 
-    # Two surfaces, two sets of hands. The shipped pill arms on a click and the
-    # compact one does not — a tap there cycles the mode, and a hold is the
-    # whole gesture — so telling a compact user to "click the pill to arm" sent
-    # them clicking at a pill that answered by changing colour. The line names
-    # the gesture the surface in front of them actually has.
-    if design == "compact":
-        # The chord names itself if there is one — it is printed in full a few
-        # lines above, so this is a pointer rather than a repeat, and it stays
-        # honest on a run started with `--no-chord`.
-        chord = getattr(hotkeys, "chord", None)
-        held = f"the pill or {chord.describe()}" if chord is not None \
-            else "the pill"
-        say(f"hold {held} to talk | tap the pill to cycle "
-            f"Type / Refine / Ask | right-click for the menu | {quits}")
-    else:
-        say(
-            ("listening | " if args.arm else "click the pill to arm | ")
-            + f"right-click for the menu | {quits}"
-        )
+    def say_gesture(name: str, armed: bool) -> None:
+        """Two surfaces, two sets of hands.
+
+        The shipped pill arms on a click and the compact one does not — a tap
+        there cycles the mode, and a hold is the whole gesture — so telling a
+        compact user to "click the pill to arm" sent them clicking at a pill
+        that answered by changing colour. The line names the gesture the
+        surface in front of them actually has, which is why it is said again
+        when a switch puts a different surface in front of them.
+        """
+        if name == "compact":
+            # The chord names itself if there is one — it is printed in full a
+            # few lines above, so this is a pointer rather than a repeat, and it
+            # stays honest on a run started with `--no-chord`.
+            chord = getattr(hotkeys, "chord", None)
+            held = f"the pill or {chord.describe()}" if chord is not None \
+                else "the pill"
+            say(f"hold {held} to talk | tap the pill to cycle "
+                f"Type / Refine / Ask | right-click for the menu | {quits}")
+        else:
+            say(
+                ("listening | " if armed else "click the pill to arm | ")
+                + f"right-click for the menu | {quits}"
+            )
+
     # `--no-lexicon` points the loader at a path inside the package that must never
     # exist, so the menu is sent to the real settings folder instead: the profile lives
     # there either way, and creating a template beside the source is nobody's idea of
     # settings.
     # What the mode notes read, and the same fact `on_send` is keyed off.
     session.pastes = paste is not None
-    if design == "compact":
-        # Lazy like the `from .ui import Pill` above, and for a superset of its reason:
-        # the compact surface is a whole second window tree nobody on the shipped design
-        # should pay to import.
-        from .ui_compact import CompactPill as Pill
-    pill = Pill(
-        # Keyed off whether an injector was imported, not off `lite`. The two came
-        # apart the day a Mac got a paste path: it is Lite in every other sense and can
-        # still put the words in the other window.
-        session, on_send=on_send if paste is not None else None,
-        hotkeys=hotkeys, arm=args.arm,
-        settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
-        lite=lite,
-    )
+
+    def build(name: str, arm: bool = False):
+        """The surface `name` draws, over the session that is already running.
+
+        Called again every time one of them asks to be replaced, with the same
+        session, the same `on_send`, the same hotkeys, the same settings path
+        and the same Lite — which is the whole of what "one product, two
+        designs" means here. What is *not* carried is `arm`: a rebuilt surface
+        starts disarmed, because the surface going away paused the microphone
+        on its way out (`detach`) and the session's own state is the only thing
+        entitled to decide otherwise.
+        """
+        if name == "compact":
+            # Lazy like the `from .ui import Pill` above, and for a superset of its
+            # reason: the compact surface is a whole second window tree nobody on the
+            # shipped design should pay to import.
+            from .ui_compact import CompactPill as cls
+        else:
+            cls = Pill
+        return cls(
+            # Keyed off whether an injector was imported, not off `lite`. The two came
+            # apart the day a Mac got a paste path: it is Lite in every other sense and
+            # can still put the words in the other window.
+            session, on_send=on_send if paste is not None else None,
+            hotkeys=hotkeys, arm=arm,
+            settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
+            lite=lite,
+        )
+
+    say_gesture(design, args.arm)
+    pill = build(design, arm=args.arm)
     # **Loaded now, not at the first word.** "loading the model" used to be the first
     # thing a fresh Flow said back, in the bubble, while somebody was already speaking —
     # and the load lands *inside* that first utterance rather than in front of it, so the
@@ -923,6 +947,10 @@ def main(argv: list[str] | None = None) -> int:
     # After the pill is built and before the loop runs, so the window is on screen while
     # the disk does its work rather than after it. `warm()` returns immediately — it is
     # single-flight and does its loading on a thread of its own — so nothing here waits.
+    #
+    # Once, on the first surface only, and the same goes for the two threads and the
+    # identity record below: all four are about the *process* starting, not about a
+    # window appearing, and a design switch does not restart the process.
     if not args.no_warm:
         session.warm()
     # Beside the window, not in front of it — see each one for what it used to cost.
@@ -932,19 +960,37 @@ def main(argv: list[str] | None = None) -> int:
             target=setup_speech, args=(session,), daemon=True, name="voices").start()
     if diag is not None:
         pill.after(10_000, record_identity_later)
-    try:
-        pill.mainloop()
-    except KeyboardInterrupt:
-        # The other half of the guard in `Pill._tick`, and the reason the pill is bound
-        # to a name at all. Tkinter reports and swallows whatever a callback raises, so
-        # nearly every ctrl+C is caught in the frame pump — but one that lands at the
-        # entry to a callback, before Tkinter's own `try`, comes out of `mainloop`
-        # instead, and that is the exit which skips teardown entirely.
-        #
-        # 0 rather than 130: ctrl+C is now a way to quit Flow rather than a way to
-        # interrupt it, and it should report what ctrl+alt+Q reports.
-        pill.quit_app()
-    return 0
+    # The rebuild-the-world loop, and it exists because a design's window tree really is
+    # built once in its constructor — that fact is what made the switch launch-time
+    # until now, and this is the one seam where it costs nothing. `mainloop()` returns
+    # when the surface's window goes: `quit_app` leaves `switch_to` None and that is a
+    # quit, while `switch_design` sets it to the other name and this builds that one
+    # against the session, the hotkeys and the draft the last surface was already
+    # driving. Nothing below the window is torn down in between.
+    while True:
+        try:
+            pill.mainloop()
+        except KeyboardInterrupt:
+            # The other half of the guard in `Pill._tick`, and the reason the pill is
+            # bound to a name at all. Tkinter reports and swallows whatever a callback
+            # raises, so nearly every ctrl+C is caught in the frame pump — but one that
+            # lands at the entry to a callback, before Tkinter's own `try`, comes out of
+            # `mainloop` instead, and that is the exit which skips teardown entirely.
+            #
+            # 0 rather than 130: ctrl+C is now a way to quit Flow rather than a way to
+            # interrupt it, and it should report what ctrl+alt+Q reports.
+            pill.quit_app()
+            return 0
+        # `in DESIGNS` rather than "not None": this is read off whatever object the
+        # surface class handed back, and a name nobody knows how to build is a quit
+        # rather than a crash.
+        wanted = getattr(pill, "switch_to", None)
+        if wanted not in DESIGNS or wanted == design:
+            return 0
+        design = wanted
+        say(f"design: {design}")
+        say_gesture(design, False)
+        pill = build(design)
 
 
 if __name__ == "__main__":

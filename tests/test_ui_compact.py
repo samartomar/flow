@@ -1374,28 +1374,23 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
     def test_design_names_both_surfaces_and_marks_the_one_running(self):
         # The shipped design's own Design menu, in this surface's idiom: the
         # same names and the same `(current)` marker, so somebody who has seen
-        # one recognises the other.
-        _p, m = self.build(design="compact")
+        # one recognises the other. The marker is `DESIGN` — what this class
+        # *is* — rather than `profile.design`, which under `--no-profile` is
+        # not an answer to "which surface am I looking at".
+        _p, m = self.build(design="current")
         sub = m.cascades["Design"]
         self.assertEqual(sub.order, ["Current", "Compact   (current)"])
 
-    def test_design_writes_the_choice_and_saves_it(self):
+    def test_the_row_switches_the_running_surface(self):
+        # Not "writes the profile for next time" any more: the row hands the
+        # name to `switch_design`, which stores it, sets `switch_to` and takes
+        # the window down so `__main__` can build the other one. What that
+        # method does with the name is `tests/test_switch.py`'s subject; what
+        # is pinned here is that the row is wired to it.
         p, m = self.build()
+        p.switch_design = mock.Mock()
         m.cascades["Design"].commands["Current"]()
-        self.assertEqual(p.session.profile.design, "current")
-        p.session.profile.save.assert_called_once_with()
-
-    def test_a_design_save_that_failed_is_visible(self):
-        p, m = self.build()
-        p.session.profile.save.return_value = False
-        m.cascades["Design"].commands["Current"]()
-        self.assertEqual(p._flash, uc.FLASH_FRAMES)
-
-    def test_no_profile_writes_nothing_and_does_not_raise(self):
-        p, m = self.build()
-        p.session.profile = None
-        m.cascades["Design"].commands["Current"]()
-        self.assertEqual(p._flash, 0)
+        p.switch_design.assert_called_once_with("current")
 
     def test_the_menu_ends_where_the_artboard_ends(self):
         # "There is no preferences window and no tray menu. The pill is the

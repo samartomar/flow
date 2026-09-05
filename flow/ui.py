@@ -727,7 +727,9 @@ def _timer_resolution(ms: int) -> None:
     Not undone at quit. The period is a per-process request the kernel drops when the
     process ends, and a matching `timeEndPeriod` on the quit path would be one more
     thing that has to run in the right order during teardown, for a resource the OS
-    already reclaims.
+    already reclaims. Which is also why a second `Pill` in one process — a design
+    switched live — may call this again with nothing to balance: there is no end call
+    for a repeat to get out of step with, and asking twice for 1 ms is still 1 ms.
     """
     if sys.platform != "win32":
         return
@@ -747,8 +749,15 @@ def _load_fonts() -> None:
     which is why the font tuples below reference a family per weight instead of a
     "bold" flag. A machine missing a file, or off Windows entirely, still runs — Tk
     falls back to its platform default for whichever family did not resolve.
+
+    Idempotent, and that is not decoration now that a design can be switched live: a
+    second `Pill` in the same process would otherwise register the same five files a
+    second time, and `AddFontResourceExW` counts its callers — one more `Add` per
+    switch against the single `Remove` `quit_app` runs, which is a registration left
+    behind on every path but process exit. `_loaded_fonts` non-empty means the process
+    already has them, and only `_unload_fonts` empties it.
     """
-    if sys.platform != "win32":
+    if sys.platform != "win32" or _loaded_fonts:
         return
     try:
         add = ctypes.windll.gdi32.AddFontResourceExW
@@ -2475,6 +2484,18 @@ class Pill(tk.Tk):
     #: gesture it is. `--no-hotkeys` leaves this None for real, so the default is not a
     #: fixture convenience — it is the shipped value on one of the supported launches.
     hotkeys = None
+    #: Which of `profile.DESIGNS` this class *is*. The name is a property of the class
+    #: and not of the profile: `--no-profile` stores nothing and `--design` writes the
+    #: profile before the window exists, so a menu that marked the current row off
+    #: `profile.design` was reading a stored preference where the question is "which
+    #: surface am I looking at". `switch_design` reads it for the same reason.
+    DESIGN = DESIGN_DEFAULT
+    #: The design this surface asked to be replaced by, or None for "nobody asked".
+    #: `__main__` reads it the moment `mainloop()` returns: None is a quit, a name is a
+    #: switch, and the loop there builds the other class against the same session. A
+    #: class default for the reason every other one here is: a `__new__`-built fixture
+    #: must find a real value rather than recurse through `tk.Misc.__getattr__`.
+    switch_to: str | None = None
 
     def __init__(
         self, session: Session, on_send=None, hotkeys=None, arm=False,
@@ -3103,39 +3124,26 @@ class Pill(tk.Tk):
         parent.add_cascade(label="Panel size", menu=sub)
 
     def _design_menu(self, parent: tk.Menu) -> None:
-        """Which surface the *next* launch draws, switchable from this one.
+        """Which surface is on screen — changed here, and now.
 
-        Not applied live, and that is construction rather than omission: a design's
-        whole window tree is built in its constructor (`__main__.py` picks the class
-        before the first frame), so the only honest thing a menu press can do is write
-        the name and say when it takes effect — which is also `--lite`'s rule. The note
-        says "next launch" out loud, because a switch that applied silently later would
-        read as one that did nothing now.
+        It used to write the name and promise it for the next launch, because a
+        design's whole window tree is built in its constructor and a live swap was a
+        rebuild-the-world pattern nothing here had. `switch_design` is that pattern,
+        at the one seam that already existed: `__main__` speaks to a surface through a
+        constructor, `mainloop()` and a teardown, so a surface that tears its *window*
+        down and names its successor gets rebuilt around the session it was already
+        driving. The words survive the switch, and so does the microphone's state.
+
+        The `(current)` marker comes off `DESIGN` rather than off `profile.design`: the
+        question the row answers is "which surface am I looking at", and under
+        `--no-profile` the stored field is not that.
         """
         sub = _dark_menu(parent)
-        profile = getattr(self.session, "profile", None)
-        here = getattr(profile, "design", DESIGN_DEFAULT)
-
-        def choose(name: str) -> None:
-            if profile is None:
-                # `--no-profile`. The choice has nowhere to live past this process, and
-                # a design switch exists only at launch — so there is nothing even a
-                # session-local apply could mean. Said rather than swallowed.
-                self.bubble.note("design: not saved - launched with --no-profile")
-                return
-            profile.design = name
-            # The same shape `_panel_menu.choose` uses: a setting somebody chooses once,
-            # so a save that failed has to be visible now.
-            if profile.save():
-                self.bubble.note(f"design: {name} - launches next time")
-            else:
-                self._flash = FLASH_FRAMES
-                self.bubble.note(f"could not save {profile.path}")
-
         for name in DESIGNS:
             sub.add_command(
-                label=name.capitalize() + ("   (current)" if name == here else ""),
-                command=lambda n=name: choose(n),
+                label=name.capitalize() + ("   (current)" if name == self.DESIGN
+                                           else ""),
+                command=lambda n=name: self.switch_design(n),
             )
         parent.add_cascade(label="Design", menu=sub)
 
@@ -4141,6 +4149,9 @@ class Pill(tk.Tk):
         # torn down by `__main__`. A second `destroy()` against an interpreter that is
         # already gone is a TclError raised while quitting — the one moment at which
         # nobody is left to act on it.
+        #
+        # `detach` below is the window half of this and nothing else — see it for the
+        # three lines it deliberately does not run.
         if not self._alive:
             return
         # Cleared before anything is torn down, so a `_tick` already in flight does not
@@ -4158,6 +4169,95 @@ class Pill(tk.Tk):
         finally:
             self.destroy()
             _unload_fonts()
+
+    # -- the design switch -------------------------------------------------
+
+    def switch_design(self, name: str) -> None:
+        """Put the other design on screen, in place of this one, now.
+
+        Two designs, one product, one switch: a press here ends this surface and names
+        its successor, and `__main__`'s loop builds that one against the session, the
+        hotkeys and the `on_send` this one was already driving. What survives is
+        everything that was never the window's — the words in the draft, the thread, the
+        workspace, the mode, the chord's registration. What does not is the window: a
+        panel that was open closes, and the new surface starts disarmed.
+
+        Refused for the design already running (a press on the row marked `(current)`
+        would otherwise blank the screen and redraw the same thing) and for a name that
+        is not one of `DESIGNS`.
+
+        Stored on the way through, because the choice is a preference and not a one-run
+        override — the same rule `--design` has always run under. A save that failed is
+        said out loud, and `--no-profile` is told the switch is happening anyway and
+        will not be remembered: the surface really does change, so the only honest note
+        is about the *next* launch rather than about this press.
+
+        Both reports print rather than note, and both had to: this is the one menu row
+        whose window is gone before the next frame, so a sentence in the bubble and a
+        red flash on the pill are alike painted onto something nobody will see. That
+        also covers the announcement — `__main__` prints `design: <name>` as it builds
+        the successor, on a window that will still be there to have said it.
+        """
+        if name == self.DESIGN or name not in DESIGNS:
+            return
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            print(f"flow: design: {name} - not remembered, launched with "
+                  "--no-profile", flush=True)
+        else:
+            profile.design = name
+            if not profile.save():
+                print(f"flow: could not save {profile.path}", flush=True)
+        self.switch_to = name
+        self.detach()
+
+    def detach(self) -> None:
+        """Take this surface off the screen and leave everything under it running.
+
+        `quit_app` minus three lines, and each omission is the point: the session is
+        **not** closed, the hotkeys are **not** stopped and the fonts are **not**
+        unloaded, because the surface being built next needs all three. Stopping the
+        hotkeys here would be a switch that silently cost somebody push-to-talk;
+        closing the session would throw away the draft the switch is supposed to carry.
+
+        The microphone is the one piece of session state a surface owns, so it is
+        handed back: a pill that was armed pauses before it goes. The new surface is
+        built disarmed, and a device left open under a window that is not pumping it is
+        exactly the failure of 2026-09-04 — the chord opened the mic into a frame loop
+        that never read a sample, and it looked for six reports like a broken
+        microphone. `pause()` rather than `mic.stop()` so the health check knows this
+        was deliberate.
+
+        The pending `after` callbacks go before the window does. Normally a destroyed
+        root takes its own timers with it and the process ends anyway; here a *second*
+        interpreter is about to pump the same thread's notifier, and a timer whose Tcl
+        command was deleted with this window surfaces there as "invalid command name"
+        against a Flow that has nothing wrong with it (`tests/test_resilience.py` found
+        this in its teardown first).
+        """
+        if not self._alive:
+            return
+        self._alive = False
+        try:
+            if self._tray is not None:
+                self._tray.stop()
+            if self.armed:
+                self.session.pause()
+        finally:
+            self._cancel_pending()
+            self.destroy()
+
+    def _cancel_pending(self) -> None:
+        """Drop every `after` this window still has outstanding. Never raises."""
+        try:
+            pending = self.tk.eval("after info").split()
+        except Exception:
+            return
+        for aid in pending:
+            try:
+                self.after_cancel(aid)
+            except Exception:
+                pass
 
     # -- the pump ----------------------------------------------------------
 

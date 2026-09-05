@@ -48,7 +48,7 @@ from typing import NamedTuple
 
 from . import tray
 from . import paint
-from .profile import DESIGNS, DESIGN_DEFAULT
+from .profile import DESIGNS
 from .session import CONVERSE, DICTATE, REFINE, Session, State
 
 # The hues and the fonts are ui.py's own, imported rather than restated: the
@@ -640,6 +640,15 @@ class CompactPill(tk.Tk):
     #: bare fixture has to find it here. True: a fixture that drives `_frame`
     #: directly is alive by definition.
     _alive = True
+    #: Which of `profile.DESIGNS` this class *is* — ui.py:2492's field, and the
+    #: same two readers: the menu's `(current)` marker and `switch_design`'s
+    #: refusal to rebuild the surface already on screen. Uppercase because
+    #: `design()` a few methods down is this class's device-to-design-pixel
+    #: conversion, and one of the two names had to give.
+    DESIGN = "compact"
+    #: The design this surface asked to be replaced by, or None for "nobody
+    #: asked" — read by `__main__` the moment `mainloop()` returns.
+    switch_to: str | None = None
     #: The eased and the drawn level, read by `_frame` and `_draw`. A bare
     #: fixture draws the silent meter these describe.
     _eased_level = 0.0
@@ -1018,6 +1027,9 @@ class CompactPill(tk.Tk):
         # Idempotent, for the reason ui.py's is: ctrl+C reaches here down
         # either of two paths (caught in `_tick`, or escaping `mainloop`) and
         # nothing upstream can tell which one ran.
+        #
+        # `detach` below is this minus the session, the hotkeys and the words —
+        # the window half, for a design switch rather than a quit.
         if not self._alive:
             return
         self._alive = False
@@ -1036,6 +1048,100 @@ class CompactPill(tk.Tk):
                     close()
         finally:
             self.destroy()
+
+    # -- the design switch ---------------------------------------------------
+
+    def switch_design(self, name: str) -> None:
+        """Put the other design on screen, in place of this one, now.
+
+        ui.py's `switch_design` in this surface's idiom, and the same contract
+        both halves of the switch depend on: store the name, set `switch_to`,
+        and hand the window back. `__main__`'s loop reads `switch_to` when
+        `mainloop()` returns and builds the other class against the session,
+        the hotkeys and the `on_send` this surface was already driving — so the
+        draft, the thread, the workspace and the mode all cross the seam, and
+        the window does not.
+
+        Refused for the design already running and for a name that is not one
+        of `DESIGNS`: the row marked `(current)` would otherwise blank the
+        screen to redraw the same pill.
+
+        This surface already printed rather than noted — a wordless pill has
+        nowhere to put a sentence — so the two exceptional cases keep their
+        lines, and the error flash they used to set goes: this is the one row
+        whose window is gone before the next frame, so a flash here is a colour
+        nobody sees. The switch itself says nothing: `__main__` prints
+        `design: <name>` as it builds the successor, which is the same sentence
+        one frame later and on a window that will still be there to have said
+        it.
+        """
+        if name == self.DESIGN or name not in DESIGNS:
+            return
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            # `--no-profile`. The surface really does change — that is this
+            # process, and this process is what the flag is about — so the note
+            # is about the next launch rather than about this press.
+            print(f"flow: design: {name} - not remembered, launched with "
+                  "--no-profile", flush=True)
+        else:
+            profile.design = name
+            # A setting somebody chooses once, so a save that failed has to be
+            # visible now rather than at the next launch that ignores it.
+            if not profile.save():
+                print(f"flow: could not save {profile.path}", flush=True)
+        self.switch_to = name
+        self.detach()
+
+    def detach(self) -> None:
+        """Take this surface off the screen and leave the session running.
+
+        `quit_app` minus three lines, each omitted on purpose: the session is
+        **not** closed, the hotkeys are **not** stopped and — the compact
+        surface's own — the painters *are*, because a `GdiCanvas` holds a DIB
+        and a GDI+ graphics for a window that is about to stop existing.
+
+        The microphone is handed back. A pill that was armed pauses first,
+        because the surface built next starts disarmed and a device left open
+        under a window that is not pumping it is the failure of 2026-09-04 in
+        full: the chord opened the mic into a frame loop that never read a
+        sample, and for six reports it looked like a broken microphone.
+        `pause()` and not `mic.stop()`, so the health check knows this was
+        deliberate and does not helpfully reopen it.
+
+        The pending `after` callbacks go before the window does — see
+        `ui.Pill.detach` for the second interpreter that would otherwise
+        inherit them. The frame in flight is already covered: `_present`
+        catches the TclError a destroyed window raises and clears `_alive`,
+        and `_tick`'s re-schedule reads the same flag.
+        """
+        if not self._alive:
+            return
+        self._alive = False
+        try:
+            if self._tray is not None:
+                self._tray.stop()
+            if self.armed:
+                self.session.pause()
+            for painter in (self.paint, self._box_paint):
+                close = getattr(painter, "close", None)
+                if close is not None:
+                    close()
+        finally:
+            self._cancel_pending()
+            self.destroy()
+
+    def _cancel_pending(self) -> None:
+        """Drop every `after` this window still has outstanding. Never raises."""
+        try:
+            pending = self.tk.eval("after info").split()
+        except Exception:
+            return
+        for aid in pending:
+            try:
+                self.after_cancel(aid)
+            except Exception:
+                pass
 
     # -- the pump ----------------------------------------------------------
 
@@ -1968,18 +2074,18 @@ class CompactPill(tk.Tk):
         self._design_menu(m)
 
     def _design_menu(self, parent) -> None:
-        """Which surface the *next* launch draws, switchable from this one.
+        """Which surface is on screen, changed here and now.
 
-        The shipped design's `_design_menu` (flow/ui.py:3073) in this surface's
+        The shipped design's `_design_menu` (flow/ui.py:3126) in this surface's
         idiom, and deliberately the same shape: the same names, the same
-        `(current)` marker, and the same promise about when it takes effect. A
-        design's whole window tree is built in its constructor — `__main__`
-        picks the class before the first frame — so the only honest thing a
-        press can do is write the name and say that it lands next time.
+        `(current)` marker, and — since the switch became live — the same
+        press. `switch_design` ends this surface and names its successor;
+        `__main__` builds the other class against the session this one was
+        driving, so the words in the draft are still there on the other side.
 
-        Where the shipped one notes into its bubble, this one prints: a
-        wordless pill has nowhere to put a sentence, and this sentence has to
-        be read or the switch reads as a press that did nothing.
+        The marker comes off `DESIGN` rather than off `profile.design`: the row
+        answers "which surface am I looking at", which under `--no-profile` is
+        not what the stored field says.
 
         **Built once, refreshed after.** `_on_menu` rebuilds the whole menu on
         every open, because the mode check and the workspace path are the
@@ -1996,34 +2102,13 @@ class CompactPill(tk.Tk):
             sub = self._design_sub = _dark_menu(parent)
         else:
             sub.delete(0, "end")
-        profile = getattr(self.session, "profile", None)
-        here = getattr(profile, "design", DESIGN_DEFAULT)
         for name in DESIGNS:
             sub.add_command(
-                label=name.capitalize() + ("   (current)" if name == here
+                label=name.capitalize() + ("   (current)" if name == self.DESIGN
                                            else ""),
-                command=lambda n=name: self._choose_design(n),
+                command=lambda n=name: self.switch_design(n),
             )
         parent.add_cascade(label="Design", menu=sub)
-
-    def _choose_design(self, name: str) -> None:
-        """Store `name` as the design and say when it takes effect."""
-        profile = getattr(self.session, "profile", None)
-        if profile is None:
-            # `--no-profile`. The choice has nowhere to live past this process
-            # and a design switch exists only at launch, so there is nothing
-            # even a session-local apply could mean. Said, not swallowed.
-            print("flow: design not saved - launched with --no-profile",
-                  flush=True)
-            return
-        profile.design = name
-        # A setting somebody chooses once, so a save that failed has to be
-        # visible now rather than at the next launch that ignores it.
-        if profile.save():
-            print(f"flow: design: {name} - launches next time", flush=True)
-        else:
-            self._flash = FLASH_FRAMES
-            print(f"flow: could not save {profile.path}", flush=True)
 
     def _on_menu(self, e=None) -> None:
         """Right-click — the only menu the design allows (Workspace.dc.html).

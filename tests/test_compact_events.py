@@ -352,11 +352,16 @@ class TestTheDesignSubmenuIsBuiltOnce(unittest.TestCase):
         self.assertEqual(p._design_sub.order, ["Current", "Compact   (current)"])
 
     def test_a_kept_submenu_still_moves_its_marker(self):
+        # The rows are read off the surface on every open rather than frozen
+        # when the submenu was first built. `DESIGN` is what the marker follows
+        # now — the surface you are looking at, not the field the profile
+        # stores — and no live pill changes it mid-process, so the fixture
+        # moves it by hand to prove the refresh is a refresh.
         p, built, factory = self.clicking()
         with mock.patch.object(uc.tk, "StringVar", FakeVar), \
                 mock.patch.object(uc, "_dark_menu", factory):
             p._on_menu(mock.Mock(x_root=10, y_root=10))
-            p.session.profile.design = "current"
+            p.DESIGN = "current"
             p._on_menu(mock.Mock(x_root=10, y_root=10))
         self.assertEqual(p._design_sub.order, ["Current   (current)", "Compact"])
 
