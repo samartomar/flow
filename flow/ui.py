@@ -127,6 +127,22 @@ def _scaled(canvas):
     return canvas if SCALE == 1.0 else paint.ScaledCanvas(canvas, SCALE)
 
 
+def _recorder(canvas, pill):
+    """`canvas` with a retained display list, where the pill's window is composited.
+
+    The draft panel and the conversation card are `Frame`s *inside* the pill's window,
+    so a bitmap covering that window has to carry their drawing too — and they repaint
+    **partially** (`delete("body")`, `delete("chips")`), so the items a frame does not
+    touch have to survive somewhere the bitmap can be rebuilt from. A `paint.recorder`
+    keeps them and has nothing of its own to present; the pill's own `TeeCanvas` replays
+    it under the band's offset (`Pill._present`).
+
+    Untouched where nothing is composited — Lite, a Mac, a machine whose GDI+ would not
+    start — so those surfaces run exactly the code they ran before.
+    """
+    return paint.recorder(canvas) if getattr(pill, "composited", False) else canvas
+
+
 class _RECT(ctypes.Structure):
     _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
                 ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
@@ -1717,6 +1733,11 @@ HELP_MAX_H = 1090
 #: Air left around the window inside the work area, so it reads as floating rather than
 #: as a panel wedged against the edges.
 HELP_MARGIN = 48
+#: What the sheet is worth once it is up — a hair off solid, the only window here that
+#: is. Named because it is written twice: Tk's `-alpha` on the painted surface, and
+#: `BLENDFUNCTION.SourceConstantAlpha` on the composited one, which is the same number
+#: reaching Windows down the other of its two layered paths.
+HELP_ALPHA = 0.97
 
 #: How much of one Recent entry a menu row carries. A native `TrackPopupMenu` row that
 #: runs the width of the screen is a menu nobody can read down, and the tap copies the
@@ -2443,6 +2464,11 @@ class Pill(tk.Tk):
     #: reason `lite` is: a fixture built with `__new__` must not recurse into `self.tk`.
     _hidden = False
     _tray = None
+    #: Whether this window is composited from a bitmap rather than painted by Tk — see
+    #: `__init__`. Class-level for the same reason: every UI fixture in the suite builds
+    #: its pill with `__new__`, and a `__getattr__` miss here recurses rather than
+    #: defaulting. False is the Tk-drawn surface this file always was.
+    composited = False
     #: Whether the mic view is switched on, and where it was last dragged to. Class
     #: attributes for the reason `lite` and `_docked_w` are: a fixture built with
     #: `__new__` must find a real value here rather than fall through
@@ -2637,6 +2663,40 @@ class Pill(tk.Tk):
         # `place`, not `pack`: this canvas is the *foot* of a window whose top edge moves
         # when a panel opens, so it has to be positioned rather than filled.
         self.canvas.place(x=0, y=0, width=BUBBLE_W, height=PILL_H)
+        # And wrapped again, where Windows will composite: a `TeeCanvas` draws into the
+        # real canvas *and* keeps a retained display list a `GdiCanvas` replays into a
+        # premultiplied bitmap. The real items stay, so the eighteen `tag_bind` sites and
+        # the item-based hover tooltips are untouched — which is the whole reason this is
+        # a tee and not a swap (`paint.TeeCanvas`). Lite and a Mac get the canvas itself
+        # and draw Tk's stairs, which is what a Flow looks like there.
+        #
+        # The bitmap is sized to the **window**, not to `BUBBLE_W`:
+        # `UpdateLayeredWindow` is handed a size and resizes the window to it, so a
+        # bitmap wider than the shell would widen the shell. `_sync_shell` resizes it
+        # from then on.
+        self.canvas = paint.painter_for(self.canvas, self._docked_w, PILL_H, lite,
+                                        self._drawn_alpha, SCALE, tee=True)
+        #: Whether this window is presented as a bitmap rather than painted by Tk. The
+        #: honest question `paint` documents — a real `tk.Canvas` has no such attribute.
+        self.composited = getattr(self.canvas, "antialiased", False)
+        if self.composited:
+            # Both are answers to the question `GdiCanvas` now answers, and both get in
+            # its way: `-transparentcolor` would punch the shell's own pixels out of the
+            # bitmap we just antialiased, and `-alpha` puts the window in the *other*
+            # layered mode, which refuses `UpdateLayeredWindow` outright. The opacity
+            # moves to the blend — see `_apply_idle_dim`.
+            paint.unkey(self)
+            # And with the key gone, the key *colour* has no job left — so the window's
+            # own background becomes the shell's. Measured rather than tidied: the
+            # window is already mapped by the time `__init__` returns (`_no_activate`
+            # runs `update_idletasks`), so whatever Tk paints between the takeover and
+            # the first present is on screen, and against `TRANSPARENT` that is a
+            # magenta rectangle. It is also the honest fallback if a present is ever
+            # refused for good: an opaque pill rather than a magenta one. Set before
+            # the two panels are built, because both take `pill.bg` as their own.
+            self.bg = SHELL
+            self.configure(bg=self.bg)
+            self.canvas.configure(bg=self.bg)
 
         self.bubble = Bubble(self)
         #: P9's own surface (decisions.md 2026-08-03, "two surfaces, two jobs"). Built
@@ -2685,6 +2745,11 @@ class Pill(tk.Tk):
         self.no_activate = all(applied)
 
         self._draw()
+        # And handed over, rather than waited 30 ms for. The window is already mapped
+        # (see the takeover above), so the first frame the desktop shows is either this
+        # bitmap or whatever Tk painted underneath it — and the frame pump is not
+        # running yet.
+        self._present()
         # Arm after the first frame is painted, so a capture failure has somewhere
         # visible to report itself.
         if self._arm_on_start:
@@ -2970,6 +3035,15 @@ class Pill(tk.Tk):
         rather than one it freezes for that reason — hovering is what a fade-out is
         for. Armed cancels the dim outright (`_disarmed_since` is `None`) rather than
         fading a pill that is actively capturing something.
+
+        **Composited, this is written to the blend and not to the window.**
+        `attributes("-alpha", …)` is `SetLayeredWindowAttributes`, which is the *other*
+        of Windows' two layered modes, and a window put into it refuses
+        `UpdateLayeredWindow` from then on — so the dim would have taken the whole
+        surface off screen thirty frames later. `GdiCanvas.constant_alpha` is where the
+        same number already means exactly this, on `BLENDFUNCTION.SourceConstantAlpha`;
+        the tee is marked dirty so the next frame actually carries it, because the dim
+        moves on its own clock and nothing else about the picture has changed.
         """
         now = time.perf_counter()
         if self._disarmed_since is None or now - self._disarmed_since < IDLE_DIM_AFTER_SEC:
@@ -2981,7 +3055,11 @@ class Pill(tk.Tk):
             target = IDLE_DIM_ALPHA
         if target != self._drawn_alpha:
             self._drawn_alpha = target
-            self.attributes("-alpha", target)
+            if self.composited:
+                self.canvas.constant_alpha = round(target * 255)
+                self.canvas.dirty = True
+            else:
+                self.attributes("-alpha", target)
 
     def _menu(self, e) -> None:
         """The right-click menu: six rows, each showing its own current value.
@@ -4149,6 +4227,12 @@ class Pill(tk.Tk):
         self._sync_shell()
         self.deiconify()
         self.lift()
+        # A layered window's content does not survive its own mapping, and the frame key
+        # cannot see a remapping — the picture is identical to the one before the window
+        # went away, so `_draw` would skip it and the bitmap would never be handed over
+        # again. Cleared by hand, which is what `ui_compact._draw_key` says about the
+        # same case and what `_open_box` binds `<Map>` for.
+        self._drawn_key = None
 
     def _drain_tray(self) -> None:
         """What the icon decided, acted on from Tk's own thread.
@@ -4191,9 +4275,25 @@ class Pill(tk.Tk):
             if self.hotkeys is not None:
                 self.hotkeys.stop()
             self.session.close()
+            self._close_painter()
         finally:
             self.destroy()
             _unload_fonts()
+
+    def _close_painter(self) -> None:
+        """Give the bitmap and its GDI+ graphics back, where there are any.
+
+        A `GdiCanvas` holds a DIB and a graphics context belonging to a window that is
+        about to stop existing, and the process does not always end with it — a design
+        switch builds a second surface in the same interpreter. `ui_compact`'s `detach`
+        and `quit_app` do exactly this, for exactly this reason.
+        """
+        # Through `__dict__`, like `mic_view` and `_marks` and for their reason: a
+        # fixture built with `__new__` has no canvas, and a miss on a real attribute
+        # recurses through `tk.Misc.__getattr__` into `self.tk` rather than raising.
+        close = getattr(self.__dict__.get("canvas"), "close", None)
+        if close is not None:
+            close()
 
     # -- the design switch -------------------------------------------------
 
@@ -4245,6 +4345,10 @@ class Pill(tk.Tk):
         hotkeys here would be a switch that silently cost somebody push-to-talk;
         closing the session would throw away the draft the switch is supposed to carry.
 
+        The painter *is* closed, and that is the one thing this shares with a quit
+        rather than omits: a `GdiCanvas` holds a DIB and a GDI+ graphics for a window
+        that is about to stop existing, and the next surface builds its own.
+
         The microphone is the one piece of session state a surface owns, so it is
         handed back: a pill that was armed pauses before it goes. The new surface is
         built disarmed, and a device left open under a window that is not pumping it is
@@ -4268,6 +4372,7 @@ class Pill(tk.Tk):
                 self._tray.stop()
             if self.armed:
                 self.session.pause()
+            self._close_painter()
         finally:
             self._cancel_pending()
             self.destroy()
@@ -4535,6 +4640,53 @@ class Pill(tk.Tk):
         self._sync_dock()
         self._apply_idle_dim()
         self._draw()
+        self._present()
+
+    def _present(self) -> None:
+        """Hand the finished frame to the desktop, where there is one to hand.
+
+        A no-op on the Tk-drawn surface — Tk has already painted it — and the whole of
+        the layered path everywhere else: nothing this frame drew is visible until this
+        runs, which is also why a composited Flow cannot flicker. The window is handed
+        over complete rather than assembled in front of the user.
+
+        **One bitmap for the whole window.** The panels are `Frame`s inside it, so their
+        display lists are replayed first, at the band's own origin, and the row's is
+        replayed last under `at_self` — the row is `place`d at `y = h - PILL_H` while the
+        band takes the top, and the row is the canvas that owns the painter. Presenting
+        from the panel instead would mean compositing through whichever of two objects
+        happened to be up, and through neither when the row is alone.
+
+        **Only when something is dirty**, and that is what makes an idle frame free. The
+        canvases here redraw on their own schedules — `_draw_key` skips a row that has
+        not moved, and the draft panel repaints when the draft changes, which is not the
+        same moment — so the compositor cannot key off the row alone. It did, once, and
+        composited the row with the panel missing from the bitmap.
+
+        `at=(self.x, self.y)`: told where the window is, not asked. `winfo_*` lags a
+        `geometry` call by a frame or two, which is the same staleness `_sync_shell`
+        compares against the window to survive and `_open_box` records in the compact
+        surface — and a present at a stale position puts the bitmap somewhere else on
+        the desktop rather than merely late.
+        """
+        if not self.composited or self._hidden:
+            return
+        bands = [p for p in (self.__dict__.get("bubble"), self.__dict__.get("card"))
+                 if p is not None and p.__dict__.get("_visible", False)]
+        if not (self.canvas.dirty or any(b.canvas.dirty for b in bands)):
+            return
+        try:
+            self.canvas.present(
+                self, at=(self.x, self.y),
+                others=[(b.canvas, 0, 0) for b in bands],
+                at_self=(0, self._shell_h - PILL_H))
+        except tk.TclError:
+            # "application has been destroyed". `quit_app` tears the window down while a
+            # frame that began before it is still running, and this is the first line of
+            # that frame to ask Tk for anything — so the whole traceback would land on
+            # the console of somebody who has just pressed quit. Nothing is wrong: there
+            # is no window left to composite onto.
+            self._alive = False
 
     def _drain_hotkeys(self) -> bool:
         """Act on every hotkey that arrived since the last drain. False after a quit.
@@ -5090,6 +5242,14 @@ class Pill(tk.Tk):
         # process answers in the pixels the window actually occupies.
         if self.window_geometry() != (dev_w, self.x, self.y):
             self.geometry(f"{dev_w}x{dev_h}+{self.x}+{self.y}")
+        if self.composited:
+            # The bitmap is the whole window, and `UpdateLayeredWindow` is handed a size
+            # rather than asked for one — so a bitmap left at the old shape would *be*
+            # the window's shape, and the geometry above would be undone by the next
+            # present. Unconditional because `GdiCanvas.resize` is a no-op on a size that
+            # has not moved, and because the comparison this sits under is about the
+            # position as well: a frame that only moved must not skip it.
+            self.canvas.resize(w, h)
 
     #: Kept under the old name because every caller in the app and the suite says it, and
     #: the two never meant different things — the dock *was* the shell, badly.
@@ -5668,14 +5828,35 @@ class HelpWindow(tk.Toplevel):
     #: name recurses until the stack ends instead of defaulting.
     _title = TITLE_DEFAULT
     _chip = "Close"
+    #: Same reason as the two above, and the same answer `Pill.composited` gives: a
+    #: fixture built with `__new__` must find a real `False` rather than recurse.
+    composited = False
+    _at: tuple[int, int] | None = None
 
     def __init__(self, pill: Pill) -> None:
         super().__init__(pill)
         self.pill = pill
         self.bg = _shell_window(self, pill.lite, 0.0)
         self.configure(bg=self.bg)
+        self._h = 200
         self.canvas = _scaled(tk.Canvas(self, bg=self.bg, highlightthickness=0))
         self.canvas.pack()
+        # Composited like the pill's window, and cheaply: this window has one canvas, one
+        # full repaint (`delete("all")` at the top of `_render`) and one place to present
+        # from, which is the three things the pill's shell had to be taken apart to get.
+        # It carries the same rounded shell and the same hairlines, so leaving it Tk-drawn
+        # would have made the Help sheet the one aliased window in a smooth product.
+        self.canvas = paint.painter_for(self.canvas, HELP_W, self._h, pill.lite,
+                                        HELP_ALPHA, SCALE, tee=True)
+        self.composited = getattr(self.canvas, "antialiased", False)
+        if self.composited:
+            paint.unkey(self)
+            # The key colour has no job left once the key is off, and the shell's own
+            # is what should show if Tk ever paints a frame ahead of a present — the
+            # same argument `Pill.__init__` makes at more length.
+            self.bg = SHELL
+            self.configure(bg=self.bg)
+            self.canvas.configure(bg=self.bg)
         #: Reported rather than assumed, exactly as the pill and bubble do it: a style
         #: that failed to apply would give this window the focus the moment it opened,
         #: and take it from whatever the user was typing in.
@@ -5685,7 +5866,9 @@ class HelpWindow(tk.Toplevel):
         self._top = 0  # index of the first row drawn
         self._drag_y: int | None = None
         self._drag_px = 0
-        self._h = 200
+        #: Where `_place` last put this window, in device pixels — what `_present` is
+        #: *told*, rather than reading a `winfo_*` that lags the `geometry` call above it.
+        self._at: tuple[int, int] | None = None
         self.canvas.bind("<MouseWheel>", self._wheel)
         self.canvas.bind("<ButtonPress-1>", self._grab)
         self.canvas.bind("<B1-Motion>", self._drag)
@@ -5710,7 +5893,14 @@ class HelpWindow(tk.Toplevel):
         self._top = 0
         self._render()
         self.deiconify()
-        self.attributes("-alpha", 0.97)
+        if self.composited:
+            # Again, and this is the fault the compact surface's `_open_box` records: a
+            # layered window's content does not survive its own mapping, so the bitmap
+            # handed over by the render above is gone the moment `deiconify` runs, and a
+            # sheet built once at open had nothing on it until something else redrew.
+            self._present()
+        else:
+            self.attributes("-alpha", HELP_ALPHA)
 
     def close(self) -> None:
         self.withdraw()
@@ -5816,6 +6006,22 @@ class HelpWindow(tk.Toplevel):
 
         self._scrollbar(drawn)
         self._footer(drawn)
+        self._present()
+
+    def _present(self) -> None:
+        """Composite this sheet, where there is a bitmap to composite.
+
+        A no-op on the Tk-drawn surface. `_at` rather than `winfo_*`, for the reason
+        `Pill._present` gives: the position was just written by `_place` and Tk has not
+        caught up with it, which composites the first frame somewhere else on the desktop
+        rather than merely late.
+        """
+        if not self.composited:
+            return
+        try:
+            self.canvas.present(self, at=self._at)
+        except tk.TclError:
+            pass
 
     def _place(self) -> None:
         """Centred in the work area, clamped inside it.
@@ -5828,7 +6034,14 @@ class HelpWindow(tk.Toplevel):
         w, h = dev(HELP_W), dev(self._h)
         x = left + ((right - left) - w) // 2
         y = top + ((bottom - top) - h) // 2
-        self.geometry(f"{w}x{h}+{max(left, x)}+{max(top, y)}")
+        self._at = (max(left, x), max(top, y))
+        self.geometry(f"{w}x{h}+{self._at[0]}+{self._at[1]}")
+        if self.composited:
+            # The bitmap is the window, and `UpdateLayeredWindow` sets the size rather
+            # than reading it — so a bitmap left at the old height would undo the
+            # `geometry` above on the next present. The sheet re-measures itself against
+            # its content on every render, so this is the only place that can know.
+            self.canvas.resize(HELP_W, self._h)
 
     def _scrollbar(self, drawn: int) -> None:
         """A thumb, only when there is something off screen to point at."""
@@ -5918,6 +6131,7 @@ class ConversationCard(tk.Frame):
         self.configure(bg=self.bg)
         self.canvas = _scaled(tk.Canvas(self, bg=self.bg, highlightthickness=0))
         self.canvas.pack()
+        self.canvas = _recorder(self.canvas, pill)
         self.no_activate = _no_activate(self)
         #: Exchanges already answered, oldest first, as `(kind, text)` with kind in
         #: `{"q", "a"}`. Its own list rather than a read of `session.thread`: the thread
@@ -6492,6 +6706,7 @@ class Bubble(tk.Frame):
         self.configure(bg=self.bg)
         self.canvas = _scaled(tk.Canvas(self, bg=self.bg, highlightthickness=0))
         self.canvas.pack()
+        self.canvas = _recorder(self.canvas, pill)
         self._visible = False
         self._text = ""
         self._note = ""

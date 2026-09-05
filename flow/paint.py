@@ -48,6 +48,11 @@ _PARGB = 0xE200B
 _SMOOTH_AA, _OFFSET_HQ, _TEXT_AA = 4, 2, 3
 #: GDI+ font styles, and the two Tk spellings that map onto them.
 _STYLE_BOLD, _STYLE_ITALIC = 1, 2
+#: GDI+'s `UnitPixel`: what a pen width and a font size are given in here.
+_UNIT_PIXEL = 2
+#: Pixels per point at 96 dpi, which is how a Tk **positive** font size is
+#: turned into the design pixels this canvas draws in — see `_font`.
+_PX_PER_POINT = 96.0 / 72.0
 #: What stands in for a family the machine does not have. Both are shipped with
 #: Windows, and the split is load-bearing rather than tidy: a monospaced family
 #: replaced by a proportional one breaks every caller that positions glyphs on
@@ -370,19 +375,31 @@ class GdiCanvas:
         #: tint — lands progressively further off with every character. The
         #: generic typographic format has no such padding, and using the same
         #: one for both calls is what makes them agree.
-        self._fmt = ctypes.c_void_p()
-        _gdiplus.GdipStringFormatGetGenericTypographic(ctypes.byref(self._fmt))
-        fmt = ctypes.c_void_p()
-        _gdiplus.GdipCloneStringFormat(self._fmt, ctypes.byref(fmt))
+        generic = ctypes.c_void_p()
+        _gdiplus.GdipStringFormatGetGenericTypographic(ctypes.byref(generic))
         # 0x800 is MeasureTrailingSpaces: without it a label ending in a
         # space measures as though it did not. 0x1000 is NoWrap, and it is not
-        # optional: GDI+ breaks a string that measures a rounding error wider
-        # than the rectangle it is given, and a single-line label in a fixed
-        # row has nowhere to break to — it came out as "LI STENI NG".
-        flags = ctypes.c_int()
-        _gdiplus.GdipGetStringFormatFlags(fmt, ctypes.byref(flags))
-        _gdiplus.GdipSetStringFormatFlags(fmt, flags.value | 0x800 | 0x1000)
-        self._fmt = fmt
+        # optional for a label: GDI+ breaks a string that measures a rounding
+        # error wider than the rectangle it is given, and a single-line label
+        # in a fixed row has nowhere to break to — it came out as
+        # "LI STENI NG".
+        #
+        # **Two formats, because `tk.Canvas` has two kinds of string.** A
+        # `create_text` with no `width` is a label and may never wrap; one
+        # *with* a width is a wrap column, and the shipped surface's draft,
+        # note, partial and answer are all written that way. Composited under
+        # the label format they ran off the side of the panel in one line, so
+        # the wrapping one is what a width selects — see `create_text`.
+        self._fmt, self._fmt_wrap = None, None
+        for name, extra in (("_fmt", 0x800 | 0x1000), ("_fmt_wrap", 0x800)):
+            fmt = ctypes.c_void_p()
+            _gdiplus.GdipCloneStringFormat(generic, ctypes.byref(fmt))
+            flags = ctypes.c_int()
+            _gdiplus.GdipGetStringFormatFlags(fmt, ctypes.byref(flags))
+            _gdiplus.GdipSetStringFormatFlags(fmt, flags.value | extra)
+            setattr(self, name, fmt)
+        # `generic` is GDI+'s own cached object, not ours: it is cloned from
+        # and never deleted, which is what the single-format version did too.
         #: Whether the style has been put into the per-pixel-alpha mode. A
         #: hint, not a fact — `present` re-takes it if a frame is refused.
         self._took_over = False
@@ -436,9 +453,11 @@ class GdiCanvas:
             _gdiplus.GdipDeleteFont(font)
             _gdiplus.GdipDeleteFontFamily(fam)
         self._fonts.clear()
-        if self._fmt is not None:
-            _gdiplus.GdipDeleteStringFormat(self._fmt)
-            self._fmt = None
+        for name in ("_fmt", "_fmt_wrap"):
+            fmt = getattr(self, name, None)
+            if fmt is not None:
+                _gdiplus.GdipDeleteStringFormat(fmt)
+                setattr(self, name, None)
 
     def offset(self, dx: float, dy: float):
         """Draw at `(dx, dy)` until the returned token is passed to `restore`.
@@ -476,12 +495,28 @@ class GdiCanvas:
         _gdiplus.GdipFillPath(self._g, brush, path)
         _gdiplus.GdipDeleteBrush(brush)
 
-    def _stroke_path(self, path, colour, width) -> None:
+    def _stroke_path(self, path, colour, width=None) -> None:
+        """Trace `path` in `colour`, `width` **design** pixels wide.
+
+        Unit 2 is Pixel, which is a width in *device* pixels that the world
+        transform does not touch — measured here rather than assumed: at
+        `scale` 3, pens of 1, 1.5 and 2 all rendered the same two device rows.
+        So every stroke on a 300 % display came out a third of its weight, and
+        `glyphs.STROKE` — 1.5, whose own docstring says it should land as
+        "four or five pixels on the owner's 300 % display" — drew a hairline.
+
+        Converted here, and to exactly the rule `ScaledCanvas` keeps for the
+        Tk path so the two backends draw the same picture: **an explicit width
+        is a design length and scales; an absent one is Tk's own default and
+        is one device pixel.** That split is not tidiness — `_panel_chrome`'s
+        three hairlines are drawn without a width on purpose, and they are
+        hairlines at every scale, while a glyph's stroke is part of the
+        drawing and grows with it.
+        """
         pen = ctypes.c_void_p()
-        # Unit 2 is Pixel: a 1 px hairline stays 1 px whatever DPI awareness
-        # the process ends up with.
+        w = 1.0 if width is None else float(width) * self.scale
         _gdiplus.GdipCreatePen1(ctypes.c_uint(_argb(colour)),
-                                ctypes.c_float(width), 2, ctypes.byref(pen))
+                                ctypes.c_float(w), 2, ctypes.byref(pen))
         _gdiplus.GdipDrawPath(self._g, pen, path)
         _gdiplus.GdipDeletePen(pen)
 
@@ -504,7 +539,7 @@ class GdiCanvas:
         if kw.get("fill"):
             self._fill_path(path, kw["fill"])
         if kw.get("outline"):
-            self._stroke_path(path, kw["outline"], kw.get("width", 1))
+            self._stroke_path(path, kw["outline"], kw.get("width"))
         _gdiplus.GdipDeletePath(path)
 
     def create_line(self, *args, **kw) -> None:
@@ -514,7 +549,7 @@ class GdiCanvas:
         path = ctypes.c_void_p()
         _gdiplus.GdipCreatePath(0, ctypes.byref(path))
         _gdiplus.GdipAddPathLine2(path, self._floats(pts), len(pts))
-        self._stroke_path(path, kw.get("fill", "#000000"), kw.get("width", 1))
+        self._stroke_path(path, kw.get("fill", "#000000"), kw.get("width"))
         _gdiplus.GdipDeletePath(path)
 
     def round_rect(self, x1, y1, x2, y2, r, **kw) -> None:
@@ -530,7 +565,8 @@ class GdiCanvas:
         `r` takes the shapes `_round_rect` takes: one radius, or a
         `(tl, tr, br, bl)` mix for a surface that squares off on a seam.
         """
-        tl, tr, br, bl = (r, r, r, r) if isinstance(r, (int, float))             else tuple(r)
+        tl, tr, br, bl = ((r, r, r, r) if isinstance(r, (int, float))
+                          else tuple(r))
         path = ctypes.c_void_p()
         _gdiplus.GdipCreatePath(0, ctypes.byref(path))
         f = ctypes.c_float
@@ -556,7 +592,7 @@ class GdiCanvas:
         if kw.get("fill"):
             self._fill_path(path, kw["fill"])
         if kw.get("outline"):
-            self._stroke_path(path, kw["outline"], kw.get("width", 1))
+            self._stroke_path(path, kw["outline"], kw.get("width"))
         _gdiplus.GdipDeletePath(path)
 
     def create_rectangle(self, x1, y1, x2, y2, **kw) -> None:
@@ -570,7 +606,7 @@ class GdiCanvas:
         if kw.get("fill"):
             self._fill_path(path, kw["fill"])
         if kw.get("outline"):
-            self._stroke_path(path, kw["outline"], kw.get("width", 1))
+            self._stroke_path(path, kw["outline"], kw.get("width"))
         _gdiplus.GdipDeletePath(path)
 
     def create_arc(self, x1, y1, x2, y2, **kw) -> None:
@@ -588,7 +624,7 @@ class GdiCanvas:
             _gdiplus.GdipClosePathFigure(path)
             self._fill_path(path, kw["fill"])
         if kw.get("outline"):
-            self._stroke_path(path, kw["outline"], kw.get("width", 1))
+            self._stroke_path(path, kw["outline"], kw.get("width"))
         _gdiplus.GdipDeletePath(path)
 
     # -- text --------------------------------------------------------------
@@ -603,7 +639,23 @@ class GdiCanvas:
         got = self._fonts.get(spec)
         if got is not None:
             return got
-        family, size = spec[0], abs(spec[1])
+        family, size = spec[0], spec[1]
+        # Tk spells a **pixel** size as a negative number and a **point** size
+        # as a positive one, and both are used here: the panels are drawn in
+        # pixel sizes (`FONT_BODY` is `-14`), the Help sheet and the chip
+        # labels in points. A point taken for a pixel is three-quarters of the
+        # size it should be, which photographed as a whole Help sheet at
+        # three-quarters of its height.
+        #
+        # Converted here rather than handed to GDI+'s own `UnitPoint`, and that
+        # is measured rather than assumed: under `UnitPoint` an 11 pt face came
+        # back **three times** too large, because GDI+ resolves points against
+        # the graphics' dpi *and* the world transform, and this canvas already
+        # carries the display scale in that transform. 96/72 design pixels per
+        # point is the same arithmetic Tk's own `tk scaling` does — 1.333
+        # unaware, 3.996 measured at 300 % aware, against 96 * 3 / 72 — so the
+        # two backends put the same glyphs in the same box.
+        size = abs(size) if size < 0 else size * _PX_PER_POINT
         style = 0
         if len(spec) > 2:
             style |= _STYLE_BOLD if "bold" in spec[2] else 0
@@ -625,22 +677,32 @@ class GdiCanvas:
             # has no letter-spacing. Under a proportional fallback the narrow
             # glyphs left holes and the wide ones closed up, and LISTENING
             # rendered as "LI STENI NG".
-            stand_in = _MONO_FALLBACK if _MONO_HINT in family.lower()                 else _UI_FALLBACK
+            stand_in = (_MONO_FALLBACK if _MONO_HINT in family.lower()
+                        else _UI_FALLBACK)
             _gdiplus.GdipCreateFontFamilyFromName(
                 ctypes.c_wchar_p(stand_in), None, ctypes.byref(fam))
         font = ctypes.c_void_p()
-        # Unit 2 is Pixel, so a Tk `-13` is thirteen pixels here too.
-        _gdiplus.GdipCreateFont(fam, ctypes.c_float(size), style, 2,
+        _gdiplus.GdipCreateFont(fam, ctypes.c_float(size), style, _UNIT_PIXEL,
                                 ctypes.byref(font))
         self._fonts[spec] = (fam, font)
         return fam, font
 
-    def measure(self, text: str, spec) -> tuple:
-        """`(width, height)` of `text` in `spec`, in pixels."""
+    def measure(self, text: str, spec, width=None) -> tuple:
+        """`(width, height)` of `text` in `spec`, in pixels.
+
+        `width` is `create_text`'s wrap column: given one, the string is
+        measured as it will be *drawn* — broken across lines inside that
+        column — which is what makes the box a wrapped paragraph occupies
+        agree with the box it is laid out in.
+        """
         _fam, font = self._font(spec)
-        layout, box = _RectF(0, 0, 8192, 512), _RectF()
+        wrap = width is not None and width > 0
+        layout = _RectF(0, 0, float(width) if wrap else 8192.0,
+                        8192.0 if wrap else 512.0)
+        box = _RectF()
         _gdiplus.GdipMeasureString(self._g, ctypes.c_wchar_p(text), -1, font,
-                                   ctypes.byref(layout), self._fmt,
+                                   ctypes.byref(layout),
+                                   self._fmt_wrap if wrap else self._fmt,
                                    ctypes.byref(box), None, None)
         return box.w, box.h
 
@@ -650,7 +712,15 @@ class GdiCanvas:
             return
         spec = kw.get("font") or ("Segoe UI", -12)
         _fam, font = self._font(spec)
-        w, h = self.measure(text, spec)
+        # Tk's `width` on a text item is a **wrap column**, and this app writes
+        # its paragraphs with one: the draft, the note, the partial and the
+        # card's answer all pass `BUBBLE_W - 2 * PAD`. Measured and drawn in
+        # that column, so a wrapped paragraph occupies the box the layout
+        # above it reserved rather than running off the side in one line.
+        wrap = kw.get("width")
+        wrap = (float(wrap) if isinstance(wrap, (int, float)) and wrap > 0
+                else None)
+        w, h = self.measure(text, spec, wrap)
         # Tk's anchors, because every call site is written in them: "w" is the
         # left edge on the vertical centre, "nw" the top-left corner, "e" the
         # right edge, and "center" — the default — is centred both ways.
@@ -668,10 +738,14 @@ class GdiCanvas:
                                                                 "#FFFFFF"))),
                                      ctypes.byref(brush))
         # Generous slack as well as NoWrap: the flag stops the break, and the
-        # room stops the last glyph being clipped by a rounding error.
-        layout = _RectF(tx, ty, w + 8, h + 4)
+        # room stops the last glyph being clipped by a rounding error. A
+        # wrapped string keeps its column exactly — the slack is what it would
+        # break *into*, and a paragraph two pixels wider than its layout is a
+        # different set of line breaks from the one Tk measured.
+        layout = _RectF(tx, ty, wrap if wrap else w + 8, h + 4)
         _gdiplus.GdipDrawString(self._g, ctypes.c_wchar_p(text), -1, font,
-                                ctypes.byref(layout), self._fmt, brush)
+                                ctypes.byref(layout),
+                                self._fmt_wrap if wrap else self._fmt, brush)
         _gdiplus.GdipDeleteBrush(brush)
 
     # -- presentation ------------------------------------------------------
@@ -853,8 +927,26 @@ class TeeCanvas:
                   if it[0] == below or below in it[1]), default=0)
         self._items = rest[:at] + moved + rest[at:]
 
-    def measure(self, text: str, spec) -> tuple:
-        return self._gdi.measure(text, spec) if self._gdi else (0, 0)
+    def measure(self, text: str, spec, width=None) -> tuple:
+        return (self._gdi.measure(text, spec, width) if self._gdi
+                else (0, 0))
+
+    @property
+    def constant_alpha(self) -> int:
+        """The window-wide opacity, 0-255, as `BLENDFUNCTION` carries it.
+
+        Forwarded rather than reached through, because this is where
+        `-alpha` went: `flow/ui.py`'s idle dim writes it every time the
+        fade moves, and a caller holding `tee._gdi` to do that would be
+        holding the one thing a `recorder` does not have. 255 without a
+        painter, which is what "no window-wide fade" means.
+        """
+        return self._gdi.constant_alpha if self._gdi is not None else 255
+
+    @constant_alpha.setter
+    def constant_alpha(self, value: int) -> None:
+        if self._gdi is not None:
+            self._gdi.constant_alpha = max(0, min(255, int(value)))
 
     def resize(self, w: int, h: int) -> None:
         if self._gdi:
@@ -879,13 +971,21 @@ class TeeCanvas:
             except Exception:
                 continue
 
-    def present(self, win, at=None, others=()) -> bool:
+    def present(self, win, at=None, others=(), at_self=None) -> bool:
         """Composite this canvas — and any `others` — as one bitmap.
 
         `others` is `(tee, dx, dy)` for every other canvas sharing this
         window, drawn under its own translation and *before* this one, which
         is the stacking Tk gives them: the panel is placed above the pill row
         and the row is the window's foot.
+
+        `at_self` is this canvas's own translation, for the case the shipped
+        surface is: the canvas that owns the bitmap is **not** the one at the
+        window's origin. `flow/ui.py`'s pill row is `place`d at
+        `y = h - PILL_H` with the panel band above it, and the row is what
+        holds the painter — so the alternative would have been to composite
+        from whichever panel happened to be up, which is a different object
+        on every frame and none at all when the row is alone.
         """
         self._gdi.delete("all")
         for tee, dx, dy in others:
@@ -894,7 +994,14 @@ class TeeCanvas:
                 tee.replay(self._gdi)
             finally:
                 self._gdi.restore(token)
-        self.replay(self._gdi)
+        if at_self and tuple(at_self) != (0, 0):
+            token = self._gdi.offset(*at_self)
+            try:
+                self.replay(self._gdi)
+            finally:
+                self._gdi.restore(token)
+        else:
+            self.replay(self._gdi)
         self.dirty = False
         for tee, _dx, _dy in others:
             tee.dirty = False
