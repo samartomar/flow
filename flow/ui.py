@@ -246,6 +246,21 @@ def toplevel_hwnd(win) -> int:
     return _user32.GetParent(win.winfo_id()) or 0
 
 
+def set_icon(root) -> None:
+    """Flow's icon on every window this Tk creates (decisions.md 2026-09-23, "Flow gets an
+    icon"), in place of Tk's feather — `iconbitmap(default=)` is the one call that covers
+    the Help sheet, the setup box and anything opened later. An `.ico` is a Windows
+    format: elsewhere Tk refuses it, and a missing or refused icon costs the icon, never
+    the window."""
+    from . import ICON
+
+    try:
+        if ICON.is_file():
+            root.iconbitmap(default=str(ICON))
+    except (tk.TclError, OSError):
+        pass
+
+
 def _no_activate(win) -> bool:
     """Take `win` out of the activation chain, and report whether it took.
 
@@ -2580,6 +2595,7 @@ class Pill(tk.Tk):
         paint.make_dpi_aware()
         _timer_resolution(1)  # so `after(5)` and `after(30)` mean what they say
         super().__init__()
+        set_icon(self)
         # The scale of the monitor this window opened on, read once, now that there is
         # a window to ask about. Once, like the compact surface: a window *dragged* to a
         # display of a different scale keeps the one it was built with, which is a known

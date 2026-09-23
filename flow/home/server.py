@@ -42,6 +42,10 @@ FILES: dict[str, tuple[Path, str]] = {
         "IBMPlexSans-Regular.ttf", "IBMPlexSans-Medium.ttf", "IBMPlexSans-SemiBold.ttf",
         "IBMPlexMono-Regular.ttf", "IBMPlexMono-Medium.ttf",
     )},
+    # Flow's icon: the .ico is the page's icon, which the Edge app window also takes for
+    # its taskbar button; the .svg is the mark in the rail.
+    "/flow.ico": (FONTS.parent / "flow.ico", "image/x-icon"),
+    "/flow.svg": (FONTS.parent / "flow.svg", "image/svg+xml"),
 }
 
 #: The largest request body accepted. Every setting is a few hundred bytes.

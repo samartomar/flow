@@ -107,6 +107,7 @@ from .ui import (
     foreground_hwnd,
     modifiers_held,
     owned_by_flow,
+    set_icon,
     toplevel_hwnd,
 )
 from .ui import PANEL_BOTTOM_OFFSET, bottom_centre
@@ -900,6 +901,7 @@ class CompactPill(tk.Tk):
         settings_path=None, lite=False,
     ) -> None:
         super().__init__()
+        set_icon(self)
         self.session = session
         self.on_send = on_send
         self.hotkeys = hotkeys

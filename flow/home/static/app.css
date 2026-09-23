@@ -42,8 +42,8 @@ a:hover { color: #a8c1fa; }
 }
 .brand { display: flex; align-items: center; gap: 9px; padding: 4px 10px 12px; font-weight: 600; font-size: 15px; }
 .brand-mark {
-  width: 26px; height: 16px; border-radius: 8px; background: var(--shell);
-  border: 1px solid #0B0D10; box-shadow: inset 0 1px 0 var(--ring-top), 0 0 0 1px var(--ring);
+  width: 24px; height: 24px; flex-shrink: 0;
+  background: url("/flow.svg") center / contain no-repeat;
 }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav .label {

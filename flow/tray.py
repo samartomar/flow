@@ -21,10 +21,10 @@ runs on this thread, and everything it learns is put on a `queue.Queue` that the
 drains from its own frame pump. Nothing here calls into Tk, which is the rule that makes
 threading here safe rather than merely tested.
 
-**Stock icon, deliberately.** `IDI_APPLICATION` rather than an `.ico` shipped in the
-package: an icon file is a binary asset in a repository that has none, and a tray icon
-that is obviously a placeholder is more honest than one that took a build step to look
-official. It is a line to change when Flow has artwork.
+**Flow's own icon since 2026-09-23** (decisions.md, "Flow gets an icon") — the pill's
+level bars ending in a text cursor, `flow/assets/flow.ico`. It was the stock
+`IDI_APPLICATION` until Flow had artwork, and that stays the fallback for a package
+unpacked without its assets.
 """
 
 import ctypes
@@ -32,6 +32,8 @@ import queue
 import sys
 import threading
 from ctypes import wintypes
+
+from . import ICON
 
 #: What the icon puts on the queue. Strings rather than callbacks, because the callback
 #: would then run on this module's thread — and the one rule here is that nothing this
@@ -65,6 +67,8 @@ _NIF_MESSAGE, _NIF_ICON, _NIF_TIP = 0x1, 0x2, 0x4
 _IDI_APPLICATION = 32512
 _IMAGE_ICON = 1
 _LR_SHARED = 0x8000
+_LR_LOADFROMFILE = 0x10
+_SM_CXSMICON = 49
 _HWND_MESSAGE = -3
 _MF_STRING = 0x0
 _TPM_RETURNCMD = 0x0100
@@ -154,6 +158,10 @@ def _declare() -> None:
     u.LoadImageW.restype = wintypes.HANDLE
     u.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
                              ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    u.GetSystemMetrics.restype = ctypes.c_int
+    u.GetSystemMetrics.argtypes = [ctypes.c_int]
+    u.DestroyIcon.restype = wintypes.BOOL
+    u.DestroyIcon.argtypes = [wintypes.HICON]
     u.CreatePopupMenu.restype = wintypes.HMENU
     u.TrackPopupMenu.restype = wintypes.BOOL
     u.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_int,
@@ -189,6 +197,8 @@ class Tray:
         #: an access violation in a thread nobody is watching.
         self._proc = _WNDPROC(self._on_message)
         self._class = f"FlowTray{id(self):x}"
+        #: The icon loaded from `flow.ico`, which is ours to destroy; 0 for the stock one.
+        self._hicon = 0
 
     # -- the thread that owns the window ------------------------------------
 
@@ -214,9 +224,12 @@ class Tray:
         try:
             _shell().Shell_NotifyIconW(_NIM_DELETE, ctypes.byref(self._icon_data()))
             ctypes.windll.user32.DestroyWindow(self.hwnd)
+            if self._hicon:
+                ctypes.windll.user32.DestroyIcon(self._hicon)
         except OSError:
             pass
         self.hwnd = 0
+        self._hicon = 0
 
     def _icon_data(self, with_icon: bool = False) -> _NOTIFYICONDATAW:
         data = _NOTIFYICONDATAW()
@@ -226,13 +239,30 @@ class Tray:
         data.uFlags = _NIF_MESSAGE | _NIF_ICON | _NIF_TIP
         data.uCallbackMessage = _WM_TRAY
         if with_icon:
-            # `MAKEINTRESOURCE`: a stock icon is identified by an integer squeezed
-            # into a string pointer, which is what `LPCWSTR(id)` builds here.
-            data.hIcon = ctypes.windll.user32.LoadImageW(
-                None, wintypes.LPCWSTR(_IDI_APPLICATION), _IMAGE_ICON, 0, 0,
-                _LR_SHARED)
+            data.hIcon = self._load_icon()
         data.szTip = self.title
         return data
+
+    def _load_icon(self):
+        """Flow's icon at the tray's own size, or the stock one if it will not load.
+
+        Asked for at `SM_CXSMICON` — 16 px at 100% display scaling, 20, 24 and 32 at
+        125, 150 and 200% — because `flow.ico` carries each of those drawn on whole
+        pixels (`scripts/make_icon.py`), and one scaled by the shell smears. Loaded from
+        the file, so not `LR_SHARED`: the handle is ours, and `stop` destroys it.
+        """
+        u = ctypes.windll.user32
+        side = u.GetSystemMetrics(_SM_CXSMICON) or 16
+        if ICON.is_file():
+            handle = u.LoadImageW(None, str(ICON), _IMAGE_ICON, side, side,
+                                  _LR_LOADFROMFILE)
+            if handle:
+                self._hicon = handle
+                return handle
+        # `MAKEINTRESOURCE`: a stock icon is identified by an integer squeezed into a
+        # string pointer, which is what `LPCWSTR(id)` builds here.
+        return u.LoadImageW(None, wintypes.LPCWSTR(_IDI_APPLICATION), _IMAGE_ICON, 0, 0,
+                            _LR_SHARED)
 
     def _serve(self) -> None:
         """Register, create, add the icon, then pump messages until the window dies."""

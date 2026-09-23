@@ -82,6 +82,9 @@ datas += copy_metadata("flow")
 datas += [
     (os.path.join(ROOT, "flow", "assets", "fonts"), os.path.join("flow", "assets", "fonts")),
     (os.path.join(ROOT, "flow", "home", "static"), os.path.join("flow", "home", "static")),
+    # Flow's icon, read at runtime by the tray, the pill's windows and Flow Home.
+    (os.path.join(ROOT, "flow", "assets", "flow.ico"), os.path.join("flow", "assets")),
+    (os.path.join(ROOT, "flow", "assets", "flow.svg"), os.path.join("flow", "assets")),
 ]
 
 a = Analysis(  # noqa: F821
@@ -104,6 +107,9 @@ exe = EXE(  # noqa: F821
     [],
     exclude_binaries=True,  # onedir: everything else lands beside the exe
     name="flow",
+    # The same icon the tray and the windows wear (decisions.md 2026-09-23), so the .exe
+    # in Explorer and on the taskbar is recognisably the thing on screen.
+    icon=os.path.join(ROOT, "flow", "assets", "flow.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
