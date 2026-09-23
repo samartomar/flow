@@ -413,6 +413,18 @@ body.first .page { align-items: center; padding: 32px 24px 40px; }
   font: inherit; text-decoration: underline;
 }
 
+/* ---------------------------------------------------------------- better voices */
+.packs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.pack {
+  display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px 16px; background: var(--bg);
+}
+.pack-voices { display: flex; flex-direction: column; }
+.pack-voice {
+  display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 4px 0;
+  border-top: 1px solid var(--line); font-size: 13.5px;
+}
+
 /* ---------------------------------------------------------------- narrower windows */
 /* The window opens at 1200 wide; somebody can make it anything. Two columns become
    one, the model table folds its actions under the row, and below that the rail keeps
@@ -430,6 +442,7 @@ body.first .page { align-items: center; padding: 32px 24px 40px; }
   .convo { grid-template-columns: minmax(0, 1fr); }
   .convo-list { position: static; }
   .toolbar .right { text-align: left; }
+  .packs { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
   .rail { width: 60px; padding: 14px 8px; }

@@ -65,6 +65,22 @@ datas += _sd_datas
 binaries += _sd_binaries
 hiddenimports += _sd_hidden
 
+# The two voice engines Flow Home's Better voices card offers (decisions.md 2026-09-23,
+# "Better voices from Flow Home"). A frozen download cannot install anything into itself,
+# so it carries both — release.yml syncs the `voice` and `edge` extras before building.
+# Both are imported lazily (`flow/piper.py`, `flow/edge.py`), which an import scan cannot
+# see, and Piper carries espeak-ng's data and its bridge beside its modules; `collect_all`
+# takes all three. Skipped when absent, so a local build without the extras still builds
+# — and says on its Models page that this download cannot add them.
+import importlib.util as _util  # noqa: E402
+
+for _pkg in ("piper", "edge_tts"):
+    if _util.find_spec(_pkg) is not None:
+        _d, _b, _h = collect_all(_pkg)
+        datas += _d
+        binaries += _b
+        hiddenimports += _h
+
 # PyInstaller collects modules, not distributions, so a frozen bundle carries no
 # `.dist-info` unless it is asked for one — and `flow --version` is
 # `importlib.metadata.version("flow")` (see `flow/version.py`). Without this the exe

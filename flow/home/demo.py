@@ -467,6 +467,50 @@ def seed(session, kept: bool) -> None:
     h.flush()
 
 
+class DemoPacks:
+    """Better voices that install nothing and download nothing: the page's whole arc — Add,
+    a minute of adding, a voice downloading with progress — acted out on a timer, into the
+    demo's own folder. The demo runs from a real environment, and its "Add Piper" must not
+    install into it."""
+
+    def __new__(cls, folder: Path):
+        from .voicepacks import Cancelled, VoicePacks
+
+        class _Packs(VoicePacks):
+            def __init__(self) -> None:
+                super().__init__(None, run=self._pretend_install)
+                self._have: set[str] = set()
+                self._dir = folder / "voices"
+
+            def _importable(self, module: str) -> bool:
+                return module in self._have
+
+            def _installer(self, spec: str):
+                return ["uv", "pip", "install", spec], ""
+
+            def _folder(self) -> Path:
+                return self._dir
+
+            def _pretend_install(self, command, **_kw):
+                import subprocess
+
+                time.sleep(2.5)
+                self._have.add("piper" if command[-1].startswith("piper") else "edge_tts")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            def _fetch_to(self, path, dest, md5, job) -> None:
+                for step in range(1, 31):
+                    if job is not None and job.cancel.is_set():
+                        raise Cancelled()
+                    time.sleep(0.1)
+                    if job is not None:
+                        job.done = job.total * step // 30
+                dest.write_text("{}" if dest.name.endswith(".json") else "demo",
+                                encoding="utf-8")
+
+        return _Packs()
+
+
 class FakeChord:
     """A chord as the pages read one: its keys, its gesture, nothing hooked."""
 
@@ -517,6 +561,7 @@ def build(profile_dir: Path | None = None, kept: bool = False):
                 lexicon_path=folder / "lexicon.txt", trace_path=folder / "diag.jsonl")
     home.design = "compact"
     home.mic_factory = ReadingMic
+    home.packs = DemoPacks(folder)
     return home, session
 
 

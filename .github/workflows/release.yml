@@ -47,9 +47,12 @@ jobs:
         run: uv run python -m unittest discover -s tests
 
       # `--with` keeps PyInstaller out of the venv Flow runs in, exactly as it is built
-      # locally. packaging/flow.spec explains every collector it needs.
+      # locally. packaging/flow.spec explains every collector it needs. The `voice` and
+      # `edge` extras go in first: a frozen download cannot add an engine to itself, so
+      # Flow Home's Better voices card needs both already inside it (decisions.md
+      # 2026-09-23, "Better voices from Flow Home").
       - name: Build the bundle
-        run: uv run --with pyinstaller pyinstaller --noconfirm packaging/flow.spec
+        run: uv run --extra voice --extra edge --with pyinstaller pyinstaller --noconfirm packaging/flow.spec
 
       # A bundle that builds is not a bundle that runs: a missing DLL is invisible until
       # launch. `--help` is what CI can prove without a microphone or a desktop — it

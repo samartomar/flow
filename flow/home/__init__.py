@@ -54,8 +54,12 @@ class Home:
         #: None for the real one. The demo and the suite set it.
         self.mic_factory = None
         from .voice import VoiceTasks
+        from .voicepacks import VoicePacks
 
         self.voice = VoiceTasks(self)
+        #: Models ▸ Better voices: the two speech engines, added with a press, and
+        #: Piper's voices downloaded (decisions.md 2026-09-23).
+        self.packs = VoicePacks(session)
         self.api = Api(self)
         self._server: HomeServer | None = None
         self._lock = threading.Lock()

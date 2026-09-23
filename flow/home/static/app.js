@@ -309,6 +309,47 @@
       ? [["auto", "Automatic"]].concat(ag.available.map((n) => [n, n])).map(([v, t]) => `
           <label class="row"><input type="radio" name="cli" value="${esc(v)}" data-change="cli" ${(ag.pinned || "auto") === v ? "checked" : ""}>${esc(t)}</label>`).join("")
       : "";
+    // Better voices (decisions.md 2026-09-23): the two engines, added with a press, and
+    // Piper's catalogue once Piper is here.
+    const pk = vo.packs;
+    const running = (j) => j && j.state === "running";
+    const addEngine = (name, e, label) => {
+      if (e.installed) return "";
+      if (running(e.job)) return `<p class="note"><span class="dot blue"></span> Adding ${esc(label.replace("Add ", ""))} - ${esc(e.size_text)}, usually a minute.</p>`;
+      if (!e.can) return `<p class="note warn">${esc(e.why)}</p>`;
+      return `<div class="row wrap"><button type="button" class="btn ${name === "piper" ? "primary" : ""}" data-act="pack-add" data-engine="${name}">${icon("download", name === "piper" ? "#15171C" : C.text, 15)}${esc(label)}</button><span class="note">${esc(e.size_text)}</span></div>`
+        + (e.job && e.job.state === "failed" ? `<p class="note warn">${esc(e.job.error)}</p>` : "");
+    };
+    const piperRow = (v) => {
+      const j = v.job;
+      const act = v.installed
+        ? (v.in_use ? '<span class="badge green">speaking</span>'
+          : `<span class="note">on this PC</span><button type="button" class="icon-btn" aria-label="Delete ${esc(v.label)}" data-act="piper-delete" data-name="${esc(v.key)}">${icon("trash", C.soft, 14)}</button>`)
+        : running(j)
+          ? `<span class="note">${j.total ? Math.round((100 * j.done) / j.total) : 0}%</span><button type="button" class="btn ghost sm" data-act="piper-cancel" data-name="${esc(v.key)}">Cancel</button>`
+          : `<span class="note">${esc(v.size_text)}</span><button type="button" class="btn sm" data-act="piper-download" data-name="${esc(v.key)}">${icon("download", C.text, 14)}Download</button>`;
+      return `<div class="pack-voice"><span class="grow">${esc(v.label)}</span>${act}</div>`
+        + (j && j.state === "failed" ? `<p class="note warn">${esc(j.error)}</p>` : "");
+    };
+    const packs = vo.available && pk ? `
+      <section class="card">
+        <div class="row"><h2 class="grow">Better voices</h2></div>
+        <p class="note">Windows' own voices are from 2013. These two sound like people, and each adds its voices to the list above.</p>
+        <div class="packs">
+          <div class="pack">
+            <div class="row">${icon("shield", C.green, 16)}<b class="grow">Piper</b><span class="badge green">on this PC</span></div>
+            <p class="note">Natural voices that run here. Nothing leaves this PC, and they work offline.</p>
+            ${addEngine("piper", pk.piper, "Add Piper")}
+            ${pk.piper.installed ? `<div class="pack-voices">${pk.piper.voices.map(piperRow).join("")}</div>
+            <p class="fine">Hear them first on <a href="${esc(pk.piper.samples)}" target="_blank" rel="noopener noreferrer">Piper's samples page</a>.</p>` : ""}
+          </div>
+          <div class="pack">
+            <div class="row">${icon("speaker", C.ask, 16)}<b class="grow">Microsoft natural voices</b><span class="badge amber">online</span></div>
+            <p class="note">Ava, Andrew, Emma, Sonia and more - the voices Narrator uses. Choosing one sends each answer's text to Microsoft to be spoken. No account, no key.</p>
+            ${pk.edge.installed ? `<p class="note good">${icon("circlecheck", C.green, 15)} Added - choose one in the list above, under Natural.</p>` : addEngine("edge", pk.edge, "Add Microsoft voices")}
+          </div>
+        </div>
+      </section>` : "";
     const groups = {};
     (vo.voices || []).forEach((v) => { (groups[v.group] = groups[v.group] || []).push(v); });
     const voiceOptions = [`<option value="" ${vo.current ? "" : "selected"}>The engine's default</option>`]
@@ -362,7 +403,7 @@
           <div class="row top">${icon("shield", C.soft, 14)}<p class="fine">Natural voices send the answer's text to Microsoft to be spoken. Windows and Piper voices stay on this PC.</p></div>`
           : '<p class="note">No speech engine answered on this PC, so answers are shown and not read.</p>'}
         </section>
-      </div>`;
+      </div>${packs}`;
   }
 
   // ------------------------------------------------------------------ Settings
@@ -1187,6 +1228,10 @@
     effort: (el) => run(() => api("agent", { effort: el.dataset.value }), `Effort: ${el.dataset.value}`),
     mute: (el) => run(() => api("replies", { muted: el.getAttribute("aria-checked") === "true" })),
     preview: () => run(() => api("replies/preview", {}), null, false),
+    "pack-add": (el) => run(() => api("voices/engine", { engine: el.dataset.engine }), "Adding - this takes a minute"),
+    "piper-download": (el) => run(() => api("voices/piper", { name: el.dataset.name, action: "download" }), "Downloading"),
+    "piper-cancel": (el) => run(() => api("voices/piper", { name: el.dataset.name, action: "cancel" }), "Cancelled"),
+    "piper-delete": (el) => run(() => api("voices/piper", { name: el.dataset.name, action: "delete" }), "Deleted"),
     "tune-start": () => run(() => here(api("voice/tune", { action: "start" }))),
     "tune-finish": () => run(() => here(api("voice/tune", { action: "finish" }))),
     "tune-cancel": () => run(() => here(api("voice/tune", { action: "cancel" })), "Cancelled - nothing was saved"),
@@ -1380,7 +1425,8 @@
       // Models refreshes while something is moving on it; Voice while it is listening;
       // Home every few seconds.
       const moving = name === "models" && data && data.speech
-        && (data.speech.loading || data.speech.models.some((m) => m.download && m.download.state === "running"));
+        && (data.speech.loading || data.speech.models.some((m) => m.download && m.download.state === "running")
+          || packsBusy(data));
       const listening = voiceBusy(name);
       // Conversations re-reads when the live conversation moved under it: an answer on
       // its way, a question asked from the pill, a new conversation started there.
@@ -1407,6 +1453,14 @@
       if (e instanceof Gone) { gone(e.message); return; }
     }
     setTimeout(poll, current() === "settings" || voiceBusy(current()) || startBusy() ? 250 : 1000);
+  }
+
+  // An engine being added or a Piper voice downloading: Models re-reads until it lands.
+  function packsBusy(d) {
+    const p = d && d.voice && d.voice.packs;
+    if (!p) return false;
+    const on = (j) => j && j.state === "running";
+    return on(p.piper.job) || on(p.edge.job) || p.piper.voices.some((v) => on(v.job));
   }
 
   function startBusy() {

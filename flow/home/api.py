@@ -207,6 +207,8 @@ class Api:
             ("POST", "/api/agent"): self.agent,
             ("POST", "/api/replies"): self.replies,
             ("POST", "/api/replies/preview"): self.replies_preview,
+            ("POST", "/api/voices/engine"): self.voice_engine,
+            ("POST", "/api/voices/piper"): self.piper_voice,
             ("GET", "/api/voice"): self.voice_page,
             ("POST", "/api/voice/word"): self.add_word,
             ("POST", "/api/voice/word/remove"): self.remove_word,
@@ -472,7 +474,15 @@ class Api:
         voices = []
         if live["speaks"]:
             try:
-                for v in self.session.voices():
+                listed = list(self.session.voices())
+                # The voice in use stays in the list even when the list stopped offering
+                # its engine — the 2013 voices leave it once a better one is here, and a
+                # choice the list cannot show reads as "the engine's default".
+                if live["voice"] and live["voice"] not in [v.name for v in listed]:
+                    from ..speak import all_voices
+
+                    listed += [v for v in all_voices() if v.name == live["voice"]][:1]
+                for v in listed:
                     voices.append({"name": v.name, "label": v.describe(),
                                    "engine": v.engine,
                                    "group": VOICE_ENGINES.get(v.engine, VOICE_ENGINES["sapi"])})
@@ -494,6 +504,9 @@ class Api:
                 "current": live["voice"],
                 "muted": live["muted"],
                 "voices": voices,
+                # Better voices: the two engines and Piper's catalogue.
+                "packs": self.home.packs.snapshot(live["voice"])
+                if getattr(self.home, "packs", None) is not None else None,
             },
         }
 
@@ -606,6 +619,40 @@ class Api:
             raise ApiError("spoken replies are not available on this PC")
         self._call(lambda: speaker.say("This is how Flow will read its answers to you."))
         return {"ok": True}
+
+    def voice_engine(self, body: dict) -> dict:
+        """Models ▸ Better voices: add Piper or the Microsoft voices (`voicepacks`). The
+        page names which; the specs are the extras' own, never sent by the page."""
+        from .voicepacks import ENGINES
+
+        engine = body.get("engine")
+        if engine not in ENGINES:
+            raise ApiError("there is no engine by that name")
+        self.home.packs.install(engine)
+        return self.models({})
+
+    def piper_voice(self, body: dict) -> dict:
+        """A voice from Piper's catalogue: download it, stop a download, or delete it."""
+        from .voicepacks import BY_KEY
+
+        key, action = body.get("name"), body.get("action")
+        if key not in BY_KEY:
+            raise ApiError("Flow does not know that voice")
+        packs = self.home.packs
+        if action == "download":
+            packs.download(key)
+        elif action == "cancel":
+            packs.cancel(key)
+        elif action == "delete":
+            speaker = getattr(self.session, "speaker", None)
+            if getattr(speaker, "voice", None) == f"Piper {key}":
+                raise ApiError("that voice is the one Flow speaks with - choose another "
+                               "first")
+            if not packs.delete(key):
+                raise ApiError("that voice is not on this PC")
+        else:
+            raise ApiError("the action is download, cancel or delete")
+        return self.models({})
 
     # -- Voice ------------------------------------------------------------------
 
