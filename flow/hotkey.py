@@ -37,6 +37,19 @@ user32.PostThreadMessageW.argtypes = [
 user32.PostThreadMessageW.restype = wintypes.BOOL
 kernel32.GetCurrentThreadId.argtypes = []
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+# What AltGr types on each installed keyboard layout — see `altgr_types`.
+user32.GetKeyboardLayoutList.argtypes = [ctypes.c_int, ctypes.POINTER(wintypes.HKL)]
+user32.GetKeyboardLayoutList.restype = ctypes.c_int
+user32.MapVirtualKeyExW.argtypes = [wintypes.UINT, wintypes.UINT, wintypes.HKL]
+user32.MapVirtualKeyExW.restype = wintypes.UINT
+user32.ToUnicodeEx.argtypes = [
+    wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_ubyte), wintypes.LPWSTR,
+    ctypes.c_int, wintypes.UINT, wintypes.HKL,
+]
+user32.ToUnicodeEx.restype = ctypes.c_int
+kernel32.LCIDToLocaleName.argtypes = [wintypes.DWORD, wintypes.LPWSTR, ctypes.c_int,
+                                      wintypes.DWORD]
+kernel32.LCIDToLocaleName.restype = ctypes.c_int
 
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN = 0x0001, 0x0002, 0x0004, 0x0008
 MOD_NOREPEAT = 0x4000
@@ -91,6 +104,14 @@ class Hotkeys:
         #: `DEFAULT_BINDINGS` would make the second `Hotkeys` of a process inherit the
         #: first one's overrides.
         self.bindings, self.ignored = overridden(overrides, bindings)
+        #: action -> the binding this person chose for it, which is registered even
+        #: when it collides with AltGr: a choice is a decision, and is said out loud
+        #: rather than overruled (`altgr_lines`).
+        self._chosen_by_person = person_bindings(overrides)
+        #: What registration said about AltGr, one line each, for the startup block:
+        #: a shipped combo passed over for its fallback, or a chosen one kept despite
+        #: the character it takes. Filled on the hotkey thread before `start` returns.
+        self.altgr_lines: list[str] = []
         self.presses: queue.Queue[str] = queue.Queue()
         self.failed: list[str] = []
         #: action name -> the combo that actually registered, e.g. "ctrl+alt+space"
@@ -128,8 +149,26 @@ class Hotkeys:
     def _run(self) -> None:
         self._tid = kernel_thread_id()
         next_id = 1
+        types: dict[int, tuple[str, str] | None] = {}
         for name, alternatives in self.bindings.items():
             for mods, vk in alternatives:
+                if mods & MOD_CONTROL and mods & MOD_ALT:
+                    # Ctrl+Alt *is* AltGr: registering it takes whatever AltGr+key types
+                    # on this machine's layouts away for as long as Flow runs.
+                    if vk not in types:
+                        types[vk] = altgr_types(vk)
+                    clash = types[vk]
+                    if clash is not None:
+                        combo = describe(mods, vk)
+                        if self._chosen_by_person.get(name) == (mods, vk):
+                            self.altgr_lines.append(ALTGR_KEPT_LINE.format(
+                                action=name, combo=combo, key=_key_name(vk),
+                                char=_spell(clash[0]), layout=clash[1]))
+                        else:
+                            self.altgr_lines.append(ALTGR_SKIPPED_LINE.format(
+                                action=name, combo=combo, key=_key_name(vk),
+                                char=_spell(clash[0]), layout=clash[1]))
+                            continue
                 if user32.RegisterHotKey(None, next_id, mods | MOD_NOREPEAT, vk):
                     self._ids[next_id] = name
                     self.chosen[name] = describe(mods, vk)
@@ -372,6 +411,129 @@ def overridden(
             continue
         out[action].insert(0, binding)
     return out, ignored
+
+
+def person_bindings(overrides: dict | None) -> dict[str, tuple[int, int]]:
+    """action -> the binding this person chose for it: the entries `overridden` puts in
+    front, read the same way. What is not usable is not here, and is said by
+    `overridden`."""
+    out: dict[str, tuple[int, int]] = {}
+    for name, combo in (overrides or {}).items():
+        action = name.strip().lower() if isinstance(name, str) else ""
+        binding, _reason = parse(combo)
+        if action and binding is not None:
+            out[action] = binding
+    return out
+
+
+# -- AltGr ------------------------------------------------------------------
+#
+# On a keyboard with AltGr, Windows sends the key as **left Ctrl plus right Alt**. So a
+# `RegisterHotKey` for ctrl+alt+<key> is also AltGr+<key> — and on a German keyboard
+# AltGr+Q is @, on a Hungarian one AltGr+V is @ and AltGr+M is <, on US-International
+# AltGr+Q is ä. A global shortcut on any of those takes the character away for as long as
+# Flow runs, and on quit's combo, typing an email address closes Flow.
+#
+# Which keys are dangerous depends on the layouts a person has installed, not on a table
+# written here, so it is asked of Windows at registration: `ToUnicodeEx` with Ctrl and
+# Alt held, once per layout in `GetKeyboardLayoutList`. A shipped ctrl+alt alternative
+# that types something on any of them is passed over for the next one — every action has
+# a ctrl+shift fallback, which AltGr cannot reach — and the startup block says which and
+# why. A combo the person chose in `profile.json` is registered anyway and warned about:
+# their choice, their keyboard, and now their information. On a machine whose layouts
+# have no AltGr (US, UK without the extended keys) nothing changes at all.
+
+#: The keyboard state AltGr leaves behind: left Ctrl and right Alt, and the two generic
+#: codes that report them.
+_ALTGR_KEYS = (0x11, 0xA2, 0x12, 0xA5)  # VK_CONTROL, VK_LCONTROL, VK_MENU, VK_RMENU
+_MAPVK_VK_TO_VSC = 0
+#: `ToUnicodeEx`'s "leave the keyboard state alone" (Windows 10 1607 on). Without it,
+#: asking about a dead key would leave its accent pending on the thread that asked.
+_TU_KEEP_STATE = 0x4
+#: What `altgr_types` reports for a key that is a dead key under AltGr: it types nothing
+#: on its own, and an accent onto the next letter — which is still a key in use.
+DEAD_KEY = "dead"
+
+#: The two things registration can say about AltGr, ASCII only for the reason
+#: `TestEveryRefusalIsOneAsciiLine` gives: the character is named, never printed raw.
+ALTGR_SKIPPED_LINE = ("hotkey  {action:8s} not {combo} - AltGr+{key} types {char} "
+                      "on the {layout} keyboard")
+ALTGR_KEPT_LINE = ("hotkey  {action:8s} {combo} kept as chosen - AltGr+{key} "
+                   "({char}, {layout}) runs it too")
+
+
+def installed_layouts() -> list:
+    """The keyboard layouts this person has installed, as HKLs. [] when Windows will not
+    say, which reads as "no AltGr anywhere" — the behaviour before this check existed."""
+    get = getattr(user32, "GetKeyboardLayoutList", None)
+    if get is None:
+        return []
+    try:
+        count = get(0, None)
+        if count <= 0:
+            return []
+        found = (wintypes.HKL * count)()
+        got = get(count, found)
+        return [found[i] for i in range(max(0, got))]
+    except (OSError, TypeError, ValueError, ctypes.ArgumentError):
+        return []
+
+
+def layout_name(hkl) -> str:
+    """A layout's language as Windows names it — "de-DE" — for the startup line."""
+    lang = int(hkl or 0) & 0xFFFF
+    buf = ctypes.create_unicode_buffer(85)
+    try:
+        if kernel32.LCIDToLocaleName(lang, buf, len(buf), 0):
+            return buf.value
+    except (OSError, AttributeError, ctypes.ArgumentError):
+        pass
+    return f"0x{lang:04x}"
+
+
+def altgr_types(vk: int) -> tuple[str, str] | None:
+    """What AltGr+`vk` types on one of this machine's keyboard layouts, and that layout's
+    name — or None when it types nothing on any of them.
+
+    A plain space is not counted: a layout that maps AltGr+Space to a space loses
+    nothing to a shortcut. A non-breaking space is — French typography uses it — and so
+    is a dead key, which types an accent onto the next letter.
+    """
+    to_unicode = getattr(user32, "ToUnicodeEx", None)
+    scan_of = getattr(user32, "MapVirtualKeyExW", None)
+    if to_unicode is None or scan_of is None:
+        return None
+    state = (ctypes.c_ubyte * 256)()
+    for key in _ALTGR_KEYS:
+        state[key] = 0x80
+    for hkl in installed_layouts():
+        buf = ctypes.create_unicode_buffer(8)
+        try:
+            scan = scan_of(vk, _MAPVK_VK_TO_VSC, hkl)
+            got = to_unicode(vk, scan, state, buf, len(buf), _TU_KEEP_STATE, hkl)
+        except (OSError, TypeError, ValueError, ctypes.ArgumentError):
+            continue
+        if got < 0:
+            return DEAD_KEY, layout_name(hkl)
+        text = buf.value[:got] if got > 0 else ""
+        if text and text != " " and all(ch >= " " and ch != "\x7f" for ch in text):
+            return text, layout_name(hkl)
+    return None
+
+
+def _spell(char: str) -> str:
+    """A character as an ASCII startup line can say it."""
+    if char == DEAD_KEY:
+        return "an accent (a dead key)"
+    if char == " ":
+        return "a non-breaking space"
+    if char.isascii() and char.isprintable():
+        return char
+    return " ".join(f"U+{ord(ch):04X}" for ch in char)
+
+
+def _key_name(vk: int) -> str:
+    return _VK_NAMES.get(vk, f"vk{vk:#x}")
 
 
 # -- the modifier-only chord ------------------------------------------------

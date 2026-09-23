@@ -863,6 +863,10 @@ def main(argv: list[str] | None = None) -> int:
         for line in hotkeys.ignored:
             say(line)
         if hotkeys.start():
+            # What AltGr cost, before what registered: a combo passed over is the
+            # reason the line under it names a fallback (hotkey.py, "AltGr").
+            for line in hotkeys.altgr_lines:
+                say(line)
             for action, combo in hotkeys.chosen.items():
                 say(f"hotkey  {action:8s} {combo}")
             if hotkeys.failed:
