@@ -6,6 +6,50 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — Flow Home's Voice page: Remove joins Add, and the microphone is lent, not shared
+
+Step 2 of the Flow Home plan: tuning, the accuracy check, and the dictionary, on one page.
+Three things it decided that are worth the record.
+
+**The dictionary file gains a Remove.** "Flow appends one line and never edits, reorders,
+removes or reformats one" was the promise, and it was right for a file only a menu offer
+could write to. A page that lists every entry with an Add beside it and no way to take
+one back would be a page that teaches people to open the file anyway. So Flow may now
+remove an entry — only on a Remove the person pressed, about an entry they can see, only
+the lines that read as that entry, and every other byte back exactly as it was (read and
+written with `newline=""`, so even the line endings survive; a file that is not valid
+UTF-8 is refused rather than rewritten). The promise that survives is the one that
+mattered: Flow never changes the file on its own. `lexicon.append_term` is the Add's
+twin of `append_pair`, and both now refuse text that would change what the line means
+(`#` starts a comment, `->` starts a correction) instead of writing it and letting
+`entries` drop it silently.
+
+**What Flow learned is shown, with its evidence and three verbs.** Every pair counted at
+least `PROMOTE_AFTER` times is listed with the count: *Always fix* declares it (the
+menu's offer), *Never* stops asking and keeps the bias (the old "Never offer"), and
+*Forget* is new — it unlearns the pair, so the bias goes too. A bias nobody could see was
+a bias nobody could take back.
+
+**The microphone is lent, never shared.** Tuning and the check are a person reading
+aloud, and those words are not dictation. `Session.lend_mic` stops capture (a `pause`,
+which also refuses anything decoded from before it), closes a lingering stream, emits a
+`disarm` whose text is `lent` so neither surface draws a microphone that went away, and
+makes `start` refuse with the reason — which the compact pill puts on its strip instead
+of the slash it uses for a dead device. The task opens a stream of its own on the same
+device, and gives the microphone back on every exit path. Refused while a reply plays,
+for `set_microphone`'s reason. The alternative — both reading one stream — would have
+made the calibration passage a draft.
+
+**The accuracy check scores the pipeline, not the model.** Five sentences, decoded by the
+session's own transcriber with the dictionary applied, aligned word by word (fewest
+errors, then most matches, so the page shows the misses a person would name). Only
+missed names are offered for the dictionary: biasing common words is the measured harm
+in `flow/lexicon.py`.
+
+**Reopens if** a person's corrections outgrow the 64-line cap in practice — the page
+refuses past it and says so, which is the honest answer until the constrained re-decode
+changes what a line costs.
+
 ### 2026-09-22 — Flow Home: the pill never grows a setting, and one window holds every one
 
 The owner's verdict on the build: the engine is good — accented dictation, Ask like

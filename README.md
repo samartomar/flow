@@ -154,8 +154,9 @@ before you start:
   every word you know.
 - **Partials refresh about once a second, not per word**, and can contain nonsense
   mid-word. They are shown dimmed and always replaced by the final text.
-- **Accuracy on your own voice is unmeasured.** The per-accent numbers come from
-  recordings of other people. `scripts/live_check.py` measures yours.
+- **The published accuracy numbers are other people's.** The per-accent numbers come
+  from recordings of other people. Yours is five sentences away: Flow Home ▸ Voice ▸
+  **How well Flow hears you** scores what it heard in your voice, word by word.
 
 ## Docs
 

@@ -867,7 +867,8 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
 | **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The two models that invent words in silence are marked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; and the voice that reads answers aloud |
 | **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the other five shortcuts; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
-| History, Voice, Conversations | Arriving next: a history of what you dictated (only if you choose to keep one), your dictionary and calibration, and conversations you can type into as well as speak |
+| **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
+| History, Conversations | Arriving next: a history of what you dictated (only if you choose to keep one), and conversations you can type into as well as speak |
 
 A setting made here is remembered in `profile.json`, and a flag given at launch still wins
 for that launch — `--final-model` over the Models page, `--device` over the microphone.
@@ -1475,12 +1476,19 @@ is the same either way.
 
 ## Calibration (P8)
 
+On [Flow Home](#flow-home)'s **Voice** page: **Tune Flow to your voice**. Or from a
+terminal, with Flow closed:
+
 ```bash
 uv run flow --calibrate
 ```
 
-Reads you a passage, listens for 60 seconds, stores what it measured in
-`~/.flow/profile.json`, and exits. Three constants in this codebase were tuned on one
+Either way it shows you a passage, listens for up to 60 seconds while you read it, and
+stores what it measured in `~/.flow/profile.json`. The Voice page applies the result to
+the running Flow at once, and lets you stop early — **Done reading** turns on once it has
+heard enough speech and enough pauses to measure. While it listens the pill does not:
+the page has the microphone, and a hold on the pill says so instead of recording the
+passage into your draft. Three constants in this codebase were tuned on one
 machine and one speaker, and each has since been caught being wrong for somebody else:
 
 - **the room.** The gate's starting noise floor is −55 dB. A quiet room with a good USB
@@ -1595,12 +1603,22 @@ Never offer  ▸   semir → Samir
 ```
 
 One tap appends the line to `~/.flow/lexicon.txt`, and it applies to the very next
-utterance. **That tap is the only thing that ever writes to your lexicon** — Flow appends
-one line, at the end, and never edits, reorders, removes or reformats one, so everything
-already in the file comes back byte for byte. (The one other write is creating the file
-from a template of comments, if the menu's **Open settings folder** finds it missing.)
-A pair already in the file stops being offered; **Never offer** drops one without
-unlearning the bias, which never needed consent because it rewrites nothing.
+utterance. A pair already in the file stops being offered; **Never offer** drops one
+without unlearning the bias, which never needed consent because it rewrites nothing.
+
+**Flow Home's Voice page is the whole dictionary.** It lists everything Flow learned from
+your fixes — how many times you made each fix, and whether it is fixed every time,
+declined, or still on offer — with **Always fix**, **Never** and **Forget** (which also
+unlearns the bias). Below that, your corrections and your words to listen for, each with
+Add and Remove. **Flow writes to the file only when you act, and only what you acted on**:
+an Add appends one line at the end, a Remove takes out that entry's lines — and every
+other byte of the file comes back exactly as it was, comments and all. (The one other
+write is creating the file from a template of comments when it does not exist yet.)
+
+**How well Flow hears you** on the same page reads you five short sentences and scores
+what it heard, word by word, through the same models and dictionary it pastes with —
+errors per 100 words, in your voice, with each miss shown. A name it missed is one tap
+from the dictionary.
 
 Undo-straight-after-append is also recorded, as the signature of a command read as
 dictation. It is **reported**, never applied automatically: changing the alias table
@@ -1673,7 +1691,7 @@ figure — along with everything else in there.
 
 | Path | Written by | Contents |
 |---|---|---|
-| `~/.flow/lexicon.txt` | you, by hand — and by Flow in exactly two cases: creating it from a template of comments if the menu's **Open settings folder** finds it missing, and appending one `wrong -> right` line when you tap an offered correction | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders, removes or reformats a line — what you wrote comes back byte for byte |
+| `~/.flow/lexicon.txt` | you, by hand — and by Flow only when you act: creating it from a template of comments when it is missing, appending one line when you tap an offered correction or press Add on Flow Home's Voice page, and taking out one entry's lines when you press Remove there | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders or reformats a line — everything you did not ask to change comes back byte for byte |
 | `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the five global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
 | `~/.cache/huggingface/hub/` | first decode, and Flow Home's Models page | the models. `base.en` 141 MiB, `small.en` 464 MiB, `large-v3` 2.9 GiB; Models lists them with their sizes and deletes the ones you do not use |
 | `~/.flow/home/` | Microsoft Edge, for the Flow Home window | the window's own browser profile — its size and position, and Edge's cache. Nothing Flow writes; deleting it resets the window |
@@ -1700,9 +1718,11 @@ tracked at all, and which parts of it are deliberately not.
   clipboard first, so `Ctrl+V` by hand still works.
 - **Semantic rewrites take ~6 s**, and a converse-mode answer ~8-10 s — the cost of
   starting an agent CLI. This is why only genuine rewrites and questions use one.
-- **Accuracy on your own voice is still unmeasured.** The per-accent numbers in
+- **The published accuracy numbers are other people's.** The per-accent numbers in
   [docs/roadmap.md](roadmap.md) come from recordings of other people, and the SAPI
-  numbers are synthesised. Try `scripts/listen.py` or `scripts/live_check.py`.
+  numbers are synthesised. Yours is one check away: Flow Home ▸ Voice ▸ **How well Flow
+  hears you** — five sentences, scored word by word. `scripts/live_check.py` measures
+  the capture path underneath it.
 - **Voice corrections have to be phrased as commands, and that is a real limitation.**
   *"delete the bit about the standup"* works; *"I feel that it should not contain the
   summary from the stand-up"* is appended to your draft as text. The first recording from
