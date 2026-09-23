@@ -50,6 +50,16 @@ from .edits import (
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
 from .help import auto_ask_notice, exits_note
+from .history import (
+    ANSWERED,
+    ASKED,
+    DICTATED,
+    REFINED,
+    SET_ASIDE,
+    NullHistory,
+    make_entry,
+    new_id,
+)
 from .notes import Notes, render as render_notes, write as write_notes
 from .phonetic import MATCH_THRESHOLD, similarity
 from .profile import path_key
@@ -287,6 +297,11 @@ NEAR_MISS_SIMILARITY = 0.78
 #: folder across a full session. The cost is that quitting loses it. If that ever bites
 #: somebody the next shape is an opt-in on-disk history, never a default one.
 RECENT_MAX = 20
+
+#: How many exchanges of the conversation on screen are held for Flow Home, whether or not
+#: history is kept. Bounded for R8's reason, and far past what `ASK_CONTEXT_CHARS` lets
+#: the CLI see: the page shows what was said, the thread is what the CLI is told.
+EXCHANGES_MAX = 100
 
 #: What a Recent entry is, in one word: dictated, asked, or answered. Roles rather than a
 #: bare list, because "what I said" and "what came back" are the two things somebody is
@@ -812,6 +827,7 @@ class Session:
         cli: object | None = None,
         cli_timeout: float = REFINE_TIMEOUT_SEC,
         lite: bool = False,
+        history: object | None = None,
     ) -> None:
         # `mic` and `asr` are injectable so the state machine can be tested without a
         # microphone or a 141 MB model — the routing logic is where the subtle bugs live.
@@ -847,6 +863,35 @@ class Session:
         #: only one of them entered by a deliberate act, which is what makes it the only
         #: one that may reach a file (`flow/notes.py`).
         self.notes = Notes()
+        #: The fourth store, and the only one that reaches a file on its own: what was
+        #: handed over, set aside and asked, kept on disk **only** when somebody chose to
+        #: keep it (`flow/history.py`, decisions.md 2026-09-23, "History"). Off unless
+        #: the caller passes one, for `diag`'s reason — the suite builds sessions in
+        #: their hundreds, and none of them may write into a real person's history.
+        self.history = history if history is not None else NullHistory()
+        #: Which conversation an Ask belongs to. A new one starts wherever the thread
+        #: is cleared as a topic switch — `new_conversation` and a workspace switch —
+        #: so the Conversations page and the CLI agree about where one ends.
+        self.conversation = new_id()
+        #: The conversation on screen, as entries (`history.make_entry`), in memory
+        #: whether or not history is kept: Flow Home draws it from here, and a person
+        #: who chose "off" can still read what they asked a minute ago.
+        self.exchanges: deque[dict] = deque(maxlen=EXCHANGES_MAX)
+        #: The last thing a Send handed over, and when — what Paste last pastes. In
+        #: memory, like Recent; `history.newest` stands in for it after a restart.
+        self._handed: tuple[str, float] | None = None
+        #: The last refine result and the words it was made from, so a Send of that
+        #: result is kept as refined rather than as dictation somebody else wrote.
+        self._refined: dict | None = None
+        #: The words the refine in flight was asked to shape.
+        self._refine_before = ""
+        #: Whether the ask in flight came from Flow Home's composer. A typed question is
+        #: answered on the page it was typed on: it is not read aloud, and it does not
+        #: raise the pill's panel over an exchange the panel was not showing.
+        self._ask_typed = False
+        #: Where the last wrap-up was written, or "" when it stopped at the screen — so
+        #: Flow Home can name the file it just made.
+        self.wrapped_to = ""
         #: The question the answer on screen came from, so keeping "that exchange" keeps
         #: both halves of it. `_recent` holds the same string, but reading it back out
         #: would mean trusting a search through a mixed-role deque to find the right one;
@@ -1746,6 +1791,12 @@ class Session:
             return
         for drop in take():
             self._emit("drop", drop.describe())
+            # A final's rejection is the one that decided what reached the draft; a
+            # partial's is replaced by the final a second later either way. Kept so the
+            # History page can hand the words back — the recovery P2 promised and a
+            # bubble note that scrolls away never delivered.
+            if getattr(drop, "final", False) and drop.text.strip():
+                self.history.add(SET_ASIDE, drop.text, reason=drop.reason)
 
     def _say_exits(self) -> None:
         """Name the ways out that still work — once per draft, and never for no draft.
@@ -2430,6 +2481,52 @@ class Session:
         """
         self._recall()
 
+    def delivered(self, text: str, problem: str = "", copied: bool = False) -> None:
+        """A surface has put `text` where the user was, or on the clipboard.
+
+        The one door dictation takes into History, and it is the surfaces' to open
+        because only they know the words left: `send()` hands text back and cannot tell
+        a paste from a refusal, and in Refine the words that go are the panel's, sent by
+        a button `send()` never sees. So both surfaces call this after every handover —
+        paste, Lite's copy, or a paste Windows refused — and never for Paste last, which
+        hands over something already kept.
+
+        What it knows that they do not is where the words came from: text that is the
+        last refine's result is kept as refined, with the words it was made from.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        self._handed = (text, time.time())
+        # `inject` says "not pasted: ..." for every refusal, and a warning ("your
+        # clipboard held an image") for a paste that happened anyway; only the first is
+        # a paste that did not land. A copy has no warnings: any problem is a failure.
+        if copied:
+            how = "not copied" if problem else "copied"
+        else:
+            how = "not pasted" if "not pasted" in (problem or "") else "pasted"
+        fields = {"app": self.target_app if isinstance(self.target_app, str) else "",
+                  "words": len(text.split()), "how": how, "note": problem or ""}
+        refined, self._refined = self._refined, None
+        if refined is not None and refined["text"].strip() == text:
+            self.history.add(REFINED, text, heard=refined["heard"], cli=refined["cli"],
+                             secs=refined["secs"], **fields)
+        else:
+            self.history.add(DICTATED, text, **fields)
+
+    @property
+    def last_handed(self) -> str:
+        """What Paste last pastes: the newest thing a Send handed over.
+
+        This launch's, from memory; after a restart, the newest kept entry — so Paste
+        last survives a quit exactly when somebody chose to keep history, and not
+        otherwise.
+        """
+        if self._handed is not None:
+            return self._handed[0]
+        newest = getattr(self.history, "newest", None)
+        return newest["text"] if isinstance(newest, dict) else ""
+
     def _recall(self) -> None:
         """P6: put the last sent prompt back in the draft."""
         last = self.thread.last
@@ -2548,6 +2645,7 @@ class Session:
             return False
         self._refine_cwd = path
         self.thread.clear()
+        self._new_exchange()
         self.diag.write("workspace", ok=True)
         self._emit("note",
                    f"workshop: {self._workspace_leaf() or 'not set'} — new conversation")
@@ -2607,7 +2705,7 @@ class Session:
         self._emit("draft", self.draft.text)
         return True
 
-    def keep_note(self, text: str = "") -> bool:
+    def keep_note(self, text: str = "", question: str = "") -> bool:
         """P9: file something worth keeping. True when a note was actually kept.
 
         Two callers, two meanings, and the argument is which one:
@@ -2619,11 +2717,15 @@ class Session:
           answer filed without its question reads a week later as an assertion from
           nowhere, and the question is the thing somebody scanning the file navigates by.
 
+        `question` is Flow Home's third meaning: an earlier answer on the Conversations
+        page, kept with the question it answered — the exchange somebody pointed at,
+        rather than the one that happens to be on the pill.
+
         Refuses out loud rather than quietly doing nothing, the way `send()` does: a verb
         that sometimes works and sometimes is silent is one people stop trusting.
         """
         text = (text or "").strip()
-        question = ""
+        question = (question or "").strip()
         if not text:
             if not self.reply:
                 self._emit("note", "nothing to keep yet - ask something first")
@@ -2642,8 +2744,11 @@ class Session:
             self._emit("note", f"the oldest {dropped} fell off - the buffer is full")
         return True
 
-    def wrap_up(self) -> bool:
+    def wrap_up(self, pill: bool = True) -> bool:
         """P9: the kept notes as one document, on screen and — with a workspace — on disk.
+
+        `pill=False` is Flow Home's Wrap up: the document is the page's to show, so it
+        arrives as an `answer` rather than a `reply` and the pill's panel stays down.
 
         **On screen always, and through the reply.** The conversation card already draws
         an answer, already carries Copy and Use this, and `take_reply` already moves one
@@ -2674,13 +2779,15 @@ class Session:
                 self._emit("error", f"could not write the notes ({exc}) - "
                                     "they are still kept")
                 return False
-            self._emit("reply", doc)
+            self._emit("reply" if pill else "answer", doc)
             self.reply = doc
+            self.wrapped_to = str(path)
             self._emit("note", f"{len(held)} note"
                        + ("" if len(held) == 1 else "s") + f" written to {path}")
         else:
-            self._emit("reply", doc)
+            self._emit("reply" if pill else "answer", doc)
             self.reply = doc
+            self.wrapped_to = ""
             self._emit("note", f"{len(held)} note"
                        + ("" if len(held) == 1 else "s")
                        + " on screen - Copy takes them (no workspace set, so no file)")
@@ -3428,6 +3535,7 @@ class Session:
         op = self._refine_op = self._next_op()
         self._refine_reply = reply
         before = text if text is not None else self.draft.text
+        self._refine_before = before
         self.diag.write("refine", op=op, chars=len(before),
                         sent=tail_sent(before),
                         route="polish" if polish else "semantic")
@@ -3494,6 +3602,14 @@ class Session:
         self._trace_cli("refine", op, revised is not None, note, skipped)
         done = (f"refined via {note}" if not skipped
                 else f"refined via {note}, after {'; then '.join(skipped)}")
+        if revised is not None:
+            # What the CLI made and what it was made from, so the Send that hands this
+            # text over is kept as refined, with both halves (`delivered`). The raw
+            # words a failed refine leaves behind are dictation, and are kept as that.
+            self._refined = {
+                "text": revised, "heard": self._refine_before, "cli": note,
+                "secs": round(time.perf_counter() - self._cli_started, 1),
+            }
         if revised is None:
             self._emit("error", f"refine failed ({note}) — draft unchanged")
         elif reply:
@@ -3597,10 +3713,81 @@ class Session:
         result whose op has moved.
         """
         self.thread.clear()
+        self._new_exchange()
         self.reply = ""
         self._ask_op = None
         self._emit("conversation", "")
         self._emit("note", "new conversation")
+
+    @property
+    def asking(self) -> bool:
+        """True while a question is out with the agent CLI, from the pill or the page."""
+        return self._ask_op is not None
+
+    def ask(self, question: str) -> str:
+        """Flow Home's composer: a typed question, into the conversation on screen.
+
+        Returns "" when it is on its way, or the reason it is not — which the page shows,
+        the way the pill's own refusals are said rather than swallowed.
+
+        The same path a spoken question takes from `send()` — the thread, the framing,
+        the workspace, the context budget — so a conversation can move between the pill
+        and the page mid-sentence and the CLI cannot tell. Three things differ, all on
+        arrival (`_pump_ask`): the answer is not read aloud, it does not raise the pill's
+        panel, and the pill's mode is left alone. Typing into the page is not a request
+        to change what the pill does next.
+        """
+        question = (question or "").strip()
+        if not question:
+            return "type a question first"
+        if self._ask_op is not None:
+            return "still waiting on the last answer"
+        if not self._provider():
+            return "no agent CLI found - install claude or codex and sign in to it"
+        self.thread.add(question)
+        self._start_ask(question, typed=True)
+        return ""
+
+    def resume(self, conv: str, entries: list[dict]) -> str:
+        """Carry on a kept conversation: its turns become the thread the next question
+        is asked into, from the pill or from the page. "" when done, else why not.
+
+        The thread is rebuilt from the kept turns in their order, as `send()` and
+        `_pump_ask` would have built it, and bounded by `Thread` the same way — so the
+        CLI sees exactly what it would have seen had the conversation never stopped, up
+        to the budget it always had. The workspace is not switched: the page says which
+        one the next answer will be grounded in, and moving the pill's ground because a
+        page was opened is a bigger act than anybody asked for.
+        """
+        if self._ask_op is not None:
+            return "still waiting on the last answer"
+        turns = [e for e in entries
+                 if e.get("kind") in (ASKED, ANSWERED) and (e.get("text") or "").strip()]
+        if not turns:
+            return "that conversation has nothing to carry on from"
+        self.thread.clear()
+        for e in turns:
+            text = e["text"].strip()
+            self.thread.add(text if e["kind"] == ASKED else f"(reply) {text}")
+        self.conversation = conv
+        self.exchanges.clear()
+        self.exchanges.extend(entries[-EXCHANGES_MAX:])
+        answers = [e for e in turns if e["kind"] == ANSWERED]
+        questions = [e for e in turns if e["kind"] == ASKED]
+        self.reply = answers[-1]["text"] if answers else ""
+        self._last_question = questions[-1]["text"] if questions else ""
+        self._emit("conversation", "")
+        self._emit("note", f"carrying on a conversation of {len(questions)} question"
+                   + ("" if len(questions) == 1 else "s"))
+        return ""
+
+    def _new_exchange(self) -> None:
+        """A fresh conversation id and an empty page for it, wherever the thread is
+        cleared as a topic switch. The id is what keeps the history file's turns of
+        one conversation together, and the page's "Now" in step with the CLI's."""
+        self.conversation = new_id()
+        self.exchanges.clear()
+        self._ask_typed = False
 
     def toggle_mode(self, to: str | None = None) -> str:
         """P9: one action cycles dictate → refine → converse. Returns the new mode.
@@ -3735,9 +3922,14 @@ class Session:
         self._set_state(State.IDLE)
         return text
 
-    def _start_ask(self, question: str) -> None:
-        """P9: put the draft to the CLI off the hot path (R11) and wait for the reply."""
+    def _start_ask(self, question: str, typed: bool = False) -> None:
+        """P9: put the draft to the CLI off the hot path (R11) and wait for the reply.
+
+        `typed` is a question from Flow Home's composer rather than from the pill; see
+        `ask` for what that changes when the answer lands.
+        """
         op = self._ask_op = self._next_op()
+        self._ask_typed = typed
         # Decided from the request, before the answer exists to bias the guess. The
         # flag outlives the call because the *speaker* needs it when the answer lands.
         artifact = self._ask_artifact = is_artifact_request(question)
@@ -3763,6 +3955,13 @@ class Session:
         # before the answer exists: this is what a kept exchange is headed with, and a
         # heading naming the framed string would name a sentence nobody said.
         self._last_question = question
+        # The page's half and the file's half of the same fact, one shape for both.
+        # The workspace is kept whole: a conversation reopened next week has to say
+        # which project it was about, and the leaf alone cannot tell two "api"s apart.
+        entry = make_entry(ASKED, question, conv=self.conversation,
+                           ws=self._refine_cwd, via="typed" if typed else "voice")
+        self.exchanges.append(entry)
+        self.history.keep(entry)
         self.diag.write("ask", op=op, chars=len(question),
                         sent=len(kept), mode=self.mode, artifact=artifact)
         self._cli_started = time.perf_counter()
@@ -3822,20 +4021,35 @@ class Session:
         if op != self._ask_op:
             return
         self._ask_op = None
+        typed, self._ask_typed = self._ask_typed, False
         self._trace_cli("ask", op, answer is not None, note, skipped)
+        secs = round(time.perf_counter() - self._cli_started, 1)
         if answer is None:
             # Non-destructive by construction: the question is still in the thread, so
             # "say that again" and a retry both still work.
             self._emit("error", f"ask failed ({note})")
             self.reply = ""
+            # Kept as an answer that did not come, so the page shows the question
+            # answered by the reason rather than hanging there as if still asked.
+            entry = make_entry(ANSWERED, "", conv=self.conversation, failed=note,
+                               secs=secs)
+            self.exchanges.append(entry)
+            self.history.keep(entry)
         else:
             self.reply = answer
             self._remember_recent(RECENT_ANSWERED, answer)
             # Recorded as a turn so the next question inherits it — this is what makes
             # "and what about the other one?" mean anything.
             self.thread.add(f"(reply) {answer}")
-            self._emit("reply", answer)
-            if self.speaker is not None and not self.muted:
+            entry = make_entry(ANSWERED, answer, conv=self.conversation, cli=note,
+                               secs=secs)
+            self.exchanges.append(entry)
+            self.history.keep(entry)
+            # A typed question is answered on the page it was typed on. As a `reply` it
+            # would raise the pill's panel under whatever question the panel last
+            # heard, and read aloud to somebody who is reading it already.
+            self._emit("answer" if typed else "reply", answer)
+            if not typed and self.speaker is not None and not self.muted:
                 spoken = answer
                 if self._ask_artifact:
                     lines = answer.count("\n") + 1

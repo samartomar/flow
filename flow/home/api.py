@@ -15,6 +15,7 @@ halfway (see `ui.Pill._gesture_menu` for why the gesture, alone, is live).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -23,6 +24,20 @@ from pathlib import Path
 
 from .. import stats
 from ..edits import SEND_WORD_PRESETS, enter_word
+from ..history import (
+    ANSWERED,
+    ASKED,
+    DICTATED,
+    DICTATION,
+    HANDED,
+    KEEP,
+    OFF,
+    REFINED,
+    SET_ASIDE,
+    NullHistory,
+    matches,
+)
+from ..history import DAYS as HISTORY_DAYS
 from ..refine import EFFORTS, available, named
 from ..session import CONVERSE, DICTATE, REFINE, RECENT_ANSWERED, RECENT_ASKED
 from ..version import check_update, version
@@ -39,6 +54,7 @@ HOTKEY_LABELS = {
     "send": "Send the draft",
     "cancel": "Cancel",
     "mode": "Switch mode",
+    "paste_last": "Paste last",
     "quit": "Quit Flow",
 }
 
@@ -52,6 +68,119 @@ VOICE_ENGINES = {
 #: The two designs, by the names the page shows. "current" is the stored spelling of
 #: the pill Flow shipped first, kept so older profiles still load.
 DESIGN_LABELS = {"compact": "Compact", "current": "Classic"}
+
+#: The History page's filters, by the name its buttons send.
+HISTORY_FILTERS = {
+    "all": DICTATION,
+    "dictated": (DICTATED,),
+    "refined": (REFINED,),
+    "set_aside": (SET_ASIDE,),
+}
+
+#: How many entries one History load carries. A day of heavy dictation is a hundred or
+#: two; past this the page says how many more there are and the search box finds them.
+HISTORY_PAGE = 300
+
+#: The longest question the composer takes. `refine.ask` keeps the tail of anything
+#: longer than the CLI's budget, so this is a bound on a paste gone wrong, not on a
+#: question: a whole log file in the box is refused rather than silently cut.
+MAX_QUESTION_CHARS = 20_000
+
+#: What people call the programs Flow pastes into most often. Anything else is its own
+#: executable's name, tidied the way the pill's row tidies it (`ui.app_label`).
+APP_NAMES = {
+    "windowsterminal.exe": "Windows Terminal", "wt.exe": "Windows Terminal",
+    "cmd.exe": "Command Prompt", "powershell.exe": "PowerShell", "pwsh.exe": "PowerShell",
+    "code.exe": "VS Code", "cursor.exe": "Cursor", "idea64.exe": "IntelliJ IDEA",
+    "pycharm64.exe": "PyCharm", "devenv.exe": "Visual Studio",
+    "chrome.exe": "Chrome", "msedge.exe": "Edge", "firefox.exe": "Firefox",
+    "slack.exe": "Slack", "ms-teams.exe": "Teams", "teams.exe": "Teams",
+    "discord.exe": "Discord", "whatsapp.exe": "WhatsApp", "zoom.exe": "Zoom",
+    "outlook.exe": "Outlook", "olk.exe": "Outlook", "winword.exe": "Word",
+    "excel.exe": "Excel", "powerpnt.exe": "PowerPoint", "onenote.exe": "OneNote",
+    "notepad.exe": "Notepad", "explorer.exe": "File Explorer", "obsidian.exe": "Obsidian",
+    "notion.exe": "Notion", "claude.exe": "Claude", "chatgpt.exe": "ChatGPT",
+}
+
+#: Why the speech filter set words aside, as somebody reading History needs to hear it.
+#: The reasons are `clean.invented_reason`'s.
+SET_ASIDE_WHY = {
+    "filler": "what speech models write when they hear only the room",
+    "unconfident": "Flow was not sure these were words",
+    "empty": "nothing but noise",
+}
+
+
+def app_name(process) -> str:
+    """`WindowsTerminal.exe` -> `Windows Terminal`; "" for nothing."""
+    if not isinstance(process, str) or not process.strip():
+        return ""
+    process = process.strip()
+    known = APP_NAMES.get(process.lower())
+    if known:
+        return known
+    stem = process.rsplit(".", 1)[0] if process.lower().endswith(".exe") else process
+    return stem[:1].upper() + stem[1:] if stem.islower() else stem
+
+
+def _midnight(now: float) -> float:
+    t = time.localtime(now)
+    return time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
+
+
+def _day(at: float, now: float) -> str:
+    """The heading an entry is grouped under: Today, Yesterday, or the date."""
+    midnight = _midnight(now)
+    if at >= midnight:
+        return "Today"
+    if at >= _midnight(midnight - 3600):
+        return "Yesterday"
+    d = time.localtime(at)
+    return f"{time.strftime('%A', d)} {d.tm_mday} {time.strftime('%B', d)}"
+
+
+def _when(at: float, now: float) -> str:
+    """A conversation's time, the way a list of them reads it."""
+    d = time.localtime(at)
+    midnight = _midnight(now)
+    if at >= midnight:
+        return f"Today, {time.strftime('%H:%M', d)}"
+    if at >= _midnight(midnight - 3600):
+        return "Yesterday"
+    if at >= midnight - 6 * 86400:
+        return time.strftime("%A", d)
+    return f"{d.tm_mday} {time.strftime('%b', d)}"
+
+
+def _size(items) -> int:
+    try:
+        return len(items)
+    except TypeError:
+        return 0
+
+
+def _leaf(path) -> str:
+    """A workspace's own name: the folder, not the path to it. "" for none."""
+    if not isinstance(path, str) or not path.strip():
+        return ""
+    return Path(path).name or path
+
+
+def _entry_view(e: dict, now: float) -> dict:
+    """One kept entry as the pages draw it: the stored fields a person reads, the time
+    in their clock, and the program's name in their words."""
+    view = {"id": e["id"], "kind": e["kind"], "text": e["text"], "at": e["at"],
+            "time": time.strftime("%H:%M", time.localtime(e["at"])),
+            "day": _day(e["at"], now)}
+    if e.get("app"):
+        view["app"] = app_name(e["app"])
+    for key in ("words", "how", "note", "heard", "cli", "secs", "fixed", "via", "failed",
+                "ws", "conv"):
+        if key in e:
+            view[key] = e[key]
+    if e["kind"] == SET_ASIDE:
+        view["why"] = SET_ASIDE_WHY.get(e.get("reason", ""), "")
+    return view
 
 
 class ApiError(Exception):
@@ -86,6 +215,23 @@ class Api:
             ("POST", "/api/voice/learned"): self.learned,
             ("POST", "/api/voice/tune"): self.tune,
             ("POST", "/api/voice/check"): self.check,
+            ("GET", "/api/history"): self.history_page,
+            ("POST", "/api/history/list"): self.history_page,
+            ("POST", "/api/history/choice"): self.history_choice,
+            ("POST", "/api/history/days"): self.history_days,
+            ("POST", "/api/history/pause"): self.history_pause,
+            ("POST", "/api/history/delete"): self.history_delete,
+            ("POST", "/api/history/clear"): self.history_clear,
+            ("POST", "/api/history/fix"): self.history_fix,
+            ("GET", "/api/ask"): self.ask_page,
+            ("POST", "/api/ask/view"): self.ask_page,
+            ("POST", "/api/ask/question"): self.ask_question,
+            ("POST", "/api/ask/new"): self.ask_new,
+            ("POST", "/api/ask/continue"): self.ask_continue,
+            ("POST", "/api/ask/delete"): self.ask_delete,
+            ("POST", "/api/ask/note"): self.ask_note,
+            ("POST", "/api/ask/wrap"): self.ask_wrap,
+            ("POST", "/api/ask/say"): self.ask_say,
             ("GET", "/api/settings"): self.settings,
             ("POST", "/api/settings/mic"): self.set_mic,
             ("POST", "/api/settings/gesture"): self.set_gesture,
@@ -112,7 +258,7 @@ class Api:
             return 200, route(body)
         except ApiError as exc:
             return exc.status, {"error": str(exc)}
-        except Busy as exc:
+        except (Busy, TimeoutError) as exc:
             return 503, {"error": str(exc)}
         except Exception as exc:
             traceback.print_exc()
@@ -167,6 +313,11 @@ class Api:
                 "mic": getattr(getattr(s, "mic", None), "device_name", "") or "",
                 "cli": getattr(s, "provider", "") or "",
                 "lent": getattr(s, "mic_on_loan", "") or "",
+                "asking": bool(getattr(s, "asking", False)),
+                "conversation": str(getattr(s, "conversation", "") or ""),
+                # How many turns the live conversation has: the Conversations page
+                # re-reads when this moves, so a question asked from the pill shows up.
+                "exchanges": _size(getattr(s, "exchanges", ())),
             }
 
         data = self._call(read)
@@ -257,7 +408,14 @@ class Api:
             "workspace": live["workspace"],
             "cli": live["cli"],
             "shortcuts": self._shortcut_names(),
+            "history": self._history_state(),
         }
+
+    def _history_state(self) -> dict:
+        """What the other pages say about History: whether it keeps, and for how long."""
+        h = self._history()
+        return {"choice": h.choice, "keeping": h.keeping, "days": h.days,
+                "paused": h.paused}
 
     def _shortcut_names(self) -> dict:
         """The keys the Home page names for each side, as they registered here."""
@@ -269,6 +427,8 @@ class Api:
             "toggle": (getattr(hotkeys, "chosen", {}) or {}).get("toggle", "")
             if hotkeys is not None else "",
             "mode": (getattr(hotkeys, "chosen", {}) or {}).get("mode", "")
+            if hotkeys is not None else "",
+            "paste_last": (getattr(hotkeys, "chosen", {}) or {}).get("paste_last", "")
             if hotkeys is not None else "",
         }
 
@@ -629,6 +789,286 @@ class Api:
             raise ApiError(why)
         return self.voice_page({})
 
+    # -- History --------------------------------------------------------------
+
+    def _history(self):
+        history = getattr(self.session, "history", None)
+        return history if history is not None else NullHistory()
+
+    def history_page(self, body: dict) -> dict:
+        """What was handed over and set aside, newest first — when it is kept.
+
+        One read of every dictation entry, filtered here rather than on the writer: the
+        counts under the filter buttons and "today" both need the unfiltered list, and a
+        second trip through the writer's queue would be the same copy twice.
+        """
+        h = self._history()
+        kind = body.get("kind") if body.get("kind") in HISTORY_FILTERS else "all"
+        query = body.get("query") if isinstance(body.get("query"), str) else ""
+        query = " ".join(query.split())[:200]
+        now = time.time()
+        everything = h.entries(DICTATION) if h.choice == KEEP else []
+        wanted = HISTORY_FILTERS[kind]
+        shown = [e for e in everything if e["kind"] in wanted and matches(e, query)]
+        midnight = _midnight(now)
+        today = [e for e in everything if e["at"] >= midnight and e["kind"] in HANDED]
+        profile = self.profile
+        reading = stats.read(trace=self.home.trace_path, profile=profile.path) \
+            if profile is not None else stats.Reading()
+        hotkeys = self.home.hotkeys
+        return {
+            "profile": profile is not None,
+            "choice": h.choice,
+            "keeping": h.keeping,
+            "paused": h.paused,
+            "days": h.days,
+            "day_choices": list(HISTORY_DAYS),
+            "error": h.error,
+            "unreadable": h.unreadable,
+            "path": str(h.path) if h.path else "",
+            "kind": kind,
+            "query": query,
+            "counts": {k: sum(1 for e in everything if e["kind"] in kinds)
+                       for k, kinds in HISTORY_FILTERS.items()},
+            "entries": [_entry_view(e, now) for e in shown[:HISTORY_PAGE]],
+            "more": max(0, len(shown) - HISTORY_PAGE),
+            "today": {"words": reading.today.words, "pastes": len(today)},
+            "paste_last": ((getattr(hotkeys, "chosen", {}) or {}).get("paste_last", "")
+                           if hotkeys is not None else ""),
+            "lexicon": self._lexicon_path() is not None,
+        }
+
+    def _history_view(self, body: dict) -> dict:
+        """The page again, with the filter the request was made under."""
+        return self.history_page({"kind": body.get("kind"), "query": body.get("query")})
+
+    def history_choice(self, body: dict) -> dict:
+        """Keep, or stop keeping. Only ever from a press — nothing else sets this.
+
+        "Off" deletes what was kept, because "Don't keep it" is a promise about the
+        disk and not only about the future: a file of last month's words left behind
+        by somebody who chose off would be the opposite of what they chose. The page
+        asks before it sends this.
+        """
+        choice = body.get("choice")
+        if choice not in (KEEP, OFF):
+            raise ApiError("choose to keep history, or not")
+        profile = self._need_profile()
+        h = self._history()
+
+        def apply() -> bool:
+            profile.history = choice
+            return profile.save()
+
+        if not self._call(apply):
+            raise ApiError(f"could not save {profile.path}")
+        h.paused = False
+        if choice == OFF and not h.forget():
+            raise ApiError(h.error or "could not delete the history file")
+        return self.history_page({})
+
+    def history_days(self, body: dict) -> dict:
+        days = body.get("days")
+        if isinstance(days, bool) or days not in HISTORY_DAYS:
+            raise ApiError("keep history for 7, 30 or 90 days")
+        profile = self._need_profile()
+
+        def apply() -> bool:
+            profile.history_days = days
+            return profile.save()
+
+        if not self._call(apply):
+            raise ApiError(f"could not save {profile.path}")
+        return self._history_view(body)
+
+    def history_pause(self, body: dict) -> dict:
+        """Stop keeping until resumed or until Flow quits. The choice is untouched."""
+        self._history().paused = bool(body.get("paused"))
+        return self._history_view(body)
+
+    def history_delete(self, body: dict) -> dict:
+        entry_id = body.get("id")
+        if not isinstance(entry_id, str) or not self._history().remove(entry_id):
+            raise ApiError("that entry is already gone")
+        return self._history_view(body)
+
+    def history_clear(self, body: dict) -> dict:
+        """Every dictation entry. Conversations are the Conversations page's to delete."""
+        self._history().clear(DICTATION)
+        return self._history_view(body)
+
+    def history_fix(self, body: dict) -> dict:
+        """A word Flow got wrong in a kept entry: fixed in the entry, and — "Always fix
+        it" — added to the dictionary as a correction, so it stops coming out wrong.
+
+        The correction goes through `lexicon.append_pair`, the Voice page's own door, so
+        every rule that guards the file guards it here too; it is written before the
+        entry is changed, so a refused correction leaves the entry as it was.
+        """
+        h = self._history()
+        entry_id, wrong, right = body.get("id"), body.get("wrong"), body.get("right")
+        if not all(isinstance(v, str) for v in (entry_id, wrong, right)):
+            raise ApiError("say what Flow wrote, and what you said")
+        wrong, right = " ".join(wrong.split()), " ".join(right.split())
+        if not wrong or not right:
+            raise ApiError("say what Flow wrote, and what you said")
+        if wrong == right:
+            raise ApiError("those are the same words")
+        entry = h.get(entry_id)
+        if entry is None or entry["kind"] not in HANDED:
+            raise ApiError("that entry is gone", 404)
+        pattern = re.compile(r"(?<!\w)" + re.escape(wrong) + r"(?!\w)", re.IGNORECASE)
+        if not pattern.search(entry["text"]):
+            raise ApiError(f"“{wrong}” is not in this entry")
+        if body.get("always"):
+            from ..lexicon import append_pair
+
+            why = append_pair(self._writable_lexicon(), wrong, right)
+            if why:
+                raise ApiError(why)
+        # A function, not a string: `right` is the user's text, and a replacement
+        # string would read its backslashes as group references.
+        h.update(entry_id, text=pattern.sub(lambda _m: right, entry["text"]), fixed=True)
+        return self._history_view(body)
+
+    # -- Conversations ----------------------------------------------------------
+
+    def ask_page(self, body: dict) -> dict:
+        """The conversation on screen — always, from memory — and the kept ones.
+
+        `conv` names a kept conversation to show instead of the live one: read-only
+        until somebody carries it on (`ask_continue`), because asking into it means
+        making it the thread the pill asks into as well.
+        """
+        s = self.session
+        h = self._history()
+
+        def read() -> dict:
+            notes = getattr(s, "notes", None)
+            return {
+                "conv": getattr(s, "conversation", ""),
+                "exchanges": [dict(e) for e in getattr(s, "exchanges", [])],
+                "asking": bool(getattr(s, "asking", False)),
+                "workspace": getattr(s, "workspace", None),
+                "cli": getattr(s, "provider", "") or "",
+                "effort": getattr(s, "cli_effort", "") or "",
+                "model": getattr(s, "cli_model", "") or "",
+                "notes": len(notes) if notes is not None else 0,
+                "speaker": getattr(s, "speaker", None) is not None,
+                "mode": MODE_KEYS.get(getattr(s, "mode", DICTATE), "dictate"),
+            }
+
+        live = self._call(read)
+        now = time.time()
+        live["title"] = next((e["text"] for e in live["exchanges"] if e["kind"] == ASKED), "")
+        live["exchanges"] = [_entry_view(e, now) for e in live["exchanges"]]
+        live["workspace_leaf"] = _leaf(live["workspace"])
+        past = [c for c in h.conversations() if c["conv"] != live["conv"]]
+        viewing = None
+        conv = body.get("conv")
+        if isinstance(conv, str) and conv and conv != live["conv"]:
+            entries = h.conversation(conv)
+            if entries:
+                asked = [e for e in entries if e["kind"] == ASKED]
+                ws = next((e["ws"] for e in asked if e.get("ws")), "")
+                viewing = {"conv": conv, "title": asked[0]["text"] if asked else "",
+                           "ws": ws, "ws_leaf": _leaf(ws),
+                           "when": _when(entries[0]["at"], now),
+                           "exchanges": [_entry_view(e, now) for e in entries]}
+        return {
+            "current": live,
+            "past": [{"conv": c["conv"], "title": c["title"], "when": _when(c["last"], now),
+                      "ws": c["ws"], "ws_leaf": _leaf(c["ws"]), "asked": c["asked"]}
+                     for c in past],
+            "viewing": viewing,
+            "choice": h.choice,
+            "keeping": h.keeping,
+            "days": h.days,
+            "profile": self.profile is not None,
+        }
+
+    def ask_question(self, body: dict) -> dict:
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ApiError("type a question first")
+        if len(text) > MAX_QUESTION_CHARS:
+            raise ApiError(f"that is {len(text):,} characters - keep a question under "
+                           f"{MAX_QUESTION_CHARS:,}")
+        why = self._call(lambda: self.session.ask(text))
+        if why:
+            raise ApiError(why)
+        return self.ask_page({})
+
+    def ask_new(self, _body: dict) -> dict:
+        self._call(self.session.new_conversation)
+        return self.ask_page({})
+
+    def ask_continue(self, body: dict) -> dict:
+        conv = body.get("conv")
+        entries = self._history().conversation(conv) if isinstance(conv, str) else []
+        if not entries:
+            raise ApiError("that conversation is no longer kept", 404)
+        why = self._call(lambda: self.session.resume(conv, entries))
+        if why:
+            raise ApiError(why)
+        return self.ask_page({})
+
+    def ask_delete(self, body: dict) -> dict:
+        conv = body.get("conv")
+        if not isinstance(conv, str) or not conv:
+            raise ApiError("name the conversation to delete")
+        if conv == self._call(lambda: getattr(self.session, "conversation", "")):
+            raise ApiError("that is the conversation on screen - start a new one first")
+        if not self._history().remove_conversation(conv):
+            raise ApiError("that conversation is already gone")
+        return self.ask_page({})
+
+    def _answer(self, body: dict) -> tuple[str, str]:
+        """The answer `body` names and the question it answered, from the live
+        conversation or from the kept one the page is showing."""
+        entry_id, conv = body.get("id"), body.get("conv")
+        pool = self._call(lambda: [dict(e) for e in getattr(self.session, "exchanges", [])])
+        if not any(e["id"] == entry_id for e in pool) and isinstance(conv, str) and conv:
+            pool = self._history().conversation(conv)
+        for i, e in enumerate(pool):
+            if e["id"] == entry_id and e["kind"] == ANSWERED and e["text"]:
+                question = next((q["text"] for q in reversed(pool[:i])
+                                 if q["kind"] == ASKED), "")
+                return e["text"], question
+        raise ApiError("that answer is not here any more", 404)
+
+    def ask_note(self, body: dict) -> dict:
+        text, question = self._answer(body)
+        if not self._call(lambda: self.session.keep_note(text, question=question)):
+            raise ApiError("could not keep that note")
+        return self.ask_page({"conv": body.get("conv")})
+
+    def ask_wrap(self, body: dict) -> dict:
+        s = self.session
+        held = self._call(lambda: len(s.notes))
+        if not held:
+            raise ApiError("nothing kept yet - press Keep note under an answer first")
+        if not self._call(lambda: s.wrap_up(pill=False)):
+            raise ApiError("could not write the notes - they are still kept")
+        doc, path = self._call(lambda: (s.reply, getattr(s, "wrapped_to", "")))
+        page = self.ask_page({"conv": body.get("conv")})
+        page["wrapped"] = {"doc": doc, "path": path, "count": held}
+        return page
+
+    def ask_say(self, body: dict) -> dict:
+        """Read one answer aloud, on request — typed questions are not read on their
+        own. `stop` cuts whatever is being said short."""
+        s = self.session
+        if body.get("stop"):
+            self._call(s.stop_speaking)
+            return self.ask_page({"conv": body.get("conv")})
+        speaker = getattr(s, "speaker", None)
+        if speaker is None:
+            raise ApiError("no voice on this PC - answers are shown and not read")
+        text, _question = self._answer(body)
+        self._call(lambda: speaker.say(text))
+        return self.ask_page({"conv": body.get("conv")})
+
     # -- Settings -------------------------------------------------------------
 
     def settings(self, _body: dict) -> dict:
@@ -711,6 +1151,7 @@ class Api:
             "paths": paths,
             "profile": profile is not None,
             "version": version(),
+            "history": self._history_state(),
         }
 
     def set_mic(self, body: dict) -> dict:

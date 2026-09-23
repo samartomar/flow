@@ -158,6 +158,7 @@ def kernel_thread_id() -> int:
 VK_BACKSLASH, VK_SEMICOLON = 0xDC, 0xBA
 VK_M = 0x4D  # P9 mode toggle
 VK_Q = 0x51  # quit
+VK_V = 0x56  # paste last
 
 #: Ordered alternatives per action. ctrl+alt+space is first because it is the most
 #: natural, but it was already taken on the development machine, so toggle in
@@ -191,6 +192,16 @@ DEFAULT_BINDINGS: dict[str, list[tuple[int, int]]] = {
     "quit": [
         (MOD_CONTROL | MOD_ALT, VK_Q),
         (MOD_CONTROL | MOD_SHIFT, VK_Q),
+    ],
+    # Paste the last thing a Send handed over, again, into the window in front
+    # (decisions.md 2026-09-23, "History"). V, in the family the other five live in.
+    # The second alternative adds Shift rather than swapping Alt for it: ctrl+shift+V
+    # is "paste as plain text" in half the apps on the machine, and taking it globally
+    # would break a keystroke people use every hour to add one they use a few times a
+    # day. The first has a cost the guide names: Word and Excel's Paste Special.
+    "paste_last": [
+        (MOD_CONTROL | MOD_ALT, VK_V),
+        (MOD_CONTROL | MOD_ALT | MOD_SHIFT, VK_V),
     ],
 }
 

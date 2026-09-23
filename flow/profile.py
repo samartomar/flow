@@ -35,6 +35,9 @@ from pathlib import Path
 from typing import Sequence
 
 from . import edits
+from .history import CHOICES as HISTORY_CHOICES
+from .history import DAYS as HISTORY_DAYS
+from .history import DAYS_DEFAULT as HISTORY_DAYS_DEFAULT
 from .refine import EFFORT_DEFAULT, EFFORTS, MAX_TIMEOUT_SEC
 
 
@@ -491,6 +494,15 @@ class Profile:
         #: Whether the speech model loads at launch. `--no-warm` still turns it off for
         #: one launch; this is for the machine where paying the load at sign-in is wrong.
         self.warm: bool = True
+        #: Whether Flow keeps what was dictated and asked (`flow/history.py`,
+        #: decisions.md 2026-09-23, "History"): None until somebody chooses, then
+        #: "keep" or "off". None keeps nothing, and nothing in Flow ever sets this but
+        #: a person choosing it — which is why it is None rather than False: "never
+        #: asked" and "said no" are different facts, and the History page asks only
+        #: the first.
+        self.history: str | None = None
+        #: How long a kept entry lasts, in days: 7, 30 or 90.
+        self.history_days: int = HISTORY_DAYS_DEFAULT
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -598,6 +610,18 @@ class Profile:
             timeout = None
         self.cli_timeout = timeout
         self.warm = take("warm", _flag, True)
+        # A choice that is neither answer is no choice, and is named: reading a stray
+        # "yes" as "keep" would be Flow deciding to store somebody's words for them.
+        history = take("history", _text)
+        if history is not None and history not in HISTORY_CHOICES:
+            self.faults.append("history")
+            history = None
+        self.history = history
+        days = take("history_days", _count, HISTORY_DAYS_DEFAULT)
+        if days not in HISTORY_DAYS:
+            self.faults.append("history_days")
+            days = HISTORY_DAYS_DEFAULT
+        self.history_days = days
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
         # `stored=[]` because JSON has no set: `save` writes this one as a sorted list,
@@ -651,6 +675,9 @@ class Profile:
             "mic_device": self.mic_device,
             "cli_timeout": self.cli_timeout,
             "warm": self.warm,
+            "history": self.history if self.history in HISTORY_CHOICES else None,
+            "history_days": (self.history_days if self.history_days in HISTORY_DAYS
+                             else HISTORY_DAYS_DEFAULT),
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's

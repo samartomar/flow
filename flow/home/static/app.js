@@ -79,6 +79,15 @@
     refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v3.2h-3.2"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>',
+    pencil: '<path d="M4.5 19.5l1-4L15.8 5.2a2 2 0 0 1 2.8 0l.2.2a2 2 0 0 1 0 2.8L8.5 18.5z"/><path d="M13.5 7.5l3 3"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
+    pause: '<path d="M9 6v12M15 6v12"/>',
+    bookmark: '<path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4-6 4V5.5a1 1 0 0 1 1-1z"/>',
+    speaker: '<path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+    stop: '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
+    aside: '<path d="M4 6h16l-6 7.5V19l-4-2v-3.5z"/>',
+    send: '<path d="M4.5 12 20 4.5 13.5 20l-2-6.5z"/>',
   };
   const icon = (name, color = C.muted, size = 18, sw = 1.6) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
@@ -107,10 +116,10 @@
   const NAV = [
     { id: "home", label: "Home", icon: "home" },
     { group: "Dictate" },
-    { id: "history", label: "History", icon: "history", tint: C.type, soon: true },
+    { id: "history", label: "History", icon: "history", tint: C.type },
     { id: "voice", label: "Voice", icon: "wave", tint: C.type },
     { group: "Ask" },
-    { id: "ask", label: "Conversations", icon: "chat", tint: C.ask, soon: true },
+    { id: "ask", label: "Conversations", icon: "chat", tint: C.ask },
     { group: "Setup" },
     { id: "models", label: "Models", icon: "layers" },
     { id: "settings", label: "Settings", icon: "sliders" },
@@ -122,7 +131,7 @@
       if (n.group) return `<div class="label">${esc(n.group)}</div>`;
       const on = n.id === here;
       const tint = on ? (n.tint || C.text) : C.muted;
-      return `<a href="#/${n.id}" ${on ? 'aria-current="page"' : ""} title="${esc(n.label)}">${icon(n.icon, tint)}<span class="nav-text">${esc(n.label)}</span>${n.soon ? '<span class="soon">soon</span>' : ""}</a>`;
+      return `<a href="#/${n.id}" ${on ? 'aria-current="page"' : ""} title="${esc(n.label)}">${icon(n.icon, tint)}<span class="nav-text">${esc(n.label)}</span></a>`;
     }).join("");
   }
 
@@ -185,6 +194,7 @@
   function renderHome(d) {
     const s = d.stats || {};
     const sc = d.shortcuts || {};
+    const hist = d.history || {};
     const done = d.setup.filter((i) => i.done).length;
     const gesture = sc.gesture === "toggle" ? "press, talk, press again" : "hold, talk, let go";
     const askHow = sc.mode
@@ -207,6 +217,7 @@
           </div>
           <hr class="rule">
           <div class="row">${glyph(C.refine, 0.8)}<p class="note">Tap the pill to gold for <b class="warn">Refine</b>: shaped for your project before you send it.</p></div>
+          ${sc.paste_last ? `<div class="row">${icon("copy", C.soft, 15)}<p class="note grow">Pasted in the wrong window? <b>Paste last</b> puts it in the one in front.</p>${keys(sc.paste_last)}</div>` : ""}
         </section>
         <section class="card side-card">
           <div class="row"><span class="disc">${glyph(C.ask, 1.15)}</span><h2 class="grow">Ask</h2>${d.mode === "ask" ? '<span class="badge violet">the pill is on Ask</span>' : ""}</div>
@@ -229,7 +240,10 @@
         <section class="card">
           <div class="row"><h2 class="grow">This session</h2></div>
           <div class="col">${recent || '<p class="note">Nothing yet. What you say and ask shows up here.</p>'}</div>
-          <div class="row">${icon("lock", C.soft, 14)}<p class="fine">In memory only - gone when Flow quits. Nothing here is written to disk.</p></div>
+          <div class="row">${icon("lock", C.soft, 14)}<p class="fine">${hist.keeping
+            ? `In memory, and kept in <a href="#/history">History</a> for ${esc(hist.days)} days on this PC.`
+            : hist.choice === "off" ? "In memory only - gone when Flow quits. History is off, so nothing is written to disk."
+              : `In memory only - gone when Flow quits. <a href="#/history">History</a> can keep it, if you choose to.`}</p></div>
         </section>
       </div>`;
   }
@@ -421,6 +435,9 @@
             <div class="privacy">${icon("circlecheck", C.green, 18)}<div class="col"><b>Your voice never does</b><span class="note">Speech is recognised here. No account, no key.</span></div></div>
             <div class="privacy">${icon("terminal", C.blue, 18)}<div class="col"><b>Ask and Refine send text to your agent CLI</b><span class="note">The words, and the workspace path when one is set.</span></div></div>
             <div class="privacy">${icon("lock", C.soft, 18)}<div class="col"><b>The trace keeps timings and counts, never words</b><span class="note">Flow's own diagnostics, on this PC.</span></div></div>
+            <div class="privacy">${icon("history", d.history && d.history.keeping ? C.green : C.soft, 18)}<div class="col"><b>${d.history && d.history.keeping
+              ? `History keeps your words for ${esc(d.history.days)} days`
+              : d.history && d.history.choice === "off" ? "History is off: your words are not kept" : "History keeps nothing until you choose"}</b><span class="note">On this PC only. <a href="#/history">History</a> changes it.</span></div></div>
             <div class="row wrap"><button type="button" class="btn sm" data-act="open" data-what="settings">${icon("folder", C.text, 14)}Settings folder</button><button type="button" class="btn sm" data-act="open" data-what="trace">${icon("folder", C.text, 14)}Trace folder</button></div>
           </section>
         </div>
@@ -567,52 +584,248 @@
       </div>`;
   }
 
-  // ------------------------------------------------------------------ pages still to come
-  const SOON = {
-    history: {
-      title: "History", sub: "What you dictated, where it went, and anything Flow set aside.",
-      coming: ["Search everything you dictated and refined, kept on this PC for as long as you choose - or not at all.",
-        "Paste anything again, or copy it.", "Fix a word Flow got wrong, and have it stay fixed.",
-        "Get back words Flow set aside as noise."],
-      today: "Home lists what you said this session, in memory only.",
-    },
-    ask: {
-      title: "Conversations", sub: "Ask like ChatGPT, about your code or about anything.",
-      coming: ["Every conversation kept, grouped by workspace.", "Type or talk; answers with code blocks you can copy.",
-        "Carry on here from the pill, or send an answer back as your draft."],
-      today: "Switch the pill to Ask and hold to talk; the answer rises above the pill.",
-    },
-  };
-  function renderSoon(name) {
-    const s = SOON[name];
+  // ------------------------------------------------------------------ History
+  // What the page is filtered to, and the fix a person has open. Kept here rather than
+  // read back off the page, because the page is re-drawn under them every few seconds.
+  const historyView = { kind: "all", query: "" };
+  let fixing = null; // { id, wrong, right }
+
+  function keepChoice(d) {
+    const days = d.days || 30;
     return `
-      <div class="page-head"><div class="grow"><h1>${esc(s.title)}</h1><p class="sub">${esc(s.sub)}</p></div></div>
-      <section class="card soon-card">
-        <div class="row"><span class="badge">arrives next</span></div>
-        <ul>${s.coming.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
-        <hr class="rule">
-        <div class="row wrap"><p class="note grow">Until then: ${s.today}</p>${s.action || ""}</div>
+      <section class="card choose-history">
+        <h2>Keep a history?</h2>
+        <p class="note">Nothing is chosen for you, and until you choose, Flow keeps nothing. You can change it here at any time.</p>
+        <div class="choice-grid">
+          <button type="button" class="choice" data-act="history-keep" ${d.profile ? "" : "disabled"}>${icon("history", C.green, 20)}
+            <b>Keep what I dictate and ask for ${esc(days)} days</b>
+            <span class="note">On this PC only. Find it, copy it again, fix words Flow got wrong. Conversations are kept too, so you can carry them on.</span></button>
+          <button type="button" class="choice" data-act="history-decline" ${d.profile ? "" : "disabled"}>${icon("lock", C.soft, 20)}
+            <b>Don't keep it</b>
+            <span class="note">Flow keeps times and word counts, never the words. What you said this session stays on Home until Flow quits.</span></button>
+        </div>
+        ${d.profile ? `<p class="fine">Kept in <span class="mono">${esc(d.path)}</span>, a plain file you can open. Choosing "Don't keep it" later deletes it.</p>`
+          : '<p class="note warn">Flow was started with --no-profile, so there is nowhere to keep a history this launch.</p>'}
       </section>`;
   }
 
+  function entryMeta(e) {
+    if (e.kind === "set_aside") {
+      return `<span class="where">${icon("aside", C.amber, 14)}Set aside, not pasted</span>`;
+    }
+    const where = e.app ? `<span class="where">${icon("terminal", C.muted, 14)}${esc(e.app)}</span>` : "";
+    const parts = [];
+    if (e.kind === "refined") parts.push(`refined by ${esc(e.cli || "the CLI")}${e.secs != null ? ` in ${esc(e.secs)} s` : ""}`);
+    else if (e.words) parts.push(`${esc(e.words)} word${e.words === 1 ? "" : "s"}`);
+    const how = e.how === "not pasted" || e.how === "not copied"
+      ? `<span class="bad" title="${esc(e.note || "")}">${esc(e.how)}</span>` : esc(e.how || "");
+    if (how) parts.push(how);
+    return `${where}<span class="fine">${parts.join(" &middot; ")}</span>${e.fixed ? '<span class="badge">fixed here</span>' : ""}`;
+  }
+
+  function fixForm(e, lexicon) {
+    const f = fixing;
+    return `
+      <div class="fixer">
+        <label class="note" for="fix-was">Flow wrote</label><input id="fix-was" class="input mono" value="${esc(f.wrong)}" maxlength="40" aria-label="What Flow wrote" data-fix="wrong">
+        ${icon("arrow", C.soft, 14)}
+        <label class="note" for="fix-said">you said</label><input id="fix-said" class="input mono" value="${esc(f.right)}" maxlength="40" aria-label="What you said" data-fix="right">
+        <button type="button" class="btn sm" data-act="history-fix-here" data-id="${esc(e.id)}">Fix it here</button>
+        ${lexicon ? `<button type="button" class="btn sm primary" data-act="history-fix-always" data-id="${esc(e.id)}">${icon("check", "#15171C", 14)}Always fix it</button>` : ""}
+        <button type="button" class="btn ghost sm" data-act="history-fix-cancel">Cancel</button>
+        <p class="fine grow-line">${lexicon ? "Always fix it adds a correction to Voice, so it stops coming out wrong." : "The dictionary is off this launch, so the fix stays in this entry."}</p>
+      </div>`;
+  }
+
+  function historyEntry(e, lexicon) {
+    const acts = `
+      <button type="button" class="icon-btn" aria-label="Copy" title="Copy" data-act="history-copy" data-id="${esc(e.id)}">${icon("copy", C.soft, 15)}</button>
+      ${e.kind === "set_aside" ? "" : `<button type="button" class="icon-btn" aria-label="Fix a word" title="Fix a word Flow got wrong" data-act="history-fix" data-id="${esc(e.id)}">${icon("pencil", C.soft, 15)}</button>`}
+      <button type="button" class="icon-btn" aria-label="Delete" title="Delete" data-act="history-delete" data-id="${esc(e.id)}">${icon("x", C.soft, 14)}</button>`;
+    const body = e.kind === "refined" && e.heard
+      ? `<div class="was"><span class="label">heard</span><p>${esc(e.heard)}</p></div>
+         <div class="sent"><span class="label">sent</span><p class="body" data-text="${esc(e.id)}">${esc(e.text)}</p></div>`
+      : `<p class="body" data-text="${esc(e.id)}">${esc(e.text)}</p>`;
+    return `
+      <article class="entry ${e.kind === "set_aside" ? "aside" : ""}">
+        <div class="meta"><span class="time">${esc(e.time)}</span>${entryMeta(e)}<span class="acts">${acts}</span></div>
+        ${body}
+        ${e.kind === "set_aside" ? `<p class="fine">Sounded like ${esc(e.why || "noise")}. Flow sets aside what might be the room rather than your words, and keeps it here so you can have it back.</p>` : ""}
+        ${fixing && fixing.id === e.id ? fixForm(e, lexicon) : ""}
+      </article>`;
+  }
+
+  function renderHistory(d) {
+    const head = (actions) => `
+      <div class="page-head"><div class="grow"><h1>History</h1><p class="sub">What you dictated, where it went, and anything Flow set aside.</p></div>${actions || ""}</div>`;
+    if (d.choice === "") return head() + keepChoice(d);
+    if (d.choice === "off") {
+      return head() + `
+        <section class="card">
+          <div class="row">${icon("lock", C.soft, 18)}<h2 class="grow">History is off</h2><button type="button" class="btn" data-act="history-keep" ${d.profile ? "" : "disabled"}>Keep a history</button></div>
+          <p class="note">Flow keeps times and word counts, never the words. Today: ${Number(d.today.words || 0).toLocaleString()} words.</p>
+          <p class="fine">Home lists what you said this session, in memory only.</p>
+        </section>`;
+    }
+    const actions = `
+      <div class="row">
+        <select data-change="history-days" aria-label="How long history is kept">${d.day_choices.map((n) =>
+          `<option value="${n}" ${n === d.days ? "selected" : ""}>Keep ${n} days</option>`).join("")}</select>
+        <button type="button" class="btn" data-act="${d.paused ? "history-resume" : "history-pause"}">${icon(d.paused ? "play" : "pause", C.text, 14)}${d.paused ? "Resume" : "Pause"}</button>
+      </div>`;
+    const filters = [["all", "All"], ["dictated", "Dictated"], ["refined", "Refined"], ["set_aside", "Set aside"]];
+    let lastDay = "";
+    const list = d.entries.map((e) => {
+      const heading = e.day !== lastDay ? `<h3 class="day">${esc(e.day)}</h3>` : "";
+      lastDay = e.day;
+      return heading + historyEntry(e, d.lexicon);
+    }).join("");
+    const empty = d.query
+      ? `<p class="note">Nothing kept matches &ldquo;${esc(d.query)}&rdquo;.</p>`
+      : d.counts.all ? '<p class="note">Nothing of this kind is kept yet.</p>'
+        : '<p class="note">Nothing kept yet. Dictate something, and it shows up here the moment it is pasted.</p>';
+    return head(actions) + `
+      ${d.paused ? `<section class="card tight banner"><div class="row">${icon("pause", C.amber, 16)}<p class="note grow">Paused: nothing you say is kept until you resume, or until Flow restarts.</p><button type="button" class="btn sm" data-act="history-resume">Resume</button></div></section>` : ""}
+      ${d.error ? `<section class="card tight banner bad"><div class="row">${icon("warn", C.red, 16)}<p class="note grow">${esc(d.error)}</p></div></section>` : ""}
+      <div class="toolbar">
+        <label class="search">${icon("search", C.soft, 16)}<input id="history-q" type="search" value="${esc(historyView.query)}" placeholder="Search what you said" aria-label="Search history"></label>
+        <div class="seg" role="group" aria-label="Show">${filters.map(([k, t]) =>
+          `<button type="button" aria-pressed="${d.kind === k ? "true" : "false"}" data-act="history-kind" data-value="${k}">${t}<span class="count">${esc(d.counts[k] || 0)}</span></button>`).join("")}</div>
+        <span class="note grow right">Today: ${Number(d.today.words || 0).toLocaleString()} words, ${esc(d.today.pastes)} ${d.today.pastes === 1 ? "paste" : "pastes"}</span>
+      </div>
+      <div class="entries">${list || empty}</div>
+      ${d.more ? `<p class="note">${esc(d.more)} older ${d.more === 1 ? "entry is" : "entries are"} not shown - search to find ${d.more === 1 ? "it" : "them"}.</p>` : ""}
+      <hr class="rule">
+      <div class="row wrap">${icon("lock", C.soft, 14)}<p class="fine grow">Stored only on this PC, in <span class="mono">${esc(d.path)}</span>, and deleted after ${esc(d.days)} days.${d.paste_last ? ` Paste last (${esc(d.paste_last)}) pastes the newest one again.` : ""}</p>
+        <button type="button" class="btn ghost sm" data-act="history-clear" ${d.counts.all ? "" : "disabled"}>Clear dictation history</button>
+        <button type="button" class="btn ghost sm danger" data-act="history-off">Stop keeping</button></div>`;
+  }
+
+  // ------------------------------------------------------------------ Conversations
+  // Which kept conversation is open instead of the live one ("" for the live one), and
+  // the question being typed — held here so a re-draw never takes it from under a hand.
+  const askView = { conv: "" };
+  let askDraft = "";
+  let wrapped = null;
+
+  // An answer's text as a page: fenced code as code, `inline code` and **bold** in the
+  // prose, everything escaped first so nothing in an answer can become markup.
+  function rich(text) {
+    const inline = (t) => esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+    return String(text).split("```").map((part, i) => {
+      if (i % 2 === 1) {
+        const nl = part.indexOf("\n");
+        const lang = nl > 0 ? part.slice(0, nl).trim() : "";
+        const code = (nl >= 0 ? part.slice(nl + 1) : part).replace(/\n$/, "");
+        return `<pre class="code">${lang && lang.length < 20 ? `<span class="lang">${esc(lang)}</span>` : ""}<code>${esc(code)}</code></pre>`;
+      }
+      const prose = part.replace(/^\n+|\n+$/g, "");
+      return prose ? `<div class="prose">${inline(prose)}</div>` : "";
+    }).join("");
+  }
+
+  function turn(e, live, cli) {
+    if (e.kind === "asked") {
+      return `<div class="turn you"><span class="who">${icon(e.via === "typed" ? "pencil" : "mic", C.soft, 13)}you ${e.via === "typed" ? "typed" : "said"} &middot; ${esc(e.time)}</span><p class="said">${esc(e.text)}</p></div>`;
+    }
+    if (e.failed) {
+      return `<div class="turn cli"><div class="answer failed"><span class="who">${icon("warn", C.red, 13)}no answer</span><p class="note">${esc(e.failed)}</p></div></div>`;
+    }
+    const conv = live ? "" : askView.conv;
+    return `
+      <div class="turn cli"><div class="answer">
+        <span class="who">${glyph(C.ask, 0.62)}${esc(e.cli || cli || "the CLI")}${e.secs != null ? ` &middot; ${esc(e.secs)} s` : ""}</span>
+        ${rich(e.text)}
+        <div class="row wrap acts">
+          <button type="button" class="btn ghost sm" data-act="answer-copy" data-id="${esc(e.id)}">${icon("copy", C.muted, 14)}Copy</button>
+          <button type="button" class="btn ghost sm" data-act="answer-note" data-id="${esc(e.id)}" data-conv="${esc(conv)}">${icon("bookmark", C.muted, 14)}Keep note</button>
+          <button type="button" class="btn ghost sm" data-act="answer-say" data-id="${esc(e.id)}" data-conv="${esc(conv)}">${icon("speaker", C.muted, 14)}Read aloud</button>
+        </div>
+      </div></div>`;
+  }
+
+  function convoList(d) {
+    const cur = d.current;
+    const now = `
+      <button type="button" class="item" data-act="conv-open" data-conv="" aria-current="${askView.conv ? "false" : "true"}">
+        <span class="t">${esc(cur.title || "New conversation")}</span>
+        <span class="w">${cur.asking ? "asking now" : cur.exchanges.length ? "now" : "nothing asked yet"}</span></button>`;
+    const groups = {};
+    d.past.forEach((c) => { (groups[c.ws_leaf || ""] = groups[c.ws_leaf || ""] || []).push(c); });
+    const past = Object.entries(groups).map(([leaf, items]) => `
+      <div class="label group">${icon(leaf ? "folder" : "chat", C.soft, 13)}${esc(leaf || "No workspace")}</div>
+      ${items.map((c) => `<button type="button" class="item" data-act="conv-open" data-conv="${esc(c.conv)}" aria-current="${askView.conv === c.conv ? "true" : "false"}">
+        <span class="t">${esc(c.title || "(no question)")}</span><span class="w">${esc(c.when)}</span></button>`).join("")}`).join("");
+    const kept = d.keeping ? (past || '<p class="fine pad">Earlier conversations show up here.</p>')
+      : `<p class="fine pad">${d.choice === "off" ? "History is off, so a conversation lasts until Flow quits." : "Conversations last until Flow quits."} <a href="#/history">${d.choice === "off" ? "Turn history on" : "Keep a history"}</a> to find them later.</p>`;
+    return `<aside class="convo-list" aria-label="Conversations">${now}${kept}</aside>`;
+  }
+
+  function renderAsk(d) {
+    const cur = d.current;
+    const v = d.viewing;
+    const shown = v || cur;
+    const ws = v ? v.ws : cur.workspace;
+    const context = `
+      <div class="row wrap context">${icon("folder", ws ? C.green : C.soft, 15)}<span class="mono ellipsis">${esc(ws || "no workspace - answers are about anything")}</span>
+        ${v ? "" : `<span class="fine">&middot; ${esc(cur.cli || "no agent CLI")}${cur.effort ? ` &middot; ${esc(cur.effort)} effort` : ""}</span>`}
+        ${!v && cur.notes ? `<span class="badge violet">${icon("bookmark", C.ask, 12)}${cur.notes} note${cur.notes === 1 ? "" : "s"} kept</span>
+          <button type="button" class="btn sm" data-act="ask-wrap" title="${cur.workspace ? "Writes them to flow-notes in the workspace" : "No workspace: the notes stay on screen"}">Wrap up</button>` : ""}</div>`;
+    const turns = shown.exchanges.map((e) => turn(e, !v, cur.cli)).join("");
+    const waiting = !v && cur.asking ? `
+      <div class="turn cli"><div class="answer pending"><span class="who">${glyph(C.ask, 0.62)}${esc(cur.cli || "the CLI")}</span>
+        <div class="thinking"><span class="dot blue"></span>thinking<span class="fine" id="ask-elapsed"></span></div></div></div>` : "";
+    const empty = !shown.exchanges.length ? `
+      <div class="empty-ask">${glyph(C.ask, 1.6)}<p class="note">Ask anything, like ChatGPT. ${cur.workspace ? `Answers know the code in <span class="mono">${esc(cur.workspace_leaf)}</span>.` : "Set a workspace on Settings and answers know your code."}</p></div>` : "";
+    const composer = v ? `
+      <section class="card tight banner violet"><div class="row wrap">${icon("history", C.ask, 16)}<p class="note grow">From ${esc(v.when)}. Carrying it on makes it the conversation the pill asks into too${cur.workspace !== v.ws ? `, grounded in ${esc(cur.workspace_leaf || "no workspace")}` : ""}.</p>
+        <button type="button" class="btn violet sm" data-act="conv-continue" data-conv="${esc(v.conv)}">Carry on this conversation</button>
+        <button type="button" class="btn ghost sm danger" data-act="conv-delete" data-conv="${esc(v.conv)}">Delete</button></div></section>`
+      : `
+      <div class="composer">
+        <textarea id="ask-text" rows="3" placeholder="${shown.exchanges.length ? "Ask a follow-up" : "Ask anything"}" aria-label="Your question" ${cur.cli ? "" : "disabled"}>${esc(askDraft)}</textarea>
+        <div class="row wrap"><span class="fine grow">Enter asks, Shift+Enter starts a new line. Or hold the talk keys and dictate into the box.</span>
+          <button type="button" class="btn violet" data-act="ask" ${cur.cli && !cur.asking ? "" : "disabled"}>${icon("send", C.ask, 15)}Ask</button></div>
+      </div>
+      <div class="row">${icon("shield", C.soft, 14)}<p class="fine">${cur.cli ? `Your question${cur.workspace ? ` and the path <span class="mono">${esc(cur.workspace)}</span> go` : " goes"} to ${esc(cur.cli)}. Audio never leaves this PC.` : "No agent CLI found. Install claude or codex and sign in to it to ask."}</p></div>`;
+    const wrap = wrapped ? `
+      <section class="card">
+        <div class="row">${icon("bookmark", C.ask, 16)}<h2 class="grow">Wrapped up ${esc(wrapped.count)} note${wrapped.count === 1 ? "" : "s"}</h2>
+          <button type="button" class="btn sm" data-act="wrapped-copy">${icon("copy", C.text, 14)}Copy</button><button type="button" class="icon-btn" aria-label="Close" data-act="wrapped-close">${icon("x", C.soft, 14)}</button></div>
+        <p class="note">${wrapped.path ? `Written to <span class="mono">${esc(wrapped.path)}</span>.` : "No workspace is set, so they stay here: copy them."}</p>
+        <pre class="code doc"><code>${esc(wrapped.doc)}</code></pre>
+      </section>` : "";
+    return `
+      <div class="page-head"><div class="grow"><h1>Conversations</h1><p class="sub">Ask like ChatGPT, about your code or about anything. Type here, or talk to the pill.</p></div>
+        <button type="button" class="btn" data-act="ask-new">${icon("plus", C.text, 15)}New conversation</button></div>
+      <div class="convo">
+        ${convoList(d)}
+        <section class="thread">
+          <div class="col"><h2 class="ellipsis">${esc(shown.title || "New conversation")}</h2>${context}</div>
+          ${wrap}${empty}${turns}${waiting}${composer}
+        </section>
+      </div>`;
+  }
+
   // ------------------------------------------------------------------ showing a page
-  const LOAD = { home: "home", models: "models", settings: "settings", voice: "voice" };
-  const DRAW = { home: renderHome, models: renderModels, settings: renderSettings, voice: renderVoice };
+  const LOAD = { home: "home", history: "history", voice: "voice", ask: "ask", models: "models", settings: "settings" };
+  const DRAW = { home: renderHome, history: renderHistory, voice: renderVoice, ask: renderAsk, models: renderModels, settings: renderSettings };
   let data = null;
   let shown = "";
+
+  // A page's data as its view stands: History under its filter, Conversations on the
+  // kept conversation that is open.
+  function fetchPage(name) {
+    if (name === "history") return api("history/list", { kind: historyView.kind, query: historyView.query });
+    if (name === "ask" && askView.conv) return api("ask/view", { conv: askView.conv });
+    return api(LOAD[name]);
+  }
 
   async function show(force = false) {
     const name = current();
     renderNav();
-    const pageEl = document.getElementById("page");
-    if (!LOAD[name]) {
-      data = null;
-      shown = name;
-      pageEl.innerHTML = renderSoon(name);
-      return;
-    }
     try {
-      const fresh = await api(LOAD[name]);
+      const fresh = await fetchPage(name);
       if (current() !== name) return;
       data = fresh;
       draw(name, force || shown !== name);
@@ -628,29 +841,58 @@
     if (!el || el === document.body) return "";
     if (el.id) return `#${CSS.escape(el.id)}`;
     const attrs = ["act", "change", "value", "name", "action", "what", "path", "exe", "hotkey",
-      "term", "wrong", "right"]
+      "term", "wrong", "right", "id", "conv"]
       .filter((k) => el.dataset && el.dataset[k] !== undefined)
       .map((k) => `[data-${k}="${CSS.escape(el.dataset[k])}"]`);
     return attrs.length ? attrs.join("") : "";
   }
 
+  // The fields a re-draw may happen under: their words live in this script, not in the
+  // page, so an answer arriving while somebody types the next question lands without
+  // taking the question away.
+  const HELD = new Set(["ask-text", "history-q", "fix-was", "fix-said"]);
+
   // A poll never re-draws under somebody typing; an action they took always re-draws.
   function draw(name, fresh, force = false) {
     const pageEl = document.getElementById("page");
     const active = document.activeElement;
-    const typing = active && pageEl.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName);
-    if (typing && !fresh && !force) return;
+    const typing = active && pageEl.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)
+      && !HELD.has(active.id);
+    // Nor under somebody selecting words: a poll that re-draws takes the selection with
+    // it, and a selection is how a word to fix or to copy gets picked.
+    const sel = window.getSelection ? window.getSelection() : null;
+    const selecting = sel && !sel.isCollapsed && sel.anchorNode && pageEl.contains(sel.anchorNode);
+    if ((typing || selecting) && !fresh && !force) return;
     const key = pageEl.contains(active) ? focusKey(active) : "";
+    const caret = active && HELD.has(active.id) ? [active.selectionStart, active.selectionEnd] : null;
     const top = pageEl.scrollTop;
+    const bottom = pageEl.scrollHeight - pageEl.clientHeight - top < 40;
     pageEl.innerHTML = DRAW[name](data);
     sizes(pageEl);
-    pageEl.scrollTop = fresh ? 0 : top;
-    if (fresh) {
+    // A conversation reads downward: a page that was at its end stays at its end when an
+    // answer lands, so the answer is what is on screen.
+    pageEl.scrollTop = fresh ? (name === "ask" ? pageEl.scrollHeight : 0)
+      : name === "ask" && bottom ? pageEl.scrollHeight : top;
+    if (fresh && name !== "ask") {
       pageEl.focus({ preventScroll: true });
     } else if (key) {
       const again = pageEl.querySelector(key);
-      if (again) again.focus({ preventScroll: true });
+      if (again) {
+        again.focus({ preventScroll: true });
+        if (caret && typeof again.setSelectionRange === "function") {
+          try { again.setSelectionRange(caret[0], caret[1]); } catch (_) { /* not a text field */ }
+        }
+      }
     }
+    elapsed();
+  }
+
+  // The seconds an answer has been coming, beside "thinking".
+  function elapsed() {
+    const el = document.getElementById("ask-elapsed");
+    if (!el || !data || !data.current) return;
+    const asked = [...data.current.exchanges].reverse().find((e) => e.kind === "asked");
+    if (asked && asked.at) el.textContent = ` ${Math.max(0, Math.round(Date.now() / 1000 - asked.at))} s`;
   }
 
   function redrawWith(payload) {
@@ -665,6 +907,67 @@
       const out = await fn();
       if (out && typeof out === "object" && !Array.isArray(out) && LOAD[current()]) redrawWith(out);
       if (done) toast(done);
+    } catch (e) {
+      if (e instanceof Gone) gone(e.message); else toast(e.message, true);
+    }
+  }
+  const redraw = () => { if (data) draw(current(), false, true); };
+  const refresh = () => run(() => fetchPage(current()));
+
+  // The clipboard, from the page: a loopback origin is a secure context, and every call
+  // here follows a click, which is the permission the browser asks for.
+  async function copy(text, said = "Copied") {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(said);
+    } catch (_) {
+      toast("Could not copy - select the text and press Ctrl+C", true);
+    }
+  }
+
+  function findEntry(id) {
+    if (!data) return null;
+    const pool = data.entries || [].concat((data.current && data.current.exchanges) || [],
+      (data.viewing && data.viewing.exchanges) || []);
+    return pool.find((e) => e.id === id) || null;
+  }
+
+  // The words last selected inside an entry, so "Fix a word" can start from them. Kept
+  // on every change rather than read at the click, because the click itself can collapse
+  // the selection before the handler runs.
+  let lastPick = { id: "", text: "" };
+  document.addEventListener("selectionchange", () => {
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().trim() : "";
+    if (!text) return;
+    const node = sel.anchorNode;
+    const host = node && (node.nodeType === 1 ? node : node.parentElement);
+    const el = host && host.closest ? host.closest("[data-text]") : null;
+    lastPick = el && text.length <= 40 ? { id: el.dataset.text, text } : { id: "", text: "" };
+  });
+
+  function fixEntry(id, always) {
+    const wrong = ((fixing && fixing.wrong) || "").trim();
+    const right = ((fixing && fixing.right) || "").trim();
+    if (!wrong || !right) { toast("Say what Flow wrote, and what you said", true); return; }
+    run(async () => {
+      const out = await api("history/fix", { id, wrong, right, always, ...historyView });
+      fixing = null;
+      return out;
+    }, always ? `${wrong} becomes ${right} from now on` : "Fixed in this entry");
+  }
+
+  async function sendQuestion() {
+    const text = askDraft.trim();
+    if (!text) return;
+    try {
+      const out = await api("ask/question", { text });
+      askDraft = "";
+      askView.conv = "";
+      data = out;
+      draw("ask", false, true);
+      const box = document.getElementById("ask-text");
+      if (box) box.focus({ preventScroll: true });
     } catch (e) {
       if (e instanceof Gone) gone(e.message); else toast(e.message, true);
     }
@@ -693,6 +996,58 @@
     "check-record": () => run(() => api("voice/check", { action: "record" })),
     "check-stop": () => run(() => api("voice/check", { action: "stop" })),
     "check-cancel": () => run(() => api("voice/check", { action: "cancel" })),
+    "history-keep": () => run(() => api("history/choice", { choice: "keep" }), "History is on, on this PC only"),
+    "history-decline": () => run(() => api("history/choice", { choice: "off" }), "Nothing you say will be kept"),
+    "history-off": () => {
+      if (!confirm("Stop keeping history? This deletes everything kept so far - dictation and conversations.")) return;
+      run(() => api("history/choice", { choice: "off" }), "History is off, and what was kept is deleted");
+    },
+    "history-kind": (el) => { historyView.kind = el.dataset.value; fixing = null; refresh(); },
+    "history-pause": () => run(() => api("history/pause", { paused: true, ...historyView }), "Paused - nothing is kept until you resume"),
+    "history-resume": () => run(() => api("history/pause", { paused: false, ...historyView }), "Keeping again"),
+    "history-copy": (el) => { const e = findEntry(el.dataset.id); if (e) copy(e.text); },
+    "history-fix": (el) => {
+      const id = el.dataset.id;
+      fixing = { id, wrong: lastPick.id === id ? lastPick.text : "", right: "" };
+      lastPick = { id: "", text: "" };
+      redraw();
+      const field = document.getElementById(fixing.wrong ? "fix-said" : "fix-was");
+      if (field) field.focus();
+    },
+    "history-fix-cancel": () => { fixing = null; redraw(); },
+    "history-fix-here": (el) => fixEntry(el.dataset.id, false),
+    "history-fix-always": (el) => fixEntry(el.dataset.id, true),
+    "history-delete": (el) => run(() => api("history/delete", { id: el.dataset.id, ...historyView }), "Deleted"),
+    "history-clear": () => {
+      if (!confirm("Delete every dictation entry kept so far? Conversations stay.")) return;
+      run(() => api("history/clear", historyView), "Cleared");
+    },
+    ask: () => sendQuestion(),
+    "ask-new": () => { askView.conv = ""; wrapped = null; run(() => api("ask/new", {})); },
+    "conv-open": (el) => { askView.conv = el.dataset.conv || ""; wrapped = null; show(true); },
+    "conv-continue": (el) => run(async () => {
+      const out = await api("ask/continue", { conv: el.dataset.conv });
+      askView.conv = "";
+      return out;
+    }, "Carried on - ask the next question here or on the pill"),
+    "conv-delete": (el) => {
+      if (!confirm("Delete this conversation from History?")) return;
+      run(async () => {
+        const out = await api("ask/delete", { conv: el.dataset.conv });
+        askView.conv = "";
+        return out;
+      }, "Deleted");
+    },
+    "answer-copy": (el) => { const e = findEntry(el.dataset.id); if (e) copy(e.text); },
+    "answer-note": (el) => run(() => api("ask/note", { id: el.dataset.id, conv: el.dataset.conv }), "Kept as a note - Wrap up puts them in one file"),
+    "answer-say": (el) => run(() => api("ask/say", { id: el.dataset.id, conv: el.dataset.conv })),
+    "ask-wrap": () => run(async () => {
+      const out = await api("ask/wrap", { conv: askView.conv });
+      wrapped = out.wrapped || null;
+      return out;
+    }),
+    "wrapped-copy": () => { if (wrapped) copy(wrapped.doc); },
+    "wrapped-close": () => { wrapped = null; redraw(); },
     "dict-add": (el) => run(() => api("voice/word", { term: el.dataset.term }), `Flow listens for ${el.dataset.term} now`),
     "word-add": () => {
       const term = (value("word-new") || "").trim();
@@ -747,7 +1102,22 @@
     ws: (el) => run(() => api("settings/workspace", { path: el.value || null }), "Workspace changed"),
     panel: (el) => run(() => api("settings/classic", { panel: el.value }), "Saved"),
     place: (el) => run(() => api("settings/classic", { place: el.value }), "Saved"),
+    "history-days": (el) => run(() => api("history/days", { days: Number(el.value), ...historyView }), `Kept for ${el.value} days`),
   };
+
+  // Words being typed into a field a re-draw can happen under are kept here as they
+  // are typed, and the search asks again a moment after the typing stops.
+  let searchTimer = 0;
+  document.addEventListener("input", (ev) => {
+    const el = ev.target;
+    if (el.id === "ask-text") askDraft = el.value;
+    else if (el.dataset && el.dataset.fix && fixing) fixing[el.dataset.fix] = el.value;
+    else if (el.id === "history-q") {
+      historyView.query = el.value;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(refresh, 250);
+    }
+  });
 
   document.addEventListener("click", (ev) => {
     const el = ev.target.closest("[data-act]");
@@ -764,6 +1134,17 @@
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter" && ev.keyCode !== 13) return;
     const el = ev.target;
+    if (el.id === "ask-text") {
+      // Enter asks; Shift+Enter is a new line, and an IME still composing owns the key.
+      if (!ev.shiftKey && !ev.isComposing) { ev.preventDefault(); sendQuestion(); }
+      return;
+    }
+    if (el.id === "fix-was" || el.id === "fix-said") {
+      ev.preventDefault();
+      const b = document.querySelector('[data-act="history-fix-always"]') || document.querySelector('[data-act="history-fix-here"]');
+      if (b) ACT[b.dataset.act](b);
+      return;
+    }
     if (el.id === "ws-path") ACT["ws-add-path"]();
     else if (el.id === "cli-model") ACT["cli-model"]();
     else if (el.id === "chord-keys") ACT.chord();
@@ -787,10 +1168,16 @@
       const moving = name === "models" && data && data.speech
         && (data.speech.loading || data.speech.models.some((m) => m.download && m.download.state === "running"));
       const listening = voiceBusy(name);
-      if (moving || listening || (name === "home" && polls % 5 === 0)) {
-        const fresh = await api(LOAD[name]);
+      // Conversations re-reads when the live conversation moved under it: an answer on
+      // its way, a question asked from the pill, a new conversation started there.
+      const cur = name === "ask" && data && data.current;
+      const talked = cur && (live.asking || cur.asking || live.conversation !== cur.conv
+        || live.exchanges !== cur.exchanges.length);
+      if (moving || listening || talked || ((name === "home" || name === "history") && polls % 5 === 0)) {
+        const fresh = await fetchPage(name);
         if (current() === name) { data = fresh; draw(name, false); }
       }
+      if (name === "ask") elapsed();
     } catch (e) {
       if (e instanceof Gone) { gone(e.message); return; }
     }

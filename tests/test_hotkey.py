@@ -381,9 +381,10 @@ class TestWhatRegisteredIsWhatIsReported(Registered):
         self.assertEqual(len(keys.ignored), 1)
         self.assertEqual(keys.chosen["toggle"], "ctrl+alt+space")
 
-    def test_all_five_actions_still_register_with_nothing_overridden(self):
+    def test_all_six_actions_still_register_with_nothing_overridden(self):
         keys, _fake = self.register()
-        self.assertEqual(list(keys.chosen), ["toggle", "send", "cancel", "mode", "quit"])
+        self.assertEqual(list(keys.chosen),
+                         ["toggle", "send", "cancel", "mode", "quit", "paste_last"])
         self.assertEqual(keys.failed, [])
         self.assertEqual(keys.ignored, [])
 
@@ -503,7 +504,7 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
 
     def test_a_launch_with_no_hotkeys_block_prints_only_what_registered(self):
         lines = self.hotkey_lines({})
-        self.assertEqual(len(lines), 5)
+        self.assertEqual(len(lines), 6)
         self.assertNotIn("ignored", " ".join(lines))
 
     def test_a_block_typed_by_hand_survives_the_whole_way_to_registration(self):

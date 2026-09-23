@@ -627,6 +627,21 @@ def main(argv: list[str] | None = None) -> int:
     # telemetry is for them to find it by accident.
     say(f"trace: {diag.path} (timings and state only, no words; --no-profile to disable)"
         if diag is not None else "trace: off")
+    # History (decisions.md 2026-09-23, "History"): built whenever there is a profile
+    # to hold the choice, and keeping nothing until somebody makes it. Said out loud for
+    # the trace's reason, with more force — this file, when it exists, holds the words.
+    history = None
+    if profile is not None:
+        from .history import KEEP, OFF, History
+
+        history = History(profile.path.parent / "history.jsonl", profile)
+        if history.choice == KEEP:
+            say(f"history: {history.path} (what you dictate and ask, kept "
+                f"{history.days} days; Flow Home > History)")
+        elif history.choice == OFF:
+            say("history: off - nothing you say is kept")
+        else:
+            say("history: not kept - Flow Home > History asks whether to keep it")
 
     lexicon = Lexicon(
         NUL_PATH if args.no_lexicon else args.lexicon, learned=learned
@@ -736,6 +751,7 @@ def main(argv: list[str] | None = None) -> int:
         cli_timeout=cli_timeout,
         refine_cwd=workspace,
         lite=lite,
+        history=history,
     )
     if args.device is None and mic_index is not None and profile is not None:
         # Found by name at launch, so found by name again after a device change.
@@ -1059,6 +1075,10 @@ def main(argv: list[str] | None = None) -> int:
         # The port closes with the process either way; this is so a Home window left
         # open says "Flow has quit" at its next poll instead of waiting on a socket.
         home.close()
+        # The last Send's entry is on a queue until the writer takes it, and the writer
+        # is a daemon: without this, a quit right after a paste could lose that paste.
+        if history is not None:
+            history.flush()
 
 
 if __name__ == "__main__":

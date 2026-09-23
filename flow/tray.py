@@ -40,6 +40,8 @@ SHOW = "show"
 QUIT = "quit"
 #: Open Flow Home — the window for everything that is not talking.
 HOME = "home"
+#: Paste the last thing a Send handed over, again (decisions.md 2026-09-23, "History").
+PASTE_LAST = "paste_last"
 
 #: The message the shell sends us for every click on the icon. `WM_APP` and above are
 #: reserved for an application's own use, which is exactly what this is.
@@ -50,6 +52,7 @@ _WM_TRAY = _WM_APP + 1
 _ID_SHOW = 1
 _ID_QUIT = 2
 _ID_HOME = 3
+_ID_PASTE_LAST = 4
 
 _WM_DESTROY = 0x0002
 _WM_RBUTTONUP = 0x0205
@@ -296,7 +299,8 @@ class Tray:
             wintypes.WPARAM(wparam), wintypes.LPARAM(lparam))
 
     def _popup(self) -> None:
-        """The right-click menu: Flow Home, and the two things a hidden app has to offer.
+        """The right-click menu: Flow Home, Paste last, and the two things a hidden app
+        has to offer.
 
         `SetForegroundWindow` first, and the `PostMessage` after, are both from the
         documented recipe: a popup owned by a window that is not foreground never
@@ -309,6 +313,7 @@ class Tray:
             return
         try:
             user32.AppendMenuW(menu, _MF_STRING, _ID_HOME, "Open Flow")
+            user32.AppendMenuW(menu, _MF_STRING, _ID_PASTE_LAST, "Paste last")
             user32.AppendMenuW(menu, _MF_STRING, _ID_SHOW, "Show the pill")
             user32.AppendMenuW(menu, _MF_STRING, _ID_QUIT, "Quit Flow")
             point = wintypes.POINT()
@@ -331,6 +336,8 @@ class Tray:
             self.events.put(QUIT)
         elif chosen == _ID_HOME:
             self.events.put(HOME)
+        elif chosen == _ID_PASTE_LAST:
+            self.events.put(PASTE_LAST)
 
 
 def _shell():

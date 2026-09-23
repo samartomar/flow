@@ -2419,6 +2419,29 @@ def _copy_to_clipboard(widget, text: str) -> str:
     return ""
 
 
+#: How long Paste last waits for the keys that asked for it to come up. A hand leaves a
+#: shortcut in a few hundred milliseconds; three seconds is somebody still holding on,
+#: and pasting through a held Alt is the one outcome worse than not pasting.
+PASTE_LAST_WAIT_SEC = 3.0
+
+#: Shift, Ctrl, Alt and both Windows keys: what a shortcut is held with.
+_MODIFIER_VKS = (0x10, 0x11, 0x12, 0x5B, 0x5C)
+
+
+def modifiers_held() -> bool:
+    """True while a modifier key is physically down. False where there are no hands.
+
+    Paste last is a shortcut, and `RegisterHotKey` fires on the key going *down* — with
+    Ctrl and Alt still held. A Ctrl-V sent then arrives as Ctrl-Alt-V, which Word and
+    Excel read as Paste Special and many keyboard layouts read as AltGr-V, so the paste
+    waits for the hand to come off the keys.
+    """
+    try:
+        return any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MODIFIER_VKS)
+    except Exception:
+        return False
+
+
 def _dark_menu(master, **kw) -> tk.Menu:
     """Every `tk.Menu` in this app, styled once rather than at each of the dozen call
     sites that build one.
@@ -2464,6 +2487,10 @@ class Pill(tk.Tk):
     #: reason `lite` is: a fixture built with `__new__` must not recurse into `self.tk`.
     _hidden = False
     _tray = None
+    #: A Paste last waiting to happen, (text, since, restore), or None — see
+    #: `_paste_last`. Class-level for `lite`'s reason: the frame's pump reads it on
+    #: fixtures built with `__new__`.
+    _paste_last_wait = None
     #: Whether this window is composited from a bitmap rather than painted by Tk — see
     #: `__init__`. Class-level for the same reason: every UI fixture in the suite builds
     #: its pill with `__new__`, and a `__getattr__` miss here recurses rather than
@@ -2606,6 +2633,8 @@ class Pill(tk.Tk):
         #: measured 0.7-7 s in this user's own trace, so the release arms a wait and the
         #: frame loop finishes the gesture.
         self._ptt_wait: float | None = None
+        #: A Paste last waiting to happen: (text, since, restore) — see `_paste_last`.
+        self._paste_last_wait: tuple | None = None
         self._flash = 0  # frames remaining of the error flash, out of `FLASH_FRAMES`
         #: Where the three waiting dots are in their 1.2 s loop, and how far the pill has
         #: travelled toward converse's violet (0 = dictate, 1 = converse). Both advance
@@ -3951,6 +3980,7 @@ class Pill(tk.Tk):
             # handler predating this — `send_check.py`'s fixture is one — still works.
             extra = {"submit": True} if submit else {}
             problem = self.on_send(text, self.paste_target, **extra) or ""
+            self._handed_over(text, problem)
         elif text and self.lite:
             # The fallback, not the Lite behaviour. A handler is offered wherever Flow
             # can actually put the words in the other window — Win32 injection, or
@@ -3959,6 +3989,7 @@ class Pill(tk.Tk):
             # paste path would still have copied: `lite` is about hotkeys and window
             # handles, and it was standing in for "cannot send", which it is not.
             problem = self._copy(text)
+            self._handed_over(text, problem, copied=True)
         if getattr(self.session, "mode", DICTATE) != DICTATE:
             # Converse: send() returns "" and the answer is still coming, so the bubble
             # stays up to render it and there is nothing to linger over.
@@ -3991,6 +4022,14 @@ class Pill(tk.Tk):
                 self.bubble.note(COPIED_ENTER if submit else COPIED)
         # Nothing else: an empty `text` means send() refused and said why in a note, and
         # hiding the bubble here is what used to take that explanation off the screen.
+
+    def _handed_over(self, text: str, problem: str = "", copied: bool = False) -> None:
+        """Tell the session the words left, so History keeps them (when it is kept) and
+        Paste last has them — after the paste, which is what somebody is waiting on.
+        `getattr` because a fixture's session may predate the method."""
+        delivered = getattr(self.session, "delivered", None)
+        if callable(delivered):
+            delivered(text, problem, copied)
 
     def _offer_pairs(self, m: tk.Menu) -> list[tuple[str, str]]:
         """Words Flow keeps seeing corrected, offered for the user to declare.
@@ -4257,6 +4296,8 @@ class Pill(tk.Tk):
                 self.quit_app()
             elif event == tray.HOME:
                 self._open_home()
+            elif event == tray.PASTE_LAST:
+                self._paste_last(restore=True)
 
     def _open_home(self, page: str = "home") -> None:
         """Open Flow Home (decisions.md 2026-09-22): models, microphone, shortcuts and
@@ -4272,6 +4313,51 @@ class Pill(tk.Tk):
         why = home.open(page)
         if why:
             self.front.note(why)
+
+    def _paste_last(self, restore: bool = False) -> None:
+        """Paste last (decisions.md 2026-09-23, "History"): the newest thing a Send
+        handed over, pasted again into the window in front — from the `paste_last`
+        shortcut and the tray.
+
+        Armed here and done by `_pump_paste_last`, never on the spot: a shortcut fires
+        with its keys still down, and the tray's menu has just taken the foreground.
+        `restore` is the tray's case — its menu leaves one of Flow's own windows in
+        front, which `inject.paste` rightly refuses to paste over, so the window the
+        paste is aimed at is handed the foreground back first.
+        """
+        text = getattr(self.session, "last_handed", "")
+        if not isinstance(text, str) or not text:
+            self.front.note("nothing to paste yet - Flow has not sent anything")
+            return
+        self._paste_last_wait = (text, time.perf_counter(), restore)
+
+    def _pump_paste_last(self) -> None:
+        """One frame of a pending Paste last: give the foreground back, wait for the
+        hand to leave the keys, then paste — through `on_send`, the one way words go
+        into another window, or onto the clipboard where there is none."""
+        wait = self._paste_last_wait
+        if wait is None:
+            return
+        text, since, restore = wait
+        if restore:
+            self._paste_last_wait = (text, time.perf_counter(), False)
+            if self.paste_target:
+                _user32.SetForegroundWindow(self.paste_target)
+            return
+        held = modifiers_held()
+        if held and time.perf_counter() - since < PASTE_LAST_WAIT_SEC:
+            return
+        self._paste_last_wait = None
+        if held:
+            self.front.note("Paste last waited for the keys to come up - press it again")
+            return
+        if self.on_send:
+            problem = self.on_send(text, self.paste_target) or ""
+        else:
+            problem = self._copy(text)
+        if problem:
+            self._flash = FLASH_FRAMES
+            self.front.note(problem)
 
     def quit_app(self) -> None:
         # Idempotent, because ctrl+C reaches here down either of two paths and nothing
@@ -4572,7 +4658,13 @@ class Pill(tk.Tk):
                 # handle, and this runs every frame — at 30 fps an `OpenProcess` per
                 # frame is a cost paid forever to answer a question whose answer moves a
                 # few times an hour. Resolved on the edge, remembered in between.
-                self.session.target_app = classify(hwnd).process
+                target = classify(hwnd)
+                if getattr(target, "is_shell", False) is True:
+                    # The taskbar, for the moment a tray click holds it: never a
+                    # place to paste, and the tray's Paste last needs the window
+                    # before it (`inject.SHELL_CLASSES`).
+                    return
+                self.session.target_app = target.process
             self.paste_target = hwnd
 
     @property
@@ -4644,6 +4736,7 @@ class Pill(tk.Tk):
         # would cost one extra frame, and a decode that landed in the same frame as the
         # timeout would be reported as never having arrived.
         self._pump_talk()
+        self._pump_paste_last()
 
         if self.converse:
             self.card.tick_countdown()
@@ -4747,6 +4840,8 @@ class Pill(tk.Tk):
                 # the new mode does whatever it now means, deliberately.
                 self._ptt_wait = None
                 self.session.toggle_mode()
+            elif name == "paste_last":
+                self._paste_last()
             elif name == "quit":
                 self.quit_app()
                 return False

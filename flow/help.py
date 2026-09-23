@@ -146,6 +146,7 @@ _ACTIONS = {
     "cancel": "clear the draft, and cut a spoken reply short",
     "mode": "switch between dictate and converse",
     "quit": "close Flow",
+    "paste_last": "paste the last thing Flow pasted, again",
 }
 
 #: The draft the examples below are aimed at, shown in the sheet rather than implied.

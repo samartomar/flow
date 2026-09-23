@@ -21,7 +21,33 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ..edits import SEND_ENTER_WORD, SEND_WORD
+from ..history import (
+    ANSWERED,
+    ASKED,
+    DICTATED,
+    KEEP,
+    REFINED,
+    SET_ASIDE,
+    History,
+    NullHistory,
+    make_entry,
+    new_id,
+)
+from ..notes import Notes, render as render_notes
 from ..session import CONVERSE, DICTATE, RECENT_ANSWERED, RECENT_ASKED, RECENT_SAID
+
+#: What the pretend CLI answers, whatever it is asked: long enough to scroll, with the
+#: code block and the inline code a real answer carries, so the page's rendering of
+#: both has something to render.
+DEMO_ANSWER = (
+    "In `flow/ui.py`: a press shorter than `PILL_HOLD_SEC`, 0.30 s, is a tap and cycles "
+    "the mode; anything longer is a hold and opens the microphone. Beside it, "
+    "`PILL_DRAG_SLOP` gives a hold 4 px to wander, so a nudge while you talk is not read "
+    "as a drag.\n\n```python\nPILL_HOLD_SEC = 0.30   # tap below, hold above\n"
+    "PILL_DRAG_SLOP = 4     # px a hold may wander\n```\n\n"
+    "**Both surfaces** read the same constant, so the compact pill splits a tap from a "
+    "hold at the same 0.30 s."
+)
 
 
 class FakeTranscriber:
@@ -183,7 +209,22 @@ class FakeSession:
         self.cli_model = ""
         self.cli_effort = "low"
         self.cli_timeout = 20.0
-        self.notes: list[str] = []
+        #: What the session would have said in its bubble, for the suite to read.
+        self.said: list[str] = []
+        #: The kept notes, the real store: Wrap up renders them the real way.
+        self.notes = Notes()
+        #: The real history store over the demo's profile, or nothing.
+        self.history = History(profile.path.parent / "history.jsonl", profile) \
+            if profile is not None else NullHistory()
+        self.conversation = new_id()
+        self.exchanges: list[dict] = []
+        self.asking = False
+        self.reply = ""
+        self.wrapped_to = ""
+        self.target_app = "WindowsTerminal.exe"
+        self._handed: str = ""
+        #: How long the pretend CLI takes to answer.
+        self.answer_sec = 1.6
         #: The live gate a tuning is applied to; only its two numbers are ever read.
         self.gate = SimpleNamespace(floor_db=-55.0, margin_db=10.0)
         self._posted: queue.SimpleQueue = queue.SimpleQueue()
@@ -228,7 +269,79 @@ class FakeSession:
     # -- what Home changes -------------------------------------------------------
 
     def _note(self, text: str) -> None:
-        self.notes.append(text)
+        self.said.append(text)
+
+    # -- History and Conversations ------------------------------------------------
+
+    def delivered(self, text: str, problem: str = "", copied: bool = False) -> None:
+        self._handed = text
+        self.history.add(DICTATED, text, app=self.target_app, words=len(text.split()),
+                         how="copied" if copied else "pasted", note=problem)
+
+    @property
+    def last_handed(self) -> str:
+        newest = self.history.newest
+        return self._handed or (newest["text"] if isinstance(newest, dict) else "")
+
+    def ask(self, question: str) -> str:
+        question = (question or "").strip()
+        if not question:
+            return "type a question first"
+        if self.asking:
+            return "still waiting on the last answer"
+        entry = make_entry(ASKED, question, conv=self.conversation, ws=self.workspace,
+                           via="typed")
+        self.exchanges.append(entry)
+        self.history.keep(entry)
+        self.asking = True
+        conv = self.conversation
+
+        def answer() -> None:
+            if conv != self.conversation:
+                return
+            reply = make_entry(ANSWERED, DEMO_ANSWER, conv=conv, cli="claude",
+                               secs=self.answer_sec)
+            self.exchanges.append(reply)
+            self.history.keep(reply)
+            self.reply = DEMO_ANSWER
+            self.asking = False
+
+        timer = threading.Timer(self.answer_sec, lambda: self.post(answer))
+        timer.daemon = True
+        timer.start()
+        return ""
+
+    def new_conversation(self) -> None:
+        self.conversation = new_id()
+        self.exchanges = []
+        self.asking = False
+        self.reply = ""
+
+    def resume(self, conv: str, entries: list) -> str:
+        if self.asking:
+            return "still waiting on the last answer"
+        self.conversation = conv
+        self.exchanges = [dict(e) for e in entries]
+        return ""
+
+    def keep_note(self, text: str = "", question: str = "") -> bool:
+        if not text:
+            return False
+        self.notes.add(text, question=question,
+                       workspace=Path(self.workspace).name if self.workspace else "")
+        return True
+
+    def wrap_up(self, pill: bool = True) -> bool:
+        held = self.notes.all
+        if not held:
+            return False
+        self.reply = render_notes(held, workspace="")
+        self.wrapped_to = ""
+        self.notes.clear()
+        return True
+
+    def stop_speaking(self) -> bool:
+        return True
 
     def set_models(self, partial, final, device=None) -> bool:
         self.asr.swap(partial, final, device)
@@ -296,14 +409,71 @@ class FakeSession:
 
 
 
-def build(profile_dir: Path | None = None):
-    """A Home over a FakeSession, with its pump running. Returns (home, session)."""
+def seed(session, kept: bool) -> None:
+    """Something for the History and Conversations pages to show.
+
+    The conversation on screen always — it lives in memory whatever the choice. With
+    `kept`, history is chosen and a few days of pretend entries are written: dictation
+    into three programs, a refined prompt, a set-aside "Thank you.", and a conversation
+    from last week in another workspace.
+    """
+    now = time.time()
+    q = make_entry(ASKED, "Where does the pill decide it was a hold and not a tap?",
+                   at=now - 620, conv=session.conversation, ws=session.workspace,
+                   via="voice")
+    a = make_entry(ANSWERED, DEMO_ANSWER, at=now - 612, conv=session.conversation,
+                   cli="claude", secs=4.2)
+    session.exchanges.extend([q, a])
+    if not kept or session.profile is None:
+        return
+    session.profile.history = KEEP
+    session.profile.save()
+    h = session.history
+    for entry in (q, a):
+        h.keep(entry)
+    rows = [
+        (DICTATED, "Thanks, I will send the updated figures by Friday.", 26.2,
+         {"app": "OUTLOOK.EXE", "how": "pasted"}),
+        (DICTATED, "Hey Marco, are we still good for the review on Tuesday afternoon, "
+                   "and did you get a chance to look at the updated figures?", 3.1,
+         {"app": "slack.exe", "how": "pasted"}),
+        (SET_ASIDE, "Thank you.", 2.6, {"reason": "filler"}),
+        (REFINED, "Strip every control from the push-to-talk pill in flow/ui.py - leave "
+                  "the mic glyph and the meter. On release, inject the draft into the "
+                  "window that held focus before the pill.", 2.2,
+         {"app": "WindowsTerminal.exe", "how": "pasted", "cli": "claude", "secs": 6.1,
+          "heard": "make the pill not show any controls just the mic and when i let go "
+                   "it should paste in the window i was in before"}),
+        (DICTATED, "claude, check the cube control logs for the staging pod, and tell me "
+                   "why the decode worker drops the last utterance when I stop quickly.",
+         1.4, {"app": "WindowsTerminal.exe", "how": "pasted"}),
+    ]
+    for kind, text, hours, fields in rows:
+        if kind != SET_ASIDE:
+            fields = {**fields, "words": len(text.split())}
+        h.keep(make_entry(kind, text, at=now - hours * 3600, **fields))
+    conv = new_id()
+    h.keep(make_entry(ASKED, "Three names for a send word that nobody says by accident",
+                      at=now - 8 * 86400, conv=conv, ws="D:\\dev\\acme", via="voice"))
+    h.keep(make_entry(ANSWERED, "Boom, ship it, and send it - each measured against "
+                                "hundreds of recordings so none fires by accident.",
+                      at=now - 8 * 86400 + 5, conv=conv, cli="claude", secs=4.8))
+    h.flush()
+
+
+def build(profile_dir: Path | None = None, kept: bool = False):
+    """A Home over a FakeSession, with its pump running. Returns (home, session).
+
+    `kept` starts it with history chosen and a few days of pretend entries (`seed`);
+    without it, the History page asks the question the way a first launch would.
+    """
     from ..profile import Profile
     from . import Home
 
     folder = Path(profile_dir or tempfile.mkdtemp(prefix="flow-home-"))
     profile = Profile(folder / "profile.json")
     session = FakeSession(profile)
+    seed(session, kept)
 
     def pump() -> None:
         while True:
@@ -321,8 +491,10 @@ def build(profile_dir: Path | None = None):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m flow.home.demo", description=__doc__)
     ap.add_argument("--no-open", action="store_true", help="print the address only")
+    ap.add_argument("--history", action="store_true",
+                    help="start with history kept, and a few days of pretend entries")
     args = ap.parse_args(argv)
-    home, _session = build()
+    home, _session = build(kept=args.history)
     url = home.url("home")
     print(url, flush=True)
     if not args.no_open:

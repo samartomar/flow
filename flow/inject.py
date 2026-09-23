@@ -561,6 +561,17 @@ BRACKETED_PASTE = {
 }
 
 
+#: The taskbar and the notification area's own windows. Clicking the tray icon makes the
+#: taskbar the foreground for a moment, and a pill that tracked it would aim the next
+#: paste at the taskbar — which is exactly where "Paste last" from the tray menu is
+#: chosen. None of these ever takes text, so the trackers skip them and keep the window
+#: somebody was working in.
+SHELL_CLASSES = {
+    "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow",
+    "TopLevelWindowForOverflowXamlIsland",
+}
+
+
 class Target:
     """What is about to be pasted into, and what that means for the payload."""
 
@@ -588,6 +599,11 @@ class Target:
     @property
     def brackets_paste(self) -> bool:
         return self.process.lower() in BRACKETED_PASTE
+
+    @property
+    def is_shell(self) -> bool:
+        """The taskbar or the tray: never a paste target. See `SHELL_CLASSES`."""
+        return self.window_class in SHELL_CLASSES
 
     def __repr__(self) -> str:
         return (f"Target(class={self.window_class!r}, process={self.process!r}"

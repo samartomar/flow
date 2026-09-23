@@ -83,6 +83,7 @@ from .ui import (
     PILL_DRAG_SLOP,
     PILL_HOLD_SEC,
     PLACEHOLDER,
+    PASTE_LAST_WAIT_SEC,
     PRIMARY_FILL,
     PRIMARY_TEXT,
     PTT_PASTE_WAIT_SEC,
@@ -101,7 +102,9 @@ from .ui import (
     _shell_window,
     _user32,
     _virtual_desktop,
+    classify,
     foreground_hwnd,
+    modifiers_held,
     owned_by_flow,
     toplevel_hwnd,
 )
@@ -300,6 +303,19 @@ def _chip_rects(footer_y: int) -> tuple:
             (PANEL_W - 74, footer_y, PANEL_W - 16, footer_y + CHIP_H))
 
 
+#: Ask's footer chip that carries the conversation to Flow Home (the canvas's Pill
+#: artboard: "Copy · Continue in Flow · hold to reply"). Hard right, where Refine keeps
+#: Send — Ask has no Send, so the slot was empty — and wide enough for its label in
+#: `FONT_CHIP`, which measures about 106 px.
+CONTINUE_LABEL = "Continue in Flow"
+CONTINUE_W = 132
+
+
+def _continue_rect(footer_y: int) -> tuple:
+    """Where Continue in Flow sits in a footer whose chips start at `footer_y`."""
+    return (PANEL_W - 16 - CONTINUE_W, footer_y, PANEL_W - 16, footer_y + CHIP_H)
+
+
 #: The footer's two chips at the *resting* band — what an importer means by
 #: "where Copy is" when nothing has been said yet. A live frame reads them off
 #: `_panel_layout`, which is the authority: the footer travels with the band's
@@ -342,13 +358,16 @@ PANEL_SPEC = {
     CONVERSE: {
         # Ask.dc.html: the question is body text, not a grey transcript, and
         # carries no tag; the answer is a card with a violet left bar; the
-        # footer is Copy and the hint — no Send.
+        # footer is Copy and the hint — no Send — and, since Flow Home,
+        # Continue in Flow where Send would be.
         "heard_tag": None,
         "heard_fill": TEXT,
         "result_tag": None,
         "result_accent": CARD_ACCENT,
         "hint": "hold the mic to reply",
         "send": False,
+        # The conversation's way to the page: every turn, typed follow-ups, notes.
+        "continue": True,
     },
 }
 
@@ -488,6 +507,19 @@ def _capsule_ring(c: tk.Canvas, x1, y1, x2, y2, colour: str, width=1,
     if top:
         pts = pts + [pts[0]]
     c.create_line(_flat(pts), fill=colour, width=width)
+
+
+#: How much of the last handover the menu's Paste last row quotes: enough to recognise
+#: the words, short enough that the menu stays the width its other rows set.
+MENU_QUOTE_CHARS = 34
+
+
+def _menu_quote(text: str) -> str:
+    """The words Paste last would paste, as one quoted menu line."""
+    flat = " ".join(text.split())
+    if len(flat) > MENU_QUOTE_CHARS:
+        flat = flat[: MENU_QUOTE_CHARS - 1].rstrip() + "…"
+    return f"“{flat}”"
 
 
 def _hit(rect, x, y) -> bool:
@@ -745,6 +777,10 @@ class CompactPill(tk.Tk):
     #: also the Lite answer: no target-window awareness, and `paste()` asks
     #: the foreground instead.
     paste_target = None
+    #: A Paste last waiting to happen, (text, since, restore), or None — see
+    #: `_paste_last`. Class-level so the frame's pump finds a real None on a
+    #: `__new__`-built fixture instead of recursing into `self.tk`.
+    _paste_last_wait = None
     #: The panel's whole state: open or not; the mode it was opened for, which
     #: is what its spec lookup keys on — the drawing follows the mode that
     #: *raised* it, so an answer landing after a mode switch still draws as
@@ -870,6 +906,8 @@ class CompactPill(tk.Tk):
         # fixture — never sees a class attribute.
         self._fast_ticking = False
         self.paste_target = None
+        #: A Paste last waiting to happen: (text, since, restore). See `_paste_last`.
+        self._paste_last_wait = None
         self._panel_open = False
         self._panel_mode = None
         self._panel_heard = ""
@@ -1209,6 +1247,7 @@ class CompactPill(tk.Tk):
         # draft the event has just settled.
         self._pump_send()
         self._pump_press()
+        self._pump_paste_last()
         if self._panel_open and self._outside_click_now():
             self._close_panel()
         if self._flash:
@@ -1316,6 +1355,8 @@ class CompactPill(tk.Tk):
                 self._close_panel()
             elif name == "mode":
                 self._cycle_mode()
+            elif name == "paste_last":
+                self._paste_last()
             elif name == "quit":
                 self.quit_app()
                 return False
@@ -1703,19 +1744,83 @@ class CompactPill(tk.Tk):
             problem = self.on_send(text, self.paste_target, **extra) or ""
             if problem:
                 self._flash = FLASH_FRAMES
-        elif _copy_to_clipboard(self, text):
+            self._handed_over(text, problem)
+            return
+        problem = _copy_to_clipboard(self, text)
+        if problem:
             self._flash = FLASH_FRAMES
         else:
             self._say(COPIED_ENTER_TEXT if submit else COPIED_TEXT)
             self._sync_shell()
+        self._handed_over(text, problem or "", copied=True)
+
+    def _handed_over(self, text: str, problem: str = "",
+                     copied: bool = False) -> None:
+        """Tell the session the words left, so History keeps them (when it is
+        kept) and Paste last has them. After the paste, never before it: the
+        keystroke is what somebody is waiting on. `getattr` because a fixture's
+        session may predate the method."""
+        delivered = getattr(self.session, "delivered", None)
+        if callable(delivered):
+            delivered(text, problem, copied)
+
+    def _paste_last(self, restore: bool = False) -> None:
+        """Paste last (decisions.md 2026-09-23, "History"): the newest thing a
+        Send handed over, pasted again into the window in front — from the menu
+        row, the `paste_last` shortcut and the tray.
+
+        Armed here and done by `_pump_paste_last`, never on the spot: the
+        shortcut fires with its keys still down, the menu is still handing the
+        foreground back, and the tray's menu has just taken it. `restore` is
+        the tray's case — its menu leaves one of Flow's own windows in front,
+        which `inject.paste` rightly refuses to paste over, so the window the
+        paste is aimed at is handed the foreground back first.
+        """
+        text = getattr(self.session, "last_handed", "")
+        if not isinstance(text, str) or not text:
+            self._say("nothing to paste yet - Flow has not sent anything")
+            return
+        self._paste_last_wait = (text, time.perf_counter(), restore)
+
+    def _pump_paste_last(self) -> None:
+        """One frame of a pending Paste last: give the foreground back, wait for
+        the hand to leave the keys, then paste through `on_send` — the one way
+        words go into another window — or copy where there is none. Never kept
+        again: it is already kept (`_handed_over` is for new words)."""
+        wait = self._paste_last_wait
+        if wait is None:
+            return
+        text, since, restore = wait
+        if restore:
+            self._paste_last_wait = (text, time.perf_counter(), False)
+            if self.paste_target:
+                _user32.SetForegroundWindow(self.paste_target)
+            return
+        held = modifiers_held()
+        if held and time.perf_counter() - since < PASTE_LAST_WAIT_SEC:
+            return
+        self._paste_last_wait = None
+        if held:
+            self._say("Paste last waited for the keys to come up - press it again")
+            return
+        if self.on_send:
+            problem = self.on_send(text, self.paste_target) or ""
+        else:
+            problem = _copy_to_clipboard(self, text)
+            if not problem:
+                self._say(COPIED_TEXT)
+        if problem:
+            self._flash = FLASH_FRAMES
+            self._say(problem)
 
     def _track_target(self) -> None:
         """Remember the last window that had the foreground and was not Flow's own.
 
-        ui.py:4223-4244's poll, minus the per-app classification this surface
-        has no slot for: by the time `paste()` runs, the gesture that started
-        it has had its chance to move the foreground, so the target is asked a
-        frame at a time rather than at send time. Lite has no target-window
+        ui.py's `Pill._track_target`, the executable's name included now:
+        History says where the words went, and it can only say what this poll
+        found out. By the time `paste()` runs, the gesture that started it has
+        had its chance to move the foreground, so the target is asked a frame
+        at a time rather than at send time. Lite has no target-window
         awareness and does not ask — which is what makes `--lite` here the
         same code a Mac runs instead of a rehearsal of it.
         """
@@ -1723,6 +1828,17 @@ class CompactPill(tk.Tk):
             return
         hwnd = foreground_hwnd()
         if hwnd and not owned_by_flow(hwnd):
+            if hwnd != self.paste_target:
+                # On the edge only, ui.py's rule: `classify` opens a process
+                # handle, and the answer moves a few times an hour. The name is
+                # what History says the words went to, and what a per-app
+                # Refine note is keyed on — this surface used to leave it empty.
+                target = classify(hwnd)
+                if getattr(target, "is_shell", False) is True:
+                    # The taskbar, while a tray click holds it: never a place to
+                    # paste, and the tray's Paste last needs the window before it.
+                    return
+                self.session.target_app = target.process
             self.paste_target = hwnd
 
     def _pump_press(self) -> None:
@@ -2062,6 +2178,19 @@ class CompactPill(tk.Tk):
                 command=lambda t=mode: self._choose_mode(t), **kw)
         m.add_command(label="tap the pill to cycle", state="disabled")
         m.add_separator()
+        # Paste last (the canvas's Pill artboard, and Wispr Flow's, FluidVoice's
+        # and VoiceInk's menus): the words it would paste, so the row says what
+        # a click does. After a frame, not now — the menu is still handing the
+        # foreground back to the window the paste is aimed at.
+        last = getattr(self.session, "last_handed", "")
+        if isinstance(last, str) and last:
+            m.add_command(label="Paste last",
+                          command=lambda: self.after(60, self._paste_last))
+            m.add_command(label=_menu_quote(last), state="disabled")
+        else:
+            m.add_command(label="Paste last", state="disabled")
+            m.add_command(label="nothing sent yet", state="disabled")
+        m.add_separator()
         m.add_command(label="Switch workspace", command=self._open_palette)
         ws = getattr(self.session, "workspace", "") or ""
         m.add_command(label=ws or "no workspace", state="disabled")
@@ -2207,6 +2336,8 @@ class CompactPill(tk.Tk):
                 return
             elif event == tray.HOME:
                 self._open_home()
+            elif event == tray.PASTE_LAST:
+                self._paste_last(restore=True)
 
     # -- the standalone box --------------------------------------------------
 
@@ -2590,7 +2721,8 @@ class CompactPill(tk.Tk):
 
     def _panel_click(self, e) -> None:
         """A press in the band: the only live things there are the strip's
-        close, the footer's Copy, and Send when the mode has one.
+        close, the footer's Copy, Send when the mode has one, and Ask's
+        Continue in Flow.
 
         Off the layout, not off the module constants: the footer travels with
         the band's bottom edge, so the rects a tall panel drew its chips at
@@ -2604,6 +2736,9 @@ class CompactPill(tk.Tk):
             self._copy_result()
         elif self._spec()["send"] and _hit(layout.send, x, y):
             self._panel_send()
+        elif (self._spec().get("continue")
+              and _hit(_continue_rect(layout.footer_y), x, y)):
+            self._continue_in_flow()
 
     def _panel_text(self) -> str:
         """What Copy copies and Refine's Send pastes: the result, unless the
@@ -2625,6 +2760,14 @@ class CompactPill(tk.Tk):
             return
         if _copy_to_clipboard(self, text):
             self._flash = FLASH_FRAMES
+
+    def _continue_in_flow(self) -> None:
+        """Ask's footer chip: the conversation, carried on in Flow Home's
+        Conversations page — every turn of it, a box to type the next question
+        in, and the notes. The panel goes down behind it: the page is where the
+        exchange is now, and two copies of one answer is one too many."""
+        self._close_panel()
+        self._open_home("ask")
 
     def _panel_send(self) -> None:
         """The footer Send: paste the result into `paste_target`, and close.
@@ -3060,7 +3203,8 @@ class CompactPill(tk.Tk):
                 c.create_text(PAD_X + 12, layout.result_y, anchor="nw",
                               text=result, font=FONT_BODY, fill=TEXT)
         # The footer: Copy, the hold hint, and Send in the modes that have one
-        # (Refine.dc.html; Ask's footer stops at the hint).
+        # (Refine.dc.html). Ask has no Send; its right-hand slot carries the
+        # conversation to Flow Home instead (the canvas's Pill artboard).
         x1, y1, x2, y2 = layout.copy
         _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
         # gen.py's chip is `{COPY_ICON}Copy` — two offset rounded rectangles,
@@ -3080,6 +3224,11 @@ class CompactPill(tk.Tk):
                         fill=PRIMARY_FILL, outline="")
             c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Send",
                           font=FONT_CHIP_PRIMARY, fill=PRIMARY_TEXT)
+        if spec.get("continue"):
+            x1, y1, x2, y2 = _continue_rect(layout.footer_y)
+            _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
+            c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=CONTINUE_LABEL,
+                          font=FONT_CHIP, fill=CODE)
 
     def _draw_folder(self, c, x: int, cy: int, colour: str = DIM) -> None:
         """The strip's folder glyph, stroked like the mic: gen.py's `FOLDER`,

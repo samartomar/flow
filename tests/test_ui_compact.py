@@ -1261,15 +1261,18 @@ class TestThePanelsChips(unittest.TestCase):
         self.assertEqual(p._flash, uc.FLASH_FRAMES)
 
     def test_asks_footer_has_no_send_to_click(self):
-        # The mechanism exists (`_panel_send`) but no two-mode spec sets
-        # "send" — the Send rect is dead while the session has two modes.
+        # Ask's spec never sets "send", so a press where Send would be never
+        # pastes. Since Flow Home that slot is Continue in Flow's, so the press
+        # carries the conversation to the page instead (the canvas's Pill).
         p = panel_pill(mode=CONVERSE)
         p._panel_open = True
         p._panel_result = "the answer"
         send_rect = p._panel_layout().send
-        with mock.patch.object(p, "_panel_send") as send:
+        with mock.patch.object(p, "_panel_send") as send, \
+                mock.patch.object(p, "_continue_in_flow") as carry:
             p._panel_click(mock.Mock(x=send_rect[0] + 4, y=send_rect[1] + 4))
         send.assert_not_called()
+        carry.assert_called_once_with()
         self.assertFalse(uc.PANEL_SPEC[CONVERSE]["send"])
 
     def test_the_send_mechanism_pastes_the_result_and_closes(self):
@@ -1409,10 +1412,12 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
             m.order,
             ["Type", "Refine", "Ask",
              "tap the pill to cycle",
+             "Paste last", "nothing sent yet",
              "Switch workspace", "~/dev/products/flow",
              "Open Flow", "models, microphone, shortcuts, settings"])
         # The hints are disabled entries, never verbs.
-        for hint in ("tap the pill to cycle", "~/dev/products/flow",
+        for hint in ("tap the pill to cycle", "nothing sent yet",
+                     "~/dev/products/flow",
                      "models, microphone, shortcuts, settings"):
             self.assertIsNone(m.commands[hint])
 
