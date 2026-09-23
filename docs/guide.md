@@ -21,8 +21,10 @@ spoken command, both modes, and what is stored where.
 
 | | |
 |---|---|
+| **Hold, talk, let go** | Hold `ctrl+win` or the pill; letting go pastes into the window you were in |
+| **Three modes, one tap** | Type pastes; Refine shapes it into a prompt first; Ask puts it to your agent CLI |
 | **Live text while you speak** | Partials refresh roughly every second as you talk |
-| **Nothing sends itself** | Stopping leaves a held draft, never an automatic send |
+| **You decide when it goes** | Letting go is the send in Type; Refine and Ask wait for Send or the next hold; the Classic pill holds a draft until you send it |
 | **Correct it by voice** | "change Tuesday to Wednesday" edits the draft in place |
 | **Keep talking** | Anything that isn't a correction is appended |
 | **Shape it into a prompt** | "make it a proper prompt" restructures dictation via your agent CLI |
@@ -218,10 +220,13 @@ uv run python -m flow        # identical, and works without installing anything
 Both are supported and do the same thing. `uv sync` installs the project into the venv in
 editable mode, so an edit to `flow/*.py` takes effect on the next run with no reinstall.
 
+The first time, Flow Home opens at [the first run](#the-first-run): five steps, all of
+them skippable. After that, Flow starts as the pill alone.
+
 Startup prints exactly what it found — which version this is, which agent CLI, which
-models, whether a profile and lexicon exist, which mode Send is in, and which hotkeys
-actually registered. Those lines are the first thing to read when something is not
-working:
+models, whether a profile and lexicon exist, whether a history is kept, which mode Send is
+in, and which hotkeys actually registered. Those lines are the first thing to read when
+something is not working:
 
 ```
 version: 0.5.1 (nothing checks for updates on its own; --check-update asks GitHub)
@@ -231,7 +236,8 @@ CLI timeout: 20s per call
 models: base.en for partials, small.en for finals
 profile: room -96.5 dB, margin 18.0 dB, 2 learned pairs
 trace: C:\Users\you\.flow\diag.jsonl (timings and state only, no words; --no-profile to disable)
-lexicon: none - right-click > Open settings folder, or create C:\Users\you\.flow\lexicon.txt, to add names and corrections
+history: not kept - Flow Home > History asks whether to keep it
+lexicon: none - add names and corrections on Flow Home > Voice (it writes C:\Users\you\.flow\lexicon.txt)
 speech: on, voice Microsoft Susan (9 installed; --voice, or the right-click menu, to change)
 workshop: not set - Ask runs without a project
 mode: DICTATE - Send pastes into the focused window (--converse, or ctrl+alt+M, to ask instead)
@@ -240,7 +246,8 @@ hotkey  send     ctrl+alt+enter
 hotkey  cancel   ctrl+alt+esc
 hotkey  mode     ctrl+alt+M
 hotkey  quit     ctrl+alt+Q
-click the pill to arm | right-click for the menu | ctrl+alt+Q quits
+hotkey  paste_last alt+shift+Z
+hold the pill or ctrl+win to talk | tap the pill to cycle Type / Refine / Ask | right-click for the menu | ctrl+alt+Q quits
 ```
 
 ### Flags
@@ -364,7 +371,7 @@ answer, and the retry budget is spent afterwards exactly as it would have been.
 | clear the draft | `ctrl+alt+esc` | `ctrl+shift+esc` |
 | dictate ⇄ converse | `ctrl+alt+M` | `ctrl+shift+M` |
 | quit | `ctrl+alt+Q` | `ctrl+shift+Q` |
-| paste the last thing Flow pasted, again ([Paste last](#history-and-paste-last)) | `ctrl+alt+V` | `ctrl+alt+shift+V` |
+| paste the last thing Flow pasted, again ([Paste last](#history-and-paste-last)) | `alt+shift+Z` | `alt+shift+V` |
 
 Combos already owned by another app fall back automatically, in that order. The startup
 log prints which one actually registered, so a dead shortcut is never a silent mystery;
@@ -885,6 +892,27 @@ Flow quits. It answers only the window Flow opened: every request carries a toke
 fresh at launch, and a request from another host name or from another web page is
 refused before it reaches anything. Nothing it serves leaves your machine.
 
+### The first run
+
+A new profile opens Flow Home at five steps, before anything else
+([decisions.md](decisions.md), 2026-09-23, "The first run"):
+
+1. **The two sides** — Dictate and Ask — and the keys each answers to.
+2. **Which microphone.** A live meter under the one in use, and "Hearing you clearly"
+   once you have said something into it. Choosing another switches the pill's too.
+3. **The speech model** this PC will use, whether it is here yet, and its download with
+   progress. Keep going while it downloads. Short on space? The smaller pair is one press.
+4. **Tuning** — read a paragraph aloud, about 45 seconds — the Voice page's own.
+5. **Keep a history?** Two answers, neither picked for you; and a box to try your first
+   dictation in.
+
+Any step can be skipped, and **Skip setup** ends it from anywhere; everything in it is on
+Flow Home's other pages afterwards. It is shown once: finishing or skipping it is
+remembered in `profile.json`. `--no-profile` never shows it, because it could not
+remember having done so. On a first launch the speech model is not loaded behind your
+back — if it is not on this PC, the model step is where it downloads, where you can see
+it.
+
 ### History and Paste last
 
 **History keeps nothing until you choose.** The History page asks once, with neither
@@ -907,10 +935,16 @@ them ([clean.py](../flow/clean.py)). With a history kept, what it dropped is lis
 
 **Paste last** pastes the newest thing a Send handed over, again, into the window in
 front: from the compact pill's right-click menu (which quotes the words), from the tray
-icon's menu, and with `ctrl+alt+V`. Pasted into the wrong window? Click the right one and
-press it. It waits for you to let go of the keys first — a paste sent while Alt is still
-held arrives as Ctrl+Alt+V, which Word reads as Paste Special. It remembers this launch's
-last Send; after a restart it remembers only if you keep a history.
+icon's menu, and with `alt+shift+Z` — the keys Wispr Flow uses for the same thing.
+Pasted into the wrong window? Click the right one and press it. It waits for you to let
+go of the keys first: a paste sent while Alt and Shift are still held would reach the
+program as a different shortcut altogether. It remembers this launch's last Send; after
+a restart it remembers only if you keep a history.
+
+Not `ctrl+alt+V`, which it was for an afternoon: that is Paste Special in Excel, Word and
+Outlook and Extract Variable in JetBrains IDEs, and — because Ctrl+Alt is AltGr — the key
+that types @ on Hungarian, Czech and Slovak keyboards ([decisions.md](decisions.md),
+2026-09-23, "Paste last moves to Alt+Shift+Z").
 
 ## Dictate mode
 
@@ -1768,10 +1802,10 @@ tracked at all, and which parts of it are deliberately not.
   the R4 gate in [docs/roadmap.md](roadmap.md) for why one model cannot do both.
 - **Elevated windows reject the paste** (Windows UIPI). The draft is put on the
   clipboard first, so `Ctrl+V` by hand still works.
-- **Paste last takes `ctrl+alt+V` from Word, Excel and PowerPoint**, where it is Paste
-  Special, for as long as Flow runs — a global shortcut belongs to whoever registered it.
-  Move it in `profile.json` ([Changing them](#changing-them)) or on Flow Home ▸ Settings
-  if you use Paste Special from the keyboard.
+- **Paste last shares `alt+shift+Z` with Wispr Flow's own Paste last transcript.** A
+  global shortcut belongs to whichever program registered it first: with Wispr Flow
+  running first, Flow takes `alt+shift+V` instead, and the startup lines and Flow Home ▸
+  Settings say which one it got.
 - **A kept history is plain text.** `~/.flow/history.jsonl` is readable by anything that
   can read your user folder, the same as `lexicon.txt` and `profile.json`. It is kept only
   if you chose to keep it, and deleted when you stop.

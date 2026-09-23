@@ -6,6 +6,73 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — The first run: five steps in Flow Home, and compact is the default
+
+Step 4 of the Flow Home plan, and step 4 of docs/one-surface.md's.
+
+**A new profile opens Flow Home at five steps**, drawn from the canvas's FirstRun
+artboard: the two sides and their keys; which microphone, with a test that shows it
+hearing you; the speech model this PC will use, with its download and progress; tuning,
+the Voice page's own; and the history question, beside a box to try a first dictation
+in. Every step can be skipped, and "Skip setup" ends it from any of them. Finishing or
+skipping writes `profile.welcomed`, the flag the Classic pill's welcome card kept — so a
+profile that saw the card is never shown this, and one that never did (every compact
+user's, since that surface never had a card) is shown it once. `--no-profile` has nowhere
+to remember it and never shows it. **The welcome card is deleted**, with its rows and
+tests; the colour legend it carried stays in the Help sheet.
+
+**A first launch does not start a silent download.** Warming at launch used to mean
+fetching three gigabytes behind "loading the model". With the first run on screen to
+show that download with its progress, the launch warms only when the models are already
+on this PC, and otherwise says so on the console and waits. The step fetches the models
+the session will use **without pinning them** in the profile, so a PC that gains a GPU
+later still gets what suits it, and warms the session when the last one lands
+(`Home.warm_when_ready`); "use the smaller models" is a choice and is saved as one.
+
+**The microphone test says "hearing you" only for a voice.** `calibrate.heard` always
+splits what it hears into a quieter and a louder half, so a silent room has "speech" in
+it; the test instead counts blocks at least 15 dB over the quietest tenth, for 0.6 s
+(`voice.voice_seconds`). It stops before a microphone switch, because the switch
+refreshes PortAudio, which frees every open stream in the process.
+
+**Compact is the default.** `DESIGN_DEFAULT` is `"compact"`. A profile that names a
+design keeps it — every save writes the field, so nobody who has launched Flow before is
+moved — and the Classic pill stays one switch away on Flow Home's Settings page for this
+release, as one-surface.md's step 4 asked. `Pill.DESIGN` is the literal `"current"` now:
+it named the class by the default, which would have made the Classic pill call itself
+compact the moment the default moved.
+
+**Reopens if** people skip the first run more often than they finish it — the answer
+then is fewer steps, not a second welcome — or if a Classic user who never chose a design
+turns out to have been moved by the flip, which would mean some save path did not write
+the field.
+
+### 2026-09-23 — Paste last moves to Alt+Shift+Z
+
+The owner asked for the right combination after the History entry below shipped Paste
+last on `ctrl+alt+V` and named its cost. Measured the same day:
+
+- **`ctrl+alt+V` is taken where people work.** Paste Special in Excel, Word and classic
+  Outlook (Microsoft's own shortcut pages), and Extract Variable in every JetBrains IDE —
+  a refactoring developers press all day (JetBrains' Windows reference card).
+- **`ctrl+alt` is AltGr.** On a Hungarian keyboard AltGr+V types **@** (kbdlayout.info,
+  KBDHU), so a global `ctrl+alt+V` takes the @ key away for as long as Flow runs; the same
+  holds on Czech and Slovak layouts. No combination with Ctrl and Alt together can be
+  safe on every layout.
+- **`alt+shift+Z` is Wispr Flow's own default for this action on Windows** ("Paste last
+  transcript: Shift+Alt+Z", Wispr Flow's help centre), so the people most likely to reach
+  for it already have it in their hands. VS Code's and JetBrains' Windows cards bind
+  neither `alt+shift+Z` nor `alt+shift+V`, Word's shortcut list has neither, and a combo
+  with no Ctrl in it cannot meet AltGr.
+
+So: `alt+shift+Z`, then `alt+shift+V` for the machine where Wispr Flow itself is running
+and owns Z. `tests/test_history.py` pins that no alternative holds Ctrl and Alt together.
+The wider finding — the other five shortcuts are all `ctrl+alt`, and German AltGr+Q is
+@ — is its own piece of work.
+
+**Reopens if** a program people use every day turns out to bind `alt+shift+Z`, or
+Windows starts using it.
+
 ### 2026-09-23 — History: kept only when chosen, one file, and Paste last waits for the hand
 
 Step 3 of the Flow Home plan: History, Paste last and Conversations. What it decided.
@@ -54,7 +121,8 @@ sent then arrives as Ctrl-Alt-V — Paste Special in Word and Excel, AltGr-V on 
 layouts — so the paste waits up to 3 s for the hand to leave the keys and says so rather
 than paste through them. The tray's menu leaves one of Flow's windows in front, which
 `inject.paste` rightly refuses, so that path hands the foreground back first. A Paste last
-is never kept again: it is already kept.
+is never kept again: it is already kept. *(The combination moved the same day — see
+"Paste last moves to Alt+Shift+Z" above.)*
 
 **Conversations move between the pill and the page.** The conversation on screen lives in
 the session whatever the choice (`Session.exchanges`, under an id that changes wherever

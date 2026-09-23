@@ -1,8 +1,8 @@
 # Flow
 
-Dictate into whatever window you were working in, fix the text by talking to it, then
-paste. Or hand the draft to the agent CLI you already have, work the prompt over, and
-paste the version you settled on.
+Hold a key, talk, let go: the words paste into whatever window you were working in. Or
+tap the pill and hand them to the agent CLI you already have — shaped into a prompt for
+your project before anything pastes, or asked as a question and answered above the pill.
 
 Speech recognition runs on your machine. No API key.
 
@@ -75,28 +75,32 @@ what would fund it is evidence from Lite.
 
 ## The loop
 
-1. **Click the pill** (or `ctrl+alt+space`) and talk. The draft floats up above it,
-   refreshing about once a second.
-2. **Talk to the draft** to fix it — *"change Tuesday to Wednesday"*, *"delete the last
-   sentence"*, *"scratch that"*. Anything that is not a correction is added to the draft
-   instead. Or press **Edit** and type, which is faster for a URL or a flag.
-3. **Send** — the chip, `ctrl+alt+enter`, or saying *"boom"* — pastes into the window you
-   were working in.
+1. **Hold `ctrl+win`** — or hold the pill — and talk.
+2. **Let go.** The words paste into the window you were working in.
+3. **Pasted into the wrong window?** Click the right one and press **Paste last**
+   (`alt+shift+Z`, or the pill's right-click menu).
 
-Nothing sends itself. Stopping leaves the draft on screen waiting for you, and Flow
-presses Enter only when you ask for it by name (*"enter boom"*).
+The first time, Flow Home walks you through five steps — the microphone, the speech
+model with its download, a 45-second tuning to your voice, and whether to keep a
+history — any of which you can skip.
 
-Send does not erase, either: *"bring back my last prompt"* and *"follow up: …"* both
-reach what you already sent.
+## Three modes, one tap
 
-## Two modes
+Tap the pill to cycle it:
 
-**Dictate** is the default: Send pastes.
+- **Type** (white): speak, let go, it pastes.
+- **Refine** (gold): what you said is shaped into a prompt for your project by `codex`
+  or `claude`, and shown to you; nothing pastes until you press Send.
+- **Ask** (violet): the question goes to your agent CLI, and the answer rises above the
+  pill and is read aloud. **Continue in Flow** carries the conversation to a window where
+  you can read all of it and type the next question.
 
-**Converse** (`ctrl+alt+M`) turns Send into **Ask**. The draft goes to `codex` or
-`claude` as a prompt to improve rather than a task to carry out, the answer renders in
-the bubble and is read aloud, and **Use this** makes the answer your new draft. Point it
-at a project with `--cwd` and the advice is about your code.
+Point Refine and Ask at a project — Flow Home ▸ Settings ▸ Workspaces, or `--cwd` — and
+the answers are about your code.
+
+**The Classic pill** — a draft that floats above the pill, which you correct by voice
+(*"change Tuesday to Wednesday"*, *"scratch that"*) and send when it reads right — is one
+switch away on Flow Home ▸ Settings ▸ The pill, for this release.
 
 ## Flow Home
 
@@ -109,8 +113,8 @@ that reads answers. **Voice** tunes Flow to you and fixes the words it gets wron
 **Conversations** is Ask in a window: type or talk, and carry a conversation on later.
 The pill never grows a setting. [The guide](docs/guide.md#flow-home) has the pages.
 
-Pasted into the wrong window? **Paste last** (`ctrl+alt+V`, or the pill's menu) pastes it
-again into the one in front.
+Pasted into the wrong window? **Paste last** (`alt+shift+Z`, or the pill's menu) pastes
+it again into the one in front.
 
 ## Who it is for
 
@@ -185,7 +189,7 @@ where Flow mishears them. That is the one thing I cannot measure alone.
 ```bash
 git clone https://github.com/samartomar/flow && cd flow
 uv sync && uv run flow                          # run it
-uv run python -m unittest discover -s tests     # 1,965 tests, ~42 s, no mic needed
+uv run python -m unittest discover -s tests     # ~3,000 tests, ~90 s, no mic needed
 uv run python scripts/selfdrive.py              # the end-to-end harness
 ```
 
