@@ -923,7 +923,7 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 | Page | What is on it |
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
-| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The two models that invent words in silence are marked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; and the voice that reads answers aloud |
+| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The two models that invent words in silence are marked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
 | **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
 | **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
 | **History** | Only if you choose to keep one: what you dictated, the program it went to, whether it pasted, what the agent CLI made of a Refine and what it was made from, and anything the speech filter set aside — by day, searchable, each with Copy, Fix a word and Delete ([History and Paste last](#history-and-paste-last)) |
@@ -1512,13 +1512,24 @@ choosing a voice and hearing a different one.
 
 ### A better voice, if you want one
 
-Windows is the floor, not the ceiling. Install the `voice` extra and any Piper voices you
-want, and they appear in the same right-click → **Voice** menu, listed above the Windows
-ones and chosen the same way. Nothing else about Flow changes.
+Windows is the floor, not the ceiling. **Flow Home ▸ Models ▸ Better voices** adds either
+of the two engines below with one press — **Add Piper** (about 34 MB) or **Add Microsoft
+voices** (about 2 MB) — into the environment Flow runs from, and Piper's voices download on
+the same card, with progress: eight English voices, British and American, each checked
+before it is used. Their voices join the list on that page without a restart. The Windows
+download already has both engines inside it, so there the card only downloads voices
+([decisions.md](decisions.md), 2026-09-23, "Better voices from Flow Home").
+
+The same, from a terminal — which is also what to run if the card says it has nothing to
+install with. Install the `voice` extra and any Piper voices you want, and they appear in
+the same right-click → **Voice** menu, listed above the Windows ones and chosen the same
+way. Nothing else about Flow changes.
 
 ```bash
 uv pip install -e ".[voice]"
 ```
+
+A later `uv sync` removes extras it is not told about — `uv sync --extra voice` keeps it.
 
 ```bash
 python -m piper.download_voices en_GB-cori-high --data-dir ~/.flow/voices
@@ -1575,7 +1586,8 @@ stay reachable by name; they stop being what you get by accident.
 
 Ava, Guy and Sonia are sitting on your disk and Windows will not let anything but Narrator
 speak them. The `edge` extra reaches the same voice family through Microsoft's speech
-service, which is the only way to hear them.
+service, which is the only way to hear them. **Add Microsoft voices** on Flow Home ▸
+Models installs it; so does this:
 
 ```bash
 uv pip install -e ".[edge]"

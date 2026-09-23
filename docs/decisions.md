@@ -6,6 +6,41 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — Better voices from Flow Home
+
+The owner looked at the voice list and asked whether nine 2013 voices were all there was.
+They were, for a default install: the Windows 11 voices Narrator uses are unreachable by
+any public API (`speak.installed_voices`), and the two engines that sound like people —
+Piper on this PC, the Microsoft natural voices over Microsoft's service — were extras
+installed from a terminal. The owner's two had quietly gone: a `uv sync` removes extras it
+is not told about, so Cori and Alan sat in `~/.flow/voices/` with no engine to speak them.
+
+**Models ▸ Better voices adds either engine with a press**, chosen by the owner over
+making them dependencies. The install goes into the environment Flow runs from, with the
+extras' own specs (a test holds them equal): `uv pip install` when uv is here — `uv run`
+names itself in `UV` — then `python -m pip`, and in the Windows download neither: a frozen
+bundle cannot add to itself, so **the release builds with both extras** and ships both. An
+install is judged by whether the engine imports afterwards, not by the installer's exit
+code alone, and the engine's voices join the list without a restart
+(`speak.voices_changed` re-reads that one engine). The default install still declares
+three dependencies (R16): Piper costs 34 MB — onnxruntime came with faster-whisper — and
+the Microsoft voices about 2 MB, when somebody asks for them.
+
+**Piper's voices download there too**: eight single-speaker English voices from Piper's
+own catalogue, pinned to its `v1.0.0` tag, fetched into `~/.flow/voices/` with progress
+and checked against the catalogue's MD5 before they are renamed into place; a download
+that does not finish leaves nothing behind. No genders on the list — Piper's catalogue
+states none, and `piper._gender` says why Flow reads none off a name; the page links
+Piper's samples instead.
+
+**Adding is not choosing.** Adding the Microsoft voices lists them; picking one in the list
+is still what sends an answer's text to Microsoft, and the card says so before the button.
+The voice in use stays in the list even after the 2013 voices leave it.
+
+**Reopens if** an install from the page leaves somebody's environment broken — then the
+button becomes the command to run — or the release's download grows past what the second
+engine is worth.
+
 ### 2026-09-23 — Flow gets an icon
 
 The tray wore Windows' stock application icon — `tray.py` said so, "a line to change when
