@@ -648,5 +648,94 @@ class TestGTheCompactPillWatchesAndTypes(unittest.TestCase):
         self.assertEqual(p.session._paste_ended, "Paste last pasted after it")
 
 
+class TestHTypePastesInARowGetTheirSpace(unittest.TestCase):
+    """Two holds used to paste as "Hello there.How are you?" — each paste a draft of its
+    own, and a draft never starts with a space. A changeable paste is the one place Flow
+    knows what is in front of the caret."""
+
+    def _after(self, first, window=WINDOW):
+        s = _session()
+        s.delivered(first, window=window)
+        return s
+
+    def test_a_paste_that_continues_the_last_one_gets_the_space(self):
+        s = self._after("Hello there.")
+        self.assertEqual(s.join_paste("How are you?", WINDOW), " How are you?")
+
+    def test_a_command_in_two_holds_joins_up(self):
+        s = self._after("git commit")
+        self.assertEqual(s.join_paste("-m fix", WINDOW), " -m fix")
+
+    def test_nothing_where_flow_cannot_know_what_is_in_front(self):
+        # No paste yet, another window, a run that ended: the caret could be anywhere.
+        self.assertEqual(_session().join_paste("How are you?", WINDOW), "How are you?")
+        s = self._after("Hello there.")
+        self.assertEqual(s.join_paste("How are you?", WINDOW + 1), "How are you?")
+        s.end_paste_run("you typed after it was pasted")
+        self.assertEqual(s.join_paste("How are you?", WINDOW), "How are you?")
+
+    def test_nothing_where_the_two_already_meet(self):
+        self.assertEqual(self._after("a list - ").join_paste("milk", WINDOW), "milk")
+        self.assertEqual(self._after("Dear team,\nThanks").join_paste("\n\nBest", WINDOW),
+                         "\n\nBest")
+
+    def test_nothing_before_punctuation_that_belongs_to_the_word_in_front(self):
+        for text in (", and more", ".5 seconds", "? Really", ") too", "% faster"):
+            with self.subTest(text=text):
+                self.assertEqual(self._after("It was 3").join_paste(text, WINDOW), text)
+
+    def test_nothing_after_a_bracket_a_hyphen_or_a_slash(self):
+        for before, text in (("see (", "below"), ("well-", "known"), ("src/", "flow")):
+            with self.subTest(before=before):
+                self.assertEqual(self._after(before).join_paste(text, WINDOW), text)
+
+    def test_only_in_type(self):
+        s = self._after("Hello there.")
+        s.mode = CONVERSE
+        self.assertEqual(s.join_paste("How are you?", WINDOW), "How are you?")
+
+    def test_the_space_is_kept_where_the_backspaces_count_and_nowhere_else(self):
+        h = _kept()
+        s = _session(history=h)
+        s.delivered("Hello there.", window=WINDOW)
+        joined = s.join_paste("How are you?", WINDOW)
+        s.delivered(joined, window=WINDOW)
+        # The window holds the space, so the run does; History and Paste last do not.
+        self.assertEqual(s.paste_run.top.text, " How are you?")
+        self.assertEqual(s.last_handed, "How are you?")
+        h.flush()
+        self.assertEqual(h.entries()[0]["text"], "How are you?")
+        # And "scratch that" takes the space back with the words.
+        s._route("scratch that")
+        self.assertEqual(s.take_paste_fix().remove, " How are you?")
+
+    def test_the_compact_pill_pastes_the_space(self):
+        p = _typer()
+        p.session.delivered("Hello there.", window=WINDOW)
+        p.session.draft.append("How are you?")
+        with mock.patch.object(uc.CompactPill, "_clicked_off_pill", return_value=False), \
+             mock.patch.object(uc, "foreground_hwnd", return_value=WINDOW):
+            p._send()
+        p.on_send.assert_called_once_with(" How are you?", WINDOW)
+        self.assertEqual(p.session.paste_run.top.text, " How are you?")
+
+    def test_a_key_typed_just_before_it_means_no_space(self):
+        # The frame's watch runs every 30 ms; the paste asks again on the spot.
+        p = _typer()
+        p.session.delivered("Hello there.", window=WINDOW)
+        p.hotkeys.hook.touched = True
+        p.session.draft.append("How are you?")
+        p._send()
+        p.on_send.assert_called_once_with("How are you?", WINDOW)
+
+    def test_a_click_just_before_it_means_no_space(self):
+        p = _typer()
+        p.session.delivered("Hello there.", window=WINDOW)
+        p.session.draft.append("How are you?")
+        with mock.patch.object(uc.CompactPill, "_clicked_off_pill", return_value=True):
+            p._send()
+        p.on_send.assert_called_once_with("How are you?", WINDOW)
+
+
 if __name__ == "__main__":
     unittest.main()

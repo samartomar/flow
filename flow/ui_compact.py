@@ -1859,6 +1859,14 @@ class CompactPill(tk.Tk):
             # counts against it, which is the safe side to be wrong on.
             hook = self._key_hook() if typed else None
             if hook is not None:
+                # And a paste that continues the last one gets the space between
+                # them — decided now, not on the last frame: a key or a click in
+                # the 30 ms since means the caret may be somewhere else.
+                self._watch_paste_run()
+                join = getattr(self.session, "join_paste", None)
+                joined = join(text, self.paste_target) if callable(join) else text
+                if isinstance(joined, str):
+                    text = joined
                 hook.touched = False
             problem = self.on_send(text, self.paste_target, **extra) or ""
             if problem:

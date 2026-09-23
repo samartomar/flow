@@ -843,6 +843,14 @@ CORRECT_MAX_BREAKS = 1
 #: How many pastes into one window "scratch that" can walk back through, newest first.
 CORRECT_STACK = 4
 
+#: What a Type paste may start with and still sit straight against the paste before it:
+#: punctuation that belongs to the word in front, as `edits.shape` attaches it, and the
+#: closing brackets. `Session.join_paste` adds no space before these.
+_JOINS_LEFT = tuple(",.;:!?)]}%…")
+#: What the paste before may end with and take the next one straight after it: an
+#: opening bracket, a hyphen ("well-" then "known"), a slash ("src/" then "flow").
+_JOINS_RIGHT = tuple("([{-/")
+
 
 @dataclass
 class Pasted:
@@ -2676,6 +2684,30 @@ class Session:
         another window in front. `why` finishes "nothing to take back - "."""
         if self._paste_run is not None:
             self._end_paste_run(why)
+
+    def join_paste(self, text: str, window) -> str:
+        """`text` as the next Type paste into `window` should carry it: with a space in
+        front when it continues Flow's own last paste there (decisions.md 2026-09-23,
+        "Type pastes in a row get their space").
+
+        Type used to paste two holds as "Hello there.How are you?" — each paste is a
+        draft of its own, and a draft never starts with a space. A changeable paste is
+        the one place Flow knows what is in front of the caret: its own words, with
+        nothing typed or clicked since. Anywhere else it cannot know, and adds nothing.
+        No space where the two already meet — a space or a line break on either side —
+        nor where they join: punctuation that belongs to the word before it
+        (`_JOINS_LEFT`), or a paste that ends in a bracket, a hyphen or a slash
+        ("well-" then "known").
+        """
+        run = self.paste_run
+        if (run is None or run.window != window or self.mode != DICTATE
+                or not text or not run.pastes):
+            return text
+        before = run.top.text
+        if (not before or before[-1].isspace() or text[0].isspace()
+                or text.startswith(_JOINS_LEFT) or before.endswith(_JOINS_RIGHT)):
+            return text
+        return " " + text
 
     def _end_paste_run(self, why: str) -> None:
         self._paste_run = None
