@@ -5,7 +5,7 @@
 # the same register: what it does, where it runs, and what it does not do. Nothing here
 # sells anything, because a package description that oversells is a bug report later.
 PackageIdentifier: SamarTomar.Flow
-PackageVersion: 0.5.1
+PackageVersion: 0.6.0
 PackageLocale: en-US
 Publisher: Samar Tomar
 PublisherUrl: https://github.com/samartomar

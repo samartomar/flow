@@ -10,13 +10,13 @@
         "`autoupdate.hash` reads the `.sha256` the release workflow now uploads beside the",
         "zip, so a version bump does not have to download 126 MB to learn one number."
     ],
-    "version": "0.5.1",
+    "version": "0.6.0",
     "description": "Local English dictation with a talk-to-it refine loop",
     "homepage": "https://github.com/samartomar/flow",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/samartomar/flow/releases/download/v0.5.1/flow-windows-x64.zip",
+            "url": "https://github.com/samartomar/flow/releases/download/v0.6.0/flow-windows-x64.zip",
             "hash": "FILL-ME-SHA256"
         }
     },
