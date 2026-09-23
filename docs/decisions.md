@@ -39,7 +39,10 @@ The voice in use stays in the list even after the 2013 voices leave it.
 
 **Reopens if** an install from the page leaves somebody's environment broken — then the
 button becomes the command to run — or the release's download grows past what the second
-engine is worth.
+engine is worth. Measured on v0.6.0, the first release to carry both engines: the zip went
+from v0.5.1's 132,563,945 B to 169,013,698 B. Piper accounts for 32.6 MB of that, and 18.9
+MB of it is one Hebrew model no English voice uses (architecture.md, "Where a release comes
+from").
 
 ### 2026-09-23 — Flow gets an icon
 

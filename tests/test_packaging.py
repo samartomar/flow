@@ -49,6 +49,14 @@ ASSET = "flow-windows-x64.zip"
 #: than `dist/flow/*`, so the directory itself is the archive's root entry.
 IN_ZIP_EXE = "flow\\flow.exe"
 
+#: Each release's checksum, as its workflow published it in the `.sha256` beside the zip.
+#: A manifest that states a hash has to state the one for the version it names. After a
+#: bump the old number would pair the new zip's URL with the last zip's checksum, and
+#: PUBLISHING.md's one-liner replaces only the placeholder, so it would keep that number.
+PUBLISHED_SHA256 = {
+    "0.6.0": "e6719983ceb956ca8e06f653b08c794c143714c4fb1674cf6033bffce3bf3978",
+}
+
 
 def pyproject() -> dict:
     return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
@@ -489,7 +497,7 @@ class TestTheScoopManifest(unittest.TestCase):
         self.assertIn("$version", url)
         self.assertNotIn(pyproject()["project"]["version"], url)
         # And the hash comes from the `.sha256` the workflow now uploads, so a version
-        # bump costs one small request instead of re-downloading 126 MB to learn a number.
+        # bump costs one small request instead of re-downloading 161 MB to learn a number.
         self.assertEqual(auto["hash"]["url"], "$url.sha256")
 
 
@@ -603,6 +611,16 @@ class TestBothManifestsPointAtTheSameFileInTheSameZip(unittest.TestCase):
         stated = hashes.pop()
         if stated != "FILL-ME-SHA256":
             self.assertRegex(stated, r"^[A-Fa-f0-9]{64}$")
+
+    def test_and_a_stated_checksum_is_the_one_published_for_that_version(self):
+        stated = scoop()["architecture"]["64bit"]["hash"]
+        version = pyproject()["project"]["version"]
+        if stated != "FILL-ME-SHA256":
+            self.assertEqual(
+                stated.lower(), PUBLISHED_SHA256.get(version),
+                f"the manifests state a checksum that is not v{version}'s - a version bump "
+                "puts FILL-ME-SHA256 back, and filling it adds that release to "
+                "PUBLISHED_SHA256 (packaging/PUBLISHING.md, steps 1 and 5)")
 
 
 class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
