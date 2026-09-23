@@ -6,6 +6,31 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — Flow gets an icon
+
+The tray wore Windows' stock application icon — `tray.py` said so, "a line to change when
+Flow has artwork" — the .exe had PyInstaller's, the pill's windows Tk's feather, and Flow
+Home a hand-drawn microphone. The owner asked for something better and chose, from four
+sketches, **the pill's level bars ending in a violet text cursor**: what Flow does — the
+meter the pill shows while it hears you, becoming a caret where the words land — in the
+pill's own colours (the shell, the text white, Ask's violet). The alternatives were the
+pill itself (truest to the screen, muddy at 16 px), a wave flattening into a line, and an
+F in the three mode colours.
+
+`scripts/make_icon.py` draws it with numpy and the stdlib — no image library joins the
+dependencies — into `flow/assets/flow.ico` and `flow.svg`, and `--check` fails the suite
+if the committed files drift from the drawing. **The sizes Windows actually shows are
+drawn again on whole pixels**: 16, 20, 24 and 32 px are the tray and taskbar at 100, 125,
+150 and 200% scaling, and scaled from the 64-unit drawing their bars land between pixels
+and smear. BMP inside the icon below 256 px and PNG at 256, which every Windows reader
+takes, Tk's included. The tray loads it at `SM_CXSMICON` and keeps the stock icon as the
+fallback; both pills set it as their windows' default; Flow Home serves it as the page's
+icon, which the Edge app window takes for its taskbar button, and as the rail's mark; the
+.exe is built with it.
+
+**Reopens if** it is mistaken for another app's in the tray — the mark would then need
+more of Flow in it than the colours.
+
 ### 2026-09-23 — Type pastes in a row get their space
 
 Found while building the entry below: two Type holds pasted as "Hello there.How are you?"
