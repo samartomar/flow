@@ -199,6 +199,29 @@ class TestThePageWritesNoInlineStyleOrScript(unittest.TestCase):
         self.assertNotIn("?token=", js)
 
 
+class TestAnAnswerIsDrawnOnlyOnThePageThatAsked(unittest.TestCase):
+    """A voice change on Models, then a click on Settings before it answered, drew
+    Settings from Models' payload: "Cannot read properties of undefined (reading
+    'chosen')". Every action goes through `run`, so the rule is pinned there: the page
+    is taken when the action starts, and its answer redraws only that page."""
+
+    def test_run_remembers_the_page_and_checks_it_before_drawing(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        body = js[js.index("async function run(fn, done)"):]
+        body = body[:body.index("\n  }\n")]
+        self.assertIn("const page = current();", body)
+        self.assertIn("current() === page", body)
+        self.assertIn("LOAD[page]", body)
+        self.assertNotIn("LOAD[current()]", body)
+
+    def test_every_other_redraw_is_already_guarded(self):
+        # The page fetch and the poll both check the page after their await; `run` was
+        # the one path that did not.
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn("if (current() !== name) return;", js)
+        self.assertIn("if (current() === name) { data = fresh; draw(name, false); }", js)
+
+
 # ------------------------------------------------------------------------------ bridge
 
 

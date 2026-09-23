@@ -1091,9 +1091,15 @@
   // ------------------------------------------------------------------ actions
   const value = (id) => (document.getElementById(id) || {}).value;
   async function run(fn, done) {
+    // The page this was pressed on: its answer is that page's data. Drawn into whatever
+    // page is showing when it lands, a voice change on Models followed by a click on
+    // Settings drew Settings from Models' payload - "Cannot read properties of undefined
+    // (reading 'chosen')". A page left behind is re-read by its own `show` anyway.
+    const page = current();
     try {
       const out = await fn();
-      if (out && typeof out === "object" && !Array.isArray(out) && LOAD[current()]) redrawWith(out);
+      if (out && typeof out === "object" && !Array.isArray(out) && LOAD[page]
+          && current() === page) redrawWith(out);
       if (done) toast(done);
     } catch (e) {
       if (e instanceof Gone) gone(e.message); else toast(e.message, true);
