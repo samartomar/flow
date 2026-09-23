@@ -151,6 +151,43 @@ def _chord(profile, hotkeys, Chord, parse_chord, echo, ignored_line,
     return chord
 
 
+def _ask_chord(profile, hotkeys, Chord, parse_chord, echo, default):
+    """Install Ask's own hold (decisions.md 2026-09-23, "Ask's own hold"), and say so.
+
+    `_chord`'s contract — every path out prints a line — for the second chord. It
+    rides the talk chord's hook when there is one (`Chord.riders`): one hook on the
+    input path of every keystroke, not two. It asks for a hook of its own only when the
+    talk chord is off. Always a hold, whatever the talk chord's gesture: a question is
+    a sentence, and the toggle is there for the talk keys.
+
+    The talk chord's own keys are refused by name — one press would start both holds.
+    """
+    from .hotkey import (ASK_ACTIONS, ASK_CHORD_IGNORED_LINE, ASK_CHORD_LINE,
+                         ASK_CHORD_UNAVAILABLE)
+
+    wanted = getattr(profile, "ask_chord", default) if profile is not None else default
+    if not isinstance(wanted, str) or not wanted.strip():
+        return None
+    mods, reason = parse_chord(wanted)
+    if mods is None:
+        say(ASK_CHORD_IGNORED_LINE.format(combo=echo(wanted), reason=reason))
+        return None
+    talk = getattr(hotkeys, "chord", None)
+    if talk is not None and frozenset(talk.mods) == frozenset(mods):
+        say(ASK_CHORD_IGNORED_LINE.format(combo=echo(wanted),
+                                          reason="those are the talk keys"))
+        return None
+    chord = Chord(hotkeys.presses, mods, gesture="hold", **ASK_ACTIONS)
+    if talk is not None:
+        talk.riders.append(chord)
+    elif not chord.start():
+        say(ASK_CHORD_UNAVAILABLE)
+        return None
+    hotkeys.ask_chord = chord
+    say(ASK_CHORD_LINE.format(keys=chord.describe()))
+    return chord
+
+
 def _native_transcriber():
     """Import late, so a Windows launch never touches the macOS-only module."""
     from .native import NativeTranscriber
@@ -477,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
             BAD_BLOCK_LINE, CHORD_IGNORED_LINE, CHORD_UNAVAILABLE,
             DEFAULT_BINDINGS, Chord, Hotkeys, _echo, parse_chord,
         )
-        from .profile import CHORD_DEFAULT
+        from .profile import ASK_CHORD_DEFAULT, CHORD_DEFAULT
         from .inject import paste, take_warnings
     elif sys.platform == "darwin" and not args.no_paste:
         # Lite is about hotkeys and window handles, not about whether Flow can put the
@@ -878,13 +915,19 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_chord:
                 _chord(profile, hotkeys, Chord, parse_chord, _echo,
                        CHORD_IGNORED_LINE, CHORD_UNAVAILABLE, CHORD_DEFAULT)
+                _ask_chord(profile, hotkeys, Chord, parse_chord, _echo,
+                           ASK_CHORD_DEFAULT)
     # Assigned rather than passed: the session is built before `RegisterHotKey` has been
     # asked for anything, and what the session needs is the answer, not the request. It
     # reads this only to say what still works when voice stops working.
     session.hotkeys = hotkeys
 
-    def on_send(text: str, target: int | None = None, submit: bool = False) -> str:
+    def on_send(text: str, target: int | None = None, submit: bool = False,
+                remove: str = "") -> str:
         """Paste the draft into `target`, and return what went wrong, or "".
+
+        `remove` is a correction after a Type paste: that much of Flow's own last paste
+        taken back first (`inject.paste`), in the same burst.
 
         Converse mode returns "" from send(), so this is dictate-mode only by
         construction: the question must never be pasted into the focused window.
@@ -902,9 +945,14 @@ def main(argv: list[str] | None = None) -> int:
         is handed `None` rather than a handler that would fail on its first call.
         """
         if args.no_paste:
-            say(f"\n--- draft ---\n{text}{' [+Enter]' if submit else ''}\n")
+            back = f"[take back {len(remove)} characters] " if remove else ""
+            say(f"\n--- draft ---\n{back}{text}{' [+Enter]' if submit else ''}\n")
             return ""
-        ok = paste(text, hwnd=target, submit=submit)
+        # Passed only when there is one, the idiom `submit` keeps on the pill's side: the
+        # Mac's `inject_mac.paste` has no take-back, and never needs one — a correction
+        # needs the keyboard hook, which only Windows has.
+        ok = paste(text, hwnd=target, submit=submit, remove=remove) if remove \
+            else paste(text, hwnd=target, submit=submit)
         problems = take_warnings()
         if not ok and not problems:
             problems.append("not pasted, and no reason was recorded")
@@ -952,7 +1000,9 @@ def main(argv: list[str] | None = None) -> int:
             chord = getattr(hotkeys, "chord", None)
             held = f"the pill or {chord.describe()}" if chord is not None \
                 else "the pill"
-            say(f"hold {held} to talk | tap the pill to cycle "
+            ask = getattr(hotkeys, "ask_chord", None)
+            asks = f" | hold {ask.describe()} to ask" if ask is not None else ""
+            say(f"hold {held} to talk{asks} | tap the pill to cycle "
                 f"Type / Refine / Ask | right-click for the menu | {quits}")
         else:
             say(

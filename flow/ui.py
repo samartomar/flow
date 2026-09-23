@@ -1182,6 +1182,15 @@ PILL_DRAG_SLOP = 4
 #: in whatever window the user has since moved to, which is worse than not pasting.
 PTT_PASTE_WAIT_SEC = 15.0
 
+#: How long the talk keys, held while the pill is on Ask, wait before the pill leaves
+#: Ask (decisions.md 2026-09-23, "Ask's own hold"). The bottom row reads Ctrl, Win,
+#: Alt, so the Ask keys are often pressed *through* the talk keys: ctrl+win forms first
+#: and Alt lands 30-100 ms later. Leaving at once flickered the pill to Type and wiped
+#: the answer on screen, for a hold that was always going to be a question. The capture
+#: starts at once either way — only the side waits, and a final cannot be decoded, let
+#: alone routed, inside it.
+SIDE_SETTLE_SEC = 0.15
+
 #: Unified with `CARD_W` (decisions.md 2026-08-09, Phase 6): the widest state either
 #: panel reaches is the draft's full rescue row — Refine, Continue, Edit, "Was a
 #: command", Send, 345 px of chip width — and at the old 380 that left `chip_row_gap`
@@ -2523,6 +2532,13 @@ class Pill(tk.Tk):
     #: waiting" rather than a recursion. `None` is that in both cases.
     _ptt_since: float | None = None
     _ptt_wait: float | None = None
+    #: Ask's own hold (decisions.md 2026-09-23, "Ask's own hold"), the compact pill's
+    #: three fields for the same three jobs: the dictation mode the Ask keys left,
+    #: whether the hold in flight is theirs, and when a talk-keys hold began on Ask
+    #: while it waits `ui_compact.SIDE_SETTLE_SEC` to leave it.
+    _dictate_side = DICTATE
+    _ask_hold = False
+    _side_since: float | None = None
     #: And for the three gestures now sharing the left button: when it went down, where,
     #: whether it has travelled since, whether the press turned into an utterance, and
     #: the `after` id that would turn it into one. All idle here, which is the state a
@@ -4685,6 +4701,7 @@ class Pill(tk.Tk):
         # Hotkeys arrive on their own thread; Tk is only ever touched from this one.
         if not self._drain_hotkeys():
             return
+        self._pump_side()
 
         if self.armed:
             self.session.tick()
@@ -4792,13 +4809,30 @@ class Pill(tk.Tk):
                 # during the hold instead of inside the first sentence.
                 self.session.warm()
             elif name == "talk":
+                # The talk keys dictate whatever the mode, as on the compact pill
+                # (`CompactPill._drain_hotkeys`): from Ask the pill leaves Ask
+                # once the hold has settled, since the Ask keys are often pressed
+                # through these ones.
+                if self.session.mode == CONVERSE:
+                    self._side_since = time.perf_counter()
                 self._talk_start()
             elif name == "talk-end":
+                self._settle_side()
                 self._talk_end(send=True)
             elif name == "talk-break":
                 # Windows meant `ctrl+win+d`. Stop, keep whatever was said, paste
-                # nothing — see `_talk_end`.
+                # nothing — see `_talk_end`. A hold from Ask that broke stays on
+                # Ask: the third key was usually Alt, on its way to the Ask keys.
+                self._side_since = None
                 self._talk_end(send=False)
+            elif name == "ask":
+                if self._to_side(ask=True):
+                    self._talk_start()
+                    self._ask_hold = self._ptt_since is not None
+            elif name in ("ask-end", "ask-break"):
+                if self._ask_hold:
+                    self._ask_hold = False
+                    self._talk_end(send=name == "ask-end")
             elif name == "send":
                 self._send()
             elif name == "cancel":
@@ -4819,6 +4853,46 @@ class Pill(tk.Tk):
                 return False
         return True
 
+    def _to_side(self, *, ask: bool) -> bool:
+        """`CompactPill._to_side`, for this surface: put the session on the side the
+        hand chose before its hold begins. False, with a note, when Ask is not on offer
+        — no agent CLI on this PC."""
+        mode = self.session.mode
+        offered = bool(getattr(self.session, "provider", ""))
+        if ask:
+            if not offered:
+                self.front.note("Ask needs an agent CLI - install claude or codex")
+                return False
+            if mode != CONVERSE:
+                self._dictate_side = mode
+                # A pending paste belongs to the mode it was spoken in — the `mode`
+                # hotkey's rule, below.
+                self._ptt_wait = None
+                self.session.toggle_mode(to=CONVERSE)
+            return True
+        if mode == CONVERSE:
+            side = self._dictate_side
+            if side not in (DICTATE, REFINE) or (side == REFINE and not offered):
+                side = DICTATE
+            self._dictate_side = DICTATE
+            self._ptt_wait = None
+            self.session.toggle_mode(to=side)
+        return True
+
+    def _settle_side(self) -> None:
+        """A talk-keys hold that began on Ask has settled: leave Ask now. See
+        `CompactPill._settle_side`."""
+        if self._side_since is None:
+            return
+        self._side_since = None
+        self._to_side(ask=False)
+
+    def _pump_side(self) -> None:
+        """One tick of the wait `_settle_side` ends."""
+        if (self._side_since is not None
+                and time.perf_counter() - self._side_since >= SIDE_SETTLE_SEC):
+            self._settle_side()
+
     def _fast_tick(self) -> None:
         """The gesture's own clock: `FAST_TICK_MS`, between the 30 ms frames.
 
@@ -4836,6 +4910,7 @@ class Pill(tk.Tk):
                 return
             if not self._drain_hotkeys():
                 return
+            self._pump_side()
             if self._ptt_wait is not None and not self.session.busy:
                 # The same three calls `_frame` makes, in the same order, for the same
                 # reason it gives: the decode's draft has to be on `session.draft`

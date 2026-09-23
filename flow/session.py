@@ -31,6 +31,7 @@ from .diag import Diag, NullDiag
 from .edits import (
     SEND_ENTER_WORD,
     SEND_WORD,
+    Plan,
     added_text,
     apply_local,
     command_bias,
@@ -39,6 +40,7 @@ from .edits import (
     plan,
     removed_text,
     shape,
+    whole_undo,
 )
 
 #: P4/P8: the local operations that teach Flow a spelling. Every one of these replaces
@@ -814,6 +816,102 @@ class Draft:
         return out
 
 
+# -- correcting a Type paste ------------------------------------------------------
+#
+# Type pastes on the release and clears the draft, so a correction said in the next hold
+# used to find nothing to act on and was pasted as words — "scratch that" typed into
+# somebody's message. Now the words a Type paste put in a window stay changeable while
+# Flow can know they are still exactly where it put them: the same window in front,
+# nothing typed and nothing clicked since, for a minute (decisions.md 2026-09-23,
+# "Correcting a Type paste"). A change is made the only way Flow can make one in another
+# program — its own characters taken back with Backspace, the corrected ones pasted in
+# their place, in one burst — and the surfaces are the ones that watch the keyboard and
+# the mouse. This is the routing half: which words, and what they become.
+
+#: How long a Type paste stays changeable. Nothing typed or clicked is the real guard;
+#: this is the backstop for what no guard sees — a program changing its own text.
+CORRECT_WINDOW_SEC = 60.0
+
+#: The most one changeable paste may be. Claude Code turns a paste of more than 800
+#: characters or more than two lines into a "[Pasted text]" placeholder, and a count of
+#: Backspaces cannot see into a placeholder — so a paste past either is never changed,
+#: and neither is one a change would push past them. `inject.TAKE_BACK_MAX` is the same
+#: number on the side that sends the keys.
+CORRECT_MAX_CHARS = 800
+CORRECT_MAX_BREAKS = 1
+
+#: How many pastes into one window "scratch that" can walk back through, newest first.
+CORRECT_STACK = 4
+
+
+@dataclass
+class Pasted:
+    """One Type paste, as its words now stand in the window."""
+
+    text: str
+    #: What `text` was before each change made to it, oldest first — its undo stack.
+    before: list[str] = field(default_factory=list)
+    #: The History entry it was kept as, or "" when nothing is kept.
+    entry: str = ""
+
+
+@dataclass
+class PasteRun:
+    """The changeable Type pastes in one window, oldest first; the last is at the caret."""
+
+    window: int
+    at: float
+    pastes: list[Pasted] = field(default_factory=list)
+
+    @property
+    def top(self) -> Pasted:
+        return self.pastes[-1]
+
+
+@dataclass
+class PasteFix:
+    """A change the session has decided on and a surface has yet to make.
+
+    `remove` is the tail of the newest paste to take back, and `insert` what goes in its
+    place; `after` is that paste's whole text once it is made — "" when the paste is
+    taken back whole, which is `kind` "back". `kind` "undo" takes back the last change,
+    "change" makes a new one. `pair` is the confusion pair it teaches, if any.
+    """
+
+    run: PasteRun
+    kind: str
+    remove: str
+    insert: str
+    after: str
+    note: str
+    pair: tuple[str, str] | None = None
+
+
+def _quoted(text: str, limit: int = 40) -> str:
+    """The front of a paste, for a note that has to say which one."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def paste_unfit(text: str) -> str:
+    """Why a paste of `text` cannot be changed by voice afterwards, or "" when it can —
+    see `CORRECT_MAX_CHARS`. A trailing line break is out too: a terminal strips it
+    before the paste, so the words in the window would not be the words Flow counted."""
+    if not text.strip():
+        return "it was only a line break"
+    if len(text) > CORRECT_MAX_CHARS:
+        return "it was too long to change"
+    if text.count("\n") > CORRECT_MAX_BREAKS:
+        return "it had more than one line break"
+    if text.endswith(("\n", "\r")) or "\r" in text:
+        return "it ended in a line break"
+    return ""
+
+
+def paste_fits(text: str) -> bool:
+    return not paste_unfit(text)
+
+
 class Session:
     def __init__(
         self,
@@ -880,6 +978,13 @@ class Session:
         #: The last thing a Send handed over, and when — what Paste last pastes. In
         #: memory, like Recent; `history.newest` stands in for it after a restart.
         self._handed: tuple[str, float] | None = None
+        #: The Type pastes a spoken correction can still change, and the correction a
+        #: surface has yet to make (decisions.md 2026-09-23, "Correcting a Type paste").
+        #: `_paste_ended` is why the last run stopped being changeable, for the note a
+        #: "scratch that" gets when there is nothing left to take back.
+        self._paste_run: PasteRun | None = None
+        self._paste_fix: PasteFix | None = None
+        self._paste_ended = "nothing has been pasted yet"
         #: The last refine result and the words it was made from, so a Send of that
         #: result is kept as refined rather than as dictation somebody else wrote.
         self._refined: dict | None = None
@@ -2367,6 +2472,12 @@ class Session:
             self.wrap_up()
             return
 
+        # Also only with an empty draft — which is the state a Type paste leaves — and
+        # never over "that is dictation", pressed for the words about to be said.
+        if not self.draft.text and forced != "append" and self._route_paste(utterance):
+            trace("paste_fix")
+            return
+
         if not self.draft.text:
             trace("append")
             self.draft.append(utterance)
@@ -2481,7 +2592,8 @@ class Session:
         """
         self._recall()
 
-    def delivered(self, text: str, problem: str = "", copied: bool = False) -> None:
+    def delivered(self, text: str, problem: str = "", copied: bool = False,
+                  window: int | None = None, submitted: bool = False) -> None:
         """A surface has put `text` where the user was, or on the clipboard.
 
         The one door dictation takes into History, and it is the surfaces' to open
@@ -2493,8 +2605,14 @@ class Session:
 
         What it knows that they do not is where the words came from: text that is the
         last refine's result is kept as refined, with the words it was made from.
+
+        `window` is a surface saying it pasted into that window with Type and can watch
+        it — nothing typed, nothing clicked — so the words stay changeable by voice for
+        a minute (decisions.md 2026-09-23, "Correcting a Type paste"). `submitted` is a
+        paste Enter went in behind. Every other handover ends what was changeable.
         """
-        text = (text or "").strip()
+        raw = text or ""
+        text = raw.strip()
         if not text:
             return
         self._handed = (text, time.time())
@@ -2509,10 +2627,200 @@ class Session:
                   "words": len(text.split()), "how": how, "note": problem or ""}
         refined, self._refined = self._refined, None
         if refined is not None and refined["text"].strip() == text:
-            self.history.add(REFINED, text, heard=refined["heard"], cli=refined["cli"],
-                             secs=refined["secs"], **fields)
+            entry = self.history.add(REFINED, text, heard=refined["heard"],
+                                     cli=refined["cli"], secs=refined["secs"], **fields)
         else:
-            self.history.add(DICTATED, text, **fields)
+            entry = self.history.add(DICTATED, text, **fields)
+        self._track_paste(raw, how, window, submitted,
+                          entry["id"] if isinstance(entry, dict) else "")
+
+    # -- correcting a Type paste --------------------------------------------------
+
+    def _track_paste(self, text: str, how: str, window, submitted: bool,
+                     entry: str) -> None:
+        """Keep a Type paste changeable, on top of the ones before it in that window —
+        or say why nothing is changeable any more. The words kept are the ones sent,
+        spaces and all: they are what the Backspaces will have to count."""
+        why = ("it was copied, not pasted" if how in ("copied", "not copied")
+               else "it did not paste" if how != "pasted"
+               else "it went in with Enter" if submitted
+               else paste_unfit(text)
+               or ("that paste can't be changed" if not window or self.mode != DICTATE
+                   else ""))
+        if why:
+            self._end_paste_run(why)
+            return
+        now = time.time()
+        run = self.paste_run
+        if run is not None and run.window == window:
+            run.pastes.append(Pasted(text, entry=entry))
+            del run.pastes[:-CORRECT_STACK]
+            run.at = now
+        else:
+            self._paste_run = PasteRun(window=window, at=now,
+                                       pastes=[Pasted(text, entry=entry)])
+        self._paste_fix = None
+
+    @property
+    def paste_run(self) -> PasteRun | None:
+        """The Type pastes a spoken correction can still change, or None. Expires here,
+        so every reader agrees about the minute."""
+        run = self._paste_run
+        if run is not None and time.time() - run.at > CORRECT_WINDOW_SEC:
+            self._end_paste_run("it was over a minute ago")
+            return None
+        return run
+
+    def end_paste_run(self, why: str) -> None:
+        """A surface saw what makes the pastes unchangeable — a key typed, a click,
+        another window in front. `why` finishes "nothing to take back - "."""
+        if self._paste_run is not None:
+            self._end_paste_run(why)
+
+    def _end_paste_run(self, why: str) -> None:
+        self._paste_run = None
+        self._paste_fix = None
+        self._paste_ended = why
+
+    def _route_paste(self, utterance: str) -> bool:
+        """A correction said into an empty draft, about the Type pastes before it.
+
+        True when the utterance was taken as one — made, or refused out loud — and must
+        not become dictation; False lets it be the dictation it may well be. The grammar
+        is the draft's own (`edits.plan`, with the newest paste as the draft), stricter
+        in two places because a change here lands in another program:
+
+        - **Undo only as the whole utterance** (`edits.whole_undo`). In a draft "never
+          mind the weather" costs one undo of words still on screen; here it would take
+          text out of somebody's message. "Scratch that" undoes the last change made to
+          the newest paste, then the paste itself, then the one before it.
+        - **Only a change whose words are there.** A "change X to Y" with no X in the
+          newest paste is pasted as the words it is, the draft's own rule with an empty
+          draft — and "scratch that" takes it back.
+
+        With nothing changeable, the bare verbs — "scratch that", "delete the last
+        word", "that was a command" — are refused out loud rather than pasted: nobody
+        dictates them as prose, and a paste of them is the defect this exists to end.
+        """
+        if self.mode != DICTATE:
+            return False
+        run = self.paste_run
+        p = plan(utterance, run.top.text if run is not None else "", self.send_words)
+        if p.kind == "local" and p.op == "break":
+            # "New paragraph" is neither a change to a paste nor words: it is the break
+            # itself, and it goes in with the words said next — a draft of nothing but
+            # a break is never pasted on its own. Said, because until then nothing on
+            # screen moves. It used to be pasted as the two words.
+            self.draft.set(p.payload)
+            self._after_draft_change()
+            what = "new paragraph" if p.payload == "\n\n" else "new line"
+            self._emit("edit", f"{what} - it goes in with your next words")
+            return True
+        undo = whole_undo(utterance)
+        if run is None:
+            if undo or p.kind == "rescue" or (p.kind == "local" and p.op == "delete_last"):
+                self._emit("note", f"nothing to take back - {self._paste_ended}")
+                return True
+            return False
+        top = run.top
+        if undo:
+            if top.before:
+                back = top.before[-1]
+                self._fix_paste(run, "undo", back,
+                                describe_change(Plan("undo"), top.text, back))
+            else:
+                self._fix_paste(run, "back", "", f"took back “{_quoted(top.text)}”")
+            return True
+        if p.kind == "rescue":
+            # The newest paste was a command read as dictation, and the fix that can
+            # be made is to take it back out. Re-reading it against the paste under it
+            # would route exactly as it did the first time — same words, same text —
+            # so the one thing left to do with it is to say it differently.
+            self._fix_paste(run, "back", "", f"took back “{_quoted(top.text)}”")
+            return True
+        if p.kind != "local":
+            return False
+        new, applied = apply_local(top.text, p)
+        if not applied or new == top.text:
+            self._emit("note", "nothing to change in what was just pasted")
+            return True
+        if not new.strip():
+            self._fix_paste(run, "back", "", f"took back “{_quoted(top.text)}”")
+            return True
+        if not paste_fits(new):
+            why = paste_unfit(new).replace("it ", "the result ", 1)
+            self._emit("note", f"nothing to change - {why}")
+            return True
+        pair = None
+        if p.op in LEARNABLE:
+            # The draft path's own reading: both halves from the texts, not the plan.
+            gone = removed_text(top.text, new).split(" … ")[0]
+            got = added_text(top.text, new).split(" … ")[0]
+            pair = (gone, got or p.payload)
+        self._fix_paste(run, "change", new, describe_change(p, top.text, new), pair=pair)
+        return True
+
+    def _fix_paste(self, run: PasteRun, kind: str, after: str, note: str, *,
+                   pair: tuple[str, str] | None = None) -> None:
+        """Hand a surface the change: only the tail after the text the two versions
+        share is taken back and retyped, so the fewest keys go in."""
+        before = run.top.text
+        k = 0
+        limit = min(len(before), len(after))
+        while k < limit and before[k] == after[k]:
+            k += 1
+        self._paste_fix = PasteFix(run=run, kind=kind, remove=before[k:],
+                                   insert=after[k:], after=after, note=note, pair=pair)
+        self._emit("retype", note)
+
+    def take_paste_fix(self) -> PasteFix | None:
+        """The change a `retype` event announced, for the surface to make. None when
+        the pastes stopped being changeable while it waited."""
+        fix, self._paste_fix = self._paste_fix, None
+        if fix is not None and fix.run is not self._paste_run:
+            return None
+        return fix
+
+    def paste_fixed(self, fix: PasteFix, problem: str = "") -> None:
+        """The surface made the change, or `problem` says why not.
+
+        A change that did not go in ends the run: Windows reports how many keys it
+        took, never which, so the window may hold part of it and nothing Flow counts
+        from here would be true. One that did goes into History and Paste last as the
+        words now stand — a paste taken back stays in History, marked, and stays what
+        Paste last pastes, which is the way back from a "scratch that" said by mistake.
+        """
+        run = fix.run
+        if run is not self._paste_run:
+            return
+        if problem:
+            self._end_paste_run("the last change did not go in")
+            return
+        top = run.top
+        now = time.time()
+        if fix.kind == "back":
+            run.pastes.pop()
+            self.history.revise(top.entry, how="taken back")
+            if not run.pastes:
+                self._end_paste_run("it was taken back")
+        else:
+            if fix.kind == "undo":
+                top.before.pop()
+            else:
+                top.before.append(top.text)
+            top.text = fix.after
+            self.history.revise(top.entry, text=top.text.strip(),
+                                words=len(top.text.split()),
+                                how="pasted, then changed" if top.before else "pasted")
+            self._handed = (top.text.strip(), now)
+            if fix.pair is not None and self.profile is not None:
+                # P8, as for a spoken correction in a draft — and saved now, because no
+                # Send is coming to commit it.
+                self.profile.learn_pair(*fix.pair)
+                self._request_save()
+        if self._paste_run is run:
+            run.at = now
+        self._emit("edit", fix.note)
 
     @property
     def last_handed(self) -> str:

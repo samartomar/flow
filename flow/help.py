@@ -99,6 +99,9 @@ _ACTIONS = {
     # press. Spelled out to the end — release and all — because the half people get
     # wrong is that there is no second shortcut to send.
     "talk": "hold to talk, release to send",
+    # Ask's own chord (decisions.md 2026-09-23, "Ask's own hold"): a question
+    # whatever mode the pill is in, which is the whole of what it adds.
+    "ask": "hold to ask, whatever the mode; release to send it",
     "send": "hand the draft over (Send, or Ask in converse mode)",
     "cancel": "clear the draft, and cut a spoken reply short",
     "mode": "switch between dictate and converse",
@@ -186,10 +189,11 @@ def _hotkey_rows(hotkeys) -> list[tuple[str, str, str]]:
     # shape they have been using does not exist. Absent when the hook was refused or
     # `--no-chord` was passed, which is the same rule the rest of this function follows:
     # the sheet says what works on this machine this launch.
-    chord = getattr(hotkeys, "chord", None)
-    if chord is not None:
-        rows.insert(0, ("pair", f"{chord.describe()} (held)",
-                        _ACTIONS.get(chord.action, chord.action)))
+    # Ask's chord beside it, for the same reason: nothing registered it either.
+    held = [c for c in (getattr(hotkeys, "chord", None),
+                        getattr(hotkeys, "ask_chord", None)) if c is not None]
+    rows[0:0] = [("pair", f"{c.describe()} (held)", _ACTIONS.get(c.action, c.action))
+                 for c in held]
     # Named as unavailable rather than left out. A shortcut that silently does nothing is
     # the defect `Hotkeys.failed` was built to report, and a sheet that omitted it would
     # send somebody looking for a key that cannot exist on this machine.
@@ -295,6 +299,15 @@ def rows(hotkeys=None, send_words: tuple[str, str] | None = None,
         ("gap", "", ""),
         ("note", "Politeness is absorbed: 'can you please delete Tuesday' is the same "
          "command.", ""),
+        # Type pastes on the release, so the draft is empty by the next hold — and the
+        # commands above work on the paste instead (decisions.md 2026-09-23,
+        # "Correcting a Type paste"). One line, because the sheet had one line of room
+        # under `HELP_MAX_H`. Not in Lite: it needs the keyboard hook to know nobody
+        # typed since, and Lite has none.
+        *([] if lite else [
+            ("note", "After a Type paste they change what it pasted, until you type or "
+             "click there.", ""),
+        ]),
         ("gap", "", ""),
         ("head", "Taking the answer", "converse mode"),
         *[("pair", f"{verb} that answer",

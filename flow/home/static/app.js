@@ -201,9 +201,13 @@
     const hist = d.history || {};
     const done = d.setup.filter((i) => i.done).length;
     const gesture = sc.gesture === "toggle" ? "press, talk, press again" : "hold, talk, let go";
-    const askHow = sc.mode
-      ? `Tap the pill until its mic is violet, or press ${keys(sc.mode)}, then hold to talk.`
-      : "Tap the pill until its mic is violet, then hold to talk.";
+    // Ask's own hold (decisions.md 2026-09-23): the hand picks the side, so the tint
+    // is the second way in, not the first.
+    const askHow = sc.ask
+      ? `Works whatever the pill is on${sc.dictate ? `, and ${keys(sc.dictate)} goes back to dictating` : ""}. Or tap the pill until its mic is violet, then hold the pill.`
+      : sc.mode
+        ? `Tap the pill until its mic is violet, or press ${keys(sc.mode)}, then hold to talk.`
+        : "Tap the pill until its mic is violet, then hold to talk.";
     const recent = (d.recent || []).map((r) => `
       <div class="recent">${glyph(r.side === "ask" ? C.ask : C.type, 0.8)}
         <span class="kind">${esc(r.kind === "said" ? "Said" : r.kind === "asked" ? "Asked" : "Answer")}</span>
@@ -221,10 +225,11 @@
           </div>
           <hr class="rule">
           <div class="row">${glyph(C.refine, 0.8)}<p class="note">Tap the pill to gold for <b class="warn">Refine</b>: shaped for your project before you send it.</p></div>
+          ${sc.corrects ? `<div class="row">${icon("pencil", C.soft, 15)}<p class="note grow">Said it wrong? Hold again and say <b>scratch that</b>, or <b>change Tuesday to Thursday</b>. Flow fixes what it just pasted, until you type or click.</p></div>` : ""}
           ${sc.paste_last ? `<div class="row">${icon("copy", C.soft, 15)}<p class="note grow">Pasted in the wrong window? <b>Paste last</b> puts it in the one in front.</p>${keys(sc.paste_last)}</div>` : ""}
         </section>
         <section class="card side-card">
-          <div class="row"><span class="disc">${glyph(C.ask, 1.15)}</span><h2 class="grow">Ask</h2>${d.mode === "ask" ? '<span class="badge violet">the pill is on Ask</span>' : ""}</div>
+          <div class="row"><span class="disc">${glyph(C.ask, 1.15)}</span><h2 class="grow">Ask</h2>${d.mode === "ask" ? '<span class="badge violet">the pill is on Ask</span>' : ""}${keys(sc.ask)}<span class="fine">${sc.ask ? "hold, ask, let go" : ""}</span></div>
           <p class="lead">Ask anything, like ChatGPT. With a workspace set, the answer knows your code.</p>
           <p class="note">${askHow}</p>
           <hr class="rule">
@@ -369,6 +374,8 @@
     const hot = sh.available ? `
       <div class="hotkey"><span class="what">Talk</span>${keys(sh.chord.describe) || '<span class="note">off</span>'}<span class="grow"></span>${seg([["hold", "Hold"], ["toggle", "Toggle"]], sh.chord.gesture, "gesture", "How the talk keys work")}</div>
       <div class="hotkey"><label class="what" for="chord-keys">Talk keys</label><input id="chord-keys" class="input mono grow" value="${esc(sh.chord.keys)}" placeholder="ctrl+win - empty turns it off"><button type="button" class="btn sm" data-act="chord">Save</button></div>
+      <div class="hotkey"><span class="what">Ask</span>${keys(sh.ask_chord.describe) || '<span class="note">off</span>'}<span class="grow"></span><span class="note">hold, ask, let go</span></div>
+      <div class="hotkey"><label class="what" for="ask-chord-keys">Ask keys</label><input id="ask-chord-keys" class="input mono grow" value="${esc(sh.ask_chord.keys)}" placeholder="ctrl+alt+win - empty turns it off"><button type="button" class="btn sm" data-act="ask-chord">Save</button></div>
       ${sh.hotkeys.map((h) => `
       <div class="hotkey"><span class="what">${esc(h.label)}</span>${h.combo ? keys(h.combo) : '<span class="note">not registered</span>'}<span class="grow"></span>
         <input class="input mono" data-hotkey="${esc(h.action)}" value="${esc(h.override)}" placeholder="ctrl+alt+..." aria-label="New keys for ${esc(h.label)}">
@@ -831,7 +838,9 @@
       <div class="fr-sides">
         <div class="fr-side">${glyph(C.type, 1.3)}<b>Dictate</b><span class="row"><span class="note">hold</span>${holdKeys(k)}</span>
           <span class="note">pastes into the window you were in</span></div>
-        <div class="fr-side">${glyph(C.ask, 1.3)}<b>Ask</b><span class="row">${k.mode ? keys(k.mode) : ""}<span class="note">${k.mode ? "then hold" : "tap the pill to violet, then hold"}</span></span>
+        <div class="fr-side">${glyph(C.ask, 1.3)}<b>Ask</b>${k.ask
+          ? `<span class="row"><span class="note">hold</span>${keys(k.ask)}</span>`
+          : `<span class="row">${k.mode ? keys(k.mode) : ""}<span class="note">${k.mode ? "then hold" : "tap the pill to violet, then hold"}</span></span>`}
           <span class="note">the answer rises above the pill, like ChatGPT</span></div>
       </div>
       <p class="fine">${icon("shield", C.soft, 13)} Speech is recognised on this PC. No account, no API key.</p>`;
@@ -924,7 +933,9 @@
     const choice = (value, title, note) => `
       <button type="button" class="choice ${h.choice === value ? "picked" : ""}" aria-pressed="${h.choice === value ? "true" : "false"}" data-act="fr-history" data-value="${value}" ${d.profile ? "" : "disabled"}>
         ${icon(value === "keep" ? "history" : "lock", value === "keep" ? C.green : C.soft, 20)}<b>${title}</b><span class="note">${note}</span></button>`;
-    const blocked = d.mode !== "dictate"
+    // On Ask the talk keys dictate anyway (they take the pill back to Type); on Refine
+    // they refine, and the words would wait on the pill instead of landing here.
+    const blocked = d.mode === "refine" || (d.mode === "ask" && !k.dictate)
       ? `<p class="note warn">The pill is on ${esc(MODE_WORD[d.mode] || d.mode)} - tap it until its mic is white, then try this.</p>`
       : !d.model.ready ? '<p class="note warn">The speech model is not on this PC yet - try this once its download finishes.</p>' : "";
     return `
@@ -1249,6 +1260,7 @@
       el.dataset.action === "fix" ? "Fixed every time from now on" : el.dataset.action === "never" ? "Flow will not ask again" : "Forgotten"),
     gesture: (el) => run(() => api("settings/gesture", { gesture: el.dataset.value }), "Changed"),
     chord: () => run(() => api("settings/chord", { keys: value("chord-keys") || "" }), "Saved - applies when Flow next starts"),
+    "ask-chord": () => run(() => api("settings/ask_chord", { keys: value("ask-chord-keys") || "" }), "Saved - applies when Flow next starts"),
     hotkey: (el) => {
       const input = document.querySelector(`[data-hotkey="${el.dataset.action}"]`);
       run(() => api("settings/hotkey", { action: el.dataset.action, combo: input ? input.value : "" }),
@@ -1339,6 +1351,7 @@
     if (el.id === "ws-path") ACT["ws-add-path"]();
     else if (el.id === "cli-model") ACT["cli-model"]();
     else if (el.id === "chord-keys") ACT.chord();
+    else if (el.id === "ask-chord-keys") ACT["ask-chord"]();
     else if (el.id === "word-new") ACT["word-add"]();
     else if (el.id === "fix-right") ACT["correction-add"]();
   });

@@ -467,6 +467,32 @@ def seed(session, kept: bool) -> None:
     h.flush()
 
 
+class FakeChord:
+    """A chord as the pages read one: its keys, its gesture, nothing hooked."""
+
+    def __init__(self, keys: str, gesture: str = "hold") -> None:
+        self.keys = keys
+        self.gesture = gesture
+
+    def describe(self) -> str:
+        return self.keys
+
+
+class FakeHotkeys:
+    """The shipped keys, as they register on a machine where nothing else owns them —
+    so the demo's pages name keys the way a real launch's do."""
+
+    def __init__(self) -> None:
+        self.chosen = {"toggle": "ctrl+alt+space", "send": "ctrl+alt+enter",
+                       "cancel": "ctrl+alt+esc", "mode": "ctrl+alt+M", "quit": "ctrl+alt+Q",
+                       "paste_last": "alt+shift+Z"}
+        self.failed: list[str] = []
+        self.chord = FakeChord("ctrl+win")
+        self.ask_chord = FakeChord("ctrl+alt+win")
+        #: The chord whose hook is running (`Hotkeys.hook`).
+        self.hook = self.chord
+
+
 def build(profile_dir: Path | None = None, kept: bool = False):
     """A Home over a FakeSession, with its pump running. Returns (home, session).
 
@@ -487,7 +513,7 @@ def build(profile_dir: Path | None = None, kept: bool = False):
             time.sleep(0.03)
 
     threading.Thread(target=pump, daemon=True, name="demo-pump").start()
-    home = Home(session, profile=profile, hotkeys=None, lite=False,
+    home = Home(session, profile=profile, hotkeys=FakeHotkeys(), lite=False,
                 lexicon_path=folder / "lexicon.txt", trace_path=folder / "diag.jsonl")
     home.design = "compact"
     home.mic_factory = ReadingMic

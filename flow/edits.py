@@ -86,6 +86,33 @@ _UNDO = re.compile(
     r"forget that|strike that)\b",
     re.I,
 )
+#: The same verbs as the *whole* utterance. `_UNDO` is a prefix, and inside a draft
+#: that is the cheap side of the trade — "never mind the weather" costs one undo of
+#: words still on screen. Taken back out of another window it costs text the person
+#: can no longer see Flow holding, so a paste is only taken back on the phrase alone
+#: (decisions.md 2026-09-23, "Correcting a Type paste").
+_UNDO_WHOLE = re.compile(
+    "^" + _LEAD + r"(?:scratch that|undo(?: that)?|never mind|nevermind|"
+    r"forget that|strike that)[.!?]*$",
+    re.I,
+)
+
+
+def whole_undo(utterance: str) -> bool:
+    """Whether `utterance` is an undo verb and nothing else ("Scratch that.").
+
+    A mis-hearing counts through the alias table — "scratch hat", "under that" — and
+    never through an edit-distance guess: `plan()`'s own rule for undo, which has no
+    target to check a guess against.
+    """
+    u = utterance.strip()
+    if _UNDO_WHOLE.match(u):
+        return True
+    s = _strip(u)
+    m = _LEAD_ONLY.match(s)
+    lead, body = (s[: m.end()], s[m.end():]) if m else ("", s)
+    meant = _ALIASES.get(body.lower())
+    return meant is not None and bool(_UNDO_WHOLE.match(lead + meant))
 _REPLACE = re.compile(
     "^" + _LEAD + r"(?:change|replace|swap)\s+(.+?)\s+(?:to|with|for|into)\s+(.+)$",
     re.I,

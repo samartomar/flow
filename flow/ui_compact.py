@@ -88,6 +88,7 @@ from .ui import (
     PRIMARY_TEXT,
     PTT_PASTE_WAIT_SEC,
     RING_OUTER,
+    SIDE_SETTLE_SEC,
     RING_TOP,
     SHELL,
     TEXT,
@@ -135,6 +136,11 @@ if sys.platform == "win32":
 
 #: The left mouse button, for the click-outside poll's edge detector.
 _VK_LBUTTON = 0x01
+
+#: Every mouse button a click can move a caret with — left, right, middle, and the
+#: two side buttons, which are Back and Forward in a browser. Any of them down off
+#: the pill ends what a spoken correction could change (`_watch_paste_run`).
+_MOUSE_BUTTONS = (0x01, 0x02, 0x04, 0x05, 0x06)
 
 #: The capsule, from Main.dc.html's `.pill`: 120 × 34, radius half the height.
 #: Nothing on it is text — that is the design's first decision, not an omission.
@@ -781,6 +787,21 @@ class CompactPill(tk.Tk):
     #: `_paste_last`. Class-level so the frame's pump finds a real None on a
     #: `__new__`-built fixture instead of recursing into `self.tk`.
     _paste_last_wait = None
+    #: Where the talk keys go back to (decisions.md 2026-09-23, "Ask's own hold"):
+    #: the dictation mode the Ask keys took the pill away from — Type or Refine —
+    #: and Type when the pill was tapped to Ask by hand. The hand picks the side;
+    #: the tint no longer has to be read before a hold.
+    _dictate_side = DICTATE
+    #: Whether the hold in flight is the Ask keys'. Their release is theirs to
+    #: end, and an Ask hold that was refused (no agent CLI) must not end a
+    #: hands-free utterance the toggle started.
+    _ask_hold = False
+    #: When a talk-keys hold began on Ask, while it waits `SIDE_SETTLE_SEC` to
+    #: leave it — or None. See `_settle_side`.
+    _side_since = None
+    #: A correction to a Type paste waiting for the hand to leave the keys —
+    #: when it started waiting, or None. See `_pump_retype`.
+    _retype_wait = None
     #: The panel's whole state: open or not; the mode it was opened for, which
     #: is what its spec lookup keys on — the drawing follows the mode that
     #: *raised* it, so an answer landing after a mode switch still draws as
@@ -908,6 +929,10 @@ class CompactPill(tk.Tk):
         self.paste_target = None
         #: A Paste last waiting to happen: (text, since, restore). See `_paste_last`.
         self._paste_last_wait = None
+        self._dictate_side = DICTATE
+        self._ask_hold = False
+        self._side_since = None
+        self._retype_wait = None
         self._panel_open = False
         self._panel_mode = None
         self._panel_heard = ""
@@ -1227,9 +1252,11 @@ class CompactPill(tk.Tk):
         # this one.
         if not self._drain_hotkeys():
             return
+        self._pump_side()
         self._drain_tray()
         self._sync_monitor()
         self._track_target()
+        self._watch_paste_run()
         if self.armed:
             self.session.tick()
             hearing = getattr(self.session, "hearing", True)
@@ -1248,6 +1275,7 @@ class CompactPill(tk.Tk):
         self._pump_send()
         self._pump_press()
         self._pump_paste_last()
+        self._pump_retype()
         if self._panel_open and self._outside_click_now():
             self._close_panel()
         if self._flash:
@@ -1341,14 +1369,38 @@ class CompactPill(tk.Tk):
                 # models load during the hold instead of inside the sentence.
                 self.session.warm()
             elif name == "talk":
-                self._talk_start()
+                # The talk keys dictate, whatever the tint (decisions.md
+                # 2026-09-23, "Ask's own hold"). From Ask the pill leaves Ask
+                # once the hold has settled (`SIDE_SETTLE_SEC`): the Ask keys
+                # are often pressed *through* these ones.
+                if self.session.mode == CONVERSE:
+                    self._side_since = time.perf_counter()
+                    self._talk_start(panel=False)
+                else:
+                    self._talk_start()
             elif name == "talk-end":
+                # A hold released inside the settle still dictated: the side
+                # changes before its words are routed, never after.
+                self._settle_side()
                 self._talk_end(send=True)
             elif name == "talk-break":
                 # Windows meant `ctrl+win+d`. What was said is committed either
                 # way (session.talk_end's own contract, P2); it simply does not
                 # paste itself into whatever window a desktop switch moved to.
+                # And a hold from Ask that broke never leaves Ask: the third key
+                # was usually Alt, on its way to the Ask keys.
+                self._side_since = None
                 self._talk_end(send=False)
+            elif name == "ask":
+                # Ask's own hold (ctrl+alt+win): always a question, whatever
+                # the tint. `warm` arrived one put ahead of it, as for talk.
+                if self._to_side(ask=True):
+                    self._talk_start()
+                    self._ask_hold = self._press_talking
+            elif name in ("ask-end", "ask-break"):
+                if self._ask_hold:
+                    self._ask_hold = False
+                    self._talk_end(send=name == "ask-end")
             elif name == "send":
                 self._send()
             elif name == "cancel":
@@ -1385,7 +1437,9 @@ class CompactPill(tk.Tk):
                 return
             if not self._drain_hotkeys():
                 return
-            if ((self._send_pending or self._ask_pending)
+            self._pump_side()
+            if ((self._send_pending or self._ask_pending
+                 or self._retype_wait is not None)
                     and not self.session.busy):
                 # The same three calls `_frame` makes, in the same order and
                 # for its reason: the decode's words have to be on
@@ -1393,6 +1447,7 @@ class CompactPill(tk.Tk):
                 self.session.pump_results()
                 self._pump_events()
                 self._pump_send()
+                self._pump_retype()
         except Exception:
             # `_tick`'s rule, and this clock needs it more: an exception here
             # must not stop the clock and must not be silent. The red flash is
@@ -1402,7 +1457,8 @@ class CompactPill(tk.Tk):
             traceback.print_exc()
         finally:
             if self._alive and (self._press_talking or self._send_pending
-                                or self._ask_pending):
+                                or self._ask_pending
+                                or self._retype_wait is not None):
                 self.after(FAST_TICK_MS, self._fast_tick)
             else:
                 # Nothing in flight: the clock stops rather than idling, and
@@ -1492,6 +1548,54 @@ class CompactPill(tk.Tk):
         else:
             self.session.toggle_mode(to=to)
 
+    def _to_side(self, *, ask: bool) -> bool:
+        """Put the pill on the side the hand chose, before its hold begins
+        (decisions.md 2026-09-23, "Ask's own hold"). False when that side is
+        not on offer here — Ask with no agent CLI — and the strip says why.
+
+        The Ask keys remember the dictation mode they left, Type or Refine,
+        and the talk keys go back to it; from an Ask somebody tapped to by
+        hand, the talk keys go to Type. Drained at once, so the switch's own
+        `mode` event — which closes the band it does not belong to — lands
+        before the hold opens Ask's band, not a frame after it.
+        """
+        mode = self.session.mode
+        if ask:
+            if not self._cli_offered():
+                self._say("Ask needs an agent CLI - install claude or codex")
+                return False
+            if mode != CONVERSE:
+                self._dictate_side = mode
+                self._choose_mode(CONVERSE)
+                self._pump_events()
+            return True
+        if mode == CONVERSE:
+            side = self._dictate_side
+            if side == CONVERSE or (side == REFINE and not self._cli_offered()):
+                side = DICTATE
+            self._dictate_side = DICTATE
+            self._choose_mode(side)
+            self._pump_events()
+        return True
+
+    def _settle_side(self) -> None:
+        """A talk-keys hold that began on Ask has settled: leave Ask now.
+
+        Reached by `_pump_side` once `SIDE_SETTLE_SEC` has passed, and by the
+        release itself when it comes first. A break inside the wait clears it
+        instead — that hold was on its way to the Ask keys.
+        """
+        if self._side_since is None:
+            return
+        self._side_since = None
+        self._to_side(ask=False)
+
+    def _pump_side(self) -> None:
+        """One tick of the wait `_settle_side` ends."""
+        if (self._side_since is not None
+                and time.perf_counter() - self._side_since >= SIDE_SETTLE_SEC):
+            self._settle_side()
+
     def _pump_events(self) -> None:
         """Drain what the session said since the last frame.
 
@@ -1525,7 +1629,9 @@ class CompactPill(tk.Tk):
                 # of them, pasting half an utterance and stranding the rest.
                 self._last_draft = ev.text
             elif ev.kind == "partial":
-                if self._panel_open:
+                # Not while a talk-keys hold waits to leave Ask: those words
+                # are dictation, and Ask's heard block is not theirs.
+                if self._panel_open and self._side_since is None:
                     if self._hold_fresh:
                         # The words of this hold have arrived, so *now* the
                         # exchange before it goes. `_talk_start` marks the
@@ -1602,6 +1708,12 @@ class CompactPill(tk.Tk):
                 # (`undoable=True`); this one has no chip to offer, and saying
                 # what happened is the half it can do.
                 self._say(ev.text)
+            elif ev.kind == "retype":
+                # A correction to the last Type paste, decided: `_pump_retype`
+                # makes it once the hand is off the keys. Said when it lands (as
+                # an `edit`), not now — until then it has not happened.
+                self._retype_wait = time.perf_counter()
+                self._quicken()
             elif ev.kind == "note" and ev.text.startswith(SAID_NOTES):
                 # The few notes no colour on this pill can carry — see
                 # `SAID_NOTES`, which is also the list of what stays silent
@@ -1718,9 +1830,9 @@ class CompactPill(tk.Tk):
         self._send_since = None
         text = self.session.send()
         if text:
-            self._deliver(text, submit=submit)
+            self._deliver(text, submit=submit, typed=True)
 
-    def _deliver(self, text: str, submit: bool = False) -> None:
+    def _deliver(self, text: str, submit: bool = False, typed: bool = False) -> None:
         """The words' way out, shared by both sends: paste where the user
         was, or Lite's clipboard — which is not an error state, and says so
         under the pill rather than flashing (States.dc.html's last case).
@@ -1741,10 +1853,19 @@ class CompactPill(tk.Tk):
             # the same reason: a handler written before the flag existed —
             # `send_check.py`'s two-argument fixture is one — still works.
             extra = {"submit": True} if submit else {}
+            # A Type paste stays changeable by voice while nobody types or
+            # clicks (decisions.md 2026-09-23, "Correcting a Type paste"), and
+            # "since" starts *before* the Ctrl-V: a key pressed during the paste
+            # counts against it, which is the safe side to be wrong on.
+            hook = self._key_hook() if typed else None
+            if hook is not None:
+                hook.touched = False
             problem = self.on_send(text, self.paste_target, **extra) or ""
             if problem:
                 self._flash = FLASH_FRAMES
-            self._handed_over(text, problem)
+            self._handed_over(text, problem,
+                              window=self.paste_target if hook is not None else None,
+                              submitted=submit)
             return
         problem = _copy_to_clipboard(self, text)
         if problem:
@@ -1755,14 +1876,117 @@ class CompactPill(tk.Tk):
         self._handed_over(text, problem or "", copied=True)
 
     def _handed_over(self, text: str, problem: str = "",
-                     copied: bool = False) -> None:
+                     copied: bool = False, window=None,
+                     submitted: bool = False) -> None:
         """Tell the session the words left, so History keeps them (when it is
         kept) and Paste last has them. After the paste, never before it: the
         keystroke is what somebody is waiting on. `getattr` because a fixture's
-        session may predate the method."""
+        session may predate the method.
+
+        `window` is a Type paste this surface can watch, so a spoken correction
+        can still change it (`Session._track_paste`); `submitted` is one Enter
+        went in behind. Both are passed only when they say something, so a
+        fixture's older three-argument `delivered` still works."""
         delivered = getattr(self.session, "delivered", None)
         if callable(delivered):
-            delivered(text, problem, copied)
+            extra = {}
+            if window:
+                extra["window"] = window
+            if submitted:
+                extra["submitted"] = True
+            delivered(text, problem, copied, **extra)
+
+    def _key_hook(self):
+        """The chord whose keyboard hook is running (`Hotkeys.hook`), or None —
+        the one that knows whether a key was typed since Flow last pasted."""
+        hotkeys = self.hotkeys
+        return getattr(hotkeys, "hook", None) if hotkeys is not None else None
+
+    def _clicked_off_pill(self) -> bool:
+        """Whether a mouse button is down anywhere but on this window — a click
+        that may have moved the caret in the window a paste went to. Polled a
+        frame at a time: a click is longer than a frame. The same geometry as
+        `_outside_click_now`, for its reasons."""
+        if self.lite:
+            return False
+        if not any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MOUSE_BUTTONS):
+            return False
+        pt = _POINT()
+        _user32.GetCursorPos(ctypes.byref(pt))
+        x, y = self._shell_xy
+        return not (x <= pt.x < x + self.dev(self._shell_w)
+                    and y <= pt.y < y + self.dev(self._shell_h))
+
+    def _watch_paste_run(self) -> None:
+        """End what a spoken correction could change, the moment Flow cannot know
+        the words are still where it put them: a key typed that Flow did not
+        send, a click anywhere but the pill, another window in front
+        (decisions.md 2026-09-23, "Correcting a Type paste"). One boolean from
+        the hook and a few reads of the mouse, and only while there is
+        something to watch."""
+        run = getattr(self.session, "paste_run", None)
+        if run is None:
+            return
+        hook = self._key_hook()
+        if hook is None:
+            why = "that paste can't be changed"
+        elif getattr(hook, "touched", True) is not False:
+            why = "you typed after it was pasted"
+        elif self._clicked_off_pill():
+            why = "you clicked after it was pasted"
+        else:
+            fg = foreground_hwnd()
+            why = ("another window came to the front"
+                   if fg and fg != run.window and not owned_by_flow(fg) else "")
+        if why:
+            self.session.end_paste_run(why)
+
+    def _pump_retype(self) -> None:
+        """Make the change a `retype` announced, once the hand is off the keys.
+
+        A Backspace sent under a held Ctrl arrives as Ctrl+Backspace, which takes
+        a whole word per key — so this waits out the hold that said the change,
+        then the modifiers, up to `PASTE_LAST_WAIT_SEC` as Paste last does. The
+        change is taken from the session only now: a paste that landed in the
+        meantime makes it stale, and the session hands back nothing.
+
+        Checked once more on the way out, because the frame's watch runs every
+        30 ms and the keys go in now: nothing typed, the same window in front.
+        """
+        since = self._retype_wait
+        if since is None:
+            return
+        if self._press_talking:
+            # The clock starts at the release: a change said mid-hold waits for it.
+            self._retype_wait = time.perf_counter()
+            return
+        held = modifiers_held()
+        if held and time.perf_counter() - since < PASTE_LAST_WAIT_SEC:
+            return
+        self._retype_wait = None
+        fix = self.session.take_paste_fix()
+        if fix is None:
+            return
+        hook = self._key_hook()
+        if held:
+            problem = "not changed: the keys stayed down - say it again"
+        elif hook is None or getattr(hook, "touched", True) is not False:
+            problem = "not changed: you typed after Flow pasted"
+        elif foreground_hwnd() != fix.run.window:
+            problem = "not changed: that window is not in front any more"
+        elif not self.on_send:
+            problem = "not changed: nothing here can type into another window"
+        else:
+            problem = self.on_send(fix.insert, fix.run.window, remove=fix.remove) or ""
+        # `inject` says "not changed: ..." for a change that did not go in, and a
+        # warning for one that did — "your clipboard held an image" — which is said
+        # and is not a failure.
+        failed = "not changed" in problem
+        self.session.paste_fixed(fix, problem if failed else "")
+        if problem:
+            if failed:
+                self._flash = FLASH_FRAMES
+            self._say(problem)
 
     def _paste_last(self, restore: bool = False) -> None:
         """Paste last (decisions.md 2026-09-23, "History"): the newest thing a
@@ -1809,6 +2033,11 @@ class CompactPill(tk.Tk):
             problem = _copy_to_clipboard(self, text)
             if not problem:
                 self._say(COPIED_TEXT)
+        # Words Flow did not count went in after the last Type paste: nothing a
+        # spoken correction could change is where it was.
+        end = getattr(self.session, "end_paste_run", None)
+        if callable(end):
+            end("Paste last pasted after it")
         if problem:
             self._flash = FLASH_FRAMES
             self._say(problem)
@@ -1864,8 +2093,13 @@ class CompactPill(tk.Tk):
 
     # -- the gestures --------------------------------------------------------
 
-    def _talk_start(self) -> None:
+    def _talk_start(self, panel: bool = True) -> None:
         """The hold beginning, shared by the mouse pump and the `talk` hotkey.
+
+        `panel=False` is a talk-keys hold that began on Ask and has not left
+        it yet (`SIDE_SETTLE_SEC`): it captures from the press like any hold,
+        and leaves Ask's band exactly as it was — the answer on screen is not
+        this hold's to clear.
 
         A hold in a panel mode raises the panel at once — the heard block is
         where the partials land — and arms a fresh start: "the next hold
@@ -1934,7 +2168,7 @@ class CompactPill(tk.Tk):
         # against: what is in there *now* was not said into this hold.
         self._draft_at_hold = self.session.draft.text
         self._recover = 0  # a hold ends the launch notice: seen, and moved on
-        if self.session.mode in PANEL_SPEC:
+        if panel and self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
             if not self._panel_open:
                 # Nothing is on screen to keep. The deferred clear above

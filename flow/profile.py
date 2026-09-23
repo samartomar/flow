@@ -59,6 +59,16 @@ def _text(value, default=None):
     return value.strip() if isinstance(value, str) and value.strip() else default
 
 
+def _keys(value, default=None):
+    """A chord as written, the empty string included, or `default`.
+
+    Not `_text`, which reads "" as absent: the empty string is how a chord is turned
+    off, and reading it as absent put the shipped chord back on the next launch — and
+    named a fault for a choice somebody made on purpose, from Flow Home's own box.
+    """
+    return value.strip() if isinstance(value, str) else default
+
+
 def _number(value, default=None):
     """A finite real number, or `default`.
 
@@ -224,6 +234,13 @@ MAX_WORKSPACES = 5
 #: write back, and a field that vanishes from the file on one platform is worse than one
 #: nobody can edit. `flow.hotkey` owns what the string *means*; this owns what it is.
 CHORD_DEFAULT = "ctrl+win"
+
+#: Ask's own hold (decisions.md 2026-09-22, decision 4): ctrl+alt+win, the keys Wispr
+#: Flow users already hold for its command mode. A second chord rather than a mode the
+#: first one reads, so the hand picks the side and the pill's tint no longer has to be
+#: read before a hold. Spelled here for `CHORD_DEFAULT`'s reason; judged in
+#: `flow/hotkey.py`.
+ASK_CHORD_DEFAULT = "ctrl+alt+win"
 
 #: The shipped panel width, by name. Spelled here and not imported from `flow/ui.py`
 #: for the reason `CHORD_DEFAULT` is not imported from `flow/hotkey.py`: this module is
@@ -432,6 +449,9 @@ class Profile:
         #: means, for the same reason `hotkeys` is judged there: this module is imported
         #: on every launch including Lite, and `flow.hotkey` binds `user32` at import.
         self.chord: str = CHORD_DEFAULT
+        #: Ask's chord, as written — a hold that always asks, whatever the pill's mode.
+        #: The empty string turns it off, as it does for `chord`.
+        self.ask_chord: str = ASK_CHORD_DEFAULT
         #: exe name -> an extra instruction for rewrites made while that app is in front.
         self.apps: dict[str, str] = {}
         #: Which of `ui.PANEL_WIDTHS` the draft panel is drawn at. A name and not a
@@ -582,7 +602,10 @@ class Profile:
         # Absent means the shipped chord, and the empty string means "off" — somebody
         # who does not want a global keyboard hook needs a way to say so that is not
         # deleting the key, because the next save would write it straight back.
-        self.chord = take("chord", _text, CHORD_DEFAULT)
+        self.chord = take("chord", _keys, CHORD_DEFAULT)
+        # Absent is the shipped chord for a profile written before Ask had one: the keys
+        # arrive with the release, and "" is still the way to say no.
+        self.ask_chord = take("ask_chord", _keys, ASK_CHORD_DEFAULT)
         # Same bargain as `hotkeys`: a value that is not a table degrades to none and is
         # named, and what is *in* the table is judged where it is used.
         self.apps = take("apps", lambda v, _d: _apps(v), {})
@@ -659,6 +682,7 @@ class Profile:
             # dialog to put it in.
             "hotkeys": dict(self.hotkeys),
             "chord": self.chord,
+            "ask_chord": self.ask_chord,
             # Written back as it was read, so a hand-edit survives every save Flow makes
             # on its own — and an empty table lands in every profile, which is the only
             # advertisement this feature gets in a project with no settings dialog.

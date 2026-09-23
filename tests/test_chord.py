@@ -81,16 +81,19 @@ class _Keyboard:
     have to care about.
     """
 
-    def __init__(self, chord):
+    def __init__(self, chord, extra=0):
         self.chord = chord
         self.passed = []
+        #: What each event carries in `dwExtraInfo`: 0 is a person's key, and
+        #: `inject.INPUT_MARK` is one Flow sent itself.
+        self.extra = extra
 
     def _event(self, message, vk):
         # The real `KBDLLHOOKSTRUCT`, by address, because `_on_key` casts the LPARAM and
         # a fake that skipped the cast would not exercise the line most likely to be
         # wrong on a 64-bit build.
         block = hotkey._KBDLLHOOKSTRUCT(vkCode=vk, scanCode=0, flags=0, time=0,
-                                        dwExtraInfo=None)
+                                        dwExtraInfo=self.extra)
         # Held for the duration of the call: a struct that went out of scope here would
         # be freed under the pointer the callback is about to read.
         self._block = block
@@ -575,13 +578,20 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         # A guard on the shape rather than on today's code: a future field holding a
         # keystroke would have to be added here first, which is the moment to argue
         # about it.
+        #
+        # Argued on 2026-09-23, when two arrived (decisions.md, "Ask's own hold"):
+        # `riders` holds chords, never a key — Ask's ctrl+alt+win fed by this hook
+        # rather than a second one — and `touched` is one boolean of `_other`'s shape,
+        # "a key Flow did not send went down since the surface last looked", which a
+        # correction after a Type paste needs and which cannot say which key.
         chord, _presses = _chord()
         _Keyboard(chord).down(VK_LCONTROL, VK_LWIN, VK_A).up(VK_A, VK_LWIN, VK_LCONTROL)
         self.assertEqual(
             set(vars(chord)),
             {"presses", "mods", "action", "warm_action", "end_action", "break_action",
              "toggle_action", "gesture", "installed", "_down", "_other", "_extra",
-             "_armed", "_talking", "_hook", "_tid", "_ready", "_proc", "_thread"},
+             "_armed", "_talking", "riders", "touched", "_hook", "_tid", "_ready",
+             "_proc", "_thread"},
         )
 
 
@@ -614,7 +624,7 @@ class TestEItNeverSwallowsAKeystroke(unittest.TestCase):
         chord._down["ctrl"] = chord._down["win"] = True
         chord._armed = True
         block = hotkey._KBDLLHOOKSTRUCT(vkCode=VK_LWIN, scanCode=0, flags=0, time=0,
-                                        dwExtraInfo=None)
+                                        dwExtraInfo=0)
         with mock.patch.object(hotkey, "user32") as fake:
             fake.CallNextHookEx.return_value = 0
             chord._on_key(-1, WM_KEYUP, ctypes.addressof(block))

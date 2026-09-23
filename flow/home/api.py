@@ -242,6 +242,7 @@ class Api:
             ("POST", "/api/settings/gesture"): self.set_gesture,
             ("POST", "/api/settings/hotkey"): self.set_hotkey,
             ("POST", "/api/settings/chord"): self.set_chord,
+            ("POST", "/api/settings/ask_chord"): self.set_ask_chord,
             ("POST", "/api/settings/send"): self.set_send,
             ("POST", "/api/settings/workspace"): self.set_workspace,
             ("POST", "/api/settings/workspace/add"): self.add_workspace,
@@ -426,9 +427,18 @@ class Api:
         """The keys the Home page names for each side, as they registered here."""
         hotkeys = self.home.hotkeys
         chord = getattr(hotkeys, "chord", None) if hotkeys is not None else None
+        ask = getattr(hotkeys, "ask_chord", None) if hotkeys is not None else None
         return {
             "dictate": chord.describe() if chord is not None else "",
             "gesture": getattr(chord, "gesture", "") if chord is not None else "",
+            # Ask's own hold (decisions.md 2026-09-23, "Ask's own hold"), as it
+            # installed this launch — "" when it is off or its hook was refused.
+            "ask": ask.describe() if ask is not None else "",
+            # Whether a Type paste can be corrected by voice this launch: that
+            # watches the keyboard through a chord's hook, so with no chord it
+            # cannot (decisions.md 2026-09-23, "Correcting a Type paste").
+            "corrects": getattr(hotkeys, "hook", None) is not None
+            if hotkeys is not None else False,
             "toggle": (getattr(hotkeys, "chosen", {}) or {}).get("toggle", "")
             if hotkeys is not None else "",
             "mode": (getattr(hotkeys, "chosen", {}) or {}).get("mode", "")
@@ -1255,6 +1265,7 @@ class Api:
         profile = self.profile
         hotkeys = self.home.hotkeys
         chord = getattr(hotkeys, "chord", None) if hotkeys is not None else None
+        ask_chord = getattr(hotkeys, "ask_chord", None) if hotkeys is not None else None
 
         def read() -> dict:
             mic = getattr(s, "mic", None)
@@ -1297,6 +1308,11 @@ class Api:
                     "describe": chord.describe() if chord is not None else "",
                     "gesture": getattr(chord, "gesture", None)
                     or (getattr(profile, "gesture", "hold") if profile is not None else "hold"),
+                },
+                "ask_chord": {
+                    "keys": getattr(profile, "ask_chord", "") if profile is not None else "",
+                    "active": ask_chord is not None,
+                    "describe": ask_chord.describe() if ask_chord is not None else "",
                 },
                 "hotkeys": rows,
             },
@@ -1397,9 +1413,40 @@ class Api:
                 mods, why = parse_chord(keys)
                 if mods is None:
                     raise ApiError(f"{keys}: {why}")
+                ask, _why = parse_chord(getattr(profile, "ask_chord", "") or "")
+                if ask is not None and ask == mods:
+                    raise ApiError(f"{keys}: those are the Ask keys - one press would "
+                                   "start both")
 
         def apply() -> None:
             profile.chord = keys
+
+        self._call(apply)
+        self._save()
+        return self.settings({})
+
+    def set_ask_chord(self, body: dict) -> dict:
+        """Ask's keys, as `set_chord` sets the talk keys: judged by `parse_chord`, empty
+        for off, applied at the next start. The talk keys' own shape is refused — one
+        press would start both holds."""
+        keys = body.get("keys", "")
+        if not isinstance(keys, str):
+            raise ApiError("the Ask keys are written like ctrl+alt+win")
+        keys = keys.strip().lower()
+        profile = self._need_profile()
+        if keys:
+            parse_chord = _hotkey_module("parse_chord")
+            if parse_chord is not None:
+                mods, why = parse_chord(keys)
+                if mods is None:
+                    raise ApiError(f"{keys}: {why}")
+                talk, _why = parse_chord(getattr(profile, "chord", "") or "")
+                if talk is not None and talk == mods:
+                    raise ApiError(f"{keys}: those are the talk keys - one press would "
+                                   "start both")
+
+        def apply() -> None:
+            profile.ask_chord = keys
 
         self._call(apply)
         self._save()

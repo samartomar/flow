@@ -16,6 +16,8 @@ import queue
 import threading
 from ctypes import wintypes
 
+from .inject import INPUT_MARK
+
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
@@ -123,6 +125,10 @@ class Hotkeys:
         #: should own the teardown of "global key input". A chord left installed after
         #: the window is gone is a hook the OS still calls into a dead interpreter.
         self.chord = None
+        #: Ask's own chord (ctrl+alt+win), or None. It rides `chord`'s hook when there
+        #: is one, and installs its own only when the talk chord is off — see
+        #: `Chord.riders`.
+        self.ask_chord = None
         self._ids: dict[int, str] = {}
         self._tid: int | None = None
         self._ready = threading.Event()
@@ -133,10 +139,24 @@ class Hotkeys:
         return self._ready.wait(timeout)
 
     def stop(self) -> None:
-        if self.chord is not None:
-            self.chord.stop()
+        for chord in (self.chord, self.ask_chord):
+            if chord is not None:
+                chord.stop()
         if self._tid is not None:
             user32.PostThreadMessageW(self._tid, WM_QUIT, 0, 0)
+
+    @property
+    def hook(self):
+        """The chord whose keyboard hook is running, or None.
+
+        The one that knows whether a key went down since Flow last looked
+        (`Chord.touched`) — which is what a correction after a Type paste stands on.
+        A rider has no hook of its own, so it is never the answer.
+        """
+        for chord in (self.chord, self.ask_chord):
+            if chord is not None and getattr(chord, "installed", False):
+                return chord
+        return None
 
     def drain(self) -> list[str]:
         out = []
@@ -632,6 +652,16 @@ CHORD_UNAVAILABLE = ("chord   unavailable (keyboard hook refused); "
 #: indistinguishable from one that never saved (P2).
 CHORD_IGNORED_LINE = "chord   in profile.json ignored: {combo} - {reason}"
 
+#: Ask's chord, in the same block (decisions.md 2026-09-23, "Ask's own hold"). The
+#: action names are the talk chord's with "ask" in front, so the surfaces can tell
+#: which hand is down: `ask` starts a hold that always asks, `ask-end` sends the
+#: question, `ask-break` is Windows meaning something else.
+ASK_ACTIONS = {"action": "ask", "end_action": "ask-end", "break_action": "ask-break"}
+ASK_CHORD_LINE = "chord   ask      {keys}  (hold to ask, release to send the question)"
+ASK_CHORD_IGNORED_LINE = "chord   ask_chord in profile.json ignored: {combo} - {reason}"
+ASK_CHORD_UNAVAILABLE = ("chord   ask unavailable (keyboard hook refused); "
+                         "tap the pill to Ask instead")
+
 
 class _KBDLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [
@@ -639,7 +669,9 @@ class _KBDLLHOOKSTRUCT(ctypes.Structure):
         ("scanCode", wintypes.DWORD),
         ("flags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
+        # ULONG_PTR, read as the integer it is: Flow's own keystrokes carry
+        # `inject.INPUT_MARK` here, and nobody else's do.
+        ("dwExtraInfo", ctypes.c_size_t),
     ]
 
 
@@ -778,6 +810,19 @@ class Chord:
         #: has to know whether there is anything to end. Nothing about it is a keystroke:
         #: it is the same single boolean `_other` is, and for the same reason.
         self._talking = False
+        #: Chords fed by *this* chord's hook rather than one of their own — Ask's
+        #: ctrl+alt+win riding the talk chord's ctrl+win. One hook on the input path of
+        #: every keystroke is the cost R16 was narrowed to accept; two would be twice the
+        #: work per key for the same thing seen twice. A rider sees exactly what its host
+        #: sees — the virtual key, compared against `_CHORD_VKS` — and nothing more.
+        self.riders: list = []
+        #: True once a key outside the modifiers went down that Flow did not send, since
+        #: the surface last set it False. The one other thing this hook keeps, and it is
+        #: the same shape as `_other`: a boolean, never which key. A correction after a
+        #: Type paste stands on it — taking back the characters Flow put in a window is
+        #: only safe while nobody has typed there since (`inject.INPUT_MARK` is how
+        #: Flow's own keystrokes are told apart).
+        self.touched = False
         self._hook = None
         self._tid = None
         self._ready = threading.Event()
@@ -832,56 +877,70 @@ class Chord:
     def _on_key(self, code, wparam, lparam):
         # Negative `code` means "pass it on without looking", and it is not advice.
         if code >= 0:
-            vk = ctypes.cast(lparam, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents.vkCode
-            name = _CHORD_VKS.get(vk)
-            if wparam == WM_KEYDOWN or wparam == WM_SYSKEYDOWN:
-                if name is not None and name in self._down:
-                    self._down[name] = True
-                    if not self._armed and all(self._down.values()):
-                        # A fresh hold starts a fresh verdict: whatever was *pressed*
-                        # before the chord formed is not this chord's business. What is
-                        # still *held* is — see `_extra`.
-                        self._armed = True
-                        self._other = any(self._extra.values())
-                        if not self._other and self.gesture == "hold":
-                            # The hold has begun. Two puts and no other work — the rule
-                            # about what this callback may do on the input path of every
-                            # keystroke on the machine is unchanged.
-                            #
-                            # Nothing at all in the toggle gesture: it has no press-down
-                            # half, and warming on one would load the models every time
-                            # somebody reached for `ctrl+win+arrow`.
-                            self._talking = True
-                            self.presses.put(self.warm_action)
-                            self.presses.put(self.action)
-                elif name is not None:
-                    # A modifier this chord does not want. Held state, not history.
-                    self._extra[name] = True
-                    self._other = True
-                    self._break()
-                else:
-                    # Every other key on the keyboard. One boolean, and nothing else
-                    # about it is read, kept or compared.
-                    self._other = True
-                    self._break()
-            elif wparam == WM_KEYUP or wparam == WM_SYSKEYUP:
-                if name is not None and name in self._down:
-                    self._down[name] = False
-                    if self._armed:
-                        self._armed = False
-                        if self._talking:
-                            self._talking = False
-                            self.presses.put(self.end_action)
-                        elif self.gesture == "toggle" and not self._other:
-                            # The original gesture, unchanged: a clean release — both
-                            # held, nothing else touched — flips hands-free listening.
-                            # `_other` is the same rule doing the same job it always
-                            # did, which is why `ctrl+win+d` still makes a desktop and
-                            # starts nothing.
-                            self.presses.put(self.toggle_action)
-                elif name is not None:
-                    self._extra[name] = False
+            info = ctypes.cast(lparam, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
+            vk = info.vkCode
+            self._feed(wparam, vk)
+            for rider in self.riders:
+                rider._feed(wparam, vk)
+            if ((wparam == WM_KEYDOWN or wparam == WM_SYSKEYDOWN)
+                    and vk not in _CHORD_VKS and info.dwExtraInfo != INPUT_MARK):
+                self.touched = True
         return user32.CallNextHookEx(self._hook, code, wparam, lparam)
+
+    def _feed(self, wparam, vk) -> None:
+        """One key event, against this chord's shape. The whole state machine.
+
+        Split from `_on_key` so a rider can be fed by its host's hook: the hook is the
+        OS's business and there is one of it; the shape is each chord's own.
+        """
+        name = _CHORD_VKS.get(vk)
+        if wparam == WM_KEYDOWN or wparam == WM_SYSKEYDOWN:
+            if name is not None and name in self._down:
+                self._down[name] = True
+                if not self._armed and all(self._down.values()):
+                    # A fresh hold starts a fresh verdict: whatever was *pressed*
+                    # before the chord formed is not this chord's business. What is
+                    # still *held* is — see `_extra`.
+                    self._armed = True
+                    self._other = any(self._extra.values())
+                    if not self._other and self.gesture == "hold":
+                        # The hold has begun. Two puts and no other work — the rule
+                        # about what this callback may do on the input path of every
+                        # keystroke on the machine is unchanged.
+                        #
+                        # Nothing at all in the toggle gesture: it has no press-down
+                        # half, and warming on one would load the models every time
+                        # somebody reached for `ctrl+win+arrow`.
+                        self._talking = True
+                        self.presses.put(self.warm_action)
+                        self.presses.put(self.action)
+            elif name is not None:
+                # A modifier this chord does not want. Held state, not history.
+                self._extra[name] = True
+                self._other = True
+                self._break()
+            else:
+                # Every other key on the keyboard. One boolean, and nothing else
+                # about it is read, kept or compared.
+                self._other = True
+                self._break()
+        elif wparam == WM_KEYUP or wparam == WM_SYSKEYUP:
+            if name is not None and name in self._down:
+                self._down[name] = False
+                if self._armed:
+                    self._armed = False
+                    if self._talking:
+                        self._talking = False
+                        self.presses.put(self.end_action)
+                    elif self.gesture == "toggle" and not self._other:
+                        # The original gesture, unchanged: a clean release — both
+                        # held, nothing else touched — flips hands-free listening.
+                        # `_other` is the same rule doing the same job it always
+                        # did, which is why `ctrl+win+d` still makes a desktop and
+                        # starts nothing.
+                        self.presses.put(self.toggle_action)
+            elif name is not None:
+                self._extra[name] = False
 
     def _run(self) -> None:
         self._tid = kernel_thread_id()

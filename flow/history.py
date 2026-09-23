@@ -89,7 +89,9 @@ SET_ASIDE_REPEAT_SEC = 120.0
 _FIELDS: dict[str, type | tuple[type, ...]] = {
     "app": str,        # the executable a Send pasted into, as inject names it
     "words": int,
-    "how": str,        # "pasted", "copied" or "not pasted"
+    "how": str,        # "pasted", "copied" or "not pasted"; a paste changed by voice
+                       # after it landed is "pasted, then changed", and one taken back
+                       # whole is "taken back" (decisions.md 2026-09-23)
     "note": str,       # what went wrong, when something did
     "heard": str,      # a refined entry: the words before the CLI shaped them
     "cli": str,        # which agent CLI answered or refined, as it reported itself
@@ -233,6 +235,33 @@ class History:
             return None
         self.keep(entry)
         return entry
+
+    def revise(self, entry_id: str, **changes) -> bool:
+        """`update`, queued rather than waited on: the session's side of it.
+
+        A paste corrected by voice changes the words its entry kept (decisions.md
+        2026-09-23, "Correcting a Type paste"), and the session must not wait on a disk
+        to say so — the keystroke is what somebody is waiting on. Behind the entry's own
+        `keep` on the same queue, so the entry is there by the time this runs. True if
+        it was queued.
+        """
+        if not entry_id or self.choice != KEEP:
+            return False
+        self._start()
+
+        def change() -> None:
+            for e in self._items:
+                if e["id"] == entry_id:
+                    for key, value in changes.items():
+                        if key == "text":
+                            e["text"] = _cut(str(value))
+                        elif key in _FIELDS and value is not None:
+                            e[key] = value
+                    self._rewrite()
+                    return
+
+        self._ops.put((change, (), None))
+        return True
 
     # -- Flow Home's side: ask the writer and wait ---------------------------------
 
@@ -524,6 +553,9 @@ class NullHistory:
 
     def update(self, entry_id, **changes):
         return None
+
+    def revise(self, entry_id, **changes) -> bool:
+        return False
 
     def remove(self, entry_id) -> bool:
         return False
