@@ -8,6 +8,14 @@ the product, what the compact surface still has to absorb before it can be the *
 surface, and the order to do it in. It is a recommendation for the owner's decision
 ([NEEDS_YOU.md](../NEEDS_YOU.md) carries the open entry); nothing here is decided yet.
 
+**Update 2026-09-22.** Flow Home ([decisions.md](decisions.md), "Flow Home") took two of
+the five gaps below off the compact surface's list: **Settings** is Home's Models and
+Settings pages rather than live rows in a setup box (the box is deleted), and **Help**
+lands on Home's Voice page with the spoken commands. The other three — the hand editor,
+the notes-loop strip lines, and Refine's "say more" — are still the compact surface's to
+absorb. The Design row the compact menu kept moved into Home too, so the retirement in
+step 5 no longer has a menu to unpick.
+
 The standing decision it answers is the 2026-09-03 one in [decisions.md](decisions.md):
 *"a second surface is a standing cost, justified only while both are real"*, reopening
 when parity lands and one of the two stops being used. Parity landed on this branch, and

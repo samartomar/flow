@@ -98,6 +98,15 @@ reach what you already sent.
 the bubble and is read aloud, and **Use this** makes the answer your new draft. Point it
 at a project with `--cwd` and the advice is about your code.
 
+## Flow Home
+
+Right-click the pill ▸ **Open Flow** (or start with `flow --home`) for one window with
+everything that isn't talking: which speech model hears you — downloaded with progress
+and swapped without a restart, each shown with the error rate measured for it — which
+microphone, the shortcuts, the send word, your workspaces, the agent CLI and the voice
+that reads answers. The pill never grows a setting. [The guide](docs/guide.md#flow-home)
+has the pages.
+
 ## Who it is for
 
 Developers who speak English as a second language, with a strong accent — Spanish,
@@ -118,6 +127,10 @@ kind is sent.
 
 Send also puts the draft on the Windows clipboard, where any clipboard manager or
 cloud-clipboard sync you run will see it.
+
+Flow Home is a page Flow serves on `127.0.0.1` only, from the first time you open it until
+Flow quits, and only to the window Flow opened — each launch makes a new token, and a
+request from any other page is refused. Nothing it serves leaves the machine.
 
 One optional extra opens a socket: the `[edge]` voice pack sends the *text of each spoken
 reply* to Microsoft to be synthesised. Install neither extra, or pick any other voice,

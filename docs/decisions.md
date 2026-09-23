@@ -6,6 +6,73 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-22 — Flow Home: the pill never grows a setting, and one window holds every one
+
+The owner's verdict on the build: the engine is good — accented dictation, Ask like
+ChatGPT — and it is not a product. The audit behind that sentence, done the same day
+against the code: **about fifteen capabilities could be reached only through a flag or a
+hand-edited file** (the speech models and where they run, the microphone, calibration,
+the lexicon and its corrections, the CLI's wait, a custom send word, the hotkeys and the
+chord, per-app instructions, placement, stats, the update check). Nothing the user would
+look for was kept past a quit. A first-run download of three gigabytes said "loading the
+model" and nothing else, because faster-whisper turns its progress bar off. And the
+compact surface — the one the owner uses — had no settings, no help and no way to reach
+the lexicon at all. The owner had asked for exactly this on 2026-08-01 ("unless it is
+exposed to UI right click or dedicated settings page i will not be able to use it"), and
+the "no settings dialog" stance, having survived four challenges, answered with a menu.
+
+Four decisions, all the owner's, taken together:
+
+1. **Flow Home exists.** One window for everything that is not talking; the pill never
+   grows a setting. This reverses the no-settings-page stance *for the product* and keeps
+   it for the pill, which is where the stance was right: its argument was that a surface
+   people talk through must not accumulate options, and it never needed to mean that the
+   options had nowhere to live. What survives from it: every setting still writes the two
+   files that were always the settings, a flag given at launch still wins over what Home
+   remembers, and the send word is still chosen from the tested presets — a box that
+   accepts any word would be the free text the 2026-08-01 entry refused for a measured
+   reason.
+2. **HTML in an Edge app window, served by Flow on 127.0.0.1.** No new Python
+   dependency: `http.server` is the stdlib and Edge ships with Windows 11. The page is the
+   design canvas's own medium, so design and build are the same artefact. The server
+   starts the first time the window is opened, answers only its own host, its own origin
+   and a token made per launch, and serves a fixed list of files (`flow/home/server.py`
+   says why each check is there). Off Windows, and on a Windows without Edge, the page
+   opens in the default browser — so Lite gets Home without a line of platform code. Tk
+   was the alternative and the reason against it is cost, not taste: every list, text box
+   and scroll view would be hand-drawn, and the pill and its panel alone took weeks.
+3. **History is opt-in, chosen at first run with nothing preselected** — the 2026-08-03
+   bar ("an opt-in on-disk history, never a default one") kept exactly. Step 3 builds it.
+4. **Ask gets its own hold, Ctrl+Alt+Win** — the keys Wispr Flow users already know from
+   its command mode. The hand picks the side; the tint no longer has to be read before a
+   hold. Step 5 builds it.
+
+**What step 1 landed.** Home, Models and Settings, and the pages still to come shown as
+such rather than hidden. Every change is made on the session's own thread
+(`Session.post`, drained by the `pump_results` both surfaces call every frame), and
+applied now wherever the session can apply it now: **a model swap is live**
+(`WhisperTranscriber.swap` drops only the tier that changed; `_model` reloads a tier a
+swap dropped between a load and a decode, so a decode can never be handed `None`), and so
+is **the microphone, chosen by name** (`Mic.use` refreshes PortAudio between the close and
+the open, which is why it is refused while a reply is playing). Keys and the chord apply
+at the next start, and say so — the hook and the registrations are built once, and
+re-registering from a settings page is the one change the OS may refuse halfway. Model
+downloads report bytes through `snapshot_download`'s own progress class. Six settings that
+were flags are profile fields now (`partial_model`, `final_model`, `decode_device`,
+`mic_device`, `cli_timeout`, `warm`), all additive, all absent-means-before.
+
+**The menus.** The compact pill's Workbench setup and Design rows became one row, **Open
+Flow**; the setup box is deleted rather than left unreachable. This supersedes the
+2026-09-04 entry "The compact menu gets one row the artboard does not draw": its reason —
+two designs must be reachable from each other — is kept by Home, which both surfaces open
+and which switches the pill in place. The Classic pill's menu gains Open Flow as a
+seventh row and keeps its Settings cascade until the design retires. The tray gains Open
+Flow above Show the pill.
+
+**Reopens if** Edge's app window proves unreliable on a supported Windows — it does not
+open, or cannot be brought forward — in which case the answer is a native window over
+WebView2 (pywebview), at the price of a dependency R16 would have to be argued for.
+
 ### 2026-09-03 — The compact design: a second surface, switched, not a reskin
 
 `design/compact/` specs a wordless pill — glyph colour for mode, ring colour for state,
@@ -326,6 +393,10 @@ rested on reading the source. It has tests now, on both surfaces.
 
 **Reopens if** the two designs ever stop being a user-visible choice — one
 surface needs no switch, and the row goes with the choice.
+
+**Superseded 2026-09-22** ("Flow Home"): the row moved rather than went. Flow Home's
+Settings page switches the design, both surfaces open Home, so the two designs are still
+reachable from each other — through the one row, Open Flow, that the compact menu keeps.
 
 ### 2026-09-04 — The shipped surface is composited after all: the editor moved out
 

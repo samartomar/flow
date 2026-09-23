@@ -79,7 +79,14 @@ boundary is this:
   rather than leaving somebody to find it: a project path can identify an employer, a
   client or a codebase. Set no workspace and nothing of the kind is sent.
 - **Network, but never user content.** The first decode of each tier downloads its
-  model from Hugging Face.
+  model from Hugging Face, and so does a Download on Flow Home's Models page — the same
+  files, from the same place, and only when asked.
+- **A local port, and only while Flow Home has been opened.** `flow/home/server.py`
+  binds `127.0.0.1` — never another interface — the first time the window is opened, and
+  closes with Flow. It answers its own host, its own origin and a token made per launch,
+  and nothing else; what it serves is Flow's own settings, to the window Flow opened.
+  Nothing it serves leaves the machine, and a session that never opens Home never
+  listens on anything.
 - **Sent to GitHub, once, when you type `flow --check-update`.** An anonymous GET of
   `api.github.com/repos/samartomar/flow/releases/latest`, whose answer is a tag Flow
   compares to its own version *here* before printing one line. The request carries
@@ -111,6 +118,7 @@ which is 34% of the 30 ms the UI thread has to draw in.
 |---|---|---|
 | `ui.py` | surface | the pill and the draft bubble, DPI-aware |
 | `ui_compact.py` | surface | the compact design — a wordless pill beside it, chosen by `profile.design` at launch |
+| `home/` | surface | Flow Home: the window for everything that is not talking — a page in an Edge app window, a stdlib server on 127.0.0.1, and an API that reaches the session only through `Session.post` |
 | `hotkey.py` | surface | `RegisterHotKey` on its own message-loop thread |
 | `inject.py` | surface | clipboard + `SendInput`, terminal-safe paste (P7) |
 | `session.py` | core | the state machine and the pump |

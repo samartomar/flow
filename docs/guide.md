@@ -8,6 +8,7 @@ spoken command, both modes, and what is stored where.
 
 - [Install, in detail](#install) · [Requirements](#requirements)
 - [Running it](#running-it) — [flags](#flags), [the microphone going away](#if-the-microphone-goes-away-mid-session), [hotkeys](#hotkeys), [the pill](#the-pill-and-the-bubble)
+- [Flow Home](#flow-home) — models, microphone, shortcuts and every other setting, in one window
 - [Dictate mode](#dictate-mode) — [saying the send](#sending-it-without-touching-anything)
 - [Talking to the draft](#talking-to-the-draft) — [local corrections](#local-corrections), [rewrites](#rewrites-via-the-agent-cli)
 - [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [taking the answer](#taking-the-answer), [voices](#choosing-the-voice)
@@ -246,14 +247,15 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 
 | Flag | Effect |
 |---|---|
-| `--partial-model X` | fast model for live partials (default `base.en`) |
-| `--final-model X` | stronger model for the pasted text (default `small.en`) |
+| `--home` | open [Flow Home](#flow-home) as soon as the pill is up |
+| `--partial-model X` | fast model for live partials (default `base.en` on a CPU, `small` on a GPU). Flow Home's Models page chooses it too, and remembers; the flag wins for one launch |
+| `--final-model X` | stronger model for the pasted text (default `small.en` on a CPU, `large-v3` on a GPU). Same as above: Models remembers it, the flag wins for one launch |
 | `--model X` | pin BOTH tiers to one model, for a low-memory machine |
-| `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one) |
+| `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one). Models remembers a choice; the flag wins for one launch |
 | `--engine {auto,whisper,native}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all. Default `auto`: whisper unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface) |
 | `--lexicon PATH` | personal terms file (default `~/.flow/lexicon.txt`) |
 | `--no-lexicon` | ignore that file without deleting it |
-| `--device N` | input device index; list them with `scripts/devices.py`. **Pinned**: if it goes away mid-session Flow retries *this* index and never substitutes another — see [When the microphone goes away](#if-the-microphone-goes-away-mid-session) |
+| `--device N` | input device index; list them with `scripts/devices.py`. **Pinned**: if it goes away mid-session Flow retries *this* index and never substitutes another — see [When the microphone goes away](#if-the-microphone-goes-away-mid-session). Flow Home's Settings chooses a microphone by name instead, which is what most people want |
 | `--arm` | start listening immediately, no click needed |
 | `--no-paste` | print the draft to stdout instead of pasting it |
 | `--no-hotkeys` | skip global hotkey registration |
@@ -268,10 +270,10 @@ click the pill to arm | right-click for the menu | ctrl+alt+Q quits
 | `--no-warm` | do not load the model at startup; wait until it is first needed |
 | `--cli-model NAME` | ask the CLI for this model; remembered, and blank clears it |
 | `--cli-effort LEVEL` | how hard the CLI may think: `low`, `medium`, `high`, `xhigh`, `max` (default `low`) |
-| `--cli-timeout SEC` | how long to wait for one CLI call (default 20) |
+| `--cli-timeout SEC` | how long to wait for one CLI call (default 20, or what Flow Home's Models page remembers) |
 | `--cwd PATH` | the project converse-mode questions are asked from; overrides the stored `workspace` ([P9](#converse-mode-p9)) |
 | `--lite` | no global hotkeys and no target-window tracking (automatic off Windows — see [Install](#install)). On Windows it also makes Send copy instead of paste; on a Mac Send still pastes, through System Events |
-| `--design NAME` | which UI design to launch: `current` (the shipped pill and bubble) or `compact` (the wordless pill specced in `design/compact/`). Remembered. Either design's right-click menu has a Design row that switches the running surface in place, keeping the draft, the workspace and the hotkeys |
+| `--design NAME` | which UI design to launch: `current` (the Classic pill and bubble) or `compact` (the wordless pill specced in `design/compact/`). Remembered. Flow Home's Settings switches the running pill in place, keeping the draft, the workspace and the hotkeys — and so does the Classic pill's own Design row |
 | `--version` | print `flow X.Y.Z` and exit. The same number the startup block names, and the one Help shows at the bottom of the sheet |
 | `--check-update` | ask GitHub once whether a newer release exists, print one line, and exit. Manual only: nothing in Flow ever checks on its own, and the request carries no version, no identifier and no account — see [What leaves the machine](architecture.md#what-leaves-the-machine) |
 | `--stats` | print how much has been dictated — today and all time — and exit, without loading a model or opening the microphone. See [The numbers](#the-numbers). With `--no-profile` it reads nothing and says so |
@@ -853,6 +855,32 @@ Partial text is dimmed and italic: partials come from the faster model and can c
 nonsense at mid-word boundaries, so "not final yet" has to be visible. A converse-mode
 reply is rendered in its own colour, because mistaking the model's words for your own is
 the one confusion converse mode can create that dictate mode cannot.
+
+## Flow Home
+
+One window for everything that is not talking. Open it from the pill's right-click menu
+(**Open Flow**), from the tray icon's menu, or start Flow with `--home`. The pill never
+grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-09-22).
+
+| Page | What is on it |
+|---|---|
+| **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
+| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The two models that invent words in silence are marked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; and the voice that reads answers aloud |
+| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the other five shortcuts; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
+| History, Voice, Conversations | Arriving next: a history of what you dictated (only if you choose to keep one), your dictionary and calibration, and conversations you can type into as well as speak |
+
+A setting made here is remembered in `profile.json`, and a flag given at launch still wins
+for that launch — `--final-model` over the Models page, `--device` over the microphone.
+
+**What it is.** A page Flow serves itself, shown in a Microsoft Edge app window — Edge
+comes with Windows 11, so this adds nothing to install. The window keeps a profile of its
+own in `~/.flow/home`, apart from your browsing. Without Edge, or off Windows, the page
+opens in your default browser instead.
+
+**What it listens on.** `127.0.0.1` only, from the first time you open the window until
+Flow quits. It answers only the window Flow opened: every request carries a token made
+fresh at launch, and a request from another host name or from another web page is
+refused before it reaches anything. Nothing it serves leaves your machine.
 
 ## Dictate mode
 
@@ -1646,8 +1674,9 @@ figure — along with everything else in there.
 | Path | Written by | Contents |
 |---|---|---|
 | `~/.flow/lexicon.txt` | you, by hand — and by Flow in exactly two cases: creating it from a template of comments if the menu's **Open settings folder** finds it missing, and appending one `wrong -> right` line when you tap an offered correction | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders, removes or reformats a line — what you wrote comes back byte for byte |
-| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the five global combos ([Changing them](#changing-them)), and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
-| `~/.cache/huggingface/hub/` | first decode | the models. `base.en` 141 MiB, `small.en` 464 MiB |
+| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the five global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
+| `~/.cache/huggingface/hub/` | first decode, and Flow Home's Models page | the models. `base.en` 141 MiB, `small.en` 464 MiB, `large-v3` 2.9 GiB; Models lists them with their sizes and deletes the ones you do not use |
+| `~/.flow/home/` | Microsoft Edge, for the Flow Home window | the window's own browser profile — its size and position, and Edge's cache. Nothing Flow writes; deleting it resets the window |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call and device event, unless `--no-profile` | a content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, error *categories*, on each route a `confidence` — how well the decoder heard the utterance being routed, or `null` when that is unknown — and on each utterance that reached the draft, how many words it was and how long it took to say ([The numbers](#the-numbers)). **No words.** A count of words is a number; the words are never written Field names are an allow-list checked against a deny-list at import, so a draft cannot get in by being short. Bounded with one rotation: two files, a known ceiling. Startup names the path out loud |
 | `.bench/` | `scripts/` | benchmark audio, results and manifests. **Tracked**, except the downloadable corpora and the volunteer recordings — a recording is a person, so those live outside the repo and out of its history; `.bench/README.md` says where. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the model revisions that run loaded |
 
