@@ -158,7 +158,8 @@ def kernel_thread_id() -> int:
 VK_BACKSLASH, VK_SEMICOLON = 0xDC, 0xBA
 VK_M = 0x4D  # P9 mode toggle
 VK_Q = 0x51  # quit
-VK_V = 0x56  # paste last
+VK_V = 0x56  # paste last, when Z is taken
+VK_Z = 0x5A  # paste last
 
 #: Ordered alternatives per action. ctrl+alt+space is first because it is the most
 #: natural, but it was already taken on the development machine, so toggle in
@@ -194,21 +195,25 @@ DEFAULT_BINDINGS: dict[str, list[tuple[int, int]]] = {
         (MOD_CONTROL | MOD_SHIFT, VK_Q),
     ],
     # Paste the last thing a Send handed over, again, into the window in front
-    # (decisions.md 2026-09-23, "History"). V, in the family the other five live in.
-    # The second alternative adds Shift rather than swapping Alt for it: ctrl+shift+V
-    # is "paste as plain text" in half the apps on the machine, and taking it globally
-    # would break a keystroke people use every hour to add one they use a few times a
-    # day. The first has a cost the guide names: Word and Excel's Paste Special.
+    # (decisions.md 2026-09-23, "Paste last moves to Alt+Shift+Z"). **Not the ctrl+alt
+    # family the other five live in**, and three measurements say why: ctrl+alt+V is
+    # Paste Special in Excel, Word and Outlook and Extract Variable in every JetBrains
+    # IDE; and ctrl+alt *is* AltGr, so on a Hungarian, Czech or Slovak keyboard AltGr+V
+    # types @ — a global ctrl+alt+V there takes the @ key away for as long as Flow
+    # runs. alt+shift+Z is Wispr Flow's own default for this exact action on Windows,
+    # so the people most likely to reach for it already have it in their hands, and no
+    # AltGr layout can collide with a combo that has no Ctrl in it. V behind it, for
+    # the machine where Wispr Flow itself is running and owns Z.
     "paste_last": [
-        (MOD_CONTROL | MOD_ALT, VK_V),
-        (MOD_CONTROL | MOD_ALT | MOD_SHIFT, VK_V),
+        (MOD_ALT | MOD_SHIFT, VK_Z),
+        (MOD_ALT | MOD_SHIFT, VK_V),
     ],
 }
 
 
 # -- rebinding, by hand, in the file ----------------------------------------
 #
-# The table above is five opinions, and the standing answer to "let me change them" has
+# The table above is six opinions, and the standing answer to "let me change them" has
 # been a settings dialog, which this project does not build. So the answer is the file
 # somebody already owns: an optional `hotkeys` object in `~/.flow/profile.json`, read
 # once at launch. No new surface, no new dependency, and nothing to discover in a menu.
@@ -251,8 +256,8 @@ KEYS: dict[str, int] = {
 #: One refused override, one line, in the shape of the `hotkey` lines beside it.
 #:
 #: It names the action, the combo as written, and what is wrong with it — and stops
-#: there. It does not go on to list the five action names, because the very next lines
-#: printed *are* the five action names with their combos: a typo'd action is answered by
+#: there. It does not go on to list the six action names, because the very next lines
+#: printed *are* the six action names with their combos: a typo'd action is answered by
 #: the block it sits in, and a startup line that teaches a vocabulary is one nobody
 #: finishes reading.
 IGNORED_LINE = "hotkey  {name} in profile.json ignored: {combo} - {reason}"

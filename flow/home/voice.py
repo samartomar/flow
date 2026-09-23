@@ -1,6 +1,7 @@
-"""Flow Home's Voice page, the two things on it that listen: tuning, and the accuracy check.
+"""Flow Home's listeners: tuning and the accuracy check on the Voice page, and the first
+run's microphone test.
 
-Both are a person reading aloud for a while, and both borrow the microphone from the pill
+Each is a person talking for a while, and each borrows the microphone from the pill
 for exactly that while (`Session.lend_mic`): capture stops, the pill refuses to arm and
 says why, and the task opens a stream of its own. Whatever happens — done, failed,
 cancelled, an exception — the microphone goes back (`return_mic`), because a pill that
@@ -20,12 +21,35 @@ import time
 
 import numpy as np
 
-from .. import accuracy, calibrate
-from ..audio import Mic, SpeechGate, rms_db
+from .. import SAMPLE_RATE, accuracy, calibrate
+from ..audio import BLOCK, Mic, SpeechGate, rms_db
 
 #: The longest one accuracy sentence may take to read. The gate ends a take on its own
 #: once the speaker stops; this is the ceiling for somebody who never starts.
 CHECK_MAX_SEC = 20.0
+
+#: How long the first run's microphone test listens before it stops on its own: time to
+#: say a sentence into two microphones, and short enough that a page left open does not
+#: keep the pill's microphone.
+LISTEN_MAX_SEC = 45.0
+
+#: What counts as a voice on the microphone test: blocks this far above the room, the
+#: room being the quietest tenth of what was heard, for at least `HEARD_SEC`. The Voice
+#: page's `calibrate.heard` split is not used here because it always splits — a silent
+#: room still has a louder half — and "Hearing you" said over silence would be the one
+#: lie this step exists to prevent. Fifteen decibels is under half the gap a voice at a
+#: normal distance made over this machine's room (`calibrate`'s readings, 25-40 dB).
+HEARD_OVER_ROOM_DB = 15.0
+HEARD_SEC = 0.6
+
+
+def voice_seconds(levels: list[float]) -> float:
+    """Seconds of blocks loud enough over the room to be somebody talking."""
+    if len(levels) < 8:
+        return 0.0
+    room = sorted(levels)[len(levels) // 10]
+    loud = sum(1 for level in levels if level >= room + HEARD_OVER_ROOM_DB)
+    return loud * BLOCK / SAMPLE_RATE
 
 def worth_offering(sentence: str, missed: list[str]) -> list[str]:
     """The missed words worth offering for the dictionary: names and terms, which in
@@ -337,17 +361,103 @@ class Check(_Task):
         }
 
 
+class Listen(_Task):
+    """The first run's microphone test: is this microphone hearing you?
+
+    Opens the microphone the pill uses, reports its level every block for the page's
+    meter, and says `heard` once somebody has talked into it (`voice_seconds`). Nothing
+    is decoded and nothing is kept. It stops on its own after `LISTEN_MAX_SEC`, and
+    `stop` waits for the stream to close — switching the microphone refreshes PortAudio,
+    which is only safe with no stream open anywhere in the process (`audio.refresh_devices`).
+    """
+
+    WHY = "Flow is testing your microphone"
+
+    def __init__(self, home) -> None:
+        super().__init__(home)
+        self.heard = False
+        self.peak_db = -90.0
+        self.device = ""
+        self._thread: threading.Thread | None = None
+
+    @property
+    def busy(self) -> bool:
+        return self.state == "listening"
+
+    def start(self) -> str:
+        """Begin listening. "" when it is listening, otherwise why not."""
+        with self._lock:
+            if self.busy:
+                return ""
+            why = self._borrow()
+            if why:
+                return why
+            self.state, self.error, self.device = "listening", "", ""
+            self.heard, self.peak_db, self.level_db = False, -90.0, -90.0
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._run, daemon=True, name="listen")
+            self._thread.start()
+        return ""
+
+    def stop(self, wait: float = 2.0) -> None:
+        """Stop, and wait for the stream to be closed and the microphone given back."""
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(wait)
+
+    cancel = stop
+
+    def _run(self) -> None:
+        mic = None
+        levels: list[float] = []
+        try:
+            mic = self._mic()
+            mic.start()
+            self.device = str(getattr(mic, "device_name", "") or "")
+            began = time.monotonic()
+            while not self._stop.is_set() and time.monotonic() - began < LISTEN_MAX_SEC:
+                for block in mic.drain():
+                    level = rms_db(block)
+                    self.level_db = level
+                    self.peak_db = max(self.peak_db, level)
+                    levels.append(level)
+                if not self.heard and voice_seconds(levels) >= HEARD_SEC:
+                    self.heard = True
+                time.sleep(0.03)
+            self.state = "idle"
+        except Exception as exc:
+            self.state = "failed"
+            self.error = f"the microphone did not open: {exc}"
+        finally:
+            if mic is not None:
+                try:
+                    mic.stop()
+                except Exception:
+                    pass
+            self.level_db = -90.0
+            self._give_back()
+
+    def public(self) -> dict:
+        return {"state": self.state, "error": self.error, "heard": self.heard,
+                "level_db": round(self.level_db, 1), "peak_db": round(self.peak_db, 1),
+                "device": self.device}
+
+
 class VoiceTasks:
-    """The Voice page's two listeners, one of each per Home."""
+    """Flow Home's listeners, one of each per Home."""
 
     def __init__(self, home) -> None:
         self.tune = Tune(home)
         self.check = Check(home)
+        self.listen = Listen(home)
 
     def busy(self) -> str:
-        """Which of them is using the microphone, for a refusal to start the other."""
+        """Which of them is using the microphone, for a refusal to start another."""
         if self.tune.busy:
             return "tuning is still listening"
         if self.check.busy:
             return "the accuracy check is still running"
+        if self.listen.busy:
+            return "the microphone test is still listening"
         return ""

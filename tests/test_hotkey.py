@@ -462,7 +462,7 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
                 mock.patch.object(flow.ui, "Pill") as pill, \
                 contextlib.redirect_stdout(out):
-            self.assertEqual(mod.main(["--no-speak", "--no-lexicon"]), 0)
+            self.assertEqual(mod.main(["--design", "current", "--no-speak", "--no-lexicon"]), 0)
             keys = pill.call_args.kwargs["hotkeys"]
             if keys is not None:
                 keys._thread.join(timeout=5.0)

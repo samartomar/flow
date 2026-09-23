@@ -250,7 +250,13 @@ GESTURE_DEFAULT = "hold"
 #: on every launch including Lite's, where neither surface may be imported, and a
 #: default the profile could not read would be one it could not write back.
 #: `flow/__main__.py` maps the name to a class and treats an unknown one as this.
-DESIGN_DEFAULT = "current"
+#:
+#: **Compact since 2026-09-23** (decisions.md, "The first run"), step 4 of the plan in
+#: docs/one-surface.md: the surface the owner uses, now with Flow Home behind it, is
+#: what a new profile launches. A profile that already names a design keeps it — every
+#: save writes the field, so nobody who has launched Flow before is moved — and the
+#: Classic pill stays one choice away on Flow Home's Settings page for a release.
+DESIGN_DEFAULT = "compact"
 DESIGNS = ("current", "compact")
 
 #: Where decoding may run, as `--decode-device` spells it. Spelled here rather than

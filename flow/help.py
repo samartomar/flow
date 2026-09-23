@@ -43,8 +43,6 @@ GUIDE_URL = "https://github.com/samartomar/flow/blob/main/docs/guide.md"
 
 TITLE = "Commands & shortcuts"
 
-WELCOME_TITLE = "Flow — the first minute"
-
 #: What the colours mean, in the words the windows use for themselves.
 #:
 #: A legend rather than a tutorial, and it is short because there is little left to say:
@@ -52,9 +50,9 @@ WELCOME_TITLE = "Flow — the first minute"
 #: windows that were already saying the same thing. Somebody who has read this knows
 #: everything the app encodes in colour.
 #:
-#: In the sheet **permanently** as well as on the welcome card, because a legend is
-#: exactly the thing somebody wants a second time — and the welcome card is shown once,
-#: by design, to a person who has not yet seen any of these states happen.
+#: In the sheet **permanently**, because a legend is exactly the thing somebody wants
+#: a second time. It was also on the welcome card, shown once at first launch; Flow
+#: Home's first run replaced that card (decisions.md 2026-09-23, "The first run").
 def legend_rows() -> list[tuple[str, str, str]]:
     return [
         ("head", "What the colours mean", ""),
@@ -67,47 +65,6 @@ def legend_rows() -> list[tuple[str, str, str]]:
         ("pair", "pale blue text", "the model's words, never yours"),
     ]
 
-
-def welcome_rows(hotkeys=None, send_words: tuple[str, str] | None = None,
-                 lite: bool = False) -> list[tuple[str, str, str]]:
-    """The first minute, shown once (item 71).
-
-    Every line here was a `print()` before this. Flow says all of it at startup — the
-    combos it registered, the trigger word, that a pause sends a question — into a
-    console a GUI user does not have open, and three outside users met the app without
-    any of it (decisions.md 2026-08-03). A first launch is the one moment somebody is
-    willing to read six lines, and it is the only moment none of this is obvious yet.
-
-    Generated like the sheet and for the same reason: `ctrl+alt+space` is the first
-    alternative in `DEFAULT_BINDINGS` and was already taken on the machine this was
-    built on, so a welcome that named it would greet somebody with a key that does
-    nothing.
-    """
-    word, _enter = send_words or (SEND_WORD, SEND_ENTER_WORD)
-    chosen = (getattr(hotkeys, "chosen", {}) or {}) if hotkeys is not None else {}
-    arm = chosen.get("toggle")
-    return _fitted([
-        ("note", "Shown once. Everything here is also under right-click > Help.", ""),
-        ("gap", "", ""),
-        ("head", "Try it now", ""),
-        ("pair", arm or "click the pill",
-         "arms the microphone" if arm else "arms the microphone (no combo this launch)"),
-        ("note", "Then just talk. Stop, and what you said is held in a card - nothing "
-         "is sent anywhere until you say so.", ""),
-        ("pair", "the Send chip", "hands the draft to whatever window you were in"),
-        ("gap", "", ""),
-        ("head", "Two things worth knowing", ""),
-        ("pair", f"say “{word}”", "sends it without touching the mouse - on "
-                                             "its own, not inside a sentence"),
-        ("pair", "right-click the pill", "every setting, and the full command list"),
-        ("gap", "", ""),
-        *legend_rows(),
-        ("gap", "", ""),
-        ("head", "Converse mode", "right-click > Converse mode"),
-        ("note", "It asks an agent CLI instead of pasting, and there a pause sends the "
-         "question on its own.", ""),
-        ("note", f"Settings > “{AUTO_ASK_OFF_LABEL}” stops that.", ""),
-    ])
 
 #: The Settings entry that turns auto-ask off, worded exactly as the menu words it.
 #:

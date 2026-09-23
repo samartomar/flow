@@ -374,6 +374,45 @@ pre.code .lang {
 .composer textarea:disabled { opacity: .5; }
 .empty-ask { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 18px 2px 4px; }
 
+/* ---------------------------------------------------------------- the first run */
+/* The rail steps aside: five steps, one column, nothing else to click but the way on. */
+body.first .rail { display: none; }
+body.first .page { align-items: center; padding: 32px 24px 40px; }
+.fr { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 20px; }
+.fr-head { display: flex; align-items: center; gap: 14px; }
+.fr-brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.fr-dots { display: inline-flex; align-items: center; gap: 6px; }
+.fr-dot { width: 8px; height: 8px; border-radius: 4px; background: var(--ring); }
+.fr-dot.on { width: 22px; background: var(--text); }
+.fr-dot.done { background: var(--hearing); }
+.fr-body {
+  display: flex; flex-direction: column; gap: 16px; background: var(--shell);
+  border: 1px solid var(--line); border-radius: 16px; padding: 28px 32px;
+}
+.fr-title { font-size: 24px; line-height: 31px; }
+.fr-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.fr-side {
+  display: flex; flex-direction: column; gap: 10px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 12px; padding: 18px;
+}
+.fr-side b { font-size: 16px; }
+.fr-list { display: flex; flex-direction: column; gap: 6px; }
+.fr-option {
+  display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 14px;
+  border: 1px solid var(--ring); border-radius: 10px; cursor: pointer; background: var(--bg);
+}
+.fr-option.on { border-color: var(--green-line); background: var(--green-bg); }
+.fr-status { min-height: 18px; }
+.fr-model { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.fr-model.col { flex-direction: column; align-items: stretch; gap: 6px; }
+.fr-foot { display: flex; align-items: center; gap: 10px; }
+.fr-try { min-height: 64px; font-size: 15px; }
+.choice.picked { border-color: var(--green-line); background: var(--green-bg); }
+.linkish {
+  background: none; border: 0; padding: 0; color: var(--waiting); cursor: pointer;
+  font: inherit; text-decoration: underline;
+}
+
 /* ---------------------------------------------------------------- narrower windows */
 /* The window opens at 1200 wide; somebody can make it anything. Two columns become
    one, the model table folds its actions under the row, and below that the rail keeps
@@ -386,6 +425,8 @@ pre.code .lang {
   .table .tr.head span:last-child { display: none; }
   .stats { flex-wrap: wrap; row-gap: 10px; }
   .choice-grid { grid-template-columns: minmax(0, 1fr); }
+  .fr-sides { grid-template-columns: minmax(0, 1fr); }
+  .fr-body { padding: 22px 20px; }
   .convo { grid-template-columns: minmax(0, 1fr); }
   .convo-list { position: static; }
   .toolbar .right { text-align: left; }

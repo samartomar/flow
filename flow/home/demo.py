@@ -343,6 +343,12 @@ class FakeSession:
     def stop_speaking(self) -> bool:
         return True
 
+    #: How many times something asked for the models to be loaded.
+    warmed = 0
+
+    def warm(self) -> None:
+        self.warmed += 1
+
     def set_models(self, partial, final, device=None) -> bool:
         self.asr.swap(partial, final, device)
         if self.profile is not None:
@@ -493,12 +499,15 @@ def main(argv=None) -> int:
     ap.add_argument("--no-open", action="store_true", help="print the address only")
     ap.add_argument("--history", action="store_true",
                     help="start with history kept, and a few days of pretend entries")
+    ap.add_argument("--first-run", action="store_true",
+                    help="open at the first run's five steps, as a new profile does")
     args = ap.parse_args(argv)
     home, _session = build(kept=args.history)
-    url = home.url("home")
+    page = "start" if args.first_run else "home"
+    url = home.url(page)
     print(url, flush=True)
     if not args.no_open:
-        home.open("home")
+        home.open(page)
     try:
         while True:
             time.sleep(3600)

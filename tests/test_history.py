@@ -924,12 +924,18 @@ class TestPasteLast(unittest.TestCase):
         self.assertTrue(m.order[i + 1].endswith("\u2026\u201d"))
         self.assertIsNotNone(m.commands["Paste last"])
 
-    def test_the_hotkey_ships_bound_away_from_plain_text_paste(self):
-        from flow.hotkey import DEFAULT_BINDINGS, describe
+    def test_the_hotkey_is_wispr_flows_and_never_an_altgr_combo(self):
+        # alt+shift+Z is Wispr Flow's own default for this action on Windows. No
+        # alternative may hold Ctrl and Alt together: that pair *is* AltGr, and AltGr+V
+        # types @ on Hungarian, Czech and Slovak keyboards. Nor ctrl+shift+V, which is
+        # paste-as-plain-text in half the programs on the machine.
+        from flow.hotkey import DEFAULT_BINDINGS, MOD_ALT, MOD_CONTROL, describe
 
-        combos = [describe(*b) for b in DEFAULT_BINDINGS["paste_last"]]
-        self.assertEqual(combos[0], "ctrl+alt+V")
-        self.assertNotIn("ctrl+shift+V", combos)
+        bindings = DEFAULT_BINDINGS["paste_last"]
+        self.assertEqual(describe(*bindings[0]), "alt+shift+Z")
+        for mods, _vk in bindings:
+            self.assertFalse(mods & MOD_CONTROL and mods & MOD_ALT, describe(mods, _vk))
+        self.assertNotIn("ctrl+shift+V", [describe(*b) for b in bindings])
 
     def test_the_tray_menu_has_the_row(self):
         self.assertEqual(tray.PASTE_LAST, "paste_last")

@@ -21,8 +21,9 @@ from .bridge import Bridge
 from .models import ModelManager
 from .server import HomeServer
 
-#: The pages the window has, by the name the URL and the rail use.
-PAGES = ("home", "history", "voice", "ask", "models", "settings")
+#: The pages the window has, by the name the URL and the rail use. "start" is the first
+#: run, which the rail does not list: it is opened once, by `__main__`, and left for good.
+PAGES = ("home", "history", "voice", "ask", "models", "settings", "start")
 
 
 class Home:
@@ -43,6 +44,10 @@ class Home:
         #: A model choice waiting on a download: (partial, final, device). Applied by
         #: `_downloaded` when the model it needs lands. See `Api.model_use`.
         self.pending_models: tuple | None = None
+        #: Warm the session once the models it uses are all on this PC — set by the first
+        #: run's Download, which fetches the models the session will use without pinning
+        #: them in the profile, so it cannot ride on `pending_models`.
+        self.warm_when_ready = False
         self.bridge = Bridge(session.post)
         self.models = ModelManager(session, on_downloaded=self._downloaded)
         #: What the Voice page's listening tasks open instead of a real microphone, or
@@ -109,6 +114,7 @@ class Home:
         # process is going, but a stream left open is a stream Windows shows as in use.
         self.voice.tune.cancel()
         self.voice.check.cancel()
+        self.voice.listen.stop()
         with self._lock:
             server, self._server = self._server, None
         if server is not None:
@@ -126,6 +132,13 @@ class Home:
         session applies it at its next frame, and the page sees it at its next poll.
         """
         self.models.forget_scan()
+        if self.warm_when_ready and self.models_ready():
+            # The first run's models are all here: load them now, so the first thing
+            # somebody says is not also the load.
+            self.warm_when_ready = False
+            warm = getattr(self.session, "warm", None)
+            if callable(warm):
+                self.session.post(warm)
         pending = self.pending_models
         if not job.then_use or pending is None:
             return
@@ -141,6 +154,20 @@ class Home:
                 return
         self.pending_models = None
         self.session.post(lambda: self.session.set_models(partial, final, device))
+
+    def models_ready(self) -> bool:
+        """Whether every model the session will decode with is on this PC.
+
+        A name outside the catalogue (a flag, a hand-edited profile) cannot be checked
+        and is taken as present: the check exists to decide whether to *offer* a
+        download, and offering one for a model Flow cannot fetch would be a dead button.
+        """
+        from .models import BY_NAME, complete
+
+        names = getattr(getattr(self.session, "asr", None), "names", None)
+        if not isinstance(names, tuple):
+            return True
+        return all(complete(BY_NAME[n].repo) for n in names if n in BY_NAME)
 
 
 __all__ = ["Home", "PAGES"]

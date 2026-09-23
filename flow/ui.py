@@ -28,8 +28,6 @@ from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
 from . import glyphs
 from .help import (
     AUTO_ASK_OFF_LABEL,
-    WELCOME_TITLE,
-    welcome_rows,
     fit,
     AUTO_ASK_ON_LABEL,
     TITLE as TITLE_DEFAULT,
@@ -45,7 +43,7 @@ from .lexicon import (
 )
 from . import paint, tray
 from .notes import Notes
-from .profile import DESIGNS, DESIGN_DEFAULT, path_key, resolve_workspace
+from .profile import DESIGNS, path_key, resolve_workspace
 from .refine import EFFORT_DEFAULT, EFFORTS, available
 from .session import CONVERSE, DICTATE, REFINE, Session, State
 from .stats import today_note
@@ -2543,7 +2541,9 @@ class Pill(tk.Tk):
     #: profile before the window exists, so a menu that marked the current row off
     #: `profile.design` was reading a stored preference where the question is "which
     #: surface am I looking at". `switch_design` reads it for the same reason.
-    DESIGN = DESIGN_DEFAULT
+    #: The name is this class's, never the default's: the default moved to "compact"
+    #: on 2026-09-23, and this surface is still the Classic one.
+    DESIGN = "current"
     #: The design this surface asked to be replaced by, or None for "nobody asked".
     #: `__main__` reads it the moment `mainloop()` returns: None is a quit, a name is a
     #: switch, and the loop there builds the other class against the same session. A
@@ -2783,7 +2783,6 @@ class Pill(tk.Tk):
         # visible to report itself.
         if self._arm_on_start:
             self.after(120, self._toggle)
-        self.after(160, self._welcome)
         self.after(30, self._tick)
 
     # -- interaction -------------------------------------------------------
@@ -4176,33 +4175,6 @@ class Pill(tk.Tk):
             # Startup names the version too, into a console a GUI user does not have open.
             ("note", f"Flow {version()}", ""),
         ])
-
-    def _welcome(self) -> None:
-        """The first minute, once (item 71).
-
-        Every line on it was a `print()` before this: Flow says the combos it registered,
-        the trigger word and that a pause sends a question — into a console a GUI user
-        does not have open. Three outside users met the app without any of it
-        (decisions.md 2026-08-03).
-
-        Shown after the first frame rather than during construction, so the pill is on
-        screen behind it and the card reads as belonging to something rather than as the
-        whole application. `profile.welcomed` is written immediately, before anybody has
-        read a word: a card shown twice is worse than one shown once, and a crash between
-        showing and saving would do exactly that.
-        """
-        profile = getattr(self.session, "profile", None)
-        if profile is None or getattr(profile, "welcomed", True):
-            return
-        profile.welcomed = True
-        profile.save()
-        if self._help is None:
-            self._help = HelpWindow(self)
-        self._help.show(
-            welcome_rows(hotkeys=self.hotkeys, send_words=self.session.send_words,
-                         lite=self.lite),
-            title=WELCOME_TITLE, chip="Dismiss",
-        )
 
     def _open_guide(self) -> None:
         try:

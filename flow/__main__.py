@@ -1025,11 +1025,33 @@ def main(argv: list[str] | None = None) -> int:
     # Once, on the first surface only, and the same goes for the two threads and the
     # identity record below: all four are about the *process* starting, not about a
     # window appearing, and a design switch does not restart the process.
+    # The first run (decisions.md 2026-09-23, "The first run"): a profile that has never
+    # finished or skipped it opens Flow Home at its five steps, which replace the Classic
+    # pill's welcome card and give the compact pill the welcome it never had.
+    # `--no-profile` has nowhere to remember that it ran, so it never does.
+    first_run = profile is not None and not profile.welcomed
     if not args.no_warm and (profile is None or profile.warm):
-        session.warm()
-    if args.home:
+        if first_run:
+            # Not a load that is also a silent download. On a new PC the models are not
+            # here yet, and warming would start fetching three gigabytes behind the words
+            # "loading the model" — the step that shows the download with its progress
+            # is on the screen now, so the fetch waits for it. Asked on a thread: naming
+            # the models resolves the device, which is the CUDA probe.
+            def warm_if_here() -> None:
+                if home.models_ready():
+                    session.post(session.warm)
+                else:
+                    say("models: not on this PC yet - the first run in Flow Home "
+                        "downloads them, with progress")
+
+            _threading.Thread(target=warm_if_here, daemon=True, name="first-warm").start()
+        else:
+            session.warm()
+    if first_run:
         # After the first frame rather than now, so the pill is on screen before a
         # browser process starts beside it.
+        pill.after(400, lambda: home.open("start"))
+    elif args.home:
         pill.after(300, lambda: home.open("home"))
     # Beside the window, not in front of it — see each one for what it used to cost.
     _threading.Thread(target=say_models, daemon=True, name="startup-lines").start()

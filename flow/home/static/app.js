@@ -10,7 +10,7 @@
 
 (() => {
   // ------------------------------------------------------------------ token, routes
-  const PAGES = ["home", "history", "voice", "ask", "models", "settings"];
+  const PAGES = ["home", "history", "voice", "ask", "models", "settings", "start"];
   const start = new URLSearchParams(location.hash.slice(1));
   if (start.get("token")) {
     try { sessionStorage.setItem("flow-token", start.get("token")); } catch (_) { /* private */ }
@@ -166,6 +166,10 @@
   }
 
   function sizes(root) {
+    if (data && data.mic && data.mic.listen && data.tune) {
+      level(root, data.mic.listen.state === "listening" ? data.mic.listen.level_db
+        : data.tune.state === "listening" ? data.tune.level_db : -90);
+    }
     root.querySelectorAll("[data-w]").forEach((el) => { el.style.width = `${el.dataset.w}%`; });
     root.querySelectorAll("[data-x]").forEach((el) => { el.style.left = `${el.dataset.x}%`; });
     // A live level on the page belongs to whichever voice task is listening.
@@ -807,9 +811,181 @@
       </div>`;
   }
 
+  // ------------------------------------------------------------------ the first run
+  // Five steps, no terminal (the canvas's FirstRun artboard): the two sides, the
+  // microphone, the speech model, tuning, and the history question with a box to try it
+  // in. The step lives here; everything a step shows comes from /api/start.
+  let startStep = 1;
+  let tryText = "";
+  const STEPS = 5;
+
+  // "ctrl+win" as the keys the page draws, or the pill when there are none this launch.
+  const holdKeys = (k) => (k.dictate ? keys(k.dictate) : "<b>the pill</b>");
+
+  function stepWelcome(d) {
+    const k = d.keys || {};
+    const gesture = k.gesture === "toggle" ? "press, speak, press again" : "hold, speak, let go";
+    return `
+      <h1 class="fr-title">Talk, and Flow types it. Ask, and it answers.</h1>
+      <p class="sub">Two things, one pill. ${esc(gesture[0].toUpperCase() + gesture.slice(1))}.</p>
+      <div class="fr-sides">
+        <div class="fr-side">${glyph(C.type, 1.3)}<b>Dictate</b><span class="row"><span class="note">hold</span>${holdKeys(k)}</span>
+          <span class="note">pastes into the window you were in</span></div>
+        <div class="fr-side">${glyph(C.ask, 1.3)}<b>Ask</b><span class="row">${k.mode ? keys(k.mode) : ""}<span class="note">${k.mode ? "then hold" : "tap the pill to violet, then hold"}</span></span>
+          <span class="note">the answer rises above the pill, like ChatGPT</span></div>
+      </div>
+      <p class="fine">${icon("shield", C.soft, 13)} Speech is recognised on this PC. No account, no API key.</p>`;
+  }
+
+  function stepMic(d) {
+    const m = d.mic;
+    const l = m.listen;
+    const options = [["", `Windows default${!m.chosen && m.current ? ": " + m.current : ""}`]]
+      .concat(m.devices.map((dev) => [dev.name, dev.name]));
+    const chosen = m.chosen || "";
+    const status = l.state === "failed" ? `<span class="warn">${esc(l.error)}</span>`
+      : l.heard ? `<span class="good">${icon("circlecheck", C.green, 15)} Hearing you clearly.</span>`
+        : l.state === "listening" ? "Listening - say a few words."
+          : m.lent && !l.state.startsWith("listen") ? esc(m.lent) : "";
+    return `
+      <h1 class="fr-title">Which microphone?</h1>
+      <p class="sub">Say something. The bar beside the one you are using should move.</p>
+      <div class="fr-list" role="radiogroup" aria-label="Microphone">${options.map(([value, label]) => `
+        <label class="fr-option ${value === chosen ? "on" : ""}"><input type="radio" name="fr-mic" value="${esc(value)}" data-change="fr-mic" ${value === chosen ? "checked" : ""}>
+          <span class="grow ellipsis">${esc(label)}</span>${value === chosen ? bars(14, l.state === "listening" ? "live" : "") : ""}</label>`).join("")}</div>
+      <p class="note fr-status">${status}</p>
+      ${l.state !== "listening" ? '<button type="button" class="btn sm" data-act="fr-listen">Listen again</button>' : ""}`;
+  }
+
+  function modelLine(t, role) {
+    const dl = t.download;
+    if (t.installed) return `<div class="fr-model">${icon("circlecheck", C.green, 18)}<span class="mono">${esc(t.name)}</span><span class="note grow">${role}</span><span class="note">on this PC</span></div>`;
+    if (dl && dl.state === "running") {
+      const pct = dl.total ? Math.min(100, Math.round((dl.done / dl.total) * 100)) : 0;
+      return `<div class="fr-model col"><div class="row">${icon("download", C.blue, 18)}<span class="mono">${esc(t.name)}</span><span class="note grow">${role}</span>
+        <span class="note">${dl.total ? `${human(dl.done)} of ${human(dl.total)}` : "starting"}</span></div>
+        <div class="progress ${pct ? "" : "busy"}"><div data-w="${pct}"></div></div></div>`;
+    }
+    return `<div class="fr-model">${icon("circle", C.dim, 18)}<span class="mono">${esc(t.name)}</span><span class="note grow">${role}</span>
+      ${dl && dl.state === "failed" ? `<span class="note warn ellipsis" title="${esc(dl.error)}">${esc(dl.error)}</span>` : ""}<span class="note">${esc(t.size_text)}</span></div>`;
+  }
+
+  function stepModel(d) {
+    const m = d.model;
+    const gpu = m.gpu && m.gpu.name ? m.gpu.name.replace(/^NVIDIA\s+(GeForce\s+)?/i, "") : "";
+    const measuredHere = gpu && m.measured_on.includes(gpu);
+    const speed = m.final.speed ? Math.round(m.final.speed) : 0;
+    const why = m.device === "cuda" && speed
+      ? (measuredHere ? `Your ${esc(gpu)} runs it about ${speed} times faster than you talk.`
+        : `On a GTX 1070 it runs about ${speed} times faster than speech; ${esc(gpu || "your card")} is likely no slower.`)
+      : m.device === "cuda" ? "It runs on your graphics card." : "It runs on this PC's processor.";
+    const action = m.ready
+      ? `<p class="note good">${icon("circlecheck", C.green, 15)} ${m.loaded ? "Ready." : m.loading ? "On this PC - loading it now." : "On this PC."}</p>`
+      : m.downloading
+        ? '<div class="row"><p class="note grow">You can keep going while it downloads. Models in Flow Home can swap it later.</p><button type="button" class="btn ghost sm" data-act="fr-models" data-value="cancel">Cancel</button></div>'
+        : `<div class="row"><button type="button" class="btn primary" data-act="fr-models" data-value="download">${icon("download", "#15171C", 15)}Download</button><p class="note grow">You can keep going while it downloads.</p></div>`;
+    return `
+      <h1 class="fr-title">Getting the speech model</h1>
+      <p class="sub">Recommended for this PC: <b>${esc(m.final.name)}</b>. ${why}</p>
+      <div class="col">${modelLine(m.final, "writes the words that get pasted")}${modelLine(m.partial, "draws the live preview")}</div>
+      ${action}
+      ${m.alternative && !m.ready ? `<p class="note">Short on space or time? <button type="button" class="linkish" data-act="fr-models" data-value="smaller">Use ${esc(m.alternative.final)} instead${m.alternative.size_text ? " - " + esc(m.alternative.size_text) : ""}</button></p>` : ""}`;
+  }
+
+  function stepTune(d) {
+    const t = d.tune;
+    const ready = d.model.ready;
+    if (t.state === "listening" || t.state === "measuring") {
+      const pct = Math.min(100, Math.round((t.elapsed / t.seconds) * 100));
+      return `
+        <h1 class="fr-title">Let Flow hear you</h1>
+        <p class="passage">${esc(t.passage)}</p>
+        <div class="progress green"><div data-w="${pct}"></div></div>
+        ${t.state === "measuring" ? '<p class="note"><span class="dot blue"></span> Measuring what you read.</p>'
+          : `<div class="row">${bars(14, "live")}<span class="note grow">Listening - ${Math.round(t.elapsed)} s. ${t.enough ? "That is enough - finish now, or read to the end." : "Read at your normal pace."}</span>
+            <button type="button" class="btn primary" data-act="tune-finish" ${t.enough ? "" : "disabled"}>Done reading</button>
+            <button type="button" class="btn ghost" data-act="tune-cancel">Cancel</button></div>`}`;
+    }
+    const last = t.last;
+    return `
+      <h1 class="fr-title">Let Flow hear you</h1>
+      <p class="sub">Read one paragraph aloud at your normal pace. About 45 seconds; it tunes Flow to your room and your voice.</p>
+      ${t.state === "done" ? `<p class="note good">${icon("circlecheck", C.green, 15)} Saved. Flow is listening with these now.</p>` : ""}
+      ${t.state === "failed" ? `<p class="note warn">${esc(t.error)}</p>` : ""}
+      ${last && t.state !== "done" ? `<p class="note">Already tuned: the room at ${esc(last.floor_db)} dB, your voice at ${esc(last.speech_db)} dB.</p>` : ""}
+      ${ready ? `<div class="row"><button type="button" class="btn ${last ? "" : "primary"}" data-act="tune-start" ${t.profile ? "" : "disabled"}>${icon("mic", last ? C.text : "#15171C", 15)}${last || t.state === "done" ? "Tune again" : "Start reading"}</button>
+          <span class="note">Nothing leaves this PC. Or skip it - Voice in Flow Home does it any time.</span></div>`
+        : `<p class="note">${icon("download", C.soft, 14)} Tuning listens through the speech model, which is still ${d.model.downloading ? "downloading" : "not on this PC"}. Skip it for now - Voice in Flow Home does it any time.</p>`}`;
+  }
+
+  function stepFinish(d) {
+    const h = d.history;
+    const k = d.keys || {};
+    const choice = (value, title, note) => `
+      <button type="button" class="choice ${h.choice === value ? "picked" : ""}" aria-pressed="${h.choice === value ? "true" : "false"}" data-act="fr-history" data-value="${value}" ${d.profile ? "" : "disabled"}>
+        ${icon(value === "keep" ? "history" : "lock", value === "keep" ? C.green : C.soft, 20)}<b>${title}</b><span class="note">${note}</span></button>`;
+    const blocked = d.mode !== "dictate"
+      ? `<p class="note warn">The pill is on ${esc(MODE_WORD[d.mode] || d.mode)} - tap it until its mic is white, then try this.</p>`
+      : !d.model.ready ? '<p class="note warn">The speech model is not on this PC yet - try this once its download finishes.</p>' : "";
+    return `
+      <h1 class="fr-title">Last thing: keep a history?</h1>
+      <p class="sub">Nothing is chosen for you. Pick one; History in Flow Home changes it later.</p>
+      <div class="choice-grid">
+        ${choice("keep", `Keep what I dictate and ask for ${esc(h.days || 30)} days`, "On this PC only. Find it, copy it again, fix words Flow got wrong.")}
+        ${choice("off", "Don't keep it", "Flow keeps times and word counts, never the words.")}
+      </div>
+      <hr class="rule">
+      <h2>Try it</h2>
+      <p class="note">${d.lite
+        ? `Click in the box, hold the pill, say &ldquo;Flow is ready&rdquo;, let go - then press Ctrl+V in the box: Lite copies instead of pasting.`
+        : `Click in the box, hold ${holdKeys(k)}, say &ldquo;Flow is ready&rdquo;, let go.`}</p>
+      ${blocked}
+      <textarea id="fr-try" class="input fr-try" rows="2" placeholder="Try it here" aria-label="Try it here">${esc(tryText)}</textarea>
+      ${tryText.trim() ? `<p class="note good">${icon("circlecheck", C.green, 15)} It works. That is all there is to it.</p>` : ""}`;
+  }
+
+  function renderStart(d) {
+    const body = [stepWelcome, stepMic, stepModel, stepTune, stepFinish][startStep - 1](d);
+    const dots = Array.from({ length: STEPS }, (_, i) => `<span class="fr-dot ${i + 1 === startStep ? "on" : i + 1 < startStep ? "done" : ""}"></span>`).join("");
+    const next = startStep === 1 ? "Get started" : startStep === STEPS ? "Open Flow" : "Next";
+    const busy = d.tune.state === "listening" || d.tune.state === "measuring";
+    return `
+      <div class="fr">
+        <div class="fr-head"><span class="fr-brand"><span class="brand-mark" aria-hidden="true"></span>Flow</span>
+          <span class="fr-dots" aria-hidden="true">${dots}</span><span class="note grow">Step ${startStep} of ${STEPS}</span>
+          <button type="button" class="btn ghost sm" data-act="fr-skip">Skip setup</button></div>
+        <section class="fr-body">${body}</section>
+        <div class="fr-foot">${startStep > 1 ? '<button type="button" class="btn ghost" data-act="fr-back">Back</button>' : ""}<span class="grow"></span>
+          <button type="button" class="btn primary" data-act="fr-next" ${busy ? "disabled" : ""}>${next}</button></div>
+      </div>`;
+  }
+
+  // Leaving a step stops what it left listening: the microphone test is a meter, and a
+  // tuning half read is not a tuning.
+  async function goStep(n) {
+    const from = startStep;
+    startStep = Math.max(1, Math.min(STEPS, n));
+    if (from === 2 && startStep !== 2) { try { await api("start/listen", { action: "stop" }); } catch (_) { /* gone */ } }
+    if (startStep === 2) {
+      try { data = await api("start/listen", { action: "start" }); } catch (e) { toast(e.message, true); }
+    }
+    show(true);
+  }
+
+  async function finishStart() {
+    try {
+      await api("start/done", {});
+    } catch (e) {
+      if (e instanceof Gone) { gone(e.message); return; }
+      toast(e.message, true);
+      return;
+    }
+    location.hash = "#/home";
+  }
+
   // ------------------------------------------------------------------ showing a page
-  const LOAD = { home: "home", history: "history", voice: "voice", ask: "ask", models: "models", settings: "settings" };
-  const DRAW = { home: renderHome, history: renderHistory, voice: renderVoice, ask: renderAsk, models: renderModels, settings: renderSettings };
+  const LOAD = { home: "home", history: "history", voice: "voice", ask: "ask", models: "models", settings: "settings", start: "start" };
+  const DRAW = { home: renderHome, history: renderHistory, voice: renderVoice, ask: renderAsk, models: renderModels, settings: renderSettings, start: renderStart };
   let data = null;
   let shown = "";
 
@@ -823,6 +999,7 @@
 
   async function show(force = false) {
     const name = current();
+    document.body.classList.toggle("first", name === "start");
     renderNav();
     try {
       const fresh = await fetchPage(name);
@@ -850,7 +1027,7 @@
   // The fields a re-draw may happen under: their words live in this script, not in the
   // page, so an answer arriving while somebody types the next question lands without
   // taking the question away.
-  const HELD = new Set(["ask-text", "history-q", "fix-was", "fix-said"]);
+  const HELD = new Set(["ask-text", "history-q", "fix-was", "fix-said", "fr-try"]);
 
   // A poll never re-draws under somebody typing; an action they took always re-draws.
   function draw(name, fresh, force = false) {
@@ -989,9 +1166,18 @@
     effort: (el) => run(() => api("agent", { effort: el.dataset.value }), `Effort: ${el.dataset.value}`),
     mute: (el) => run(() => api("replies", { muted: el.getAttribute("aria-checked") === "true" })),
     preview: () => run(() => api("replies/preview", {})),
-    "tune-start": () => run(() => api("voice/tune", { action: "start" })),
-    "tune-finish": () => run(() => api("voice/tune", { action: "finish" })),
-    "tune-cancel": () => run(() => api("voice/tune", { action: "cancel" }), "Cancelled - nothing was saved"),
+    "tune-start": () => run(() => here(api("voice/tune", { action: "start" }))),
+    "tune-finish": () => run(() => here(api("voice/tune", { action: "finish" }))),
+    "tune-cancel": () => run(() => here(api("voice/tune", { action: "cancel" })), "Cancelled - nothing was saved"),
+    "fr-next": () => (startStep === STEPS ? finishStart() : goStep(startStep + 1)),
+    "fr-back": () => goStep(startStep - 1),
+    "fr-skip": () => finishStart(),
+    "fr-listen": () => run(() => api("start/listen", { action: "start" })),
+    "fr-models": (el) => run(() => api("start/models", { action: el.dataset.value }),
+      el.dataset.value === "download" ? "Downloading - you can keep going"
+        : el.dataset.value === "smaller" ? `Switching to the smaller models` : "Cancelled"),
+    "fr-history": (el) => run(() => here(api("history/choice", { choice: el.dataset.value })),
+      el.dataset.value === "keep" ? "History is on, on this PC only" : "Nothing you say will be kept"),
     "check-start": () => run(() => api("voice/check", { action: "start" })),
     "check-record": () => run(() => api("voice/check", { action: "record" })),
     "check-stop": () => run(() => api("voice/check", { action: "stop" })),
@@ -1103,6 +1289,7 @@
     panel: (el) => run(() => api("settings/classic", { panel: el.value }), "Saved"),
     place: (el) => run(() => api("settings/classic", { place: el.value }), "Saved"),
     "history-days": (el) => run(() => api("history/days", { days: Number(el.value), ...historyView }), `Kept for ${el.value} days`),
+    "fr-mic": (el) => run(() => api("start/mic", { name: el.value || null }), "Microphone changed"),
   };
 
   // Words being typed into a field a re-draw can happen under are kept here as they
@@ -1110,7 +1297,11 @@
   let searchTimer = 0;
   document.addEventListener("input", (ev) => {
     const el = ev.target;
-    if (el.id === "ask-text") askDraft = el.value;
+    if (el.id === "fr-try") {
+      const had = tryText.trim();
+      tryText = el.value;
+      if (!had !== !tryText.trim()) redraw();
+    } else if (el.id === "ask-text") askDraft = el.value;
     else if (el.dataset && el.dataset.fix && fixing) fixing[el.dataset.fix] = el.value;
     else if (el.id === "history-q") {
       historyView.query = el.value;
@@ -1178,11 +1369,31 @@
         if (current() === name) { data = fresh; draw(name, false); }
       }
       if (name === "ask") elapsed();
+      // The first run re-reads while something on it is moving: the microphone test,
+      // a download, a tuning. Otherwise every two seconds, for the model to finish
+      // loading and the pill's mode to come back to Dictate.
+      if (name === "start" && data && data.mic) {
+        const moving = data.mic.listen.state === "listening" || data.model.downloading
+          || ["listening", "measuring"].includes(data.tune.state) || data.model.loading;
+        if (moving || polls % 2 === 0) {
+          const fresh = await api("start");
+          if (current() === "start") { data = fresh; draw("start", false); }
+        }
+      }
     } catch (e) {
       if (e instanceof Gone) { gone(e.message); return; }
     }
-    setTimeout(poll, current() === "settings" || voiceBusy(current()) ? 250 : 1000);
+    setTimeout(poll, current() === "settings" || voiceBusy(current()) || startBusy() ? 250 : 1000);
   }
+
+  function startBusy() {
+    return current() === "start" && data && data.mic
+      && (data.mic.listen.state === "listening" || data.tune.state === "listening");
+  }
+
+  // A page reached from the first run gets the first run back, not the page its route
+  // was written for: the tuning and history routes answer with Voice and History.
+  const here = (promise) => promise.then((out) => (current() === "start" ? api("start") : out));
 
   function voiceBusy(name) {
     if (name !== "voice" || !data || !data.tune || !data.check) return false;

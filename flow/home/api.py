@@ -232,6 +232,11 @@ class Api:
             ("POST", "/api/ask/note"): self.ask_note,
             ("POST", "/api/ask/wrap"): self.ask_wrap,
             ("POST", "/api/ask/say"): self.ask_say,
+            ("GET", "/api/start"): self.start_page,
+            ("POST", "/api/start/listen"): self.start_listen,
+            ("POST", "/api/start/mic"): self.start_mic,
+            ("POST", "/api/start/models"): self.start_models,
+            ("POST", "/api/start/done"): self.start_done,
             ("GET", "/api/settings"): self.settings,
             ("POST", "/api/settings/mic"): self.set_mic,
             ("POST", "/api/settings/gesture"): self.set_gesture,
@@ -752,6 +757,9 @@ class Api:
         task = self.home.voice.tune
         action = body.get("action")
         if action == "start":
+            # The first run's microphone test is a meter and nothing else; a tuning
+            # asked for ends it rather than being refused by it.
+            self.home.voice.listen.stop()
             busy = self.home.voice.busy()
             if busy:
                 raise ApiError(busy)
@@ -771,6 +779,7 @@ class Api:
         task = self.home.voice.check
         action = body.get("action")
         if action == "start":
+            self.home.voice.listen.stop()
             busy = self.home.voice.busy()
             if busy:
                 raise ApiError(busy)
@@ -1068,6 +1077,174 @@ class Api:
         text, _question = self._answer(body)
         self._call(lambda: speaker.say(text))
         return self.ask_page({"conv": body.get("conv")})
+
+    # -- The first run -----------------------------------------------------------
+
+    def start_page(self, _body: dict) -> dict:
+        """Everything the first run's five steps draw: the two sides and their keys, the
+        microphone and the test listening to it, the speech models this PC will use and
+        whether they are here, tuning, and the history question."""
+        from ..audio import input_devices
+
+        s = self.session
+        profile = self.profile
+
+        def read() -> dict:
+            mic = getattr(s, "mic", None)
+            asr = getattr(s, "asr", None)
+            names = getattr(asr, "names", None) if asr is not None else None
+            last = None
+            if profile is not None and profile.calibrated:
+                last = {"floor_db": profile.floor_db, "speech_db": profile.speech_db,
+                        "gap_db": round(profile.speech_db - profile.floor_db, 1)}
+            return {
+                "mic": getattr(mic, "device_name", "") or "",
+                "names": names if isinstance(names, tuple) and len(names) == 2 else None,
+                "loaded": bool(getattr(asr, "loaded", False)),
+                "mode": MODE_KEYS.get(getattr(s, "mode", DICTATE), "dictate"),
+                "last": last,
+                "lent": getattr(s, "mic_on_loan", "") or "",
+            }
+
+        live = self._call(read)
+        speech = self.home.models.snapshot()
+        rows = {m["name"]: m for m in speech["models"]}
+        partial, final = live["names"] or (speech["automatic"]["partial"],
+                                           speech["automatic"]["final"])
+
+        def model(name: str) -> dict:
+            row = rows.get(name) or {"name": name, "installed": True, "size_text": "",
+                                     "speed": None, "download": None}
+            return {"name": name, "installed": bool(row.get("installed")),
+                    "size_text": row.get("size_text", ""), "speed": row.get("speed"),
+                    "download": row.get("download")}
+
+        tiers = {"partial": model(partial), "final": model(final)}
+        # The smaller pair — the CPU's own defaults — offered where the recommendation
+        # is something bigger: "short on space or time" (the canvas's step 3).
+        from ..asr import default_models
+        from .models import complete
+
+        small = default_models("cpu")
+        alternative = None
+        if final not in small and all(n in BY_NAME for n in small):
+            missing = sum(BY_NAME[n].size for n in small if not complete(BY_NAME[n].repo))
+            alternative = {"partial": small[0], "final": small[1],
+                           "size_text": human(missing) if missing else ""}
+        return {
+            "profile": profile is not None,
+            "lite": bool(self.home.lite),
+            "keys": self._shortcut_names(),
+            "mode": live["mode"],
+            "mic": {"current": live["mic"], "devices": input_devices(),
+                    "chosen": getattr(profile, "mic_device", None) if profile else None,
+                    "listen": self.home.voice.listen.public(), "lent": live["lent"]},
+            "model": {
+                **tiers,
+                "ready": tiers["partial"]["installed"] and tiers["final"]["installed"],
+                "downloading": any((t["download"] or {}).get("state") == "running"
+                                   for t in tiers.values()),
+                "loaded": live["loaded"],
+                "loading": speech["loading"],
+                "device": speech["device"],
+                "gpu": speech["gpu"],
+                "measured_on": speech["measured_on"],
+                "alternative": alternative,
+            },
+            "tune": {**self.home.voice.tune.public(), "last": live["last"],
+                     "profile": profile is not None},
+            "history": {**self._history_state(), "path": str(self._history().path or "")},
+        }
+
+    def start_listen(self, body: dict) -> dict:
+        """The microphone test: start listening, or stop."""
+        task = self.home.voice.listen
+        action = body.get("action")
+        if action == "start":
+            busy = self.home.voice.busy()
+            if busy and not task.busy:
+                raise ApiError(busy)
+            why = task.start()
+            if why:
+                raise ApiError(why)
+        elif action == "stop":
+            task.stop()
+        else:
+            raise ApiError("the action is start or stop")
+        return self.start_page({})
+
+    def start_mic(self, body: dict) -> dict:
+        """Choose the microphone from the first run, with the test listening to it after.
+
+        The test is stopped — its stream closed — before the switch, because a switch
+        refreshes PortAudio and that is only safe with no stream open (`Mic.use`).
+        """
+        name = body.get("name")
+        if name is not None and not isinstance(name, str):
+            raise ApiError("a microphone is named by its name")
+        task = self.home.voice.listen
+        was_listening = task.busy
+        task.stop()
+        if not self._call(lambda: self.session.set_microphone(name or None)):
+            raise ApiError("the microphone did not change - the note on the pill says why")
+        if was_listening:
+            task.start()
+        return self.start_page({})
+
+    def start_models(self, body: dict) -> dict:
+        """Get the speech models ready: the ones this PC will use, or the smaller pair.
+
+        "download" fetches whichever of the session's own models are missing — without
+        pinning them, so a later GPU still gets what suits it — and warms the session
+        once they are all here. "smaller" is a choice, and is saved as one, through the
+        Models page's own route. "cancel" stops what is downloading.
+        """
+        action = body.get("action")
+        names = self._call(lambda: getattr(getattr(self.session, "asr", None), "names", None))
+        names = names if isinstance(names, tuple) else ()
+        from .models import complete
+
+        if action == "download":
+            missing = [BY_NAME[n] for n in names if n in BY_NAME and not complete(BY_NAME[n].repo)]
+            if missing:
+                self.home.warm_when_ready = True
+                for spec in missing:
+                    self.home.models.downloads.start(spec)
+            else:
+                warm = getattr(self.session, "warm", None)
+                if callable(warm):
+                    self._call(warm)
+        elif action == "smaller":
+            from ..asr import default_models
+
+            partial, final = default_models("cpu")
+            self.model_use({"partial": partial, "final": final})
+        elif action == "cancel":
+            self.home.warm_when_ready = False
+            for name in names:
+                if name in BY_NAME:
+                    self.home.models.downloads.cancel(name)
+        else:
+            raise ApiError("the action is download, smaller or cancel")
+        return self.start_page({})
+
+    def start_done(self, _body: dict) -> dict:
+        """The first run is over — finished or skipped. It does not open again.
+
+        Whatever the steps left listening is stopped: a first run closed half-way
+        through a tuning must not keep the pill's microphone.
+        """
+        profile = self._need_profile()
+        self.home.voice.listen.stop()
+        self.home.voice.tune.cancel()
+
+        def apply() -> bool:
+            profile.welcomed = True
+            return profile.save()
+
+        if not self._call(apply):
+            raise ApiError(f"could not save {profile.path}")
+        return self.start_page({})
 
     # -- Settings -------------------------------------------------------------
 

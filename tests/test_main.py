@@ -80,7 +80,8 @@ def launch(platform: str, argv=(), **patches):
             mock.patch.object(flow.asr, "WhisperTranscriber"), \
             mock.patch.object(flow.ui, "Pill") as pill:
         with contextlib.redirect_stdout(out):
-            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", *argv])
+            code = mod.main(["--design", "current",
+                             "--no-profile", "--no-speak", "--no-lexicon", *argv])
     return code, out.getvalue(), pill, session
 
 
@@ -215,7 +216,8 @@ class TestCtrlCIsAQuitAndNotAnAbandonment(unittest.TestCase):
                 mock.patch.object(flow.ui, "Pill") as pill:
             pill.return_value.mainloop.side_effect = KeyboardInterrupt
             with contextlib.redirect_stdout(io.StringIO()):
-                code = mod.main(["--no-profile", "--no-speak", "--no-lexicon"])
+                code = mod.main(["--design", "current",
+                                 "--no-profile", "--no-speak", "--no-lexicon"])
         return code, pill.return_value
 
     def test_it_tears_down_rather_than_leaving_the_mic_and_the_cli_behind(self):
@@ -285,7 +287,8 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(sys, "platform", "win32"), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", *argv])
+            code = mod.main(["--design", "current",
+                             "--no-profile", "--no-speak", "--no-lexicon", *argv])
         return code, out.getvalue()
 
     def test_an_unverified_pin_says_why_and_does_not_blame_the_path(self):
@@ -322,7 +325,8 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
                 mock.patch.object(flow.ui, "Pill"), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite",
+            code = mod.main(["--design", "current",
+                             "--no-profile", "--no-speak", "--no-lexicon", "--lite",
                              "--cli", "kiro-cli"])
         self.assertEqual(code, 0)
         self.assertIn("refine CLI: kiro-cli", out.getvalue())
@@ -334,7 +338,8 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         with mock.patch.object(sys, "platform", "win32"), \
                 mock.patch("shutil.which", lambda *a, **kw: None), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon",
+            code = mod.main(["--design", "current",
+                             "--no-profile", "--no-speak", "--no-lexicon",
                              "--cli", "claude"])
         self.assertEqual(code, 2)
         self.assertIn("not on PATH", out.getvalue())
@@ -358,7 +363,8 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
                 mock.patch.object(flow.ui, "Pill"), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite"])
+            code = mod.main(["--design", "current",
+                             "--no-profile", "--no-speak", "--no-lexicon", "--lite"])
         self.assertEqual(code, 0)
         self.assertIn("found gemini, not yet verified", out.getvalue())
         self.assertIn("refine CLI: NONE", out.getvalue())
@@ -399,7 +405,8 @@ class TestACwdLaunchFeedsTheRecents(unittest.TestCase):
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
                 mock.patch.object(flow.ui, "Pill"), \
                 contextlib.redirect_stdout(out):
-            return mod.main(["--no-speak", "--no-lexicon", "--lite", *argv])
+            return mod.main(["--design", "current",
+                             "--no-speak", "--no-lexicon", "--lite", *argv])
 
     def profile_on_disk(self):
         from flow.profile import Profile
@@ -481,7 +488,7 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
                 mock.patch.object(flow.ui, "Pill") as pill, \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--no-speak", "--no-lexicon", *argv])
+            code = mod.main(["--design", "current", "--no-speak", "--no-lexicon", *argv])
         self.assertIsNone(pill.call_args.kwargs["hotkeys"])
         return code, out.getvalue()
 
@@ -577,6 +584,10 @@ class TestTheDesignSwitch(unittest.TestCase):
         d = tempfile.TemporaryDirectory()
         self.addCleanup(d.cleanup)
         self.dir = Path(d.name)
+        # Past the first run: this class pins the switch, and a first run would open
+        # Flow Home at startup and move the model warm onto a thread of its own.
+        (self.dir / "profile.json").write_text('{"schema": 1, "welcomed": true}',
+                                               encoding="utf-8")
 
     def launch(self, argv=(), asks=None):
         """Run `main()` with both surface classes mocked.
@@ -635,32 +646,43 @@ class TestTheDesignSwitch(unittest.TestCase):
             code = mod.main(["--no-speak", "--no-lexicon", *argv])
         return code, out.getvalue(), pill, compact
 
-    def test_the_default_launch_builds_the_shipped_pill(self):
+    def test_the_default_launch_builds_the_compact_pill(self):
+        # Compact since 2026-09-23 (decisions.md, "The first run").
         code, out, pill, compact = self.launch()
+        self.assertEqual(code, 0)
+        self.assertTrue(compact.called)
+        self.assertFalse(pill.called)
+        # Nothing to report when nothing was chosen: a line naming the default every
+        # launch would be noise about the ordinary case.
+        self.assertNotIn("design:", out)
+
+    def test_the_flag_builds_the_classic_pill_and_is_remembered(self):
+        code, out, pill, compact = self.launch(["--design", "current"])
         self.assertEqual(code, 0)
         self.assertTrue(pill.called)
         self.assertFalse(compact.called)
-        # Nothing to report when nothing was chosen: the shipped design is the default,
-        # and a line naming it every launch would be noise about the ordinary case.
-        self.assertNotIn("design:", out)
-
-    def test_the_flag_builds_the_compact_pill_and_is_remembered(self):
-        code, out, pill, compact = self.launch(["--design", "compact"])
-        self.assertEqual(code, 0)
-        self.assertTrue(compact.called)
-        self.assertFalse(pill.called)
-        self.assertIn("design: compact", out)
+        self.assertIn("design: current", out)
         from flow.profile import Profile
-        self.assertEqual(Profile(self.dir / "profile.json").design, "compact")
+        self.assertEqual(Profile(self.dir / "profile.json").design, "current")
 
     def test_the_remembered_choice_needs_no_flag(self):
-        self.launch(["--design", "compact"])
+        self.launch(["--design", "current"])
         _code, _out, pill, compact = self.launch()
-        self.assertFalse(pill.called)
-        self.assertTrue(compact.called)
+        self.assertTrue(pill.called)
+        self.assertFalse(compact.called)
+
+    def test_a_profile_that_names_a_design_keeps_it_after_the_flip(self):
+        # Every save writes the field, so somebody who launched the Classic pill before
+        # the default moved is not moved by it.
+        (self.dir / "profile.json").write_text(
+            '{"schema": 1, "welcomed": true, "design": "current"}', encoding="utf-8")
+        _code, _out, pill, compact = self.launch()
+        self.assertTrue(pill.called)
+        self.assertFalse(compact.called)
 
     def test_the_shipped_surface_asks_for_the_compact_one_and_gets_it(self):
-        code, out, pill, compact = self.launch(asks={"current": "compact"})
+        code, out, pill, compact = self.launch(["--design", "current"],
+                                               asks={"current": "compact"})
         self.assertEqual(code, 0)
         self.assertTrue(pill.called)
         self.assertTrue(compact.called)
@@ -671,18 +693,18 @@ class TestTheDesignSwitch(unittest.TestCase):
         self.assertIn("tap the pill to cycle", out)
 
     def test_the_compact_surface_asks_for_the_shipped_one_and_gets_it(self):
-        code, out, pill, compact = self.launch(["--design", "compact"],
-                                               asks={"compact": "current"})
+        code, out, pill, compact = self.launch(asks={"compact": "current"})
         self.assertEqual(code, 0)
         self.assertTrue(compact.called)
         self.assertTrue(pill.called)
-        self.assertIn("design: compact", out)  # the launch
+        self.assertNotIn("design: compact", out)  # the launch: the default, unsaid
         self.assertIn("design: current", out)  # the switch
         self.assertIn("click the pill to arm", out)
 
     def test_the_second_surface_is_handed_the_first_one_s_session(self):
         """The whole of what makes this a switch rather than a restart."""
-        _code, _out, pill, compact = self.launch(asks={"current": "compact"})
+        _code, _out, pill, compact = self.launch(["--design", "current"],
+                                                 asks={"current": "compact"})
         first, second = pill.call_args, compact.call_args
         self.assertIs(first.args[0], second.args[0])
         self.assertIs(first.args[0], self.session.return_value)
@@ -696,14 +718,15 @@ class TestTheDesignSwitch(unittest.TestCase):
     def test_the_model_is_warmed_once_across_a_switch(self):
         # `warm()` is about the process starting, not about a window appearing — and a
         # second call would be a spurious load on a switch nobody asked to pay for.
-        self.launch(asks={"current": "compact"})
+        self.launch(["--design", "current"], asks={"current": "compact"})
         self.session.return_value.warm.assert_called_once()
 
     def test_asking_for_the_design_already_running_rebuilds_nothing(self):
         # `switch_design` refuses this at the surface, so nothing should ever reach
         # here — but the loop is what would spin forever if it did, and "build the
         # class you are already running" is one press on the row marked (current).
-        _code, _out, pill, compact = self.launch(asks={"current": "current"})
+        _code, _out, pill, compact = self.launch(["--design", "current"],
+                                                 asks={"current": "current"})
         self.assertEqual(pill.call_count, 1)
         self.assertFalse(compact.called)
 
@@ -711,7 +734,7 @@ class TestTheDesignSwitch(unittest.TestCase):
         # Awareness is fixed for the process by the first window, so this cannot be
         # said late — and it can no longer be gated on the design either, because both
         # surfaces now run in one process in either order.
-        for argv, first in (([], "current"), (["--design", "compact"], "compact")):
+        for argv, first in (([], "compact"), (["--design", "current"], "current")):
             with self.subTest(argv=argv):
                 self.setUp()
                 self.launch(argv)
@@ -719,6 +742,6 @@ class TestTheDesignSwitch(unittest.TestCase):
                 self.dpi.assert_called_once_with()
 
     def test_and_only_once_however_many_surfaces_are_built(self):
-        self.launch(asks={"current": "compact"})
+        self.launch(["--design", "current"], asks={"current": "compact"})
         self.assertEqual(self.order, ["dpi", "current", "compact"])
 

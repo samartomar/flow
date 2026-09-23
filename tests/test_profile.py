@@ -96,9 +96,10 @@ class TestTheDesignField(unittest.TestCase):
     `panel` and `place` are spelled there.
     """
 
-    def test_a_fresh_profile_launches_the_current_design(self):
+    def test_a_fresh_profile_launches_the_compact_design(self):
+        # Compact since 2026-09-23 (decisions.md, "The first run").
         p = tmp_profile()
-        self.assertEqual(p.design, "current")
+        self.assertEqual(p.design, "compact")
 
     def test_it_round_trips(self):
         p = tmp_profile()
@@ -114,7 +115,7 @@ class TestTheDesignField(unittest.TestCase):
         p.path.write_text(json.dumps({"schema": 1, "design": "brutalist"}),
                           encoding="utf-8")
         again = Profile(p.path)
-        self.assertEqual(again.design, "current")
+        self.assertEqual(again.design, "compact")
 
     def test_a_wrong_type_is_named_in_faults(self):
         p = tmp_profile()
@@ -122,7 +123,7 @@ class TestTheDesignField(unittest.TestCase):
         p.path.write_text(json.dumps({"schema": 1, "design": 2}),
                           encoding="utf-8")
         again = Profile(p.path)
-        self.assertEqual(again.design, "current")
+        self.assertEqual(again.design, "compact")
         self.assertIn("design", again.faults)
 
 
