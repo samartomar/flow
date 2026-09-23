@@ -174,7 +174,15 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     want = {ICO: ico(), SVG: svg().encode("utf-8")}
     if args.check:
-        stale = [p for p, data in want.items() if not p.is_file() or p.read_bytes() != data]
+        # The SVG is text, so a checkout with `core.autocrlf` — every Windows runner's
+        # default — hands it back with CRLF; its line endings are not the drawing.
+        def same(path: Path, data: bytes) -> bool:
+            have = path.read_bytes()
+            if path.suffix == ".svg":
+                have = have.replace(b"\r\n", b"\n")
+            return have == data
+
+        stale = [p for p, data in want.items() if not p.is_file() or not same(p, data)]
         for p in stale:
             print(f"out of date: {p.relative_to(ROOT)}")
         return 1 if stale else 0
