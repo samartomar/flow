@@ -17,6 +17,7 @@ from __future__ import annotations
 import ctypes
 import threading
 import time
+import unicodedata
 from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -82,6 +83,19 @@ VK_CONTROL, VK_V, VK_RETURN = 0x11, 0x56, 0x0D
 PASTE_KEYS = 4
 SUBMIT_KEYS = 2
 
+#: What every keystroke Flow sends carries in `dwExtraInfo` — "FLOW" in ASCII. The
+#: keyboard hook reads it to tell Flow's own keys from a person's (`Chord.touched`): a
+#: correction after a Type paste is only safe while nobody has typed since, and
+#: `LLKHF_INJECTED` alone cannot say *who* injected — an on-screen keyboard or a text
+#: expander injects too, and their keys move the caret as surely as a hand's.
+INPUT_MARK = 0x464C4F57
+
+VK_BACK = 0x08
+#: The most a correction may take back in one go — the length at which Claude Code
+#: turns a paste into a "[Pasted text]" placeholder (more than 800 characters), which a
+#: count of Backspaces cannot see into. Every correctable paste is held under it.
+TAKE_BACK_MAX = 800
+
 
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [
@@ -89,7 +103,9 @@ class KEYBDINPUT(ctypes.Structure):
         ("wScan", wintypes.WORD),
         ("dwFlags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
+        # ULONG_PTR: an integer the width of a pointer, so the mark is written as a
+        # number and read back as one in the hook.
+        ("dwExtraInfo", ctypes.c_size_t),
     ]
 
 
@@ -108,7 +124,8 @@ user32.SendInput.restype = wintypes.UINT
 def _key(vk: int, up: bool = False) -> INPUT:
     return INPUT(
         type=INPUT_KEYBOARD,
-        u=_UNION(ki=KEYBDINPUT(wVk=vk, dwFlags=KEYEVENTF_KEYUP if up else 0)),
+        u=_UNION(ki=KEYBDINPUT(wVk=vk, dwFlags=KEYEVENTF_KEYUP if up else 0,
+                               dwExtraInfo=INPUT_MARK)),
     )
 
 
@@ -364,12 +381,40 @@ def _restore_worker() -> None:
         time.sleep(wait)
 
 
+def backspaces(text: str) -> int | None:
+    """How many Backspaces take `text` back out of the window it was pasted into, or
+    None when no count can be trusted.
+
+    One per character, and one per line break however the window stored it — an edit
+    control keeps "\\r\\n" and a browser "\\n", and one Backspace takes either. None for
+    what one count cannot fit: a character outside the Basic Multilingual Plane (an
+    emoji is one Backspace in a browser and two in an old edit control), a combining
+    mark or a joiner (one Backspace may take the mark or the whole letter), a tab (a
+    terminal completes on it), and a carriage return on its own.
+    """
+    count = 0
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\r":
+            if text[i + 1:i + 2] != "\n":
+                return None
+            i += 1
+        elif (ch == "\t" or ord(ch) > 0xFFFF or unicodedata.combining(ch)
+              or ch in "‍︎️"):
+            return None
+        count += 1
+        i += 1
+    return count
+
+
 def paste(
     text: str,
     *,
     hwnd: int | None = None,
     restore_clipboard: bool = True,
     submit: bool = False,
+    remove: str = "",
 ) -> bool:
     """Place `text` on the clipboard and send Ctrl-V to the window it is aimed at.
 
@@ -381,10 +426,20 @@ def paste(
     process can hold it briefly, and silently doing nothing would look like the Send
     button is broken. Every False leaves a line in `take_warnings()` saying which.
 
+    `remove` is a correction after a Type paste (decisions.md 2026-09-23, "Correcting a
+    Type paste"): the tail of Flow's own last paste to take back first, one Backspace a
+    character, in the same `SendInput` as the Ctrl-V — so nothing a hand does can land
+    between them. `text` may then be empty, which takes back and pastes nothing. The
+    caller has already made sure nobody typed or clicked since that paste; what is
+    checked here is only what this module can see.
+
     Known limitation: an elevated target window will not accept synthetic input from a
     non-elevated process (UIPI). The text is still on the clipboard, so a manual Ctrl-V
     works — which is why the clipboard is written before the keystroke is attempted.
     """
+    # Said as "not changed" for a correction: nothing was being pasted from scratch, and
+    # "not pasted" is the words History reads as a Send that did not land.
+    refused = "not changed" if remove else "not pasted"
     # P7: the target decides what is safe to send. Classified *before* the clipboard
     # is touched, because knowing the target is what tells us whether the trailing
     # newline would press Enter in a shell.
@@ -394,17 +449,32 @@ def paste(
         # took the foreground after all, so the Ctrl-V is going to land on a Tk canvas
         # whatever this function believes — and that is a defect to report, not a paste
         # to attempt. This is exactly the state that used to return True.
-        _warn("not pasted: Flow had the focus, not the window you were aiming at")
+        _warn(f"{refused}: Flow had the focus, not the window you were aiming at")
         return False
     if target.stale:
         # Same refusal, one window over: something took the foreground between the poll
         # and the click, so the Ctrl-V would land there — carrying a payload prepared
         # for the window the user was actually aiming at.
         _warn(
-            "not pasted: the target window changed before Send"
+            f"{refused}: the target window changed before Send"
             + (f" - {target.process} has the focus now" if target.process else "")
         )
         return False
+
+    back: list[INPUT] = []
+    if remove:
+        count = backspaces(remove)
+        if count is None or count > TAKE_BACK_MAX:
+            _warn(f"{refused}: Flow cannot count its way back over those characters")
+            return False
+        back = [_key(VK_BACK), _key(VK_BACK, up=True)] * count
+    if not text:
+        # A take-back and nothing after it: no clipboard to borrow at all.
+        taken = _send(*back) if back else 0
+        if taken != len(back):
+            _warn(f"{refused}: Windows took {taken} of {len(back)} keystrokes")
+            return False
+        return True
 
     payload, warning = prepare(text, target)
 
@@ -427,7 +497,7 @@ def paste(
     if lost:
         _warn(f"your clipboard held {lost} - it will not be restored after this paste")
     if not set_clipboard_text(payload):
-        _warn("not pasted: could not take the clipboard")
+        _warn(f"{refused}: could not take the clipboard")
         # Nothing was written, so nothing is owed by *this* send — but an earlier send in
         # the same burst may still have a restore pending, and that one is still owed.
         # Leaving the transaction alone is what keeps it.
@@ -444,7 +514,7 @@ def paste(
         # decide that a script may never be pasted into cmd.exe — only that it will not
         # be the one to press the key. No restore, for the same reason it is skipped on a
         # refused insertion: it would take away the thing the hand needs.
-        _warn(f"not pasted: {warning} - the text is on the clipboard, so Ctrl-V is yours")
+        _warn(f"{refused}: {warning} - the text is on the clipboard, so Ctrl-V is yours")
         _release()
         return False
 
@@ -455,10 +525,14 @@ def paste(
     # here on is somebody else.
     stamp = clipboard_sequence()
 
+    # The take-back rides in front of the Ctrl-V in one call: `SendInput`'s events are
+    # never interleaved with anybody else's, so no keystroke of the person's can land
+    # between the last Backspace and the paste.
     inserted = _send(
+        *back,
         _key(VK_CONTROL), _key(VK_V), _key(VK_V, up=True), _key(VK_CONTROL, up=True)
     )
-    if inserted != PASTE_KEYS:
+    if inserted != len(back) + PASTE_KEYS:
         # The count was always computed and always thrown away, which is how an Enter
         # could follow a Ctrl-V that inserted nothing — into a shell, running whatever
         # was already on the prompt. That is the failure P7 exists to prevent, arriving
@@ -469,8 +543,8 @@ def paste(
         # for the UIPI case is the user pressing Ctrl-V themselves, and a restore would
         # take away the thing they need to press it on.
         _warn(
-            f"not pasted: Windows took {inserted} of {PASTE_KEYS} keystrokes - the text "
-            f"is on the clipboard, so Ctrl-V puts it in"
+            f"{refused}: Windows took {inserted} of {len(back) + PASTE_KEYS} keystrokes"
+            f" - the text is on the clipboard, so Ctrl-V puts it in"
         )
         _release()
         return False
@@ -561,6 +635,17 @@ BRACKETED_PASTE = {
 }
 
 
+#: The taskbar and the notification area's own windows. Clicking the tray icon makes the
+#: taskbar the foreground for a moment, and a pill that tracked it would aim the next
+#: paste at the taskbar — which is exactly where "Paste last" from the tray menu is
+#: chosen. None of these ever takes text, so the trackers skip them and keep the window
+#: somebody was working in.
+SHELL_CLASSES = {
+    "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow",
+    "TopLevelWindowForOverflowXamlIsland",
+}
+
+
 class Target:
     """What is about to be pasted into, and what that means for the payload."""
 
@@ -588,6 +673,11 @@ class Target:
     @property
     def brackets_paste(self) -> bool:
         return self.process.lower() in BRACKETED_PASTE
+
+    @property
+    def is_shell(self) -> bool:
+        """The taskbar or the tray: never a paste target. See `SHELL_CLASSES`."""
+        return self.window_class in SHELL_CLASSES
 
     def __repr__(self) -> str:
         return (f"Target(class={self.window_class!r}, process={self.process!r}"

@@ -1,6 +1,6 @@
 [project]
 name = "flow"
-version = "0.5.1"
+version = "0.6.0"
 description = "Local English dictation with a talk-to-it refine loop"
 requires-python = ">=3.12"
 # A public repo with no licence is all-rights-reserved: nobody may legally use what
@@ -117,6 +117,9 @@ exclude = [
     # and the seeder rebuilds it from them. One of these alone put the sdist 15% over its
     # own size guard, which is the test that caught it.
     "design/build/",
+    # The compact design's seeded canvas, for the same reason — `design/compact/`
+    # documents in its README that `flow-compact.html` is regenerated, never edited.
+    "design/compact/flow-compact.html",
 ]
 
 [tool.uv]

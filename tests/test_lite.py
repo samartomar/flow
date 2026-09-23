@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow import help as helpmod  # noqa: E402
 from flow.audio import BLOCK  # noqa: E402
-from flow.session import Session  # noqa: E402
+from flow.session import CONVERSE, DICTATE, Session  # noqa: E402
 
 PRODUCT = Path(__file__).resolve().parent.parent / "docs" / "product.md"
 
@@ -526,9 +526,9 @@ class TestTheSheetDropsWhatLiteDoesNotHave(unittest.TestCase):
 class TestTheModeNoteNamesTheRightBody(unittest.TestCase):
     def note_for(self, lite: bool) -> str:
         s = session(lite=lite)
-        s.toggle_mode()  # into converse
+        s.toggle_mode(to=CONVERSE)  # into converse
         s.events()
-        s.toggle_mode()  # and back
+        s.toggle_mode(to=DICTATE)  # and back
         return " | ".join(e.text for e in s.events() if e.kind == "note")
 
     def test_lite_says_it_copies(self):

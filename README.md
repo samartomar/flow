@@ -1,8 +1,8 @@
 # Flow
 
-Dictate into whatever window you were working in, fix the text by talking to it, then
-paste. Or hand the draft to the agent CLI you already have, work the prompt over, and
-paste the version you settled on.
+Hold a key, talk, let go: the words paste into whatever window you were working in. Or
+tap the pill and hand them to the agent CLI you already have — shaped into a prompt for
+your project before anything pastes, or asked as a question and answered above the pill.
 
 Speech recognition runs on your machine. No API key.
 
@@ -75,28 +75,51 @@ what would fund it is evidence from Lite.
 
 ## The loop
 
-1. **Click the pill** (or `ctrl+alt+space`) and talk. The draft floats up above it,
-   refreshing about once a second.
-2. **Talk to the draft** to fix it — *"change Tuesday to Wednesday"*, *"delete the last
-   sentence"*, *"scratch that"*. Anything that is not a correction is added to the draft
-   instead. Or press **Edit** and type, which is faster for a URL or a flag.
-3. **Send** — the chip, `ctrl+alt+enter`, or saying *"boom"* — pastes into the window you
-   were working in.
+1. **Hold `ctrl+win`** — or hold the pill — and talk.
+2. **Let go.** The words paste into the window you were working in.
+3. **Said it wrong?** Hold again and say *"change Tuesday to Thursday"* or *"scratch
+   that"* — Flow fixes what it just pasted, as long as you have not typed or clicked since.
+4. **Pasted into the wrong window?** Click the right one and press **Paste last**
+   (`alt+shift+Z`, or the pill's right-click menu).
+5. **Want an answer instead?** Hold **`ctrl+alt+win`** and ask — whatever the pill is on.
 
-Nothing sends itself. Stopping leaves the draft on screen waiting for you, and Flow
-presses Enter only when you ask for it by name (*"enter boom"*).
+The first time, Flow Home walks you through five steps — the microphone, the speech
+model with its download, a 45-second tuning to your voice, and whether to keep a
+history — any of which you can skip.
 
-Send does not erase, either: *"bring back my last prompt"* and *"follow up: …"* both
-reach what you already sent.
+## Three modes, one tap
 
-## Two modes
+Tap the pill to cycle it:
 
-**Dictate** is the default: Send pastes.
+- **Type** (white): speak, let go, it pastes.
+- **Refine** (gold): what you said is shaped into a prompt for your project by `codex`
+  or `claude`, and shown to you; nothing pastes until you press Send.
+- **Ask** (violet): the question goes to your agent CLI, and the answer rises above the
+  pill and is read aloud. **Continue in Flow** carries the conversation to a window where
+  you can read all of it and type the next question. `ctrl+alt+win` asks from any mode —
+  the keys Wispr Flow users hold for its Command Mode — and `ctrl+win` goes back to
+  dictating.
 
-**Converse** (`ctrl+alt+M`) turns Send into **Ask**. The draft goes to `codex` or
-`claude` as a prompt to improve rather than a task to carry out, the answer renders in
-the bubble and is read aloud, and **Use this** makes the answer your new draft. Point it
-at a project with `--cwd` and the advice is about your code.
+Point Refine and Ask at a project — Flow Home ▸ Settings ▸ Workspaces, or `--cwd` — and
+the answers are about your code.
+
+**The Classic pill** — a draft that floats above the pill, which you correct by voice
+(*"change Tuesday to Wednesday"*, *"scratch that"*) and send when it reads right — is one
+switch away on Flow Home ▸ Settings ▸ The pill, for this release.
+
+## Flow Home
+
+Right-click the pill ▸ **Open Flow** (or start with `flow --home`) for one window with
+everything that isn't talking: which speech model hears you — downloaded with progress
+and swapped without a restart, each shown with the error rate measured for it — which
+microphone, the shortcuts, the send word, your workspaces, the agent CLI and the voice
+that reads answers. **Voice** tunes Flow to you and fixes the words it gets wrong.
+**History** shows what you dictated and where it went, if you choose to keep one.
+**Conversations** is Ask in a window: type or talk, and carry a conversation on later.
+The pill never grows a setting. [The guide](docs/guide.md#flow-home) has the pages.
+
+Pasted into the wrong window? **Paste last** (`alt+shift+Z`, or the pill's menu) pastes
+it again into the one in front.
 
 ## Who it is for
 
@@ -108,7 +131,9 @@ what the correction grammar, the calibration pass and the personal lexicon are f
 ## What leaves your machine
 
 **No API key is read, stored or passed anywhere in this codebase.** Audio, the utterance
-buffers, the lexicon, the profile and every local edit stay put.
+buffers, the lexicon, the profile and every local edit stay put. Your words are written to
+disk only if you choose to keep a history — Flow asks, with neither answer picked for you
+— and then only to `~/.flow/history.jsonl`, which "Stop keeping" deletes.
 
 What leaves is what you hand to an agent CLI, which is cloud-backed: the draft tail on a
 rewrite, and the question plus the workshop preamble on an Ask. **That preamble names
@@ -118,6 +143,10 @@ kind is sent.
 
 Send also puts the draft on the Windows clipboard, where any clipboard manager or
 cloud-clipboard sync you run will see it.
+
+Flow Home is a page Flow serves on `127.0.0.1` only, from the first time you open it until
+Flow quits, and only to the window Flow opened — each launch makes a new token, and a
+request from any other page is refused. Nothing it serves leaves the machine.
 
 One optional extra opens a socket: the `[edge]` voice pack sends the *text of each spoken
 reply* to Microsoft to be synthesised. Install neither extra, or pick any other voice,
@@ -141,8 +170,9 @@ before you start:
   every word you know.
 - **Partials refresh about once a second, not per word**, and can contain nonsense
   mid-word. They are shown dimmed and always replaced by the final text.
-- **Accuracy on your own voice is unmeasured.** The per-accent numbers come from
-  recordings of other people. `scripts/live_check.py` measures yours.
+- **The published accuracy numbers are other people's.** The per-accent numbers come
+  from recordings of other people. Yours is five sentences away: Flow Home ▸ Voice ▸
+  **How well Flow hears you** scores what it heard in your voice, word by word.
 
 ## Docs
 
@@ -164,7 +194,7 @@ where Flow mishears them. That is the one thing I cannot measure alone.
 ```bash
 git clone https://github.com/samartomar/flow && cd flow
 uv sync && uv run flow                          # run it
-uv run python -m unittest discover -s tests     # 1,965 tests, ~42 s, no mic needed
+uv run python -m unittest discover -s tests     # ~3,100 tests, ~90 s, no mic needed
 uv run python scripts/selfdrive.py              # the end-to-end harness
 ```
 

@@ -35,7 +35,10 @@ from pathlib import Path
 from typing import Sequence
 
 from . import edits
-from .refine import EFFORT_DEFAULT, EFFORTS
+from .history import CHOICES as HISTORY_CHOICES
+from .history import DAYS as HISTORY_DAYS
+from .history import DAYS_DEFAULT as HISTORY_DAYS_DEFAULT
+from .refine import EFFORT_DEFAULT, EFFORTS, MAX_TIMEOUT_SEC
 
 
 # -- per-field validation ---------------------------------------------------
@@ -54,6 +57,16 @@ from .refine import EFFORT_DEFAULT, EFFORTS
 def _text(value, default=None):
     """A non-blank string, or `default`."""
     return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+def _keys(value, default=None):
+    """A chord as written, the empty string included, or `default`.
+
+    Not `_text`, which reads "" as absent: the empty string is how a chord is turned
+    off, and reading it as absent put the shipped chord back on the next launch — and
+    named a fault for a choice somebody made on purpose, from Flow Home's own box.
+    """
+    return value.strip() if isinstance(value, str) else default
 
 
 def _number(value, default=None):
@@ -105,6 +118,24 @@ def _text_list(value, cap: int) -> list[str]:
     if not isinstance(value, list):
         return []
     return [t for t in (_text(v) for v in value) if t][:cap]
+
+
+def _pair(value) -> list[int] | None:
+    """A pair of whole numbers, or None. Never raises, for anything.
+
+    The shape only — whether the point is *on a screen* is `ui._mic_spot`'s question and
+    `Pill._placed`'s clamp, for the reason `panel` and `place` are judged there. What is
+    settled here is what `save` may write, and the invariant behind that is the suite's:
+    no shape of any field, however hand-edited, may raise on the way out. `inf` found
+    this — a float is not iterable and `list()` on one is a `TypeError` thrown while
+    writing somebody's profile.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        return [int(value[0]), int(value[1])]
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _text_set(value) -> set[str]:
@@ -204,6 +235,13 @@ MAX_WORKSPACES = 5
 #: nobody can edit. `flow.hotkey` owns what the string *means*; this owns what it is.
 CHORD_DEFAULT = "ctrl+win"
 
+#: Ask's own hold (decisions.md 2026-09-22, decision 4): ctrl+alt+win, the keys Wispr
+#: Flow users already hold for its command mode. A second chord rather than a mode the
+#: first one reads, so the hand picks the side and the pill's tint no longer has to be
+#: read before a hold. Spelled here for `CHORD_DEFAULT`'s reason; judged in
+#: `flow/hotkey.py`.
+ASK_CHORD_DEFAULT = "ctrl+alt+win"
+
 #: The shipped panel width, by name. Spelled here and not imported from `flow/ui.py`
 #: for the reason `CHORD_DEFAULT` is not imported from `flow/hotkey.py`: this module is
 #: loaded on every launch including Lite's, and a default it could not read without the
@@ -222,6 +260,26 @@ PLACE_DEFAULT = "bottom"
 #: `CHORD_DEFAULT`'s reason — that module binds user32 at import and cannot load on a
 #: Mac, and this one is read on every launch including Lite's.
 GESTURE_DEFAULT = "hold"
+
+#: Which UI design launches: `"current"` is the pill and bubble Flow shipped,
+#: `"compact"` is the wordless pill specced in `design/compact/`. Spelled here rather
+#: than imported from either UI module for `PANEL_DEFAULT`'s reason: this module is read
+#: on every launch including Lite's, where neither surface may be imported, and a
+#: default the profile could not read would be one it could not write back.
+#: `flow/__main__.py` maps the name to a class and treats an unknown one as this.
+#:
+#: **Compact since 2026-09-23** (decisions.md, "The first run"), step 4 of the plan in
+#: docs/one-surface.md: the surface the owner uses, now with Flow Home behind it, is
+#: what a new profile launches. A profile that already names a design keeps it — every
+#: save writes the field, so nobody who has launched Flow before is moved — and the
+#: Classic pill stays one choice away on Flow Home's Settings page for a release.
+DESIGN_DEFAULT = "compact"
+DESIGNS = ("current", "compact")
+
+#: Where decoding may run, as `--decode-device` spells it. Spelled here rather than
+#: imported from `flow/asr.py`, which pulls in numpy and the decoder: this module is read
+#: on every launch and by `flow --stats`, which loads no model.
+DECODE_DEVICES = ("auto", "cuda", "cpu")
 
 #: How many model names the settings menu will remember. A ceiling rather than a
 #: judgement: this list is only ever appended to, by hand, one name at a time, and a menu
@@ -391,6 +449,9 @@ class Profile:
         #: means, for the same reason `hotkeys` is judged there: this module is imported
         #: on every launch including Lite, and `flow.hotkey` binds `user32` at import.
         self.chord: str = CHORD_DEFAULT
+        #: Ask's chord, as written — a hold that always asks, whatever the pill's mode.
+        #: The empty string turns it off, as it does for `chord`.
+        self.ask_chord: str = ASK_CHORD_DEFAULT
         #: exe name -> an extra instruction for rewrites made while that app is in front.
         self.apps: dict[str, str] = {}
         #: Which of `ui.PANEL_WIDTHS` the draft panel is drawn at. A name and not a
@@ -403,11 +464,29 @@ class Profile:
         #: of whichever monitor the pointer is on — and `"corner"` is the bottom-right
         #: Flow used to use, kept for anybody who wants it back rather than removed.
         self.place: str = PLACE_DEFAULT
+        #: Whether the pill draws the mic view: the focused app's initial, the mic and
+        #: the level bars, with no chips, marks or panel. A view rather than a mode —
+        #: nothing in this package or in `flow/session.py` reads it, and `flow/ui.py`
+        #: draws fewer of the events the session emits either way.
+        self.mic: bool = False
+        #: Where that view sits, as an (x, y), or None for wherever `place` would put
+        #: it. Its own field and not a third `PLACES` name because the view anchors no
+        #: panel: the two placements exist so a 400-580 px stack is guaranteed to fit,
+        #: and a 128 px row fits anywhere. Judged in `flow/ui.py` (`_mic_spot`), which
+        #: is also where it is re-clamped against the monitor it is opened on.
+        self.mic_at: tuple[int, int] | None = None
         #: How the chord behaves. Both gestures ship because neither replaces the other:
         #: a hold is better for a sentence, a toggle is the only one that survives a
         #: paragraph or a pair of hands that cannot hold two keys down. Judged in
         #: `flow/hotkey.py`, which knows what the words mean.
         self.gesture: str = GESTURE_DEFAULT
+        #: Which UI design to launch. A name and not a module path, for `panel`'s
+        #: reason: this module is read on every launch and must not need the modules
+        #: that know what the names draw. Read at launch to pick the first surface, and
+        #: written by either surface's Design row — which switches the running surface
+        #: in the same press (`switch_design`, 2026-09-04), so this is the preference
+        #: the next launch starts from rather than the only way the switch happens.
+        self.design: str = DESIGN_DEFAULT
         #: Which model to ask the agent CLI for, "" meaning whatever it defaults to, and
         #: how hard to let it think. Both apply to whichever CLI answers - `refine.tuned`
         #: drops either for a CLI not measured to accept it.
@@ -418,6 +497,38 @@ class Profile:
         #: this list *is* the menu: a name arrives once through `--cli-model` and is a
         #: click from then on.
         self.cli_models: tuple[str, ...] = ()
+        #: The settings Flow Home gave a place (decisions.md 2026-09-22, "Flow Home"),
+        #: each of which could until then only be set by a flag at every launch. All
+        #: additive, schema stays 1, and every one reads absent as "what Flow did before
+        #: this field existed", so an older profile launches exactly as it always did.
+        #:
+        #: The speech models, by name, or None for whatever the device should run
+        #: (`asr.default_models`). A flag still wins over these, as `--voice` wins over
+        #: `voice`: a flag is a decision for one launch, this is the standing preference.
+        self.partial_model: str | None = None
+        self.final_model: str | None = None
+        #: "auto", "cuda" or "cpu" — `--decode-device`, remembered.
+        self.decode_device: str = "auto"
+        #: The microphone, by *name* and never by index — see `Mic.device_name` for why
+        #: an index stored across launches comes to mean a different device. None follows
+        #: the system default, which is also what a name that is not connected falls back
+        #: to, said out loud at launch.
+        self.mic_device: str | None = None
+        #: How long to wait for the agent CLI, in seconds, or None for the shipped
+        #: `refine.TIMEOUT_SEC`. `--cli-timeout` wins over it.
+        self.cli_timeout: float | None = None
+        #: Whether the speech model loads at launch. `--no-warm` still turns it off for
+        #: one launch; this is for the machine where paying the load at sign-in is wrong.
+        self.warm: bool = True
+        #: Whether Flow keeps what was dictated and asked (`flow/history.py`,
+        #: decisions.md 2026-09-23, "History"): None until somebody chooses, then
+        #: "keep" or "off". None keeps nothing, and nothing in Flow ever sets this but
+        #: a person choosing it — which is why it is None rather than False: "never
+        #: asked" and "said no" are different facts, and the History page asks only
+        #: the first.
+        self.history: str | None = None
+        #: How long a kept entry lasts, in days: 7, 30 or 90.
+        self.history_days: int = HISTORY_DAYS_DEFAULT
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -491,13 +602,21 @@ class Profile:
         # Absent means the shipped chord, and the empty string means "off" — somebody
         # who does not want a global keyboard hook needs a way to say so that is not
         # deleting the key, because the next save would write it straight back.
-        self.chord = take("chord", _text, CHORD_DEFAULT)
+        self.chord = take("chord", _keys, CHORD_DEFAULT)
+        # Absent is the shipped chord for a profile written before Ask had one: the keys
+        # arrive with the release, and "" is still the way to say no.
+        self.ask_chord = take("ask_chord", _keys, ASK_CHORD_DEFAULT)
         # Same bargain as `hotkeys`: a value that is not a table degrades to none and is
         # named, and what is *in* the table is judged where it is used.
         self.apps = take("apps", lambda v, _d: _apps(v), {})
         self.panel = take("panel", _text, PANEL_DEFAULT)
         self.place = take("place", _text, PLACE_DEFAULT)
+        self.mic = take("mic", lambda v, _d: bool(v), False)
+        self.mic_at = take("mic_at", lambda v, _d: _pair(v), None)
         self.gesture = take("gesture", _text, GESTURE_DEFAULT)
+        self.design = take("design", _text, DESIGN_DEFAULT)
+        if self.design not in DESIGNS:
+            self.design = DESIGN_DEFAULT
         self.cli_model = take("cli_model", _text, "")
         self.cli_effort = take("cli_effort", _text, EFFORT_DEFAULT)
         if self.cli_effort not in EFFORTS:
@@ -505,6 +624,33 @@ class Profile:
         self.cli_models = tuple(
             take("cli_models", lambda v, _d=None: _text_list(v, CLI_MODEL_CAP), [])
         )
+        self.partial_model = take("partial_model", _text)
+        self.final_model = take("final_model", _text)
+        self.decode_device = take("decode_device", _text, "auto")
+        if self.decode_device not in DECODE_DEVICES:
+            self.faults.append("decode_device")
+            self.decode_device = "auto"
+        self.mic_device = take("mic_device", _text)
+        # A wait is a positive number of seconds no longer than the flag would accept;
+        # anything else degrades to the shipped wait and is named, like any wrong type.
+        timeout = take("cli_timeout", _number)
+        if timeout is not None and not 0 < timeout <= MAX_TIMEOUT_SEC:
+            self.faults.append("cli_timeout")
+            timeout = None
+        self.cli_timeout = timeout
+        self.warm = take("warm", _flag, True)
+        # A choice that is neither answer is no choice, and is named: reading a stray
+        # "yes" as "keep" would be Flow deciding to store somebody's words for them.
+        history = take("history", _text)
+        if history is not None and history not in HISTORY_CHOICES:
+            self.faults.append("history")
+            history = None
+        self.history = history
+        days = take("history_days", _count, HISTORY_DAYS_DEFAULT)
+        if days not in HISTORY_DAYS:
+            self.faults.append("history_days")
+            days = HISTORY_DAYS_DEFAULT
+        self.history_days = days
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
         # `stored=[]` because JSON has no set: `save` writes this one as a sorted list,
@@ -536,16 +682,32 @@ class Profile:
             # dialog to put it in.
             "hotkeys": dict(self.hotkeys),
             "chord": self.chord,
+            "ask_chord": self.ask_chord,
             # Written back as it was read, so a hand-edit survives every save Flow makes
             # on its own — and an empty table lands in every profile, which is the only
             # advertisement this feature gets in a project with no settings dialog.
             "apps": dict(self.apps),
             "panel": self.panel,
             "place": self.place,
+            "mic": self.mic,
+            # Through `_pair` on the way out as well as in, because this one is written
+            # by the UI between loads — `Pill._remember_mic_at` assigns the tuple a drag
+            # ended at — so `save` is not only re-emitting what `load` already judged.
+            "mic_at": _pair(self.mic_at),
             "gesture": self.gesture,
+            "design": self.design,
             "cli_model": self.cli_model,
             "cli_effort": self.cli_effort,
             "cli_models": list(self.cli_models),
+            "partial_model": self.partial_model,
+            "final_model": self.final_model,
+            "decode_device": self.decode_device,
+            "mic_device": self.mic_device,
+            "cli_timeout": self.cli_timeout,
+            "warm": self.warm,
+            "history": self.history if self.history in HISTORY_CHOICES else None,
+            "history_days": (self.history_days if self.history_days in HISTORY_DAYS
+                             else HISTORY_DAYS_DEFAULT),
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's
@@ -653,10 +815,10 @@ class Profile:
                 out.append(right)
         return out
 
-    #: How many offers the menu may carry. It is a native modal loop that already costs
-    #: a measured ~16 s stall at worst and one mic-overflow note, so it must not grow
-    #: with the profile. The full list has no other UI on purpose: this is not a
-    #: settings page, and building one stays refused.
+    #: How many offers the draft's right-click menu may carry. It is a native modal loop
+    #: that already costs a measured ~16 s stall at worst and one mic-overflow note, so it
+    #: must not grow with the profile. The full list lives on Flow Home's Voice page
+    #: (decisions.md 2026-09-22), which asks for it with a larger `limit`.
     MAX_OFFERS = 3
 
     def offered_pairs(
@@ -700,6 +862,31 @@ class Profile:
         rewrites nothing. Only the substitution did.
         """
         self.dismissed.add(f"{wrong.lower()} -> {right}")
+
+    def learned_pairs(self, promote_after: int = PROMOTE_AFTER) -> list[tuple[str, str, int]]:
+        """(wrong, right, times) for every pair counted often enough to be biasing now.
+
+        The list `learned_terms` is built from, with its evidence attached: Flow Home's
+        Voice page shows what Flow learned and why, because a bias nobody can see is a
+        bias nobody can take back.
+        """
+        out = []
+        for key, count in self.pairs.most_common():
+            if count < promote_after:
+                continue
+            wrong, _, right = key.partition(" -> ")
+            if wrong and right:
+                out.append((wrong, right, count))
+        return out
+
+    def forget_pair(self, wrong: str, right: str) -> bool:
+        """Unlearn one pair: its count goes, and with it the bias toward `right`. True if
+        there was one. The file is untouched — a declared correction is the person's."""
+        key = f"{wrong.lower()} -> {right}"
+        if key not in self.pairs:
+            return False
+        del self.pairs[key]
+        return True
 
     def note_workspace(self, path: str) -> None:
         """A workspace was chosen — by `--cwd` or by a menu tap. Most recent first.

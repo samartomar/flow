@@ -26,10 +26,11 @@ import sys
 
 from .asr import CUDA_MODEL, DEVICE, FINAL_MODEL, PARTIAL_MODEL
 from .lexicon import DEFAULT_PATH, NUL_PATH, Lexicon
+from .profile import DESIGN_DEFAULT, DESIGNS
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, EFFORT_DEFAULT, EFFORTS, available, named, unverified, unverified_note
-from .session import AUTO_ASK_SEC, Session
+from .session import AUTO_ASK_SEC, CONVERSE, Session
 from .stats import TYPING_WPM
 from .stats import report as stats_report
 from .version import check_update, version
@@ -150,6 +151,43 @@ def _chord(profile, hotkeys, Chord, parse_chord, echo, ignored_line,
     return chord
 
 
+def _ask_chord(profile, hotkeys, Chord, parse_chord, echo, default):
+    """Install Ask's own hold (decisions.md 2026-09-23, "Ask's own hold"), and say so.
+
+    `_chord`'s contract — every path out prints a line — for the second chord. It
+    rides the talk chord's hook when there is one (`Chord.riders`): one hook on the
+    input path of every keystroke, not two. It asks for a hook of its own only when the
+    talk chord is off. Always a hold, whatever the talk chord's gesture: a question is
+    a sentence, and the toggle is there for the talk keys.
+
+    The talk chord's own keys are refused by name — one press would start both holds.
+    """
+    from .hotkey import (ASK_ACTIONS, ASK_CHORD_IGNORED_LINE, ASK_CHORD_LINE,
+                         ASK_CHORD_UNAVAILABLE)
+
+    wanted = getattr(profile, "ask_chord", default) if profile is not None else default
+    if not isinstance(wanted, str) or not wanted.strip():
+        return None
+    mods, reason = parse_chord(wanted)
+    if mods is None:
+        say(ASK_CHORD_IGNORED_LINE.format(combo=echo(wanted), reason=reason))
+        return None
+    talk = getattr(hotkeys, "chord", None)
+    if talk is not None and frozenset(talk.mods) == frozenset(mods):
+        say(ASK_CHORD_IGNORED_LINE.format(combo=echo(wanted),
+                                          reason="those are the talk keys"))
+        return None
+    chord = Chord(hotkeys.presses, mods, gesture="hold", **ASK_ACTIONS)
+    if talk is not None:
+        talk.riders.append(chord)
+    elif not chord.start():
+        say(ASK_CHORD_UNAVAILABLE)
+        return None
+    hotkeys.ask_chord = chord
+    say(ASK_CHORD_LINE.format(keys=chord.describe()))
+    return chord
+
+
 def _native_transcriber():
     """Import late, so a Windows launch never touches the macOS-only module."""
     from .native import NativeTranscriber
@@ -266,8 +304,11 @@ def main(argv: list[str] | None = None) -> int:
         help="pin BOTH tiers to one model (benchmarking, or a low-memory machine)",
     )
     ap.add_argument(
-        "--decode-device", default=DEVICE, choices=("auto", "cuda", "cpu"),
-        help="where decoding runs (default auto: the GPU when there is a working one)",
+        # None rather than DEVICE, so a launch that did not ask can be told apart from
+        # one that asked for "auto": the first follows the profile, the second wins.
+        "--decode-device", default=None, choices=("auto", "cuda", "cpu"),
+        help="where decoding runs (default auto: the GPU when there is a working one; "
+             "Flow Home remembers a choice)",
     )
     ap.add_argument(
         "--engine", default="auto", choices=("auto", "whisper", "native"),
@@ -342,6 +383,11 @@ def main(argv: list[str] | None = None) -> int:
              f"({', '.join(c.name for c in CANDIDATES if c.verified)})",
     )
     ap.add_argument(
+        "--home", action="store_true",
+        help="open Flow Home as soon as the pill is up - models, microphone, shortcuts "
+             "and every other setting, in one window",
+    )
+    ap.add_argument(
         "--no-warm", action="store_true",
         # For a launcher that starts with the machine, where paying a model load at login
         # is the wrong trade — and for measuring the cold path on purpose.
@@ -361,13 +407,25 @@ def main(argv: list[str] | None = None) -> int:
              f"({', '.join(EFFORTS)}; default {EFFORT_DEFAULT})",
     )
     ap.add_argument(
-        "--cli-timeout", type=_timeout_arg, default=REFINE_TIMEOUT_SEC, metavar="SEC",
-        help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f})",
+        "--cli-timeout", type=_timeout_arg, default=None, metavar="SEC",
+        help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f}, "
+             "or what Flow Home remembers)",
     )
     ap.add_argument(
         "--lite", action="store_true",
         help="clipboard-out mode: Send copies the draft instead of pasting it, and no "
              "hotkeys are registered (automatic off Windows)",
+    )
+    ap.add_argument(
+        "--design", default=None, choices=DESIGNS, metavar="NAME",
+        # A setting, not a one-run override, for `--cli-model`'s reason: the menu has no
+        # way to type a name, so a flag that vanished at exit would be the only place
+        # the choice could ever be made. This is the *launch* answer and stays one —
+        # either menu switches the running surface now, and writes the same field, so a
+        # flag that also applied mid-session would be a second way to say the same
+        # thing.
+        help=f"which UI design to launch ({', '.join(DESIGNS)}; default "
+             f"{DESIGN_DEFAULT}, remembered)",
     )
     # Last, because none of these is a way to run Flow: each answers a question about the
     # copy or about what it has already done, and exits. `--version` is argparse's own
@@ -414,6 +472,15 @@ def main(argv: list[str] | None = None) -> int:
             say(line)
         return 0 if counted else 1
 
+    # Read before anything below is chosen, because some of what gets chosen — the speech
+    # models, where they run, the CLI's wait, the microphone — is remembered there now
+    # (Flow Home, decisions.md 2026-09-22), and each is resolved the way `--voice` always
+    # was: a flag given for this launch wins, the profile is the standing preference, and
+    # the shipped default is what is left.
+    from .profile import CLI_MODEL_CAP, Profile, resolve_workspace
+
+    profile = None if args.no_profile else Profile()
+
     # The platform is read once, here, and only to choose a body. Everything downstream
     # reads `lite`, which is why `--lite` on Windows runs the same code a Mac runs rather
     # than a rehearsal of it — and why every Lite path is a unit test with no desktop.
@@ -447,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
             BAD_BLOCK_LINE, CHORD_IGNORED_LINE, CHORD_UNAVAILABLE,
             DEFAULT_BINDINGS, Chord, Hotkeys, _echo, parse_chord,
         )
-        from .profile import CHORD_DEFAULT
+        from .profile import ASK_CHORD_DEFAULT, CHORD_DEFAULT
         from .inject import paste, take_warnings
     elif sys.platform == "darwin" and not args.no_paste:
         # Lite is about hotkeys and window handles, not about whether Flow can put the
@@ -493,7 +560,11 @@ def main(argv: list[str] | None = None) -> int:
     # find, and the person who installed it is the one who can end the difference.
     for cli in unverified():
         say(f"  ({unverified_note(cli)})")
-    say(f"CLI timeout: {args.cli_timeout:.0f}s per call")
+    cli_timeout = args.cli_timeout
+    if cli_timeout is None:
+        cli_timeout = (profile.cli_timeout if profile is not None and profile.cli_timeout
+                       else REFINE_TIMEOUT_SEC)
+    say(f"CLI timeout: {cli_timeout:.0f}s per call")
 
     # The device first, because which model each tier should be depends on it: a GPU
     # runs one strong model for both paths and a CPU cannot. Named out loud for the same
@@ -501,8 +572,13 @@ def main(argv: list[str] | None = None) -> int:
     # and somebody whose GPU quietly did not engage has no other way to tell.
     from .asr import cuda_reason, default_models, resolve_device
 
-    asked_partial = args.model or args.partial_model
-    asked_final = args.model or args.final_model
+    asked_partial = (args.model or args.partial_model
+                     or (profile.partial_model if profile is not None else None))
+    asked_final = (args.model or args.final_model
+                   or (profile.final_model if profile is not None else None))
+    decode_device = (args.decode_device
+                     or (profile.decode_device if profile is not None else None)
+                     or DEVICE)
 
     def decode_plan() -> tuple[str, str, list[str]]:
         """Both tier names, and the startup lines that name the device and them.
@@ -520,11 +596,11 @@ def main(argv: list[str] | None = None) -> int:
         and a completely different line to read, and only the second is something the
         reader can act on.
         """
-        decode_device = resolve_device(args.decode_device)
-        lines = [f"decoding on: {decode_device}"
-                 + ("" if decode_device != "cpu" or args.decode_device == "cpu"
+        resolved = resolve_device(decode_device)
+        lines = [f"decoding on: {resolved}"
+                 + ("" if resolved != "cpu" or decode_device == "cpu"
                     else f" ({cuda_reason()})")]
-        default_partial, default_final = default_models(decode_device)
+        default_partial, default_final = default_models(resolved)
         return asked_partial or default_partial, asked_final or default_final, lines
 
     planned = None
@@ -551,12 +627,7 @@ def main(argv: list[str] | None = None) -> int:
             say(f"models: {partial} for partials, {final} for finals{engine_why}")
 
     from .diag import Diag
-    from .profile import CLI_MODEL_CAP, Profile, resolve_workspace
 
-    # Tied to the same flag as the profile, and deliberately: --no-profile means
-    # "write nothing about me this session", and a trace is a thing written about
-    # somebody even when it holds none of their words.
-    profile = None if args.no_profile else Profile()
     # Written to the profile before the session reads it, so `--cli-model` is a *setting*
     # and not a one-run override: the settings menu has no way to type a name, so a flag
     # that vanished at exit would leave the menu permanently empty. `--cli-model ""`
@@ -568,6 +639,9 @@ def main(argv: list[str] | None = None) -> int:
         profile.save()
     if profile is not None and args.cli_effort is not None:
         profile.cli_effort = args.cli_effort
+        profile.save()
+    if profile is not None and args.design is not None:
+        profile.design = args.design
         profile.save()
     if profile is not None:
         if profile.cli_model:
@@ -583,12 +657,28 @@ def main(argv: list[str] | None = None) -> int:
         say(f"profile: room {profile.floor_db:.1f} dB, "
             f"margin {profile.margin_db():.1f} dB, {len(profile.pairs)} learned pairs")
     elif profile is not None:
-        say("profile: not calibrated - run `flow --calibrate` once for this room")
+        say("profile: not calibrated - Flow Home > Voice > Tune Flow to your voice "
+            "(or `flow --calibrate`)")
     # Said out loud, unprompted. A file that records what somebody did is one they are
     # entitled to know exists and to delete, and the surest way to make it feel like
     # telemetry is for them to find it by accident.
     say(f"trace: {diag.path} (timings and state only, no words; --no-profile to disable)"
         if diag is not None else "trace: off")
+    # History (decisions.md 2026-09-23, "History"): built whenever there is a profile
+    # to hold the choice, and keeping nothing until somebody makes it. Said out loud for
+    # the trace's reason, with more force — this file, when it exists, holds the words.
+    history = None
+    if profile is not None:
+        from .history import KEEP, OFF, History
+
+        history = History(profile.path.parent / "history.jsonl", profile)
+        if history.choice == KEEP:
+            say(f"history: {history.path} (what you dictate and ask, kept "
+                f"{history.days} days; Flow Home > History)")
+        elif history.choice == OFF:
+            say("history: off - nothing you say is kept")
+        else:
+            say("history: not kept - Flow Home > History asks whether to keep it")
 
     lexicon = Lexicon(
         NUL_PATH if args.no_lexicon else args.lexicon, learned=learned
@@ -602,8 +692,8 @@ def main(argv: list[str] | None = None) -> int:
         # creating is a plausible cause of "it got worse".
         say(f"lexicon: {n_terms} terms from {lexicon.path}")
     else:
-        say("lexicon: none - right-click > Open settings folder, or create "
-            f"{lexicon.path}, to add names and corrections")
+        say("lexicon: none - add names and corrections on Flow Home > Voice "
+            f"(it writes {lexicon.path})")
 
     # Built unless refused, not only when asked for. Speech used to be a launch flag
     # while the mode it serves is a runtime toggle, so anyone who discovered converse
@@ -668,23 +758,41 @@ def main(argv: list[str] | None = None) -> int:
         profile.note_workspace(workspace)
         profile.save()
 
+    # The microphone: an index from `--device` is a pin for this launch, and a name the
+    # profile remembers is resolved against the devices plugged in right now. A name that
+    # is not connected falls back to the system default and says so — a missing headset
+    # must not be the reason Flow cannot hear anyone.
+    mic_index = args.device
+    if mic_index is None and profile is not None and profile.mic_device:
+        from .audio import find_input
+
+        mic_index = find_input(profile.mic_device)
+        if mic_index is None:
+            say(f"microphone: {profile.mic_device} is not connected - using the system default")
+        else:
+            say(f"microphone: {profile.mic_device}")
+
     session = Session(
         # The asked-for names, or None: the transcriber resolves a None to the tier
         # its device wants, the same answer `decode_plan` reaches for the startup line.
         asr=(_native_transcriber() if engine == "native" else WhisperTranscriber(
             asked_partial, asked_final, lexicon=lexicon,
             baseline=profile.confidence if profile is not None else None,
-            device=args.decode_device,
+            device=decode_device,
         )),
-        device=args.device,
+        device=mic_index,
         speaker=speaker,
         profile=profile,
         diag=diag,
         cli=pinned,
-        cli_timeout=args.cli_timeout,
+        cli_timeout=cli_timeout,
         refine_cwd=workspace,
         lite=lite,
+        history=history,
     )
+    if args.device is None and mic_index is not None and profile is not None:
+        # Found by name at launch, so found by name again after a device change.
+        session.mic.want = profile.mic_device
 
     if args.calibrate:
         from .calibrate import run as calibrate_run
@@ -721,7 +829,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.no_auto_ask:
         session.auto_ask = False
     if args.converse:
-        session.toggle_mode()
+        # `to=`, not a bare cycle: with three modes, one blind flip from
+        # DICTATE lands on REFINE — exactly the defect a three-way cycle
+        # does not announce.
+        session.toggle_mode(to=CONVERSE)
         say("mode: CONVERSE - the Ask button puts the draft to the agent CLI "
             "and the reply appears in Flow")
         if session.auto_ask:
@@ -744,6 +855,34 @@ def main(argv: list[str] | None = None) -> int:
     apply_panel_width(panel_width(profile.panel if profile is not None else None))
     apply_place(profile.place if profile is not None else "bottom")
 
+    # Which surface launches — which is no longer the same question as which surface
+    # runs. An explicit flag is a decision, a stored value is a preference, and the
+    # default is the design Flow shipped; from here the name is a variable, because the
+    # loop at the foot of this function rebuilds whichever surface the menu asks for
+    # next. `--design` keeps its old meaning exactly: a remembered setting, applied at
+    # launch.
+    design = (args.design
+              or (profile.design if profile is not None else DESIGN_DEFAULT))
+    if design != DESIGN_DEFAULT:
+        say(f"design: {design}")
+    # Before any window exists, which is the only moment this can be said: DPI
+    # awareness is fixed for the process the instant the first one is created.
+    # Without it Windows tells a 300 % display's app that the screen is a third
+    # of its real size, lets it draw a third-size image, and stretches the
+    # result — everything Flow drew was arriving as an upscaled thumbnail of
+    # itself, which was most of what "it does not look clean" turned out to be.
+    #
+    # Unconditional, where this used to be gated on `design == "compact"`. The
+    # gate was exact while one design ran per process — awareness is
+    # process-wide, and the shipped surface's geometry was written in absolute
+    # pixels — and a live switch removes the premise it stood on: both surfaces
+    # now run in this process, in either order, and a gate could only be right
+    # for whichever of them happened to be built first. The shipped surface
+    # scales its own constants now, so there is nothing left to gate.
+    from . import paint
+    if paint.make_dpi_aware():
+        say("rendering at native resolution")
+
     hotkeys = None
     if not args.no_hotkeys and not lite:
         # Read only where registration happens, which is why `--no-hotkeys` and Lite are
@@ -761,6 +900,10 @@ def main(argv: list[str] | None = None) -> int:
         for line in hotkeys.ignored:
             say(line)
         if hotkeys.start():
+            # What AltGr cost, before what registered: a combo passed over is the
+            # reason the line under it names a fallback (hotkey.py, "AltGr").
+            for line in hotkeys.altgr_lines:
+                say(line)
             for action, combo in hotkeys.chosen.items():
                 say(f"hotkey  {action:8s} {combo}")
             if hotkeys.failed:
@@ -772,13 +915,19 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_chord:
                 _chord(profile, hotkeys, Chord, parse_chord, _echo,
                        CHORD_IGNORED_LINE, CHORD_UNAVAILABLE, CHORD_DEFAULT)
+                _ask_chord(profile, hotkeys, Chord, parse_chord, _echo,
+                           ASK_CHORD_DEFAULT)
     # Assigned rather than passed: the session is built before `RegisterHotKey` has been
     # asked for anything, and what the session needs is the answer, not the request. It
     # reads this only to say what still works when voice stops working.
     session.hotkeys = hotkeys
 
-    def on_send(text: str, target: int | None = None, submit: bool = False) -> str:
+    def on_send(text: str, target: int | None = None, submit: bool = False,
+                remove: str = "") -> str:
         """Paste the draft into `target`, and return what went wrong, or "".
+
+        `remove` is a correction after a Type paste: that much of Flow's own last paste
+        taken back first (`inject.paste`), in the same burst.
 
         Converse mode returns "" from send(), so this is dictate-mode only by
         construction: the question must never be pasted into the focused window.
@@ -796,9 +945,14 @@ def main(argv: list[str] | None = None) -> int:
         is handed `None` rather than a handler that would fail on its first call.
         """
         if args.no_paste:
-            say(f"\n--- draft ---\n{text}{' [+Enter]' if submit else ''}\n")
+            back = f"[take back {len(remove)} characters] " if remove else ""
+            say(f"\n--- draft ---\n{back}{text}{' [+Enter]' if submit else ''}\n")
             return ""
-        ok = paste(text, hwnd=target, submit=submit)
+        # Passed only when there is one, the idiom `submit` keeps on the pill's side: the
+        # Mac's `inject_mac.paste` has no take-back, and never needs one — a correction
+        # needs the keyboard hook, which only Windows has.
+        ok = paste(text, hwnd=target, submit=submit, remove=remove) if remove \
+            else paste(text, hwnd=target, submit=submit)
         problems = take_warnings()
         if not ok and not problems:
             problems.append("not pasted, and no reason was recorded")
@@ -829,25 +983,88 @@ def main(argv: list[str] | None = None) -> int:
 
         _threading.Thread(target=go, daemon=True, name="identity").start()
 
-    say(
-        ("listening | " if args.arm else "click the pill to arm | ")
-        + f"right-click for the menu | {quits}"
-    )
+    def say_gesture(name: str, armed: bool) -> None:
+        """Two surfaces, two sets of hands.
+
+        The shipped pill arms on a click and the compact one does not — a tap
+        there cycles the mode, and a hold is the whole gesture — so telling a
+        compact user to "click the pill to arm" sent them clicking at a pill
+        that answered by changing colour. The line names the gesture the
+        surface in front of them actually has, which is why it is said again
+        when a switch puts a different surface in front of them.
+        """
+        if name == "compact":
+            # The chord names itself if there is one — it is printed in full a
+            # few lines above, so this is a pointer rather than a repeat, and it
+            # stays honest on a run started with `--no-chord`.
+            chord = getattr(hotkeys, "chord", None)
+            held = f"the pill or {chord.describe()}" if chord is not None \
+                else "the pill"
+            ask = getattr(hotkeys, "ask_chord", None)
+            asks = f" | hold {ask.describe()} to ask" if ask is not None else ""
+            say(f"hold {held} to talk{asks} | tap the pill to cycle "
+                f"Type / Refine / Ask | right-click for the menu | {quits}")
+        else:
+            say(
+                ("listening | " if armed else "click the pill to arm | ")
+                + f"right-click for the menu | {quits}"
+            )
+
     # `--no-lexicon` points the loader at a path inside the package that must never
     # exist, so the menu is sent to the real settings folder instead: the profile lives
     # there either way, and creating a template beside the source is nobody's idea of
     # settings.
     # What the mode notes read, and the same fact `on_send` is keyed off.
     session.pastes = paste is not None
-    pill = Pill(
-        # Keyed off whether an injector was imported, not off `lite`. The two came
-        # apart the day a Mac got a paste path: it is Lite in every other sense and can
-        # still put the words in the other window.
-        session, on_send=on_send if paste is not None else None,
-        hotkeys=hotkeys, arm=args.arm,
-        settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
-        lite=lite,
+
+    # Flow Home: the window for everything that is not talking (decisions.md 2026-09-22).
+    # Built now and started never — the server binds its port the first time somebody
+    # opens the window, so a session that never opens it never listens on anything.
+    # Hung off the session like `hotkeys`, because both surfaces reach it from a menu row
+    # and neither surface outlives a design switch.
+    from .home import Home
+
+    home = Home(
+        session, profile=profile, hotkeys=hotkeys, lite=lite,
+        lexicon_path=lexicon.path, trace_path=diag.path if diag is not None else None,
     )
+    session.home = home
+
+    def build(name: str, arm: bool = False):
+        """The surface `name` draws, over the session that is already running.
+
+        Called again every time one of them asks to be replaced, with the same
+        session, the same `on_send`, the same hotkeys, the same settings path
+        and the same Lite — which is the whole of what "one product, two
+        designs" means here. What is *not* carried is `arm`: a rebuilt surface
+        starts disarmed, because the surface going away paused the microphone
+        on its way out (`detach`) and the session's own state is the only thing
+        entitled to decide otherwise.
+        """
+        if name == "compact":
+            # Lazy like the `from .ui import Pill` above, and for a superset of its
+            # reason: the compact surface is a whole second window tree nobody on the
+            # shipped design should pay to import.
+            from .ui_compact import CompactPill as cls
+        else:
+            cls = Pill
+        surface = cls(
+            # Keyed off whether an injector was imported, not off `lite`. The two came
+            # apart the day a Mac got a paste path: it is Lite in every other sense and
+            # can still put the words in the other window.
+            session, on_send=on_send if paste is not None else None,
+            hotkeys=hotkeys, arm=arm,
+            settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
+            lite=lite,
+        )
+        # Home switches designs from its Settings page, and a switch is a method on the
+        # surface that is on screen — so Home is told which one that is, every time.
+        home.surface = surface
+        home.design = name
+        return surface
+
+    say_gesture(design, args.arm)
+    pill = build(design, arm=args.arm)
     # **Loaded now, not at the first word.** "loading the model" used to be the first
     # thing a fresh Flow said back, in the bubble, while somebody was already speaking —
     # and the load lands *inside* that first utterance rather than in front of it, so the
@@ -858,8 +1075,38 @@ def main(argv: list[str] | None = None) -> int:
     # After the pill is built and before the loop runs, so the window is on screen while
     # the disk does its work rather than after it. `warm()` returns immediately — it is
     # single-flight and does its loading on a thread of its own — so nothing here waits.
-    if not args.no_warm:
-        session.warm()
+    #
+    # Once, on the first surface only, and the same goes for the two threads and the
+    # identity record below: all four are about the *process* starting, not about a
+    # window appearing, and a design switch does not restart the process.
+    # The first run (decisions.md 2026-09-23, "The first run"): a profile that has never
+    # finished or skipped it opens Flow Home at its five steps, which replace the Classic
+    # pill's welcome card and give the compact pill the welcome it never had.
+    # `--no-profile` has nowhere to remember that it ran, so it never does.
+    first_run = profile is not None and not profile.welcomed
+    if not args.no_warm and (profile is None or profile.warm):
+        if first_run:
+            # Not a load that is also a silent download. On a new PC the models are not
+            # here yet, and warming would start fetching three gigabytes behind the words
+            # "loading the model" — the step that shows the download with its progress
+            # is on the screen now, so the fetch waits for it. Asked on a thread: naming
+            # the models resolves the device, which is the CUDA probe.
+            def warm_if_here() -> None:
+                if home.models_ready():
+                    session.post(session.warm)
+                else:
+                    say("models: not on this PC yet - the first run in Flow Home "
+                        "downloads them, with progress")
+
+            _threading.Thread(target=warm_if_here, daemon=True, name="first-warm").start()
+        else:
+            session.warm()
+    if first_run:
+        # After the first frame rather than now, so the pill is on screen before a
+        # browser process starts beside it.
+        pill.after(400, lambda: home.open("start"))
+    elif args.home:
+        pill.after(300, lambda: home.open("home"))
     # Beside the window, not in front of it — see each one for what it used to cost.
     _threading.Thread(target=say_models, daemon=True, name="startup-lines").start()
     if not args.no_speak:
@@ -867,19 +1114,47 @@ def main(argv: list[str] | None = None) -> int:
             target=setup_speech, args=(session,), daemon=True, name="voices").start()
     if diag is not None:
         pill.after(10_000, record_identity_later)
+    # The rebuild-the-world loop, and it exists because a design's window tree really is
+    # built once in its constructor — that fact is what made the switch launch-time
+    # until now, and this is the one seam where it costs nothing. `mainloop()` returns
+    # when the surface's window goes: `quit_app` leaves `switch_to` None and that is a
+    # quit, while `switch_design` sets it to the other name and this builds that one
+    # against the session, the hotkeys and the draft the last surface was already
+    # driving. Nothing below the window is torn down in between.
     try:
-        pill.mainloop()
-    except KeyboardInterrupt:
-        # The other half of the guard in `Pill._tick`, and the reason the pill is bound
-        # to a name at all. Tkinter reports and swallows whatever a callback raises, so
-        # nearly every ctrl+C is caught in the frame pump — but one that lands at the
-        # entry to a callback, before Tkinter's own `try`, comes out of `mainloop`
-        # instead, and that is the exit which skips teardown entirely.
-        #
-        # 0 rather than 130: ctrl+C is now a way to quit Flow rather than a way to
-        # interrupt it, and it should report what ctrl+alt+Q reports.
-        pill.quit_app()
-    return 0
+        while True:
+            try:
+                pill.mainloop()
+            except KeyboardInterrupt:
+                # The other half of the guard in `Pill._tick`, and the reason the pill is
+                # bound to a name at all. Tkinter reports and swallows whatever a callback
+                # raises, so nearly every ctrl+C is caught in the frame pump — but one that
+                # lands at the entry to a callback, before Tkinter's own `try`, comes out
+                # of `mainloop` instead, and that is the exit which skips teardown
+                # entirely.
+                #
+                # 0 rather than 130: ctrl+C is now a way to quit Flow rather than a way
+                # to interrupt it, and it should report what ctrl+alt+Q reports.
+                pill.quit_app()
+                return 0
+            # `in DESIGNS` rather than "not None": this is read off whatever object the
+            # surface class handed back, and a name nobody knows how to build is a quit
+            # rather than a crash.
+            wanted = getattr(pill, "switch_to", None)
+            if wanted not in DESIGNS or wanted == design:
+                return 0
+            design = wanted
+            say(f"design: {design}")
+            say_gesture(design, False)
+            pill = build(design)
+    finally:
+        # The port closes with the process either way; this is so a Home window left
+        # open says "Flow has quit" at its next poll instead of waiting on a socket.
+        home.close()
+        # The last Send's entry is on a queue until the writer takes it, and the writer
+        # is a daemon: without this, a quit right after a paste could lose that paste.
+        if history is not None:
+            history.flush()
 
 
 if __name__ == "__main__":

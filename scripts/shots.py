@@ -56,6 +56,19 @@ sys.path.insert(0, str(REPO))
 
 from PIL import ImageGrab  # noqa: E402
 
+from flow import paint  # noqa: E402
+
+# Before any window: awareness is fixed for the process the moment the
+# first one exists, and these shots are the record of what the surface
+# looks like on the machine taking them. Photographed unaware, every one
+# of them was a third-size image the compositor had stretched.
+#
+# `Pill.__init__` calls this too, so a shot is at native resolution either
+# way; it is said here as well because this file opens a backdrop
+# `Toplevel` of its own and the first window to exist is the one that
+# settles the question.
+paint.make_dpi_aware()
+
 import flow.ui as ui  # noqa: E402
 from flow.session import CONVERSE, DICTATE, Activity, Event, State  # noqa: E402
 from flow.ui import Pill  # noqa: E402
@@ -97,6 +110,8 @@ class FakeMic:
     #: Read by `Pill._bar_label`, which says `NO INPUT` when the device has gone —
     #: distinct from `SPEAKING`/`EDITING`, where the microphone comes back on its own.
     active = True
+    #: Read by the compact surface's Workbench setup line.
+    device_name = "Yeti Nano"
 
     def stop(self) -> None: ...
 
@@ -137,6 +152,20 @@ class FakeVoice:
         return self.name
 
 
+class FakeAsr:
+    """`loading` is all the compact pill asks of a transcriber."""
+
+    def __init__(self) -> None:
+        self.loading = False
+
+
+class FakeAsr:
+    """`loading` is all the compact pill asks of a transcriber."""
+
+    def __init__(self) -> None:
+        self.loading = False
+
+
 class FakeSession:
     """Just enough of the `Session` surface for every UI window to drive.
 
@@ -153,6 +182,22 @@ class FakeSession:
         self.state = State.IDLE
         self.activity = None
         self.hearing = True
+        #: Whether the microphone is open — not the same as `state is
+        #: LISTENING`, which means speech was *detected*. The compact pill
+        #: lights its ring off this so an open mic over a silent room is
+        #: distinguishable from a dead application.
+        self.capturing = False
+        #: The models, coming off disk. `asr.loading` is what the real session
+        #: reads; the pill turns it into the waiting ring.
+        self.asr = FakeAsr()
+        #: Whether the microphone is open — not the same as `state is
+        #: LISTENING`, which means speech was *detected*. The compact pill
+        #: lights its ring off this so an open mic over a silent room is
+        #: distinguishable from a dead application.
+        self.capturing = False
+        #: The models, coming off disk. `asr.loading` is what the real session
+        #: reads; the pill turns it into the waiting ring.
+        self.asr = FakeAsr()
         self.profile = FakeProfile()
         self.workspace = str(REPO)
         self.send_words = ("boom", "enter boom")
@@ -164,18 +209,46 @@ class FakeSession:
         self.muted = False
         self.cli = None
         self.auto_ask = True
+        #: Read by the compact surface's setup box and no-CLI cycle.
+        self.pastes = True
         self.auto_ask_in = None
         self.editing = False
         self.can_rescue = False
         self.can_take_reply = False
+        #: Read by the mic view's resting frame, and by the full row's app slot.
+        self.target_app = "claude.exe"
+        #: Read by `_pump_talk` while a paste is waiting.
+        self.busy = False
         self._events: list[Event] = []
         self._t0 = time.perf_counter()
 
     def start(self) -> None: ...
     def close(self) -> None: ...
+
+    def _provider(self) -> str:
+        """The CLI the setup box names and the no-CLI cycle asks about."""
+        return "claude"
+
+    @property
+    def provider(self) -> str:
+        """`Session.provider`, the public read of the same fact — which is
+        what the compact surface asks now.
+
+        Over `_provider` rather than beside it, exactly as the real session
+        has it, so `compact_shots.py`'s no-CLI step goes on working: that step
+        shadows `_provider` with an instance attribute, and a property reading
+        through it finds the shadow. Two constants would have needed the walk
+        to know about both."""
+        return self._provider()
     def tick(self) -> None: ...
     def pump_results(self) -> None: ...
     def pause(self) -> None: ...
+    def talk_start(self) -> None: ...
+
+    def talk_end(self) -> bool:
+        """Nothing pending — the fake never captures, so a release's answer
+        is always "nothing was said into the hold"."""
+        return False
     def stop_speaking(self) -> None: ...
     def hold_auto_ask(self) -> None: ...
     def rescue_last_append(self) -> None: ...
@@ -243,6 +316,12 @@ def _ratio(img) -> float:
     Measured every grab rather than assumed: a DPI-virtualized process on a 4K
     display reports 1280x720 while `ImageGrab` returns 3840x2160, and the same
     code has to work unchanged where the two agree.
+
+    Since `make_dpi_aware` at the top of this file it measures **1.0** on the
+    300 % machine as well — `GetSystemMetrics` now answers in the same pixels
+    `ImageGrab` returns — which is the point: the crop is right either way, and
+    the difference is that the pixels inside it are the surface's own rather
+    than a stretch of a third-size one.
     """
     return img.width / max(1, user32.GetSystemMetrics(SM_CXVIRTUALSCREEN))
 
@@ -264,7 +343,10 @@ def _grab(bbox, name: str) -> None:
 
 def _visible(pill):
     out = [pill]
-    for w in (pill.bubble, pill.card, pill._help):
+    # The hand editor's own `Toplevel` last, so `_front` lifts it over the panel it
+    # stands in: both windows are `-topmost` and the last one raised is the one in
+    # front. Left out, `07-editor.png` was a picture of the well with nothing in it.
+    for w in (pill.bubble, pill.card, pill._help, pill.bubble._edit_box):
         if w is not None and w.winfo_viewable():
             out.append(w)
     return out
@@ -540,6 +622,42 @@ def build(pill, sess):
         (0, state(State.IDLE, Activity("loading the model", True))),
         (900, lambda: shot(pill, "10-loading")),
         (0, state(State.IDLE)),
+        # -- the mic view ------------------------------------------------------
+        # Photographed because it cannot be reviewed any other way. Every test for it
+        # drives `_draw` against a recording canvas, which says what was asked of Tk and
+        # nothing about what Tk did — and the bug that shipped past those tests was a
+        # name overrunning the mic glyph, which is only a bug once it is pixels.
+        # Both frames, because the press swaps what is drawn and neither half is the
+        # other's default.
+        (300, lambda: (setattr(pill, "mic_view_on", True),
+                       state(State.LISTENING)())),
+        (600, lambda: shot(pill, "10a-mic-rest")),
+        (200, lambda: (setattr(pill, "_ptt_since", time.perf_counter()),
+                       setattr(pill, "_meter_level", 0.75),
+                       setattr(pill, "_eased_level", 0.75))),
+        (400, lambda: shot(pill, "10b-mic-talking")),
+        (0, lambda: (setattr(pill, "_ptt_since", None),
+                     setattr(pill, "_meter_level", 0.0))),
+        # The longest name the row can be handed, against the one thing beside it.
+        (300, lambda: setattr(sess, "target_app", "WindowsTerminal.exe")),
+        (400, lambda: shot(pill, "10c-mic-long-name")),
+        (0, lambda: setattr(sess, "target_app", "claude.exe")),
+        # The grow-back: with no panels there is nowhere for a note to land, so the view
+        # stands down for as long as one is up. The picture is the proof it is one
+        # window and not a 90 px row parked under a 400 px panel.
+        (300, lambda: pill.bubble.surface("could not reach the CLI - is claude "
+                                          "on PATH?")),
+        (600, lambda: shot(pill, "10d-mic-note-growback")),
+        (0, lambda: pill.bubble.hide()),
+        (400, lambda: shot(pill, "10e-mic-shrunk-again")),
+        (0, lambda: (setattr(pill, "mic_view_on", False), state(State.IDLE)())),
+        # The full row's app slot has the same overrun the mic view's did, and it was
+        # written off as one this row never shows. It does: 69 px of `WindowsTe…` from
+        # x=10, against a mic arc starting at 61. Photographed so the write-off cannot
+        # be made twice.
+        (300, lambda: setattr(sess, "target_app", "WindowsTerminal.exe")),
+        (400, lambda: shot(pill, "10f-full-row-long-name")),
+        (0, lambda: setattr(sess, "target_app", "claude.exe")),
         # -- windows ----------------------------------------------------------
         (300, lambda: pill._open_commands()),
         (900, lambda: shot(pill, "11-help-commands")),
@@ -599,6 +717,11 @@ def main() -> None:
         chosen={"toggle": "ctrl+alt+space", "send": "ctrl+alt+enter",
                 "cancel": "ctrl+alt+esc", "mode": "ctrl+alt+M",
                 "quit": "ctrl+alt+Q"},
+        # A chord, because two things read one: the Settings menu names the gesture in
+        # its own row, and the mic view is offered only while that gesture is the hold.
+        # Without it both are absent from the walk and the shots stop covering them.
+        chord=SimpleNamespace(gesture="hold", action="toggle",
+                              describe=lambda: "Ctrl+Win"),
         failed=[], stop=lambda: None, drain=lambda: [])
     pill = Pill(sess, hotkeys=hotkeys)
     # The editor checks it really holds the foreground before taking keystrokes;

@@ -381,9 +381,10 @@ class TestWhatRegisteredIsWhatIsReported(Registered):
         self.assertEqual(len(keys.ignored), 1)
         self.assertEqual(keys.chosen["toggle"], "ctrl+alt+space")
 
-    def test_all_five_actions_still_register_with_nothing_overridden(self):
+    def test_all_six_actions_still_register_with_nothing_overridden(self):
         keys, _fake = self.register()
-        self.assertEqual(list(keys.chosen), ["toggle", "send", "cancel", "mode", "quit"])
+        self.assertEqual(list(keys.chosen),
+                         ["toggle", "send", "cancel", "mode", "quit", "paste_last"])
         self.assertEqual(keys.failed, [])
         self.assertEqual(keys.ignored, [])
 
@@ -461,7 +462,7 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
                 mock.patch.object(flow.ui, "Pill") as pill, \
                 contextlib.redirect_stdout(out):
-            self.assertEqual(mod.main(["--no-speak", "--no-lexicon"]), 0)
+            self.assertEqual(mod.main(["--design", "current", "--no-speak", "--no-lexicon"]), 0)
             keys = pill.call_args.kwargs["hotkeys"]
             if keys is not None:
                 keys._thread.join(timeout=5.0)
@@ -503,7 +504,7 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
 
     def test_a_launch_with_no_hotkeys_block_prints_only_what_registered(self):
         lines = self.hotkey_lines({})
-        self.assertEqual(len(lines), 5)
+        self.assertEqual(len(lines), 6)
         self.assertNotIn("ignored", " ".join(lines))
 
     def test_a_block_typed_by_hand_survives_the_whole_way_to_registration(self):
@@ -582,6 +583,130 @@ class TestEveryRefusalIsOneAsciiLine(unittest.TestCase):
             if "x" * 20 not in line and "t" * 20 not in line:
                 with self.subTest(line=line):
                     self.assertLessEqual(len(line), 105)
+
+
+class AltGrUser32(FakeUser32):
+    """`FakeUser32` on a machine with one keyboard layout whose AltGr layer is `types`.
+
+    `ToUnicodeEx` answers only when Ctrl and Alt are both held, the way a layout's
+    Ctrl+Alt column does, and says so if asked any other way — the check is only worth
+    anything if it asks about the state AltGr actually leaves.
+    """
+
+    DEAD = object()
+
+    def __init__(self, types, hkl=0x04070407, taken=()) -> None:
+        super().__init__(taken)
+        self.types = types
+        self.hkl = hkl
+
+    def GetKeyboardLayoutList(self, count, found):
+        if count:
+            found[0] = self.hkl
+        return 1
+
+    def MapVirtualKeyExW(self, vk, _how, _hkl):
+        return vk
+
+    def ToUnicodeEx(self, vk, _scan, state, buf, _size, flags, _hkl):
+        assert state[0xA2] & 0x80 and state[0xA5] & 0x80, "AltGr is left Ctrl + right Alt"
+        assert flags & 0x4, "asking must not leave a dead key pending"
+        text = self.types.get(vk, "")
+        if text is self.DEAD:
+            return -1
+        buf.value = text
+        return len(text)
+
+
+#: What AltGr types on a German keyboard, for the keys Flow's shortcuts use
+#: (kbdlayout.info, KBDGR): Q is @ and M is µ; Space, Enter, Esc, V and Z type nothing.
+GERMAN = {KEYS["q"]: "@", KEYS["m"]: "µ", KEYS["e"]: "€"}
+
+
+class TestAltGrKeepsItsCharacters(unittest.TestCase):
+    """Ctrl+Alt is AltGr. A shipped ctrl+alt shortcut that would take a character away on
+    one of this person's keyboard layouts is passed over for its fallback, and said."""
+
+    def register(self, types, overrides=None, hkl=0x04070407):
+        fake = AltGrUser32(types, hkl=hkl)
+        with mock.patch.object(hotkey, "user32", fake):
+            keys = Hotkeys(DEFAULT_BINDINGS, overrides)
+            self.assertTrue(keys.start(timeout=5.0))
+            keys._thread.join(timeout=5.0)
+        return keys, fake
+
+    def test_what_altgr_types_is_asked_of_the_layout(self):
+        fake = AltGrUser32(GERMAN)
+        with mock.patch.object(hotkey, "user32", fake):
+            self.assertEqual(hotkey.altgr_types(KEYS["q"]), ("@", "de-DE"))
+            self.assertIsNone(hotkey.altgr_types(KEYS["enter"]))
+
+    def test_a_plain_space_is_not_a_character_worth_keeping(self):
+        with mock.patch.object(hotkey, "user32", AltGrUser32({KEYS["space"]: " "})):
+            self.assertIsNone(hotkey.altgr_types(KEYS["space"]))
+        with mock.patch.object(hotkey, "user32", AltGrUser32({KEYS["space"]: " "})):
+            self.assertEqual(hotkey.altgr_types(KEYS["space"])[0], " ")
+
+    def test_a_dead_key_is_a_key_in_use(self):
+        with mock.patch.object(hotkey, "user32", AltGrUser32({KEYS["q"]: AltGrUser32.DEAD})):
+            self.assertEqual(hotkey.altgr_types(KEYS["q"])[0], hotkey.DEAD_KEY)
+
+    def test_on_a_german_keyboard_quit_and_mode_fall_back_and_the_rest_stay(self):
+        # AltGr+Q is @: with ctrl+alt+Q registered, typing an email address quits Flow.
+        keys, _fake = self.register(GERMAN)
+        self.assertEqual(keys.chosen["quit"], "ctrl+shift+Q")
+        self.assertEqual(keys.chosen["mode"], "ctrl+shift+M")
+        self.assertEqual(keys.chosen["toggle"], "ctrl+alt+space")
+        self.assertEqual(keys.chosen["send"], "ctrl+alt+enter")
+        self.assertEqual(keys.chosen["paste_last"], "alt+shift+Z")
+        self.assertEqual(keys.altgr_lines, [
+            "hotkey  mode     not ctrl+alt+M - AltGr+M types U+00B5 on the de-DE keyboard",
+            "hotkey  quit     not ctrl+alt+Q - AltGr+Q types @ on the de-DE keyboard",
+        ])
+
+    def test_a_combo_somebody_chose_is_kept_and_named(self):
+        keys, _fake = self.register(GERMAN, overrides={"quit": "ctrl+alt+q"})
+        self.assertEqual(keys.chosen["quit"], "ctrl+alt+Q")
+        self.assertIn("hotkey  quit     ctrl+alt+Q kept as chosen - AltGr+Q (@, de-DE) "
+                      "runs it too", keys.altgr_lines)
+
+    def test_a_layout_without_altgr_changes_nothing(self):
+        keys, _fake = self.register({}, hkl=0x04090409)
+        self.assertEqual(keys.chosen["quit"], "ctrl+alt+Q")
+        self.assertEqual(keys.chosen["mode"], "ctrl+alt+M")
+        self.assertEqual(keys.altgr_lines, [])
+
+    def test_every_line_is_short_ascii(self):
+        keys, _fake = self.register({**GERMAN, KEYS["space"]: " "},
+                                    overrides={"mode": "ctrl+alt+m"})
+        self.assertTrue(keys.altgr_lines)
+        for line in keys.altgr_lines:
+            with self.subTest(line=line):
+                self.assertTrue(line.isascii())
+                self.assertLessEqual(len(line), 105)
+
+    def test_the_startup_block_says_it_before_the_combos(self):
+        import flow.asr
+        import flow.ui
+
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with profile_carrying({}), \
+                mock.patch.object(hotkey, "user32", AltGrUser32(GERMAN)), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill") as pill, \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(mod.main(["--design", "current", "--no-speak",
+                                       "--no-lexicon"]), 0)
+            keys = pill.call_args.kwargs["hotkeys"]
+            if keys is not None:
+                keys._thread.join(timeout=5.0)
+        lines = [ln for ln in out.getvalue().splitlines() if ln.startswith("hotkey")]
+        skipped = lines.index("hotkey  quit     not ctrl+alt+Q - AltGr+Q types @ "
+                              "on the de-DE keyboard")
+        self.assertLess(skipped, lines.index("hotkey  quit     ctrl+shift+Q"))
 
 
 if __name__ == "__main__":

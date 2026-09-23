@@ -675,48 +675,15 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestTheWelcomeCard(unittest.TestCase):
-    """Item 71. Every line on it was a `print()` before this.
+class TestTheLegendIsInTheSheet(unittest.TestCase):
+    """The colour legend outlived the welcome card it was first shown on."""
 
-    Flow says the combos it registered, the trigger word and that a pause sends a
-    question — into a console a GUI user does not have open. Three outside users met the
-    app without any of it (decisions.md 2026-08-03), and a first launch is the one moment
-    somebody is willing to read six lines.
-    """
-
-    def rows(self, **kw):
-        return helpfile.welcome_rows(**kw)
-
-    def text(self, **kw) -> str:
-        return "\n".join(f"{left} {right}" for _k, left, right in self.rows(**kw))
-
-    def test_it_names_the_combo_that_actually_registered(self):
-        # The same defect the sheet exists to prevent, one surface along: greeting
-        # somebody with a key that does nothing is worse than not greeting them.
-        said = self.text(hotkeys=FakeHotkeys(REGISTERED))
-        self.assertIn(REGISTERED["toggle"], said)
-        self.assertNotIn("ctrl+alt+space", said)
-
-    def test_with_no_hotkeys_it_names_the_pill_instead_of_trailing_off(self):
-        said = self.text(hotkeys=None)
-        self.assertIn("click the pill", said)
-        self.assertIn("no combo this launch", said)
-
-    def test_it_names_the_configured_trigger_word(self):
-        self.assertIn("tango", self.text(send_words=("tango", "enter tango")))
-        self.assertNotIn("boom", self.text(send_words=("tango", "enter tango")))
-
-    def test_it_says_a_pause_sends_and_where_to_stop_that(self):
-        # The load-bearing console line, on a surface a GUI user actually sees.
-        said = self.text()
-        self.assertIn("a pause sends the question", said)
-        self.assertIn(helpfile.AUTO_ASK_OFF_LABEL, said)
-
-    def test_it_carries_the_colour_legend(self):
-        said = self.text()
-        for phrase in ("green pill", "blue pill", "amber window", "violet window"):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, said)
+    def test_the_sheet_carries_the_legend_permanently(self):
+        # A legend is exactly the thing somebody wants a *second* time.
+        said = "\n".join(f"{left} {right}"
+                         for _k, left, right in helpfile.rows())
+        self.assertIn("What the colours mean", said)
+        self.assertIn("violet window", said)
 
     def test_the_legend_matches_the_colours_the_app_actually_draws(self):
         # Three pill colours since item 63, not five, and the two that left became
@@ -724,52 +691,15 @@ class TestTheWelcomeCard(unittest.TestCase):
         # worse than none.
         import flow.ui as ui
 
-        said = self.text()
+        said = "\n".join(f"{left} {right}" for _k, left, right in helpfile.legend_rows())
         self.assertEqual(len(set(ui.ACCENT.values())), 3)
         for gone in ("amber pill", "violet pill"):
             self.assertNotIn(gone, said)
 
-    def test_the_sheet_carries_the_legend_permanently(self):
-        # A legend is exactly the thing somebody wants a *second* time, and the welcome
-        # card is shown once by design.
-        said = "\n".join(f"{left} {right}"
-                         for _k, left, right in helpfile.rows())
-        self.assertIn("What the colours mean", said)
-        self.assertIn("violet window", said)
 
-    def test_every_row_fits_the_columns_the_window_draws_in(self):
-        # The window does not wrap: a row is one line, so its height is fixed and the
-        # scroll offset is computed from it.
-        limits = {"pair": (helpfile.MAX_LEFT, helpfile.MAX_RIGHT),
-                  "note": (helpfile.MAX_NOTE, 0),
-                  "head": (helpfile.MAX_NOTE, helpfile.MAX_RIGHT), "gap": (0, 0)}
-        for kind, left, right in self.rows(hotkeys=FakeHotkeys(REGISTERED)):
-            with self.subTest(row=left[:24]):
-                self.assertLessEqual(len(left), limits[kind][0])
-                self.assertLessEqual(len(right), limits[kind][1])
-
-    def test_it_points_at_the_menu_for_everything_else(self):
-        said = self.text()
-        self.assertIn("right-click", said.lower())
-
-
-class TestItIsShownOnceAndOnlyOnce(unittest.TestCase):
-    """`profile.welcomed`, written before anybody has read a word.
-
-    A card shown twice is worse than one shown once, and a crash between showing and
-    saving would do exactly that.
-    """
-
-    def pill(self, profile):
-        import flow.ui as ui
-
-        p = ui.Pill.__new__(ui.Pill)
-        p.session = mock.Mock(profile=profile,
-                              send_words=("boom", "enter boom"))
-        p.hotkeys = None
-        p.lite = False
-        p._help = mock.Mock()
-        return p
+class TestTheFirstRunFlagIsAProfileField(unittest.TestCase):
+    """`profile.welcomed` now means the first run was finished or skipped — the flag the
+    welcome card kept, kept for the page that replaced it."""
 
     def profile(self):
         from flow.profile import Profile
@@ -778,40 +708,9 @@ class TestItIsShownOnceAndOnlyOnce(unittest.TestCase):
         self.addCleanup(d.cleanup)
         return Profile(Path(d.name) / "profile.json")
 
-    def test_a_first_launch_shows_it(self):
-        p = self.profile()
-        pill = self.pill(p)
-        pill._welcome()
-        pill._help.show.assert_called_once()
-        self.assertEqual(pill._help.show.call_args.kwargs["chip"], "Dismiss")
-
-    def test_and_the_next_launch_does_not(self):
-        p = self.profile()
-        self.pill(p)._welcome()
-        again = self.pill(type(p)(p.path))
-        again._welcome()
-        again._help.show.assert_not_called()
-
-    def test_the_flag_is_written_before_the_card_is_shown(self):
-        # A crash between showing and saving would show it twice, which is the one
-        # outcome worse than showing it once.
-        p = self.profile()
-        pill = self.pill(p)
-        pill._help.show.side_effect = RuntimeError("the card blew up")
-        with self.assertRaises(RuntimeError):
-            pill._welcome()
-        self.assertTrue(type(p)(p.path).welcomed)
-
-    def test_no_profile_means_no_card(self):
-        # `--no-profile` has nowhere to remember it, and a welcome on every launch is an
-        # advertisement rather than an introduction. The Help sheet still has all of it.
-        pill = self.pill(None)
-        pill._welcome()
-        pill._help.show.assert_not_called()
-
     def test_an_older_profile_is_welcomed_once(self):
         # Absent means not welcomed, like `converse_seen`: a person who has been using
-        # Flow for a week still has not been told what the colours mean.
+        # Flow for a week still has not been through the first run.
         from flow.profile import Profile
 
         p = self.profile()
@@ -825,3 +724,11 @@ class TestItIsShownOnceAndOnlyOnce(unittest.TestCase):
         p.welcomed = True
         self.assertTrue(p.save())
         self.assertTrue(Profile(p.path).welcomed)
+
+    def test_the_classic_pill_no_longer_shows_a_card(self):
+        import flow.ui as ui
+
+        self.assertFalse(hasattr(ui.Pill, "_welcome"))
+        self.assertFalse(hasattr(helpfile, "welcome_rows"))
+
+

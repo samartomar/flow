@@ -492,6 +492,11 @@ class WhisperTranscriber:
         self._device = device
         self._resolved: str | None = None
         self._models: dict[bool, object | None] = {False: None, True: None}
+        #: The name each loaded model was built from. Kept beside the model rather than
+        #: re-read from `names`, because `swap` can change `names` while a decode is
+        #: running on the model built under the old one — and the hallucination guard
+        #: has to be judged by the model that actually produced the segments.
+        self._built: dict[bool, str] = {False: "", True: ""}
         # Guards the model dict and the drop log — both touched from the decode
         # thread and the UI thread. Never held across a model build.
         self._lock = threading.Lock()
@@ -562,12 +567,14 @@ class WhisperTranscriber:
                         # cannot decode inside any budget, so falling back to it would
                         # trade a broken session for an unusable one.
                         self._names_cache = None
+                        name = self.names[tier]
                         model = WhisperModel(
-                            self.names[tier], device="cpu",
+                            name, device="cpu",
                             compute_type=self._compute_type,
                         )
                     with self._lock:
                         self._models[tier] = model
+                        self._built[tier] = name
                 finally:
                     # Cleared after the model is published, not before, so there is no
                     # frame in which a tier is neither loading nor loaded and the UI
@@ -621,6 +628,54 @@ class WhisperTranscriber:
         with self._lock:
             self._models = {False: None, True: None}
 
+    def swap(self, partial_model: str | None, final_model: str | None,
+             device: str | None = None) -> bool:
+        """Change what the tiers load, mid-session. True if anything will load differently.
+
+        Flow Home's Models page is the caller (through `Session.set_models`), and the
+        change is live rather than promised for the next launch: a tier whose model
+        changed is dropped, and the next `load()` — which the session starts at once —
+        builds the new one. A tier whose name did not change keeps the model it has, so
+        choosing a new final model does not also reload the partial one.
+
+        `device` of None keeps the device as asked at launch; "auto", "cuda" or "cpu"
+        re-resolve it, which drops both tiers because a model is built for one device.
+
+        **Blocks while a tier is being built**, on purpose: both tier locks are taken
+        first, so a swap can never land in the middle of a build and be undone by the
+        old model being published after it. On a first run that build can be a
+        three-gigabyte download, which is why this is never called on the UI thread.
+        """
+        with self._locks[False], self._locks[True]:
+            before = self.names, self.device
+            self._asked = {False: partial_model or None, True: final_model or None}
+            if device is not None and device != self._device:
+                self._device = device
+                self._resolved = None
+            self._names_cache = None
+            after = self.names, self.device
+            with self._lock:
+                for tier in (False, True):
+                    if before[1] != after[1] or before[0][int(tier)] != after[0][int(tier)]:
+                        self._models[tier] = None
+                        self._built[tier] = ""
+            return before != after
+
+    def _model(self, final: bool) -> tuple[object, str]:
+        """The loaded model for a tier and the name it was built from, loading it if needed.
+
+        A loop rather than one `load()`, because `swap` may drop the model in the moment
+        between `load()` returning and the model being read — `load()` holds its tier
+        lock only while building. The next pass builds the model the swap asked for, and
+        a load that fails raises out of here as it always has.
+        """
+        while True:
+            self.load(final)
+            with self._lock:
+                model, name = self._models[final], self._built[final]
+            if model is not None:
+                return model, name
+
     @property
     def loaded(self) -> bool:
         """True once *any* tier is resident — this is what the idle-unload check reads,
@@ -651,6 +706,15 @@ class WhisperTranscriber:
         if self._resolved is None:
             self._resolved = resolve_device(self._device)
         return self._resolved
+
+    @property
+    def asked(self) -> tuple[str | None, str | None]:
+        """(partial, final) as chosen — a name, or None for "what the device should run".
+
+        Not `names`, which answers what will actually load: Flow Home has to show
+        "automatic" as a choice somebody made, and a resolved name cannot say that.
+        """
+        return self._asked[False], self._asked[True]
 
     @property
     def names(self) -> tuple[str, str]:
@@ -698,15 +762,13 @@ class WhisperTranscriber:
         if audio.size == 0:
             return ""
         # Only the tier being used: a partial must never wait on the finals model.
-        self.load(final)
-        with self._lock:
-            model = self._models[final]
+        model, built = self._model(final)
         # A caller-supplied bias wins over the standing lexicon rather than joining
         # it: a rescue decode is aimed at one utterance, and the lexicon measurement
         # says a longer prompt full of terms that are not being said costs accuracy.
         bias = hotwords or self._standing_bias()
         segments, _ = model.transcribe(audio, **decode_options(final, bias))
-        trusts_ns = reports_no_speech(self.names[final])
+        trusts_ns = reports_no_speech(built or self.names[final])
         kept = []
         worst: float | None = None
         for s in segments:

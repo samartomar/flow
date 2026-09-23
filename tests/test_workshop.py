@@ -146,7 +146,7 @@ class TestTheQuestionAsksForAnAnswer(Temp):
     def framed(self, question: str, workspace=None, context=()) -> str:
         seen: list[str] = []
         s = session(refine_cwd=workspace)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         for turn in context:
             s.thread.add(turn)
         s.thread.add(question)
@@ -238,23 +238,23 @@ class TestTheWorkspaceIsVisible(Temp):
         # sentence. The workspace half is what is under test; the CLI is declared.
         with cli_on_path():
             s = session(refine_cwd=r"D:\dev\products\acme")
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
             self.assertEqual(s.mode, CONVERSE)
             self.assertIn(r"D:\dev\products\acme", notes(s))
 
     def test_and_says_so_when_there_is_none(self):
         with cli_on_path():
             s = session()
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
             said = notes(s)
         self.assertIn("converse mode", said)
         self.assertIn("no project", said.lower())
 
     def test_going_back_to_dictate_does_not_claim_a_workspace(self):
         s = session(refine_cwd=str(self.dir))
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.events()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.assertNotIn(str(self.dir), notes(s))
 
 
@@ -272,7 +272,7 @@ class TestTheGroundIsNamedAtEgress(Temp):
         with cli_on_path(), mock.patch("flow.session.ask",
                                        return_value=("a", "codex")):
             s = session(refine_cwd=refine_cwd)
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
             s.events()
             s._start_ask("q")
             said = [e.text for e in s.events() if e.kind == "note"]
@@ -300,7 +300,7 @@ class TestTheGroundIsNamedAtEgress(Temp):
         with cli_on_path(), mock.patch("flow.session.ask",
                                        return_value=("a", "codex")):
             s = session(refine_cwd=refine_cwd)
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
             s.draft.set("can you hear me")
             s._after_draft_change()
             s.events()
@@ -334,7 +334,7 @@ class TestSwitchingTheGround(Temp):
 
     def grounded(self, ws, profile=None) -> Session:
         s = session(refine_cwd=ws, profile=profile)
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.events()
         return s
 

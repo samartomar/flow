@@ -577,7 +577,7 @@ class TestAMarkSaysItsNameOnHover(unittest.TestCase):
                     if t == tag and seq == "<Enter>")
 
     # The hover word moved with the marks to the pill row, where it is shown in the
-    # label slot — `tests/test_compact.py` covers it there.
+    # label slot — `tests/test_compact_pass.py` covers it there.
 
     def test_the_primary_is_a_glyph_now_and_its_word_is_the_tip(self):
         # Asked for by name — "send and ask can change >> & agent icon" — so the word

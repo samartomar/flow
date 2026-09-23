@@ -9,8 +9,31 @@ what is live: desk work, and the two decisions parked on evidence.
 
 ## Decisions still open
 
-(none — the record is [docs/decisions.md](docs/decisions.md); two evidence-parked
-entries are further down)
+- [ ] **One surface, and which one.** Added 2026-09-04. Both designs are real now — the
+  compact build brief landed in full — and the 2026-09-03 decision's own reopen bar says
+  a second surface is a standing cost once parity is reached and one of the two stops
+  being used. You have said which one you use. [docs/one-surface.md](docs/one-surface.md)
+  is the recommendation: the compact surface becomes the product, the shipped one is
+  retired in five steps, and it lists the five things the compact surface has to absorb
+  first (settings behind the setup rows, Help, a hand editor as its own box, the notes
+  loop on the strip, Refine's "say more" meaning what it says). The one question in it
+  that is a taste call rather than a build — whether a Type hold names the window the
+  words are going to — is yours. Nothing is blocked on this: the 2026-09-04 review's
+  fixes land either way, and step 2 (moving the shared code out of `ui.py`) is safe to
+  start before the decision because it changes no behaviour.
+
+- [ ] **Spoken punctuation eats five ordinary words.** Added 2026-09-04 by the compact
+  review ([docs/audit-2026-09-04/compact-surface.md](docs/audit-2026-09-04/compact-surface.md)).
+  `edits._SHAPE_TABLE` resolves "tab", "period", "dash", "colon" and "comma" wherever
+  they appear — *"unconditional, by design"*, the send-trigger convention one level down
+  — so "open a new tab" pastes an indent and "the trial period" pastes "the trial." Undo
+  holds the words, and the 2026-09-03 decision priced the trade against a small table.
+  The alternative costs one rule: the marks that are only ever keys ("question mark",
+  "full stop", "newline", "press enter", "press tab") stay bare, and the five words that
+  are also English need a lead-in ("press", "then") to be a key. The artboard's own
+  example — *then tab dash fix the tests* — still resolves under it, because "then"
+  leads the tab and the dash follows a key. Taste call: which mistake you would rather
+  make, a key that needs a word before it or a word that becomes a key.
 
 ## The selfdrive tripwire — closed 2026-08-02, fixed rather than quarantined
 
@@ -88,6 +111,28 @@ took the shape it did.
   [docs/audit-2026-08-02/05-desktop-ui-os-integration.md](docs/audit-2026-08-02/05-desktop-ui-os-integration.md).
 
 ## Found while building, out of the item's scope
+
+- [ ] **An exception in the frame pump leaves the row painted at the last width, under a
+  window that has already been resized.** Found on 2026-09-03 while photographing the mic
+  view, with a probe whose fake session was missing `busy`. `Pill._frame` runs
+  `_pump_talk()` *before* `_sync_dock()` and `_draw()`, so anything that raises in the
+  pump aborts the frame before the repaint. `Pill._tick` catches it and surfaces the
+  message — which makes the bubble visible, which calls `_sync_shell` from the panel side
+  and grows the window to 400×98 — and the canvas still holds the capsule the previous
+  frame drew. The result is a 90 px row parked under a 400 px panel with a gap between
+  them, which is exactly the "two boxes of different widths stacked in one window" failure
+  `_sync_shell`'s own comment describes. It then *stays* that way, because the next frame
+  raises at the same place and never reaches the repaint either.
+  **Why it is here and not fixed in the same breath:** the mic view made it visible rather
+  than caused it — any raise in `_pump_talk`, `_pump_events` or `pump_results` does this,
+  and has been able to since the pill and its panel became one window. The fix is a
+  judgement call about the frame loop's contract, not a line: either `_frame` puts the
+  sync-and-draw in a `finally` so a broken pump still repaints what it can, or `_tick`'s
+  handler forces one after surfacing the error. The first is better and is also the one
+  that could hide a pump that is failing every frame behind a row that looks fine, which
+  is the trade worth your call rather than mine.
+  **Reproduce:** give `Pill` a session whose `busy` raises, arm a `_ptt_wait`, and watch
+  the window grow while the row does not.
 
 - [ ] **The furniture users saw is the *answer*, not the chrome — and stripping it is a
   product call.** Item 61 re-measured codex-cli 0.145.0 and claude 2.1.218 through

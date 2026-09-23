@@ -113,11 +113,12 @@ TEMPLATE = """\
 #
 # Saved without restarting Flow: the next thing you say picks this up.
 #
-# FLOW ADDS A LINE HERE ONLY WHEN YOU ASK IT TO. When it has watched you correct the
-# same word twice, it offers the pair in the right-click menu - "Add correction: semir
-# -> Samir" - and one tap appends it below. That is the only thing Flow ever writes to
-# this file after creating it: one new line at the end, never an edit to yours, never a
-# reorder, never a deletion. "Never offer" in the same menu makes it stop asking.
+# FLOW CHANGES THIS FILE ONLY WHEN YOU ASK IT TO. When it has watched you correct the
+# same word twice, it offers the pair - on Flow Home's Voice page, and in the draft's
+# right-click menu - and one tap appends it below. Voice can also add a word you type,
+# or take out an entry you point at. That is all Flow ever does here: a new line at the
+# end, or the lines of the one entry you removed - never an edit to yours, never a
+# reorder. "Never" on an offer makes it stop asking.
 #
 # SETTINGS THAT HAVE A VALUE live next door in profile.json - `voice` (which installed
 # voice reads replies aloud) and `auto_ask` (true or false: whether a settled converse
@@ -248,10 +249,12 @@ def ensure(path: Path | str) -> bool:
 def append_pair(path: Path | str, wrong: str, right: str) -> str:
     """Add one `wrong -> right` line. "" if it went in, otherwise the reason.
 
-    The whole of what Flow may do to this file. It appends one line, only on an explicit
-    tap in the menu, and never edits, reorders or removes one — the file is the user's,
-    and the second thing anyone does with it is delete the comments Flow wrote. So the
-    existing bytes come back byte for byte and the new line goes at the end.
+    One of the three things Flow may do to this file, all on an explicit act: append a
+    correction (the menu's offer, or Flow Home), append a word (`append_term`), or remove
+    one entry somebody pointed at (`remove_entry`). It never edits, reorders or reformats
+    a line — the file is the user's, and the second thing anyone does with it is delete
+    the comments Flow wrote. So the existing bytes come back byte for byte and the new
+    line goes at the end.
 
     A missing file is created from the template first, because the alternative is a file
     containing one arrow and none of the explanation of what an arrow is.
@@ -260,6 +263,12 @@ def append_pair(path: Path | str, wrong: str, right: str) -> str:
     corrections together, and a silent drop past a cap is the exact failure this project
     already found once in the decoder's own library.
     """
+    wrong, right = " ".join(wrong.split()), " ".join(right.split())
+    why = _unwritable(wrong) or _unwritable(right)
+    if why:
+        return why
+    if wrong == right:
+        return "the two sides are the same"
     path = Path(path)
     try:
         ensure(path)
@@ -267,6 +276,50 @@ def append_pair(path: Path | str, wrong: str, right: str) -> str:
     except OSError as exc:
         return f"could not open {path}: {exc}"
     terms, corrections = entries(text)
+    if wrong.lower() in {w.lower() for w, _r in corrections}:
+        return f"there is already a correction for {wrong}"
+    return _append(path, text, f"{wrong} -> {right}", terms, corrections)
+
+
+def append_term(path: Path | str, term: str) -> str:
+    """Add one word to listen for. "" if it went in, otherwise the reason.
+
+    Flow Home's Add, and the bargain `append_pair` strikes: one line at the end of the
+    file, on an explicit act, and every existing byte back exactly as it was.
+    """
+    term = " ".join(term.split())
+    why = _unwritable(term)
+    if why:
+        return why
+    path = Path(path)
+    try:
+        ensure(path)
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"could not open {path}: {exc}"
+    terms, corrections = entries(text)
+    if term.lower() in {t.lower() for t in terms}:
+        return f"{term} is already there"
+    return _append(path, text, term, terms, corrections)
+
+
+def _unwritable(text: str) -> str:
+    """Why `text` cannot be one side of a line in this file, or "" when it can.
+
+    A `#` would start a comment and an arrow would start a correction, so either would
+    make the line mean something other than what was typed; the length is the file's own
+    per-entry cap, which `entries` enforces by dropping the line silently.
+    """
+    if not text:
+        return "type a word first"
+    if "#" in text or "->" in text:
+        return "a word cannot contain # or ->"
+    if len(text) > MAX_TERM_CHARS:
+        return f"keep it under {MAX_TERM_CHARS} characters"
+    return ""
+
+
+def _append(path: Path, text: str, line: str, terms, corrections) -> str:
     if len(terms) + len(corrections) >= MAX_TERMS:
         return (f"the lexicon is full at {MAX_TERMS} entries - "
                 "remove a line before adding another")
@@ -275,7 +328,57 @@ def append_pair(path: Path | str, wrong: str, right: str) -> str:
     lead = "" if not text or text.endswith("\n") else "\n"
     try:
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(f"{lead}{wrong} -> {right}\n")
+            fh.write(f"{lead}{line}\n")
+    except OSError as exc:
+        return f"could not write {path}: {exc}"
+    return ""
+
+
+def remove_entry(path: Path | str, *, term: str | None = None,
+                 wrong: str | None = None) -> str:
+    """Take one entry out of the file, on an explicit tap. "" once it is gone, else why not.
+
+    The second thing Flow may do to this file after creating it, and held to the first
+    one's discipline (decisions.md 2026-09-22): only when the person asks, in Flow Home,
+    about one entry they can see; only the lines that *are* that entry; and every other
+    byte back exactly as it was — comments, blank lines, order, line endings, a missing
+    newline at the end. A comment on the same line as the entry goes with it, because it
+    was about the entry.
+
+    `term` names a word to listen for, `wrong` a correction by its left side — matched
+    the way `entries` matches them, case-insensitively — and every line that would read
+    as that entry is removed, so it is gone rather than shadowed by a duplicate.
+    """
+    if (term is None) == (wrong is None):
+        raise ValueError("name a term or a correction, not both")
+    path = Path(path)
+    try:
+        with path.open(encoding="utf-8", newline="") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        return "there is no lexicon file yet"
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"could not read {path} safely - edit it by hand ({exc})"
+    key = (term if term is not None else wrong).strip().lower()
+    kept: list[str] = []
+    removed = 0
+    for line in text.splitlines(keepends=True):
+        entry = line.split("#", 1)[0].strip()
+        left, arrow, _right = entry.partition("->")
+        if term is not None and entry and not arrow and entry.lower() == key:
+            removed += 1
+            continue
+        if wrong is not None and arrow and left.strip().lower() == key:
+            removed += 1
+            continue
+        kept.append(line)
+    if not removed:
+        return "that entry is not in the file"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8", newline="") as fh:
+            fh.write("".join(kept))
+        tmp.replace(path)
     except OSError as exc:
         return f"could not write {path}: {exc}"
     return ""

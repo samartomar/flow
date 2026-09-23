@@ -79,7 +79,14 @@ boundary is this:
   rather than leaving somebody to find it: a project path can identify an employer, a
   client or a codebase. Set no workspace and nothing of the kind is sent.
 - **Network, but never user content.** The first decode of each tier downloads its
-  model from Hugging Face.
+  model from Hugging Face, and so does a Download on Flow Home's Models page — the same
+  files, from the same place, and only when asked.
+- **A local port, and only while Flow Home has been opened.** `flow/home/server.py`
+  binds `127.0.0.1` — never another interface — the first time the window is opened, and
+  closes with Flow. It answers its own host, its own origin and a token made per launch,
+  and nothing else; what it serves is Flow's own settings, to the window Flow opened.
+  Nothing it serves leaves the machine, and a session that never opens Home never
+  listens on anything.
 - **Sent to GitHub, once, when you type `flow --check-update`.** An anonymous GET of
   `api.github.com/repos/samartomar/flow/releases/latest`, whose answer is a tag Flow
   compares to its own version *here* before printing one line. The request carries
@@ -110,12 +117,15 @@ which is 34% of the 30 ms the UI thread has to draw in.
 | Module | Band | Does |
 |---|---|---|
 | `ui.py` | surface | the pill and the draft bubble, DPI-aware |
+| `ui_compact.py` | surface | the compact design — a wordless pill beside it, chosen by `profile.design` at launch |
+| `home/` | surface | Flow Home: the window for everything that is not talking — a page in an Edge app window, a stdlib server on 127.0.0.1, and an API that reaches the session only through `Session.post` |
 | `hotkey.py` | surface | `RegisterHotKey` on its own message-loop thread |
 | `inject.py` | surface | clipboard + `SendInput`, terminal-safe paste (P7) |
 | `session.py` | core | the state machine and the pump |
 | `edits.py` | core | routes an utterance, applies the local edits |
 | `phonetic.py` | core | vendored Double Metaphone, span search |
 | `thread.py` | core | what has already been sent (P6) |
+| `history.py` | personal | what was handed over, set aside and asked, kept on disk **only** when a person chose to keep it — one JSON-lines file, a writer thread of its own, pruned by age and count |
 | `audio.py` | speech | mic capture and the speech gate |
 | `asr.py` | speech | faster-whisper in two tiers — **the only module that holds a model** |
 | `clean.py` | speech | rejects text the model invented, with the evidence |
@@ -196,7 +206,7 @@ every literal correction away from it.
 
 ## 3. Threads
 
-Ten things run concurrently. Getting this wrong is the main way to break the app, so it
+Eleven things run concurrently. Getting this wrong is the main way to break the app, so it
 is written down.
 
 | Thread | Started by | Does | Rules |
@@ -209,6 +219,7 @@ is written down.
 | `refine` | per semantic rewrite | one `refine._invoke` | Result handed back under `_refine_lock`, tagged with its operation id and the draft revision it was computed from. Watches `Session._cancel` while it waits, so `close()` does not have to |
 | `ask` | per converse question | one `refine._invoke` | Result handed back under `_ask_lock`, tagged with its operation id. Same cancellation |
 | `clipboard-restore` | one, re-armed | sleeps until `_BORROWED.due`, puts the old clipboard back | Lets the target app read the clipboard first, then checks `GetClipboardSequenceNumber` against the reading taken when Flow's own text landed — a changed counter means the user copied something in that pause and the old text is not written back. **One worker, not one per paste**: a second send pushes the deadline out and this thread re-reads it on waking, where before every send parked its own sleeper (100 alive at once, measured). The one thread that appends to `take_warnings()` from off the UI thread, which is why that queue is locked |
+| `history` writer | the first write, or at launch when history is kept | owns `History._items` and `history.jsonl`: appends, rewrites, prunes, and answers Flow Home's reads | The session only enqueues — a Send ends in a paste on the UI thread, and a rewrite is the whole file — and Flow Home's reads and changes go through the same queue, so the page cannot see an order the file does not have. Each write asks the profile again whether history is kept, so "off" chosen between a Send and its write is honoured. `main()` flushes it, bounded, on the way out |
 | `diag` writer | `Diag(background=True)`, in `main()` | takes trace lines off a bounded queue and appends them | The trace is written from the UI thread for every partial, route and state change, and each write was a `stat`, an open and a close on the 30 ms frame — 0.4 ms on a quiet disk, tens under a virus scanner. Bounded at `QUEUE_MAX`; past it a record is counted in `dropped` rather than blocking the frame. `Session.close()` flushes it, bounded, before the process goes. The synchronous default is what the tests use, so a record is on disk when `write()` returns there |
 | `voices`, `startup-lines` | `main()`, after the pill is built | one-shot: list the voices and build the speaker; resolve the decode device and say the model lines | Both used to run *before* the window. Listing the Windows voices is a PowerShell start-up (439 ms), and resolving the device is ctranslate2's import plus the CUDA probe (310 ms). Neither has anything on screen waiting on it — a reply cannot be spoken before a question is asked, and the transcriber resolves the same device on its own — so they run beside the window and `session.speaker` goes from None to a speaker when it is ready. `identity` (the two `--version` process starts) waits ten seconds further, off the model load it used to contend with |
 | `speech` watcher | each `Speaker.say()` | polls the host until it reports `Ready`, then clears `speaking` | Best-effort only. The ceiling that actually bounds `speaking` is enforced by the reader, so a wedged host cannot leave Flow deaf |
@@ -466,10 +477,12 @@ could not close without blocks to close it — and green means "capturing speech
 | `note` | what just happened | line at the bubble's foot, **measured and anchored to its own bottom edge** — it wraps upward into space the bubble reserves for it, four pixels clear of the chip row |
 | `error` | what failed | red flash + note; the draft is never lost |
 | `reply` | the CLI's answer | its own colour, plus spoken aloud |
+| `answer` | the CLI's answer to a question typed on Flow Home, or Home's Wrap up | nothing: the page shows it. Not a `reply`, so the pill's panel does not rise over an exchange it was not showing, and nothing is read aloud |
 | `mode` | `dictate` / `converse` | pill badge and chip label (an accompanying `note` is what the user reads) |
 | `drop` | a rejected segment with its evidence | shown as a note — P2 is that a rejection is never *silent* |
 | `conversation` | — | the card clears; the note that follows lands on the cleared card |
 | `send` | `""` or `enter` | the same button the Send chip presses, arrived at by a spoken trigger |
+| `retype` | what the change will be said as | a correction to the last Type paste, decided: the compact pill takes it (`take_paste_fix`) once the hand is off the keys, makes it through `on_send(…, remove=)`, and reports back (`paste_fixed`), which emits the `edit` the strip says. See §7, "Correcting a Type paste" |
 | `disarm` | why | `Pill.armed` goes false, exactly as if the pill had been clicked off. The only way a session that has stopped capturing can stop a surface claiming otherwise — `armed` belongs to the UI thread. Emitted once, after the `error` that names the reason, when the input device did not come back |
 
 ## 5. Decoding
@@ -861,6 +874,45 @@ Three things now hold, and they are independent on purpose:
    ambiguous target would refuse every ordinary editor paste, and telling the two apart
    means identifying the focused child through UI Automation — a dependency-shaped
    decision against R16. It is in NEEDS_YOU with both shapes, and it is the owner's.
+
+### Correcting a Type paste
+
+Type pastes on the release and `send()` clears the draft, so the next hold's correction
+arrives at an empty draft ([decisions.md](decisions.md), 2026-09-23, "Correcting a Type
+paste"). Three parts, split where the knowledge is:
+
+- **The session routes.** `Session.delivered(…, window=)` is the compact pill saying "I
+  pasted this into that window with Type and can watch it"; `_track_paste` keeps it as the
+  top of a `PasteRun` — the changeable pastes in one window, newest last, at most four,
+  each with its own undo stack and its History entry id. `_route` hands an empty-draft
+  utterance to `_route_paste` before appending it: the draft's own `plan()` with the
+  newest paste as the draft, undo only as the whole utterance (`edits.whole_undo`), and a
+  change only where its target is. A decision becomes a `PasteFix` — the tail of the paste
+  to take back and what replaces it, only after what the two versions share — and a
+  `retype` event. `paste_run` expires at `CORRECT_WINDOW_SEC`; `paste_unfit` is why a
+  paste is never changeable (over `CORRECT_MAX_CHARS`, more than one line break, a
+  trailing break a terminal would strip).
+- **The surface watches and types.** `CompactPill._watch_paste_run` ends the run on the
+  frame that sees a key Flow did not send (`Hotkeys.hook.touched`), a mouse button down
+  off the pill, or another non-Flow window in front. `_pump_retype` waits out the hold and
+  the modifiers — a Backspace under a held Ctrl deletes a word — checks the hook and the
+  foreground once more, and calls `on_send(insert, window, remove=)`. `touched` is cleared
+  *before* each Type paste's Ctrl-V, so a key pressed during the paste counts against it.
+- **`inject.paste(…, remove=)` sends it.** `backspaces()` counts one per character and
+  one per line break, and refuses what no count fits (emoji, combining marks, joiners,
+  tabs); the Backspaces ride in front of the Ctrl-V in **one** `SendInput`, whose events
+  are never interleaved with anyone else's. Every key Flow sends carries `INPUT_MARK`
+  in `dwExtraInfo`, which is how the hook tells Flow's keystrokes from a person's.
+
+A change that did not go in ends the run — Windows reports how many keys it took, never
+which — and one that did revises the History entry and what Paste last pastes.
+
+The same run is how consecutive Type pastes get their space: `CompactPill._deliver` asks
+`Session.join_paste(text, window)` just before the Ctrl-V, after re-running the watch on
+the spot, and a paste that continues the run's newest paste gets a space in front unless
+the two already meet or join (`_JOINS_LEFT`, `_JOINS_RIGHT`). The run keeps the space —
+the window holds it, and a take-back has to count it — while `delivered` strips it for
+History and Paste last.
 
 ### Lite
 
@@ -1594,8 +1646,9 @@ Only the ones with a measurement or a failure behind them. Everything else is in
 | Path | When | What |
 |---|---|---|
 | `~/.flow/lexicon.txt` | once, if it does not exist, when the menu's **Open settings folder** is used | the user's own words, in two kinds of line. A plain term biases the decoder toward that spelling; `wrong -> right` is a correction applied to the decoder's *output* — whole words, left side case-insensitive, right side verbatim, one pass so corrections cannot chain. Corrections exist because bias has already failed on a word the speaker keeps having to repeat: live run 1 spent a ~7 s CLI call on "Change Semir to Samir" because the name never survived decoding, and a substitution costs microseconds and no accuracy. What Flow writes is a file of comments — creating it must not switch biasing on for someone who only wanted to find the folder — and it never overwrites one that exists. **The one other thing Flow may write is a single appended `wrong -> right` line, and only on an explicit tap in the right-click menu** (see below): it never edits, reorders, removes or reformats a line, so everything already in the file comes back byte for byte. Re-read by mtime on every decode, which is how a pair added from the menu reaches the very next utterance |
-| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice or a trigger word, toggling auto-ask, switching the workspace, and a resolved `--cwd` (it joins the recents) | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, whether the welcome card has been shown (`welcomed`), whether converse mode has been entered before (`converse_seen`, which gates the one-line first-entry notice — absent means **not seen**, the opposite way round from `auto_ask`, because an upgrade is the first time that notice has existed at all), the two spoken send triggers (`send_word`, `send_enter_word`), the `workspace` a converse question is asked from, the `workspaces` recents the menu offers (most recent first, bounded at `MAX_WORKSPACES` on save *and* load), an optional `hotkeys` table rebinding the five global combos, and two running totals — `words_dictated` and `dictated_ms`, the lifetime half of `flow --stats`. Those two are here rather than derived from the trace because the trace is bounded and rotates, so it can say *when* but not *ever*; and they are two integers rather than a table by day because this file is a summary and R8 forbids it growing with use — a row per day is a log wearing a summary's name. They are validated as whole non-negative numbers (`_count`), written on every dictated utterance rather than at the next Send (a second process reads them, so a total that only lands at a Send reads wrong for every session that ended without one — measured 1.2 ms a save against the 0.4 ms `Diag.write` already spends on that path; since 2026-09-01 the save is *owed* by the frame that routes the utterance and paid by the next one, `Session._pump_saves`, because that frame is the one that pastes and the write was sitting between the decode and the keystroke), and absent from every profile written before the feature existed, which `--stats` says out loud instead of showing a lifetime of zero. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. Everything from the voice down is additive and read through a fallback — an older profile loads with no voice, an empty recents list and auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage. **Every field is validated on load, and degradation is per field** — the schema number was checked and the fields were not, so valid JSON with wrong types crashed `Profile()` before the pill existed (`send_word: 42` → `AttributeError`) or, worse, loaded clean and detonated later in gate arithmetic (`floor_db: "-60"`). Each field now answers *is this usable as what it claims to be*, never *can I coerce it* — coercion is how `"false"` became `True` and how `workspaces: "C:/one"` became five one-character entries by iterating the string, both silent and both worse than the crash they avoided. An invalid field takes its default and the rest of the file still loads, because a calibration is the expensive thing in here and nobody can re-create it by typing; `faults` names what degraded, since a setting that silently reverts is indistinguishable from one that never saved. Numbers are returned as stored rather than coerced, so a hand-written integer round-trips unchanged — a validator that rewrites the file it protects has not protected it. `hotkeys` is the one field checked for its shape and not its contents: a value that is not a table degrades to none and is named like any other wrong type, and the entries inside travel through untouched to `hotkey.overridden`, which knows the action names and the key set and can say what is wrong with each one it refuses. Dropping a bad entry here instead would be the only silent failure in that path — it would vanish between the file and the report, and nothing left would be able to say why the shortcut had not changed |
+| `~/.flow/profile.json` | `--calibrate`, every Send, choosing a voice or a trigger word, toggling auto-ask, switching the workspace, and a resolved `--cwd` (it joins the recents) | schema 1. Room, this speaker's confidence, **the microphone the room was measured through**, learned confusion pairs, misroute signatures, which installed voice reads the replies, whether auto-ask is on, whether the welcome card has been shown (`welcomed`), whether converse mode has been entered before (`converse_seen`, which gates the one-line first-entry notice — absent means **not seen**, the opposite way round from `auto_ask`, because an upgrade is the first time that notice has existed at all), the two spoken send triggers (`send_word`, `send_enter_word`), the `workspace` a converse question is asked from, the `workspaces` recents the menu offers (most recent first, bounded at `MAX_WORKSPACES` on save *and* load), an optional `hotkeys` table rebinding the six global combos, the History choice (`history`: absent until a person chooses "keep" or "off", and absent keeps nothing; `history_days`: 7, 30 or 90), and two running totals — `words_dictated` and `dictated_ms`, the lifetime half of `flow --stats`. Those two are here rather than derived from the trace because the trace is bounded and rotates, so it can say *when* but not *ever*; and they are two integers rather than a table by day because this file is a summary and R8 forbids it growing with use — a row per day is a log wearing a summary's name. They are validated as whole non-negative numbers (`_count`), written on every dictated utterance rather than at the next Send (a second process reads them, so a total that only lands at a Send reads wrong for every session that ended without one — measured 1.2 ms a save against the 0.4 ms `Diag.write` already spends on that path; since 2026-09-01 the save is *owed* by the frame that routes the utterance and paid by the next one, `Session._pump_saves`, because that frame is the one that pastes and the write was sitting between the decode and the keystroke), and absent from every profile written before the feature existed, which `--stats` says out loud instead of showing a lifetime of zero. The device is stored by name, never by index — indexes shift when anything is plugged in, so a stored one would come to mean a different microphone. Everything from the voice down is additive and read through a fallback — an older profile loads with no voice, an empty recents list and auto-ask **on**, which is the shipped default, so nobody acquires a preference they never expressed and the schema does not have to move. Written whole to a `.tmp` and moved, so a crash cannot leave a profile that loads as garbage. **Every field is validated on load, and degradation is per field** — the schema number was checked and the fields were not, so valid JSON with wrong types crashed `Profile()` before the pill existed (`send_word: 42` → `AttributeError`) or, worse, loaded clean and detonated later in gate arithmetic (`floor_db: "-60"`). Each field now answers *is this usable as what it claims to be*, never *can I coerce it* — coercion is how `"false"` became `True` and how `workspaces: "C:/one"` became five one-character entries by iterating the string, both silent and both worse than the crash they avoided. An invalid field takes its default and the rest of the file still loads, because a calibration is the expensive thing in here and nobody can re-create it by typing; `faults` names what degraded, since a setting that silently reverts is indistinguishable from one that never saved. Numbers are returned as stored rather than coerced, so a hand-written integer round-trips unchanged — a validator that rewrites the file it protects has not protected it. `hotkeys` is the one field checked for its shape and not its contents: a value that is not a table degrades to none and is named like any other wrong type, and the entries inside travel through untouched to `hotkey.overridden`, which knows the action names and the key set and can say what is wrong with each one it refuses. Dropping a bad entry here instead would be the only silent failure in that path — it would vanish between the file and the report, and nothing left would be able to say why the shortcut had not changed |
 | `~/.cache/huggingface/hub/` | first decode of each tier | the models |
+| `~/.flow/history.jsonl` | only when a person chose to keep history on Flow Home (`profile.history == "keep"`): every handover `Session.delivered` reports, a final's rejection, each Ask and its answer | one JSON object per line — `id`, `at`, `kind` (`dictated`, `refined`, `set_aside`, `asked`, `answered`), `text`, and the fields that kind carries (`app`, `words`, `how`, `heard`, `cli`, `secs`, `reason`, `conv`, `ws`, `via`, `failed`, `fixed`). **The words themselves** — the one file here that holds them, which is why it exists only by choice and is deleted when the choice becomes "off". Pruned to 7, 30 or 90 days and 20 000 entries; a line that does not validate is left out and counted |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call, overflow and device event, when the app runs without `--no-profile` | A content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, counters, error *categories*, on each route how well the decoder heard the utterance being routed (`confidence`, the worst `avg_logprob` of the kept segments, `null` for unknown), and on each utterance that reached the draft a `dictated` record carrying `words` (a count) and `ms` (how long it took to say). Field names are an allow-list and the words are a named deny-list that fails at import if the two ever intersect, so a draft cannot get in by being short — and `words` is a count of them, which is a number and not a text: it is on the allow-list precisely because no integer can be read back into the sentence it counted. Bounded at `diag.MAX_BYTES` with one rotation — two files, a known ceiling, not a log directory. Off unless the app turns it on: a `Session` traces nothing by default, which is why the unit suite does not write here |
 | `.bench/` | `scripts/` only | generated audio, benchmark results and manifests. **Tracked**, because a result is a measurement taken at a moment and cannot be re-taken. The volunteer recordings are the deliberate exception, decided 2026-08-01: a recording is a person, so the clips are untracked, rewritten out of history, and live outside the repo — [`.bench/README.md`](../.bench/README.md) says where, and how a fresh clone gets them back. The downloadable accent corpora are excluded and their manifests are not. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the cache revision of each model tier that run loaded -- a number is a measurement *of a build*, and until 2026-08-01 none of these said which |
 

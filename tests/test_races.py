@@ -23,7 +23,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
-from flow.session import AUTO_ASK_SEC, Session, State  # noqa: E402
+from flow.session import AUTO_ASK_SEC, CONVERSE, Session, State  # noqa: E402
 
 LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
 
@@ -97,7 +97,7 @@ class RefineInFlight(unittest.TestCase):
     def arm(self, converse: bool = False) -> Session:
         s = session()
         if converse:
-            s.toggle_mode()
+            s.toggle_mode(to=CONVERSE)
         s.draft.set("widen the column")
         s._after_draft_change()
         s._route("make it more formal")
@@ -213,7 +213,7 @@ class TestAnAnswerDoesNotOwnTheDraftItCameBackTo(unittest.TestCase):
 
     def test_a_draft_built_while_waiting_survives_the_answer(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         held = Held(("Use ALTER TABLE.", "codex"))
         self.addCleanup(held.release.set)
         with mock.patch("flow.session.ask", held):

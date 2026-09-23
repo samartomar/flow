@@ -59,7 +59,7 @@ FIELDS = frozenset({
     "state",      # a State value
     "was",        # the State it replaced
     "route",      # append | local | semantic | undo | rescue | recall | followup |
-                  # take | note | wrap
+                  # take | note | wrap | paste_fix
     "tier",       # base.en | small.en
     "ms",         # a duration
     "provider",   # codex | claude

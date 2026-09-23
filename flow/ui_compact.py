@@ -1,0 +1,3603 @@
+"""The compact pill — the second UI, drawn from design/compact.
+
+`flow/ui.py` is the full surface: a labelled pill with a draft bubble and a
+conversation card docking to it. This module is the other design — a wordless
+120 px capsule whose entire vocabulary is two colours and a meter
+(design/compact/README.md, Main.dc.html):
+
+  glyph colour = mode     ring colour = state     meter = the level, as ever
+
+It runs the same `Session` the full UI runs, through the same contract: the UI
+pulls, the session never calls into it. A 30 ms frame calls `session.tick()`
+while armed and `session.pump_results()` while not, drains `session.events()`,
+and reads the state attributes (`state`, `mode`, `level_db`, `hearing`,
+`busy`, `draft`) at draw time.
+
+**The spec has three modes, and so does the session.** Type / Refine / Ask
+(README) map onto DICTATE / REFINE / CONVERSE: Type is dictate, Ask is
+converse, and Refine is the polish pass over the held draft with the workspace
+as the CLI's system role — an action on a draft that became a mode in
+session.py, delivered as a `reply` rather than a draft rewrite. The panel the
+Refine and Ask artboards draw the pill as the foot of is mode-driven:
+`PANEL_SPEC` maps a mode to its panel, and Type is the only mode with no
+entry (README: "Type never opens a panel"). Spoken punctuation is still a
+stub citing its artboard, not a feature.
+
+Windowing is the same five probed attributes every Flow window wears
+(`overrideredirect`, `-topmost`, `-alpha`, `-transparentcolor`, `-toolwindow`),
+applied by ui.py's own `_shell_window` rather than re-probed here. Lite means
+what it means there: nothing in this module imports `inject` — the two Win32
+reads the panel's click-outside poll needs are declared on ui.py's own
+`_user32` under the same platform guard ui.py used to declare its own
+(flow/ui.py:82-101), and every call site is `lite`-guarded, with ui.py's
+`_NoHands` (flow/ui.py:68-79) under the ones that are not.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import queue
+import sys
+import time
+import math
+import tkinter as tk
+import tkinter.font as tkfont
+import traceback
+from pathlib import Path
+from typing import NamedTuple
+
+from . import tray
+from . import paint
+from . import glyphs
+from .profile import DESIGNS
+from .session import CONVERSE, DICTATE, REFINE, Session, State
+
+# The hues and the fonts are ui.py's own, imported rather than restated: the
+# spec's rule is "the hues flow/ui.py already gives those commands" (README),
+# and a colour written down twice is a colour that drifts. `TEXT` is the
+# near-white ui.py spends on primary text — the spec's "white" for Type.
+# `SEAM` is ui.py's `RING` hairline under the name the docked design gives it:
+# the one line between the panel and its foot.
+from .ui import (
+    _FONT_DIR,
+    _FONT_FILES,
+    _POINT,
+    CARD_ACCENT,
+    CHIP,
+    CODE,
+    DB_CEIL,
+    DB_FLOOR,
+    DIM,
+    ERROR,
+    FAST_TICK_MS,
+    FLASH_FRAMES,
+    FONT_BODY,
+    FONT_CHIP,
+    FONT_CHIP_PRIMARY,
+    FONT_MONO,
+    FONT_PARTIAL,
+    HEARING,
+    LEVEL_FALL_ALPHA,
+    LEVEL_RISE_ALPHA,
+    MUTED,
+    PILL_DRAG_SLOP,
+    PILL_HOLD_SEC,
+    PLACEHOLDER,
+    PASTE_LAST_WAIT_SEC,
+    PRIMARY_FILL,
+    PRIMARY_TEXT,
+    PTT_PASTE_WAIT_SEC,
+    RING_OUTER,
+    SIDE_SETTLE_SEC,
+    RING_TOP,
+    SHELL,
+    TEXT,
+    WAITING,
+    _copy_to_clipboard,
+    _dark_menu,
+    _mix,
+    _monitor_at,
+    _no_activate,
+    _pointer_monitor,
+    _round_rect as _tk_round_rect,
+    _shell_window,
+    _user32,
+    _virtual_desktop,
+    classify,
+    foreground_hwnd,
+    modifiers_held,
+    owned_by_flow,
+    set_icon,
+    toplevel_hwnd,
+)
+from .ui import PANEL_BOTTOM_OFFSET, bottom_centre
+from .ui import RING as SEAM
+
+# The same five files `ui._load_fonts` registers, handed to GDI+ as well.
+# `AddFontResourceExW(FR_PRIVATE)` is a GDI registration, and GDI+ keeps its
+# own collection: measured on this machine, "IBM Plex Sans" answered
+# FontFamilyNotFound to GDI+ *after* `_load_fonts` had run, so every string
+# this surface composites came out in `paint`'s stand-ins — Segoe UI where the
+# design says Plex Sans, Consolas where it says Plex Mono. Here rather than in
+# `__init__` because the painter is built there and this has to be true before
+# the first font is asked for; `load_fonts` is idempotent and answers 0 off
+# Windows, so an import costs nothing where there is no GDI+ to tell.
+paint.load_fonts(str(_FONT_DIR / name) for name in _FONT_FILES)
+
+if sys.platform == "win32":
+    # The click-outside poll's two reads, declared for the reason inject.py
+    # spells out and ui.py repeats at flow/ui.py:85-94: an undeclared ctypes
+    # restype is C `int`, so a 64-bit HWND or style word comes back truncated.
+    # GetCursorPos writes through a pointer, which is the half of that rule
+    # that applies here.
+    _user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    _user32.GetAsyncKeyState.restype = ctypes.c_short
+    _user32.GetCursorPos.argtypes = [ctypes.POINTER(_POINT)]
+    _user32.GetCursorPos.restype = ctypes.c_int
+
+#: The left mouse button, for the click-outside poll's edge detector.
+_VK_LBUTTON = 0x01
+
+#: Every mouse button a click can move a caret with — left, right, middle, and the
+#: two side buttons, which are Back and Forward in a browser. Any of them down off
+#: the pill ends what a spoken correction could change (`_watch_paste_run`).
+_MOUSE_BUTTONS = (0x01, 0x02, 0x04, 0x05, 0x06)
+
+#: The capsule, from Main.dc.html's `.pill`: 120 × 34, radius half the height.
+#: Nothing on it is text — that is the design's first decision, not an omission.
+PILL_W = 120
+PILL_H = 34
+PILL_ALPHA = 0.94
+
+#: Refine's gold (README, and ui.py's Refine chip at flow/ui.py:2200). Declared
+#: once, ahead of the mode itself, and aliased into the two maps that wear it:
+#: a colour written down twice is a colour that drifts.
+REFINE_GOLD = "#E1B75C"
+
+#: Mic glyph tint per mode (README: "white Type … violet Ask") — all three,
+#: now that the session has all three.
+MODE_TINT = {
+    DICTATE: TEXT,  # Type
+    REFINE: REFINE_GOLD,  # Refine
+    CONVERSE: CARD_ACCENT,  # Ask — the violet ui.py already gives the card
+}
+
+#: Ring colour per state (README: "green hearing, blue CLI, red wrong, none at
+#: rest"). The same hues ui.py's ACCENT map gives the same states. IDLE and
+#: DRAFT have no entry because rest is the absence of a ring, not a colour for
+#: it. `session.busy` — a final decode still running — is not a ring colour
+#: either: it happens inside the utterance it is decoding, which LISTENING's
+#: green already covers, and one state gets one colour.
+RING = {
+    State.LISTENING: HEARING,
+    State.REFINING: WAITING,
+    State.ASKING: WAITING,  # the same wait from the user's side, as in ui.py
+}
+
+#: The fourth ring colour (States.dc.html): amber, once, at launch, when the
+#: workspace the profile remembers is gone. Not a session state — a launch
+#: notice — so it is not in `RING`; `_recover` counts it down.
+RECOVER = "#E8A33D"
+#: Frames the amber notice stays up (~9 s at the 30 ms frame), and the one
+#: thing that ends it early: a hold — the user is back, and has seen it.
+RECOVER_FRAMES = 300
+
+#: Lite's last inch (States.dc.html): the words are on the clipboard, said
+#: once in a strip under the pill, never in an error colour. The strip's
+#: height in the window, and how long it stays (~3 s).
+NOTICE_H = 18
+COPIED_FRAMES = 100
+COPIED_TEXT = "copied — press Ctrl+V"
+#: The same line for the enter-variant of the spoken trigger, on ui.py's
+#: `COPIED_ENTER` argument (flow/ui.py:1085): "enter boom" collapses to a copy
+#: here like every other send, and the Enter it asked for is the one step the
+#: clipboard cannot take for you. Said rather than dropped — a suffix that
+#: sometimes does something with no signal either way is how somebody learns
+#: to distrust the one that does.
+COPIED_ENTER_TEXT = "copied — press Ctrl+V, then Enter"
+#: Air either side of a notice's words. The strip is as wide as it needs
+#: to be and never narrower than the pill.
+NOTICE_PAD = 14
+
+#: The notes the strip says out loud, matched on their opening words.
+#:
+#: Most notes are progress the ring is already carrying, and the strip stayed
+#: empty for all of them — including the handful that are the only answer to
+#: "I pressed it and nothing happened". Send's three refusals are the sharp
+#: case: press the `send` hotkey on an empty draft and this surface did
+#: *nothing at all*, no colour, no motion, no sentence. A wordless surface
+#: takes on the obligation to answer the questions its words used to answer
+#: (decisions.md, 2026-09-04), and these are questions no hue can be an answer
+#: to: the three "nothing to send/ask/refine", the two "still" refusals of a
+#: send while the last one is in flight, the two truncations that say the CLI
+#: was handed less than was said, the stale rewrite that was thrown away, and
+#: the long hold that was stopped for you.
+#:
+#: What is deliberately *not* here is everything else. The mode notes are the
+#: glyph's own hue, said a second time. "asking claude · in ~/dev/flow" and
+#: the rest of the progress lines are true for exactly as long as the ring is
+#: blue, which is a better channel for them than a strip that expires. The
+#: draft-shaped notes have the panel. A 400 px sentence under the pill on
+#: every tap is noise, and noise is how the strip that matters gets ignored.
+SAID_NOTES = ("nothing to", "still ", "only the last", "discarded",
+              "stopped after")
+
+#: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
+#: viewBox after the 12 px left padding, centred in the 34 px height. The
+#: glyph itself is stroked, not filled — `mic()` in gen.py is 1.4 px strokes
+#: with round caps. The drawing and its stroke weight moved to `flow/glyphs.py`
+#: (`glyphs.mic`, `glyphs.STROKE`) the day the shipped surface started drawing
+#: the same mic; only the frame it sits in is this module's business.
+MIC_X = 12
+MIC_Y = (PILL_H - 18) // 2
+
+#: The level meter, gen.py's `.meter`: 15 bars 2 px wide on a 2 px gap, 3 px
+#: at rest, in a 14 px band, blooming around the centre line. It starts after
+#: the padding, the glyph and the 9 px gap the flex row gives them.
+METER_X = MIC_X + 14 + 9
+BARS = 15
+BAR_W = 2
+BAR_GAP = 2
+BAR_MAX_HALF = 7.0  # half-height at full level — 14 px of travel inside 34
+
+#: The docked panel (Refine.dc.html, Ask.dc.html): 400 px of band *above* the
+#: pill, which becomes its foot — one window, one seam, the foot still
+#: holdable for "say more" / reply, closed by Send / Esc / click-outside
+#: (design/compact/README.md).
+#:
+#: `PANEL_H` is the band's **minimum**, not its height. The artboards grow
+#: with their text and this band now does too (`_panel_layout`); 200 is what
+#: the resting proportions were drawn at, so a panel whose blocks are short
+#: still photographs as the artboard did.
+PANEL_W = 400
+PANEL_H = 200
+
+#: The foot's meter, gen.py's `pill(foot=True, n=40)`: the same 2 px bars on
+#: the same 2 px gap, more of them for the wider band.
+BARS_FOOT = 40
+
+#: The workspace strip's background (gen.py `.strip`). The one hue this palette
+#: adds — ui.py's v2 ramp has no step this side of `SHELL`, and a colour
+#: written down twice is a colour that drifts, so it is written down once,
+#: here.
+STRIP = "#15181D"
+
+#: The strip's tag labels ("heard", the workspace note), gen.py's `.tag`:
+#: mono, 10 px, grey. Tk has no letterspacing; the size carries the read.
+FONT_TAG = (FONT_MONO, -10)
+
+#: The panel's vertical rhythm, measured off gen.py's Refine and Ask
+#: artboards. These are *spacings*, not rows: the rows themselves are computed
+#: per frame by `_panel_layout`, because the band grows with its text.
+#:
+#:   STRIP_H       the workspace strip (gen.py `.strip`: 10 px padding on an
+#:                 11 px line, plus its divider)
+#:   PANEL_PAD     the strip's bottom edge down to the first tag's centre
+#:                 (`padding: 14px 16px 12px` on the block, minus the tag's
+#:                 own half-height)
+#:   TAG_GAP       a tag's centre down to the first line of its block
+#:   BLOCK_GAP     the heard block's last line down to the result block —
+#:                 the air `.shots/11-compact-refine-panel.png` had none of,
+#:                 which put "refined for this repo" on top of the dictation
+#:   FOOT_PAD      above and below the footer chips (gen.py's
+#:                 `padding: 0 16px 14px`)
+STRIP_H = 35
+PANEL_PAD = 15
+TAG_GAP = 16
+BLOCK_GAP = 10
+FOOT_PAD = 14
+CHIP_H = 26
+PAD_X = 16
+#: One line of body text where nothing can be asked to measure one — a bare
+#: fixture, or a painter that refused. FONT_BODY is 13 px and its line box is
+#: about 18; `_line_height` asks the painter first, because the painter is
+#: what will lay the glyphs down.
+LINE_NOMINAL = 18
+
+#: The close cross, in the strip. The one panel rect that never moves: the
+#: strip is the band's top row and the band grows downward from it.
+CLOSE_RECT = (PANEL_W - 30, 8, PANEL_W - 6, 30)
+
+
+def _chip_rects(footer_y: int) -> tuple:
+    """`(copy, send)` for a footer whose chips start at `footer_y`.
+
+    One piece of arithmetic, so the resting constants below and the live
+    layout cannot drift: Copy on the left behind the hint, Send hard right
+    (Refine.dc.html's footer row).
+    """
+    return ((PAD_X, footer_y, 72, footer_y + CHIP_H),
+            (PANEL_W - 74, footer_y, PANEL_W - 16, footer_y + CHIP_H))
+
+
+#: Ask's footer chip that carries the conversation to Flow Home (the canvas's Pill
+#: artboard: "Copy · Continue in Flow · hold to reply"). Hard right, where Refine keeps
+#: Send — Ask has no Send, so the slot was empty — and wide enough for its label in
+#: `FONT_CHIP`, which measures about 106 px.
+CONTINUE_LABEL = "Continue in Flow"
+CONTINUE_W = 132
+
+
+def _continue_rect(footer_y: int) -> tuple:
+    """Where Continue in Flow sits in a footer whose chips start at `footer_y`."""
+    return (PANEL_W - 16 - CONTINUE_W, footer_y, PANEL_W - 16, footer_y + CHIP_H)
+
+
+#: The footer's two chips at the *resting* band — what an importer means by
+#: "where Copy is" when nothing has been said yet. A live frame reads them off
+#: `_panel_layout`, which is the authority: the footer travels with the band's
+#: bottom edge, and the band's bottom edge travels with its text.
+COPY_RECT, SEND_RECT = _chip_rects(PANEL_H - FOOT_PAD - CHIP_H)
+
+#: The panel's text budget. Tk wraps canvas text by pixel width and happily
+#: wraps *past the bottom of the block it is given* — `.shots/11` drew a
+#: three-line answer through the footer chips before this was measured. So the
+#: band wraps itself, in characters: FONT_BODY measures about 7 px a
+#: character and the blocks are 356-368 px wide.
+#:
+#: The caps are what a band may grow *to*, not what it is cut to. Two lines was
+#: the fixed band's leftovers, and it meant a ten-line answer showed two and a
+#: refined prompt could not be read before Send pasted it. Twelve is the
+#: artboards' own scale — 216 px of result at 18 px a line, which with the
+#: heard block, the footer and the foot still stands on a 1080 display.
+LINE_CHARS = 52
+HEARD_LINES_MAX = 4
+RESULT_LINES_MAX = 12
+
+#: The mode → panel map: which modes raise the panel on a hold, and what their
+#: panel looks like. The mechanism (open on hold, `heard` ← partials and the
+#: release's draft, `result` ← the reply, a Send chip when `send` is true) is
+#: mode-generic; the entries are the whole of what differs. Type is never here
+#: (README: "Type never opens a panel").
+PANEL_SPEC = {
+    REFINE: {
+        # Refine.dc.html: the raw dictation in PLACEHOLDER grey under a "heard"
+        # tag; the shaped text under a gold "refined for this repo" tag — no
+        # accent bar, the tag carries the hue; the footer's Send pastes what
+        # came back.
+        "heard_tag": "heard",
+        "heard_fill": PLACEHOLDER,
+        "result_tag": "refined for this repo",
+        "result_accent": REFINE_GOLD,
+        "hint": "hold the mic to say more",
+        "send": True,
+    },
+    CONVERSE: {
+        # Ask.dc.html: the question is body text, not a grey transcript, and
+        # carries no tag; the answer is a card with a violet left bar; the
+        # footer is Copy and the hint — no Send — and, since Flow Home,
+        # Continue in Flow where Send would be.
+        "heard_tag": None,
+        "heard_fill": TEXT,
+        "result_tag": None,
+        "result_accent": CARD_ACCENT,
+        "hint": "hold the mic to reply",
+        "send": False,
+        # The conversation's way to the page: every turn, typed follow-ups, notes.
+        "continue": True,
+    },
+}
+
+#: The modes' names on this surface (README, Workspace.dc.html). The shipped
+#: UI's Dictate/Converse named the mechanism; the compact names the job.
+MODE_NAME = {DICTATE: "Type", REFINE: "Refine", CONVERSE: "Ask"}
+
+#: The standalone box (Workspace.dc.html's `.box`) the palette draws in: 360 px
+#: wide, SHELL with a `RING_OUTER` border and the `RING_TOP` inset highlight.
+#: Its rows, measured off the artboard. The Workbench setup box that shared it
+#: became Flow Home's Settings and Models pages (decisions.md 2026-09-22).
+BOX_W = 360
+PALETTE_FIELD_H = 40
+PALETTE_ROW_H = 30
+PALETTE_FOOT_H = 34
+
+#: TODO: spoken punctuation ("press enter", "tab"), resolved locally so Type
+#: gets it without a CLI (design/compact/README.md). The session's decode
+#: pipeline owns words; this belongs beside it, not in the pill.
+
+
+def _round_rect(c, x1, y1, x2, y2, r, **kw) -> None:
+    """A rounded rectangle on whichever target is drawing.
+
+    `GdiCanvas` has a real one, built from quarter-circles; a `tk.Canvas` has
+    only the smoothed polygon `ui.py` has always used. Dispatched rather than
+    always sending the polygon, because GDI+ renders that spline wider than Tk
+    does and a 26 px chip at radius 13 came out visibly ballooned.
+    """
+    rr = getattr(c, "round_rect", None)
+    if rr is not None:
+        rr(x1, y1, x2, y2, r, **kw)
+        return
+    _tk_round_rect(c, x1, y1, x2, y2, r, **kw)
+
+
+def _unkey(win) -> None:
+    """Take a window off the colour key and off Tk's own alpha, for the
+    layered path.
+
+    Both are answers to the question `GdiCanvas` is now answering, and both
+    get in its way. `-transparentcolor` keys a colour out of whatever is
+    painted, so the pill's own `SHELL` pixels would be punched out of the
+    bitmap we just antialiased; `-alpha` puts the window into
+    `SetLayeredWindowAttributes` mode, and a window in that mode refuses
+    `UpdateLayeredWindow` outright — which photographed as the key colour
+    standing in a solid rectangle where the pill should be. The opacity
+    `-alpha` was carrying is not lost: it moves to the blend's
+    `SourceConstantAlpha` (`GdiCanvas.constant_alpha`).
+
+    Neither attribute exists off Windows, and neither is worth an exception
+    here: this only runs where `paint.available()` already said yes.
+    """
+    for attr, value in (("-transparentcolor", ""), ("-alpha", 1.0)):
+        try:
+            win.attributes(attr, value)
+        except tk.TclError:
+            pass
+
+
+def _capsule_points(x1, y1, x2, y2, square_top=False, inset=0.0) -> list:
+    """The stadium as one open point run, from its top-left to its top-right.
+
+    One path, sampled, rather than the arcs-plus-rectangles this drew before —
+    and the reason is in `.shots/02-compact-hearing.png` from the run before
+    this: a pieslice's *fill* and an arc's *stroke* do not rasterize onto the
+    same pixels, so the ring stood a pixel outside the body and a dark halo
+    ran around the inside of both caps, with a visible step where each
+    straight run met its arc. Fill and stroke taken from the same points
+    cannot disagree about where the edge is.
+
+    `inset` pulls the path in by that many pixels, which is how a stroke that
+    centres on its path stays inside a fill that stops at it.
+
+    `square_top` is the foot (gen.py `.foot`: `border-radius: 0 0 17px 17px`)
+    — the panel docks above, so the top corners square off to meet it and only
+    the bottom quarter-circles survive. Open rather than closed because the
+    foot's border has `border-top: 0`: the caller closes the loop when it
+    wants all four sides, and does not when the seam above is somebody else's
+    line to draw.
+    """
+    x1, y1, x2, y2 = x1 + inset, y1 + inset, x2 - inset, y2 - inset
+    r = (y2 - y1) / 2
+    #: 24 points to the half-circle — a 7.5 degree step, which on a 17 px
+    #: radius is a 2.2 px chord: below the eye's read of a curve at this size,
+    #: and cheap enough for a 30 ms frame.
+    steps = 24
+    pts = []
+    if square_top:
+        pts.append((x1, y1))
+        pts.append((x1, y2 - r))
+        # y grows downward, so the quarters sweep with `+ r sin a` — negating
+        # it mirrors each corner into the top half and folds the foot into a
+        # wedge, which is what `.shots/11-compact-refine-panel.png` drew.
+        for i in range(steps + 1):  # bottom-left quarter: left side to bottom
+            a = math.pi - i * (math.pi / 2) / steps
+            pts.append((x1 + r + r * math.cos(a), y2 - r + r * math.sin(a)))
+        for i in range(steps + 1):  # bottom-right quarter: bottom to right side
+            a = math.pi / 2 - i * (math.pi / 2) / steps
+            pts.append((x2 - r + r * math.cos(a), y2 - r + r * math.sin(a)))
+        pts.append((x2, y1))
+        return pts
+    cy = y1 + r
+    for i in range(steps * 2 + 1):  # the left cap, top tangent round to bottom
+        a = math.pi / 2 + i * math.pi / (steps * 2)
+        pts.append((x1 + r + r * math.cos(a), cy + r * math.sin(a)))
+    for i in range(steps * 2 + 1):  # the right cap, bottom tangent round to top
+        a = -math.pi / 2 + i * math.pi / (steps * 2)
+        pts.append((x2 - r + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
+
+
+def _flat(pts) -> list:
+    """A point list as the flat `x1, y1, x2, y2, ...` Tk takes."""
+    return [v for pt in pts for v in pt]
+
+
+def _capsule(c: tk.Canvas, x1, y1, x2, y2, square_top=False, **kw) -> None:
+    """The stadium, filled. One polygon over `_capsule_points`."""
+    c.create_polygon(_flat(_capsule_points(x1, y1, x2, y2, square_top)),
+                     **kw)
+
+
+def _capsule_ring(c: tk.Canvas, x1, y1, x2, y2, colour: str, width=1,
+                  square_top=False, top=True) -> None:
+    """The stadium as a stroke, on the same points the fill uses.
+
+    Inset by half the stroke, because a Tk line centres on its path: without
+    it half of every stroke falls outside the body it is meant to trace, which
+    is the halo this replaced.
+
+    `top` says whether the run across the top is drawn — gen.py's `.foot` has
+    `border-top: 0`, the seam above being the panel's line, but a state ring
+    is a `box-shadow` and wraps all four sides.
+    """
+    pts = _capsule_points(x1, y1, x2, y2, square_top, inset=width / 2)
+    if top:
+        pts = pts + [pts[0]]
+    c.create_line(_flat(pts), fill=colour, width=width)
+
+
+#: How much of the last handover the menu's Paste last row quotes: enough to recognise
+#: the words, short enough that the menu stays the width its other rows set.
+MENU_QUOTE_CHARS = 34
+
+
+def _menu_quote(text: str) -> str:
+    """The words Paste last would paste, as one quoted menu line."""
+    flat = " ".join(text.split())
+    if len(flat) > MENU_QUOTE_CHARS:
+        flat = flat[: MENU_QUOTE_CHARS - 1].rstrip() + "…"
+    return f"“{flat}”"
+
+
+def _hit(rect, x, y) -> bool:
+    """Whether (x, y) falls in a (x1, y1, x2, y2) chip rect — the panel's
+    whole hit-testing vocabulary."""
+    x1, y1, x2, y2 = rect
+    return x1 <= x < x2 and y1 <= y < y2
+
+
+def _wrap(text: str, line_chars: int):
+    """Every line `text` needs at about `line_chars`, one at a time.
+
+    Paragraph by paragraph on the explicit newlines, because **the shape is
+    part of the text**. This used to be `text.split()`, which collapses the
+    lot into one run of words — so Refine.dc.html's own worked example, a lead
+    line and three bullets, drew as a single paragraph while Send pasted the
+    real thing. A blank line stays a blank line and a line's leading
+    indentation is kept and paid for out of its own width, so the artboard's
+    indented "- fix the tests" is still indented and still fits.
+    """
+    for para in text.split("\n"):
+        body = para.lstrip()
+        indent = para[:len(para) - len(body)]
+        words = body.split()
+        if not words:
+            yield ""  # a paragraph break: a row of its own, as it is in the text
+            continue
+        room = max(1, line_chars - len(indent))
+        cur = ""
+        for word in words:
+            trial = f"{cur} {word}".strip()
+            if cur and len(trial) > room:
+                yield indent + cur
+                cur = word
+            else:
+                cur = trial
+        yield indent + cur
+
+
+def _fit(text: str, line_chars: int, max_lines: int) -> str:
+    """`text` wrapped to at most `max_lines` lines of about `line_chars`, with
+    an ellipsis on the last when there was more.
+
+    The band's answer to Tk's width-only wrapping: wrapped here, on the block's
+    own line budget, the text cannot spill into the block below it. The budget
+    is a cap rather than a fixed row count now — `_panel_layout` grows the band
+    to whatever this returns, up to it.
+    """
+    lines: list[str] = []
+    for line in _wrap(text.strip("\n").rstrip(), line_chars):
+        if len(lines) == max_lines:
+            lines[-1] = lines[-1].rstrip() + "…"
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _lines(fitted: str) -> int:
+    """How many rows a `_fit` result occupies. Empty text is no rows at all,
+    which is what lets a block with nothing in it cost the band nothing."""
+    return len(fitted.split("\n")) if fitted else 0
+
+
+class _Layout(NamedTuple):
+    """Where every row of the panel goes this frame, and how tall the band is.
+
+    One source of truth for the band: `_draw_panel` draws from it, `_panel_h`
+    sizes the window from it, `_panel_click` and `_on_press` hit-test against
+    it. Before this they were module constants that each described the same
+    200 px band in a slightly different way, and the arithmetic did not close
+    — the result's second line at 124 + 18 + 18 = 160 ran under the footer
+    chips at 156 (`.shots/11-compact-refine-panel.png`).
+
+    `heard` and `result` are the wrapped text, not the raw: the height was
+    computed from these exact strings, so the block cannot draw more rows than
+    the band was grown for.
+    """
+
+    band_h: int
+    line_h: int
+    heard: str
+    heard_tag_y: int | None
+    heard_y: int
+    result: str
+    result_tag_y: int | None
+    result_y: int
+    footer_y: int
+    copy: tuple
+    send: tuple
+    close: tuple = CLOSE_RECT
+
+
+class _Palette:
+    """The Switch-workspace palette's state (Workspace.dc.html): the query,
+    and the rows it leaves standing.
+
+    Logic only, so a bare fixture can drive it — the window, the keys and the
+    `set_workspace` call are CompactPill's, thin triggers beside it. The list
+    is the folders Flow has been pointed at, most recent first: the profile's
+    own record (`profile.workspaces`, written by `note_workspace`), so the
+    order the profile keeps is already the palette's ranking, and a substring
+    filter never re-sorts it.
+    """
+
+    #: The pinned last row (Workspace.dc.html). Choosing it clears the
+    #: workspace, which is what `session.set_workspace(None)` already means.
+    NONE = "No workspace — just talk"
+
+    def __init__(self, workspaces) -> None:
+        self.query = ""
+        self.workspaces = list(workspaces)
+
+    def type(self, ch: str) -> None:
+        self.query += ch
+
+    def backspace(self) -> None:
+        self.query = self.query[:-1]
+
+    def rows(self) -> list:
+        """(label, is_none) per visible row: the query's substring hits in
+        profile order, then the pinned row — always last, never filtered out."""
+        q = self.query.lower()
+        hits = [(w, False) for w in self.workspaces if q in w.lower()]
+        return hits + [(self.NONE, True)]
+
+    def choose(self, index: int = 0):
+        """What the highlighted row (or row `index`) hands
+        `session.set_workspace` — the path, or None for the pinned row."""
+        label, is_none = self.rows()[index]
+        return None if is_none else label
+
+
+class CompactPill(tk.Tk):
+    """The wordless capsule. Press and hold to talk, tap to switch mode."""
+
+    #: Declared on the class, not only assigned in `__init__`, and that is
+    #: load-bearing — the same reason every one of these carries in ui.py:
+    #: `tk.Misc.__getattr__` forwards an unknown attribute to `self.tk`, so on
+    #: an instance built with `__new__` — which is how every UI test fixture in
+    #: this suite builds one — a missing name recurses until the stack ends
+    #: instead of defaulting (item 32 found exactly this as a RecursionError
+    #: through the full Pill). A class attribute is a real lookup that never
+    #: reaches `__getattr__`; `__init__` overrides it per instance.
+    lite = False
+    armed = False
+    hotkeys = None
+    on_send = None
+    settings_path = None
+    #: `_tick`'s re-schedule and `quit_app`'s idempotence both read this, so a
+    #: bare fixture has to find it here. True: a fixture that drives `_frame`
+    #: directly is alive by definition.
+    _alive = True
+    #: Which of `profile.DESIGNS` this class *is* — ui.py:2492's field, and the
+    #: same two readers: the menu's `(current)` marker and `switch_design`'s
+    #: refusal to rebuild the surface already on screen. Uppercase because
+    #: `design()` a few methods down is this class's device-to-design-pixel
+    #: conversion, and one of the two names had to give.
+    DESIGN = "compact"
+    #: The design this surface asked to be replaced by, or None for "nobody
+    #: asked" — read by `__main__` the moment `mainloop()` returns.
+    switch_to: str | None = None
+    #: The eased and the drawn level, read by `_frame` and `_draw`. A bare
+    #: fixture draws the silent meter these describe.
+    _eased_level = 0.0
+    _meter_level = 0.0
+    #: Frames of error flash left. Zero — no flash — is what a fixture reads.
+    _flash = 0
+    #: The press's two clocks and two flags: when the button went down, where
+    #: (root coordinates, for the drag slop), whether it has travelled since,
+    #: and whether the frame pump has already turned it into an utterance. All
+    #: idle here, which is the state a fixture that never touched a mouse
+    #: should read as — the same four, for the same reason, as ui.py's press
+    #: defaults at flow/ui.py:2394-2398.
+    _press_at: float | None = None
+    _press_xy = (0, 0)
+    _press_moved = False
+    _press_talking = False
+    #: Where inside the window the press landed, so a drag moves the pill by
+    #: the pointer's travel rather than snapping its corner to the cursor.
+    _drag = (0, 0)
+    #: `tkfont.Font(...).measure` per font spec, built on demand by `_measure`.
+    _fonts: dict = {}
+    #: One line's height per font spec, asked of the painter once by
+    #: `_line_height` — the same cache `_fonts` is and for the same reason: the
+    #: panel's layout is recomputed every frame and a measurement that cannot
+    #: change between frames should be paid for once. A bare fixture reads the
+    #: empty class default and gets `LINE_NOMINAL` back.
+    _line_h: dict = {}
+    #: Where the frame draws, and where a box's frame draws. `None` on a bare
+    #: fixture, which never presents; `_draw` sets `paint` from the canvas in
+    #: `__init__`, and the tests hand it their recording fake directly.
+    paint = None
+    _box_paint = None
+    #: Device pixels per design pixel on this window's monitor. 1.0 until
+    #: `__init__` asks, and 1.0 for good on a DPI-unaware process, a Mac or a
+    #: Linux desktop — so a fixture that never asked reads the identity.
+    k = 1.0
+    #: Where the window is, and where the capsule's top edge is, both in
+    #: device pixels and both *tracked* rather than read back. `winfo_rootx`
+    #: and `winfo_rooty` lag a `geometry` call by a frame or two — the same
+    #: staleness `_open_box` records for its own anchor — so a `_sync_shell`
+    #: that read them re-anchored off the position before last and walked the
+    #: window down the screen by the panel's height each time. At 100 % that
+    #: was survivable and unnoticed; at 300 % it is 600 px a step, and the
+    #: pill left the bottom of the display.
+    _shell_xy = (0, 0)
+    _capsule_y = 0
+    #: The monitor this window is placed against, as the two rectangles the
+    #: shipped design places against — `full` to centre on, `work` to stand on.
+    #: Class defaults so a `__new__`-built fixture can read them without a Tk.
+    #: Refreshed by `_sync_monitor`, because a pill that can be dragged can be
+    #: dragged onto another monitor and these were read once, in `__init__`.
+    full = (0, 0, 1920, 1080)
+    work = (0, 0, 1920, 1080)
+    #: Every monitor's bounding box — what a *drag* may cross, as against the
+    #: one monitor a placed window is clamped into. `None` until a
+    #: `_sync_monitor` has answered, which is what makes `_move_window` fall
+    #: back to `work` on a fixture that has no Win32 to ask.
+    desktop = None
+    #: `_sync_monitor`'s frame counter, on the class for the reason all of
+    #: these are: `_frame` increments it, and a fixture that drives `_frame`
+    #: directly has no `__init__` to have set it.
+    _frame_no = 0
+    #: The right-click menu, built in `__init__`. None on a fixture, and
+    #: `_on_menu` checks rather than assuming. `_mode_var` is the radios'
+    #: tick, on the instance because a Tk variable dies with the frame that
+    #: created it (see `_populate_menu`).
+    _menu = None
+    _mode_var = None
+    #: What the last `draft` event carried — the text the send path hands
+    #: over, and what item 3's panel `heard` block will read. "" on a fixture,
+    #: which is also the true answer for a pill that has heard nothing.
+    _last_draft = ""
+    #: Armed by a release that has words to send; fired by `_pump_send` once
+    #: the decoder is finished with them. The send path's whole state, and
+    #: False on a fixture for the same reason the press flags are idle there.
+    _send_pending = False
+    #: What the draft held when the hold in flight began. `_talk_end` compares
+    #: against it to tell "the decode landed early" from "there were already
+    #: words here" — see there. "" on a fixture, and "" is also the true answer
+    #: for a pill whose session has never drafted anything.
+    _draft_at_hold = ""
+    #: When the wait above was armed, for its ceiling (`PTT_PASTE_WAIT_SEC`).
+    #: `Pill._ptt_wait` is one attribute doing both jobs; here the two flags
+    #: already say *which* wait is armed, so this says only when. None is no
+    #: wait, which is what a fixture reads.
+    _send_since: float | None = None
+    #: Whether `_fast_tick` is scheduled. Its own flag rather than a read of
+    #: the wait, because the clock outlives one turn of it: the release arms,
+    #: the tick fires, and the same tick decides whether to book the next one.
+    #: `_quicken` looks in `__dict__` rather than here — see there.
+    _fast_ticking = False
+    #: The window Send is aimed at, polled by `_track_target` the way ui.py's
+    #: own `paste_target` is (flow/ui.py:2486). None on a fixture, which is
+    #: also the Lite answer: no target-window awareness, and `paste()` asks
+    #: the foreground instead.
+    paste_target = None
+    #: A Paste last waiting to happen, (text, since, restore), or None — see
+    #: `_paste_last`. Class-level so the frame's pump finds a real None on a
+    #: `__new__`-built fixture instead of recursing into `self.tk`.
+    _paste_last_wait = None
+    #: Where the talk keys go back to (decisions.md 2026-09-23, "Ask's own hold"):
+    #: the dictation mode the Ask keys took the pill away from — Type or Refine —
+    #: and Type when the pill was tapped to Ask by hand. The hand picks the side;
+    #: the tint no longer has to be read before a hold.
+    _dictate_side = DICTATE
+    #: Whether the hold in flight is the Ask keys'. Their release is theirs to
+    #: end, and an Ask hold that was refused (no agent CLI) must not end a
+    #: hands-free utterance the toggle started.
+    _ask_hold = False
+    #: When a talk-keys hold began on Ask, while it waits `SIDE_SETTLE_SEC` to
+    #: leave it — or None. See `_settle_side`.
+    _side_since = None
+    #: A correction to a Type paste waiting for the hand to leave the keys —
+    #: when it started waiting, or None. See `_pump_retype`.
+    _retype_wait = None
+    #: The panel's whole state: open or not; the mode it was opened for, which
+    #: is what its spec lookup keys on — the drawing follows the mode that
+    #: *raised* it, so an answer landing after a mode switch still draws as
+    #: the Ask it is; the heard block's text and whether it is final (a
+    #: partial draws italic, the draft does not); the result block's text; and
+    #: the release-armed ask waiting on its draft. All closed and empty on a
+    #: fixture, which is the resting pill.
+    _panel_open = False
+    _panel_mode = None
+    _panel_heard = ""
+    _panel_heard_final = False
+    _panel_result = ""
+    _ask_pending = False
+    #: Whether the hold in flight has yet to say anything. Set by a panel-mode
+    #: `_talk_start` and cleared by the first thing that arrives — a `partial`,
+    #: or `_ask` when the question fires. It is what moves "the next hold
+    #: starts fresh" (Ask.dc.html) from the press to the words: a hold that
+    #: hears nothing must leave the answer on screen exactly as it was, and
+    #: clearing at the press destroyed it before a syllable had landed. False
+    #: on a fixture, which is a pill holding nothing.
+    _hold_fresh = False
+    #: The window's current size: PILL_W × PILL_H alone, PANEL_W ×
+    #: (PANEL_H + PILL_H) with the band. `_sync_shell` no-ops on equality,
+    #: which is what a bare fixture's values describe.
+    _shell_w = PILL_W
+    _shell_h = PILL_H
+    #: The outside-click poll's edge detector: the button's last read.
+    _outside_was_down = False
+    #: The tray's three states (the escape hatch the canvas said no to and
+    #: 2026-09-03 kept — design/compact/README.md): the icon, the queue it
+    #: puts its clicks on, and whether the window is hidden behind it. All
+    #: idle on a fixture, which is a pill that was never hidden.
+    _tray = None
+    _tray_events = None
+    _hidden = False
+    #: Where the window was when it was hidden, so `show_from_tray` puts it
+    #: back rather than where the window manager feels like.
+    _home = None
+    #: The standalone box (the workspace palette) and its state: None when
+    #: closed — which is all a fixture ever sees. `_palette` holds the
+    #: palette's logic while its box is open; `_box_kind` says which box.
+    _box = None
+    _box_canvas = None
+    _box_kind = ""
+    _palette = None
+    #: The box's anchor: left edge and bottom row, recorded at open because
+    #: `winfo_*` lags a `geometry` call by a frame and `_sync_box` re-heights
+    #: off them. Zero on a fixture, whose box is never open.
+    _box_x = 0
+    _box_foot = 0
+    #: The three fallback states the ring can be in without a session state
+    #: behind them (States.dc.html). `_mic_gone` is the persistent one: the
+    #: mic is blocked or unplugged, so the glyph wears a slash and the ring
+    #: stays red until a capture answers — the one gesture the pill refuses
+    #: outright. `_recover` is the amber launch notice's countdown. `_copied`
+    #: is Lite's clipboard notice's countdown. All zero/False on a fixture,
+    #: which is a healthy pill.
+    _mic_gone = False
+    _recover = 0
+    #: Frames of notice strip left, and what it says. `_copied` was this
+    #: with one hardcoded sentence; the strip is the same strip.
+    _notice = 0
+    _notice_text = COPIED_TEXT
+    #: How wide the strip has to be for its words. The pill is 120 px and a
+    #: sentence is not: measured when the notice is set, because a strip that
+    #: keeps the capsule's width simply cuts its own message in half — which
+    #: is what `.shots/22-compact-mic-silent.png` showed the first time.
+    _notice_w = PILL_W
+    #: When the hold in flight opened the microphone. Its own clock rather
+    #: than `_press_at`, because `_on_release` clears that *before* calling
+    #: `_talk_end` — so a release measuring against it measured zero, and the
+    #: silence check below could never fire on a real hold.
+    _hold_since = None
+    #: The loudest level seen during the hold in flight, so a release can tell
+    #: a quiet room from a microphone that is delivering nothing at all.
+    #: Whether the CLI's failure line is what's in the result block — so Copy
+    #: and Send hand over the raw dictation instead, because unrefined text
+    #: beats no text.
+    _panel_failed = False
+    #: The capsule's y-offset inside the window — the panel band's height at
+    #: the last `_sync_shell`. The capsule's screen position is the anchor
+    #: every resize keeps ("the pill never hides and never moves").
+    _capsule_off = 0
+    #: Whether the window is out of the activation chain. Set in `__init__`
+    #: from `_no_activate`'s read-back; False on a fixture, which is the
+    #: Lite/Mac answer `_on_menu`'s foreground borrow keys off.
+    no_activate = False
+    #: What `_draw_key` answered for the frame currently on screen, or None
+    #: for "whatever is up there, do not trust it". A class default because
+    #: `_frame` reads it before anything has ever set it — and None on a bare
+    #: fixture is the honest answer: nothing has been composited at all.
+    _drawn_key = None
+
+    def __init__(
+        self, session: Session, on_send=None, hotkeys=None, arm=False,
+        settings_path=None, lite=False,
+    ) -> None:
+        super().__init__()
+        set_icon(self)
+        self.session = session
+        self.on_send = on_send
+        self.hotkeys = hotkeys
+        self.lite = lite
+        self.settings_path = (
+            Path(settings_path) if settings_path is not None else None
+        )
+        self.armed = False
+        self._eased_level = 0.0
+        self._meter_level = 0.0
+        self._flash = 0
+        self._press_at = None
+        self._press_xy = (0, 0)
+        self._press_moved = False
+        self._press_talking = False
+        self._drag = (0, 0)
+        self._fonts = {}
+        self._line_h = {}
+        self._last_draft = ""
+        self._send_pending = False
+        self._send_since = None
+        # The instance's own False, and it is what `_quicken` tests for: the
+        # class default above is a real lookup for `_fast_tick` to read, and
+        # `__dict__.get` — which is how `_quicken` avoids recursing on a bare
+        # fixture — never sees a class attribute.
+        self._fast_ticking = False
+        self.paste_target = None
+        #: A Paste last waiting to happen: (text, since, restore). See `_paste_last`.
+        self._paste_last_wait = None
+        self._dictate_side = DICTATE
+        self._ask_hold = False
+        self._side_since = None
+        self._retype_wait = None
+        self._panel_open = False
+        self._panel_mode = None
+        self._panel_heard = ""
+        self._panel_heard_final = False
+        self._panel_result = ""
+        self._ask_pending = False
+        self._hold_fresh = False
+        self._shell_w = PILL_W
+        self._shell_h = PILL_H
+        self._outside_was_down = False
+        self._tray = None
+        self._tray_events = queue.Queue()
+        self._hidden = False
+        self._home = None
+        self._box = None
+        self._box_canvas = None
+        self._box_kind = ""
+        self._palette = None
+        self._mic_gone = False
+        self._recover = 0
+        self._notice = 0
+        self._notice_text = COPIED_TEXT
+        self._panel_failed = False
+        self._capsule_off = 0
+
+        # The window. `_shell_window` applies the five probed attributes and
+        # answers with the background the canvas must agree with — see its
+        # docstring for why the background is returned rather than assumed.
+        # Where it opens, and this was missing: the window was given a size and
+        # no position, so Windows dropped it in the top-left corner — over the
+        # menu bar of whatever was behind it, which is the one place a
+        # always-on-top pill must not be. `bottom_centre` is the shipped
+        # design's own arithmetic (FluidVoice's `positionWindow`): centred on
+        # the monitor under the pointer, stood clear of the taskbar. The same
+        # place, on every machine, whatever is docked to which edge.
+        # Asked once the window exists, because it is a property of the
+        # monitor the window is on and there is no window before now.
+        self.k = paint.scale_for(self)
+        self.full, self.work = _pointer_monitor(
+            self.winfo_screenwidth(), self.winfo_screenheight(), self)
+        x, y = bottom_centre(self.dev(PILL_W), self.dev(PILL_H),
+                             self.full, self.work,
+                             round(PANEL_BOTTOM_OFFSET * self.k))
+        self.geometry(f"{self.dev(PILL_W)}x{self.dev(PILL_H)}+{x}+{y}")
+        self._shell_xy = (x, y)
+        self._capsule_y = y
+        bg = _shell_window(self, lite, PILL_ALPHA)
+        self.configure(bg=bg)
+        self.canvas = tk.Canvas(
+            self, width=self.dev(PILL_W), height=self.dev(PILL_H), bg=bg,
+            highlightthickness=0, bd=0,
+        )
+        self.canvas.pack(fill="both", expand=True)
+        # What the frame actually draws on. `painter_for` answers with a
+        # `GdiCanvas` where Windows can composite per-pixel alpha and with
+        # this canvas everywhere else — same calls either way, which is why
+        # every `_draw_*` below takes the target as an argument and none of
+        # them knows which it got.
+        #
+        # The key comes off when it does: `-transparentcolor` and a layered
+        # window are two answers to the same question, and Windows honours the
+        # key, so leaving it set would punch the pill's own `SHELL` pixels out
+        # of the bitmap we just antialiased.
+        self.paint = paint.painter_for(self.canvas, PILL_W, PILL_H, lite,
+                                       PILL_ALPHA, self.k)
+        if getattr(self.paint, "antialiased", False):
+            _unkey(self)
+
+        # Three gestures on one button (README: "Tap (< PILL_HOLD_SEC) cycles
+        # the mode; hold talks; right-click is the only menu"). The hold is
+        # not a timer of its own: the 30 ms frame is the only clock this pill
+        # has — the same rule ui.py states for its dots and its flash — so a
+        # press past the threshold becomes an utterance in `_pump_press`, and
+        # a release that never got there is a tap.
+        self.canvas.bind("<ButtonPress-1>", self._on_press)
+        self.canvas.bind("<B1-Motion>", self._on_motion)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<Button-3>", self._on_menu)
+        # The panel's Esc (README: "Send / Esc / click-outside closes"). The
+        # window is out of the activation chain, so this only ever fires where
+        # the style cannot take (Lite, a Mac); everywhere else Esc is the
+        # `cancel` hotkey, which is global and does not ask who has focus.
+        self.bind("<Escape>", lambda _e: self._close_panel())
+
+        self._menu = _dark_menu(self)
+        self._populate_menu(self._menu)
+
+        # Out of the activation chain, like every Flow window (ui.py:2570). Not
+        # cosmetic: a window the click *activates* is raised and focused by it,
+        # which both disturbs the z-order under the always-on-top band and earns
+        # the popup a foreground it must then be refused — see `_on_menu`.
+        self.no_activate = _no_activate(self)
+
+        if arm:
+            try:
+                self.session.start()
+            except Exception:
+                # No microphone, a device held exclusively elsewhere. Stay
+                # disarmed and slash the glyph, rather than showing a green
+                # ring over a capture that does not exist — `_toggle`'s rule,
+                # kept here.
+                self._flash = FLASH_FRAMES
+                self._mic_gone = True
+            else:
+                self.armed = True
+
+        # States.dc.html's amber case, detected once, at launch.
+        self._check_workspace_gone()
+
+        # The icon goes up now, because the pill's menu no longer carries a
+        # way out — see `_start_tray`. A machine with no notification area
+        # says so by returning False, and nothing here depends on it.
+        self._start_tray()
+
+        self.after(30, self._tick)
+
+    # `mainloop` is tk.Tk's own, and that is deliberate: __main__.py drives
+    # this class exactly as it drives Pill — construct, `mainloop()`, and
+    # `quit_app()` out of the KeyboardInterrupt clause.
+
+    def dev(self, v) -> int:
+        """A design length in device pixels — what Tk geometry now takes.
+
+        Every size in this module is written in the units
+        `design/compact/gen.py` uses, and the whole DPI story is that those are
+        no longer the units the screen is measured in: on a 300 % display a
+        120 px capsule is a 360 px window holding a bitmap GDI+ drew at 360 px.
+        Rounded, not floored, so a 34 px pill at 150 % is 51 and not 50 — half
+        a pixel of drift at the bottom edge is a hairline outside the window.
+
+        Not clamped to a minimum, because this converts offsets as well as
+        sizes and a zero offset is a real answer: floored at one, a closed
+        panel moved the capsule a pixel every time it was drawn. Sizes here
+        are constants that are never zero, and the bitmap clamps its own.
+        """
+        return round(v * self.k)
+
+    def design(self, v) -> float:
+        """A device length back in design pixels, for hit-testing.
+
+        Tk reports pointer coordinates in device pixels once the process is
+        DPI-aware, and every rectangle this module tests against is written in
+        design pixels. Without this the panel's chips move out from under the
+        pointer by exactly the scale factor.
+        """
+        return v / self.k
+
+    def quit_app(self) -> None:
+        # Idempotent, for the reason ui.py's is: ctrl+C reaches here down
+        # either of two paths (caught in `_tick`, or escaping `mainloop`) and
+        # nothing upstream can tell which one ran.
+        #
+        # `detach` below is this minus the session, the hotkeys and the words —
+        # the window half, for a design switch rather than a quit.
+        if not self._alive:
+            return
+        self._alive = False
+        try:
+            # Before the hotkeys and before the window: an icon outliving its
+            # process is a ghost in the notification area that only a hover
+            # clears (ui.py:4114-4118, whose order this keeps).
+            if self._tray is not None:
+                self._tray.stop()
+            if self.hotkeys is not None:
+                self.hotkeys.stop()
+            self.session.close()
+            for painter in (self.paint, self._box_paint):
+                close = getattr(painter, "close", None)
+                if close is not None:
+                    close()
+        finally:
+            self.destroy()
+
+    # -- the design switch ---------------------------------------------------
+
+    def switch_design(self, name: str) -> None:
+        """Put the other design on screen, in place of this one, now.
+
+        ui.py's `switch_design` in this surface's idiom, and the same contract
+        both halves of the switch depend on: store the name, set `switch_to`,
+        and hand the window back. `__main__`'s loop reads `switch_to` when
+        `mainloop()` returns and builds the other class against the session,
+        the hotkeys and the `on_send` this surface was already driving — so the
+        draft, the thread, the workspace and the mode all cross the seam, and
+        the window does not.
+
+        Refused for the design already running and for a name that is not one
+        of `DESIGNS`: the row marked `(current)` would otherwise blank the
+        screen to redraw the same pill.
+
+        This surface already printed rather than noted — a wordless pill has
+        nowhere to put a sentence — so the two exceptional cases keep their
+        lines, and the error flash they used to set goes: this is the one row
+        whose window is gone before the next frame, so a flash here is a colour
+        nobody sees. The switch itself says nothing: `__main__` prints
+        `design: <name>` as it builds the successor, which is the same sentence
+        one frame later and on a window that will still be there to have said
+        it.
+        """
+        if name == self.DESIGN or name not in DESIGNS:
+            return
+        profile = getattr(self.session, "profile", None)
+        if profile is None:
+            # `--no-profile`. The surface really does change — that is this
+            # process, and this process is what the flag is about — so the note
+            # is about the next launch rather than about this press.
+            print(f"flow: design: {name} - not remembered, launched with "
+                  "--no-profile", flush=True)
+        else:
+            profile.design = name
+            # A setting somebody chooses once, so a save that failed has to be
+            # visible now rather than at the next launch that ignores it.
+            if not profile.save():
+                print(f"flow: could not save {profile.path}", flush=True)
+        self.switch_to = name
+        self.detach()
+
+    def detach(self) -> None:
+        """Take this surface off the screen and leave the session running.
+
+        `quit_app` minus three lines, each omitted on purpose: the session is
+        **not** closed, the hotkeys are **not** stopped and — the compact
+        surface's own — the painters *are*, because a `GdiCanvas` holds a DIB
+        and a GDI+ graphics for a window that is about to stop existing.
+
+        The microphone is handed back. A pill that was armed pauses first,
+        because the surface built next starts disarmed and a device left open
+        under a window that is not pumping it is the failure of 2026-09-04 in
+        full: the chord opened the mic into a frame loop that never read a
+        sample, and for six reports it looked like a broken microphone.
+        `pause()` and not `mic.stop()`, so the health check knows this was
+        deliberate and does not helpfully reopen it.
+
+        The pending `after` callbacks go before the window does — see
+        `ui.Pill.detach` for the second interpreter that would otherwise
+        inherit them. The frame in flight is already covered: `_present`
+        catches the TclError a destroyed window raises and clears `_alive`,
+        and `_tick`'s re-schedule reads the same flag.
+        """
+        if not self._alive:
+            return
+        self._alive = False
+        try:
+            if self._tray is not None:
+                self._tray.stop()
+            if self.armed:
+                self.session.pause()
+            for painter in (self.paint, self._box_paint):
+                close = getattr(painter, "close", None)
+                if close is not None:
+                    close()
+        finally:
+            self._cancel_pending()
+            self.destroy()
+
+    def _cancel_pending(self) -> None:
+        """Drop every `after` this window still has outstanding. Never raises."""
+        try:
+            pending = self.tk.eval("after info").split()
+        except Exception:
+            return
+        for aid in pending:
+            try:
+                self.after_cancel(aid)
+            except Exception:
+                pass
+
+    # -- the pump ----------------------------------------------------------
+
+    def _tick(self) -> None:
+        """Drive one frame. Must never propagate an exception.
+
+        The re-schedule is in `finally`, for the reason ui.py's `_tick` states
+        at length: a raise out of this callback would break the `after()` chain
+        and leave a pill on screen but dead, and for an always-on widget that
+        is the worst available failure mode. An error becomes a red flash —
+        which on this pill is the whole vocabulary for "something is wrong" —
+        and the loop carries on.
+        """
+        try:
+            self._frame()
+        except KeyboardInterrupt:
+            # Tcl's event loop is C, so a pending SIGINT is raised where Python
+            # bytecode next runs — here. Taken as the quit it was, as ui.py
+            # does, because the alternative is a microphone left open.
+            self.quit_app()
+        except Exception:
+            self._flash = FLASH_FRAMES
+            traceback.print_exc()
+            # And repaint anyway, because the line that raised was in front of
+            # the one that draws: `_draw()` is the last thing `_frame` does, so
+            # anything raising in a pump aborts the frame *before* the repaint.
+            # NEEDS_YOU.md records the same failure on the shipped surface —
+            # "an exception in the frame pump leaves the row painted at the
+            # last width, under a window that has already been resized" — and
+            # here it is worse: with the layered path there is no Tk canvas
+            # underneath still holding the last frame's items, so the last
+            # *presented bitmap* stays on screen — at whatever size
+            # `_sync_shell` has since changed to — until a frame succeeds. It
+            # never does, if the pump raises every frame. The flash above is
+            # the report; this is what makes it visible.
+            try:
+                self._draw()
+            except Exception:
+                # A draw that itself raises cannot recurse into this handler or
+                # take the clock down with it. One frame that drew nothing is a
+                # stale pill; a broken `after` chain is a dead one, and the
+                # `finally` below is the only thing standing between them.
+                pass
+        finally:
+            if self._alive:
+                self.after(30, self._tick)
+
+    def _frame(self) -> None:
+        """One pull of the session: tick or collect, drain, ease, draw."""
+        # Hotkeys arrive on their own thread; Tk is only ever touched from
+        # this one.
+        if not self._drain_hotkeys():
+            return
+        self._pump_side()
+        self._drain_tray()
+        self._sync_monitor()
+        self._track_target()
+        self._watch_paste_run()
+        if self.armed:
+            self.session.tick()
+            hearing = getattr(self.session, "hearing", True)
+            target = self._norm(self.session.level_db) if hearing else 0.0
+            self._meter_level = self._eased(target)
+        else:
+            # Still collect what the CLI owes us. Disarming must not strand an
+            # answer already in flight — the defect ui.py's identical branch
+            # comments on, and the reason `pump_results` exists separately.
+            self.session.pump_results()
+            self._meter_level = self._eased(0.0)
+        self._pump_events()
+        # Immediately after the drain, and never before it: the words a wait is
+        # waiting for arrive as a `draft` event, and `_pump_send` reads the
+        # draft the event has just settled.
+        self._pump_send()
+        self._pump_press()
+        self._pump_paste_last()
+        self._pump_retype()
+        if self._panel_open and self._outside_click_now():
+            self._close_panel()
+        if self._flash:
+            self._flash -= 1
+        if self._recover:
+            self._recover -= 1
+        if self._notice:
+            self._notice -= 1
+            if not self._notice:
+                # The notice strip's time is up; the window is 120×34 again.
+                self._sync_shell()
+        # Only when the picture has changed. `_draw` rebuilds every item and
+        # composites a whole bitmap, and an idle pill asked it to draw the
+        # same pill thirty times a second — see `_draw_key` for the numbers
+        # and for what makes the key trustworthy. Stored before the draw, the
+        # way the shipped surface does it: a `_draw` that raises is a frame
+        # `_tick` turns into a flash, and the flash moves the key itself.
+        key = self._draw_key()
+        if key != self._drawn_key:
+            self._drawn_key = key
+            self._draw()
+
+    def _sync_monitor(self) -> None:
+        """Which monitor the *window* is on, re-asked every fourth frame.
+
+        `self.full` and `self.work` were read once, in `__init__`, off the
+        pointer — and then never again for the life of the process. Everything
+        that keeps this surface on screen clamps against them: `_move_window`'s
+        drag bounds, `_sync_shell`'s four edges, the box's right edge. So a
+        pill dragged to a second monitor spent the rest of the session being
+        clamped into a rectangle it had left, and the first panel it opened
+        was thrown back onto the primary display. That is not a rounding
+        error; it is the whole width of a monitor.
+
+        **Keyed on the window, where `Pill._sync_monitor` (flow/ui.py:4233) is
+        keyed on the pointer.** The shipped design re-places its stack when the
+        pointer changes screen, so the pointer *is* the question there. This
+        one is dragged by hand and stays where it was put, so the question is
+        where the capsule is standing — and during a drag those two differ for
+        as long as the seam takes to cross. The point asked about is the
+        capsule's centre in device pixels: the window is 400 px wide with the
+        band up and the capsule is 120, so asking about the window's corner
+        near a seam would hand the far monitor's rectangle to a pill standing
+        on this one.
+
+        Every fourth frame (~120 ms), for the reason `Pill._frame` states at
+        flow/ui.py:4318: the question is three ctypes calls, the answer changes
+        a few times an hour, and a tenth of a second is fast enough to follow a
+        window across a seam.
+        """
+        if not self._alive:
+            # The tray's Quit is drained one line above the call to this, and
+            # it destroys the window inside the frame that is still running —
+            # so this is the first line afterwards that asks Tk for anything,
+            # and "application has been destroyed" would land as a traceback
+            # on the console of somebody who has just pressed quit. `_present`
+            # catches the same thing at the other end of the frame.
+            return
+        self._frame_no += 1
+        if self._frame_no % 4 != 1:
+            return
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.full, self.work = _monitor_at(
+            self._shell_xy[0] + self.dev(self._shell_w) // 2,
+            self._capsule_y + self.dev(PILL_H) // 2, sw, sh, self)
+        # What a drag is allowed to cross: every monitor there is, the union
+        # `park_spot` already places against. Asked here rather than inside
+        # `_move_window` so a drag costs no Win32 calls of its own — a motion
+        # event arrives far more often than every 120 ms.
+        self.desktop = _virtual_desktop(sw, sh)
+
+    def _drain_hotkeys(self) -> bool:
+        """Act on every hotkey that arrived since the last drain. False after a quit.
+
+        The names are the ones `Pill._drain_hotkeys` (flow/ui.py:4333) acts on.
+        `send` is bound here rather than arriving with the panel, because it was
+        never the panel's: a dictation surface with no send is not a dictation
+        surface. `cancel` is the panel's Esc ("Send / Esc / click-outside
+        closes", design/compact/README.md) — a chord rather than a key binding
+        because this window never has focus for one to fire on. A name this loop
+        does not know falls through, which is what an unbound chord does in the
+        full UI too.
+        """
+        if self.hotkeys is None:
+            return True
+        for name in self.hotkeys.drain():
+            if name == "toggle":
+                self._toggle()
+            elif name == "warm":
+                # The chord's press-down, one put ahead of `talk`, so the
+                # models load during the hold instead of inside the sentence.
+                self.session.warm()
+            elif name == "talk":
+                # The talk keys dictate, whatever the tint (decisions.md
+                # 2026-09-23, "Ask's own hold"). From Ask the pill leaves Ask
+                # once the hold has settled (`SIDE_SETTLE_SEC`): the Ask keys
+                # are often pressed *through* these ones.
+                if self.session.mode == CONVERSE:
+                    self._side_since = time.perf_counter()
+                    self._talk_start(panel=False)
+                else:
+                    self._talk_start()
+            elif name == "talk-end":
+                # A hold released inside the settle still dictated: the side
+                # changes before its words are routed, never after.
+                self._settle_side()
+                self._talk_end(send=True)
+            elif name == "talk-break":
+                # Windows meant `ctrl+win+d`. What was said is committed either
+                # way (session.talk_end's own contract, P2); it simply does not
+                # paste itself into whatever window a desktop switch moved to.
+                # And a hold from Ask that broke never leaves Ask: the third key
+                # was usually Alt, on its way to the Ask keys.
+                self._side_since = None
+                self._talk_end(send=False)
+            elif name == "ask":
+                # Ask's own hold (ctrl+alt+win): always a question, whatever
+                # the tint. `warm` arrived one put ahead of it, as for talk.
+                if self._to_side(ask=True):
+                    self._talk_start()
+                    self._ask_hold = self._press_talking
+            elif name in ("ask-end", "ask-break"):
+                if self._ask_hold:
+                    self._ask_hold = False
+                    self._talk_end(send=name == "ask-end")
+            elif name == "send":
+                self._send()
+            elif name == "cancel":
+                self._close_panel()
+            elif name == "mode":
+                self._cycle_mode()
+            elif name == "paste_last":
+                self._paste_last()
+            elif name == "quit":
+                self.quit_app()
+                return False
+        return True
+
+    def _fast_tick(self) -> None:
+        """The gesture's own clock: `FAST_TICK_MS`, between the 30 ms frames.
+
+        `Pill._fast_tick` (flow/ui.py:4415), for the reason the 2026-09-01
+        felt-latency pass gives: the chord's release and the moment the final
+        decode lands are two things that had been waiting for a repaint that
+        has nothing to do with them, and they are in series. This surface
+        drains hotkeys only on the frame, so a release-to-paste carried up to
+        two extra frames — ~60 ms on Windows' 15.6 ms timer, which
+        `Pill.__init__` lowers to 1 ms for the whole process.
+
+        This loop does exactly those two things and nothing else. Drawing stays
+        on the frame, where the meter needs it, and so does the wait's ceiling:
+        this only ever looks at a decoder that has *finished*.
+
+        Only while something is in flight. A queue check every 5 ms is cheap
+        but it is not free, and an idle pill has nothing to be quick about.
+        """
+        try:
+            if not self._alive:
+                return
+            if not self._drain_hotkeys():
+                return
+            self._pump_side()
+            if ((self._send_pending or self._ask_pending
+                 or self._retype_wait is not None)
+                    and not self.session.busy):
+                # The same three calls `_frame` makes, in the same order and
+                # for its reason: the decode's words have to be on
+                # `session.draft` before `_pump_send` looks for them.
+                self.session.pump_results()
+                self._pump_events()
+                self._pump_send()
+                self._pump_retype()
+        except Exception:
+            # `_tick`'s rule, and this clock needs it more: an exception here
+            # must not stop the clock and must not be silent. The red flash is
+            # this surface's whole vocabulary for "something is wrong", and the
+            # frame that draws it is 30 ms away at most.
+            self._flash = FLASH_FRAMES
+            traceback.print_exc()
+        finally:
+            if self._alive and (self._press_talking or self._send_pending
+                                or self._ask_pending
+                                or self._retype_wait is not None):
+                self.after(FAST_TICK_MS, self._fast_tick)
+            else:
+                # Nothing in flight: the clock stops rather than idling, and
+                # the next `_quicken` starts it again. A press that has not
+                # yet become a hold is deliberately not on this list —
+                # `_pump_press` is the frame's, and the frame is the only
+                # clock it has ever had.
+                self._fast_ticking = False
+
+    def _quicken(self) -> None:
+        """Start `_fast_tick` if it is not already running."""
+        # `__dict__`, not `getattr`: a bare fixture built with `__new__` has no
+        # clock and no `after`, and `tk.Misc.__getattr__` would recurse looking
+        # for either — the RecursionError this module's class defaults exist to
+        # prevent. `__init__` is what puts the False there, so this is a no-op
+        # on a fixture and a real start on a real window.
+        if self.__dict__.get("_fast_ticking") is False:
+            self._fast_ticking = True
+            self.after(FAST_TICK_MS, self._fast_tick)
+
+    def _check_workspace_gone(self) -> None:
+        """States.dc.html's amber case: the workspace the profile remembers is
+        gone. `resolve_workspace` has already dropped it and said so on the
+        console (flow/profile.py:289-291) — the fallback to no workspace is
+        done; the pill's half is to say it the one way this surface can,
+        once, in amber. A hold or the countdown ends the notice."""
+        stored = getattr(getattr(self.session, "profile", None),
+                         "workspace", None)
+        if stored and not Path(stored).is_dir():
+            self._recover = RECOVER_FRAMES
+
+    def _cli_offered(self) -> bool:
+        """Whether Refine and Ask exist on this machine right now
+        (States.dc.html: with no agent CLI on PATH they are simply not
+        offered). The same answer Flow Home's Models page gives —
+        `Session.provider`'s own cache pays the PATH lookup, and it is the
+        public seam for it: this is a surface asking the session a question,
+        not a surface reading the session's implementation."""
+        return bool(self.session.provider)
+
+    def _cycle_mode(self) -> None:
+        """The tap's and the `mode` chord's cycle, filtered by what the
+        machine offers.
+
+        The session stays three-mode — the shipped UI cycles through all
+        three and a CLI can arrive mid-session. The exclusion is this
+        surface's, and it is grey, not red: no flash, no error, Type simply
+        does not cycle. Already off Type (the CLI vanished mid-session), the
+        one cycle that still runs is the way back to it.
+
+        Both endings go through `_choose_mode`, which is where the pending
+        send is dropped — this method used to carry that rule alone, and the
+        menu's radios, which change the mode just as completely, did not.
+        """
+        if self._cli_offered():
+            self._choose_mode(None)
+        elif self.session.mode != DICTATE:
+            self._choose_mode(DICTATE)
+
+    def _choose_mode(self, to: str | None) -> None:
+        """Change mode, from whichever gesture asked. `None` is the cycle.
+
+        **The one seam, because the rule under it was in one of two places.**
+        A pending paste belongs to the mode it was spoken in (ui.py:4363-4369)
+        — so the arm is dropped here, and the words themselves stay in the
+        draft, which is `toggle_mode`'s own promise. `_cycle_mode` had that;
+        `_populate_menu`'s radios called `session.toggle_mode(to=)` straight
+        and did not. Choose Ask from the menu with a Type paste waiting and the
+        arm survived the switch: the next `draft` fired `session.send()` in
+        CONVERSE, which asks — so the words went to the CLI as a question
+        instead of into the window they were dictated for, and the only sign
+        was an answer to something nobody had asked.
+
+        `_ask_pending` goes with it, for the mirror of the same reason: a
+        release in Ask that is still waiting on its decode must not fire an
+        ask into a session that is now in Type.
+
+        The cycle keeps its own call rather than passing `to=None`. They are
+        the same thing to the session and not the same thing to read: one is
+        "next mode", the other is "this mode", and the session's API says so
+        with two forms.
+        """
+        self._send_pending = False
+        self._ask_pending = False
+        if to is None:
+            self.session.toggle_mode()
+        else:
+            self.session.toggle_mode(to=to)
+
+    def _to_side(self, *, ask: bool) -> bool:
+        """Put the pill on the side the hand chose, before its hold begins
+        (decisions.md 2026-09-23, "Ask's own hold"). False when that side is
+        not on offer here — Ask with no agent CLI — and the strip says why.
+
+        The Ask keys remember the dictation mode they left, Type or Refine,
+        and the talk keys go back to it; from an Ask somebody tapped to by
+        hand, the talk keys go to Type. Drained at once, so the switch's own
+        `mode` event — which closes the band it does not belong to — lands
+        before the hold opens Ask's band, not a frame after it.
+        """
+        mode = self.session.mode
+        if ask:
+            if not self._cli_offered():
+                self._say("Ask needs an agent CLI - install claude or codex")
+                return False
+            if mode != CONVERSE:
+                self._dictate_side = mode
+                self._choose_mode(CONVERSE)
+                self._pump_events()
+            return True
+        if mode == CONVERSE:
+            side = self._dictate_side
+            if side == CONVERSE or (side == REFINE and not self._cli_offered()):
+                side = DICTATE
+            self._dictate_side = DICTATE
+            self._choose_mode(side)
+            self._pump_events()
+        return True
+
+    def _settle_side(self) -> None:
+        """A talk-keys hold that began on Ask has settled: leave Ask now.
+
+        Reached by `_pump_side` once `SIDE_SETTLE_SEC` has passed, and by the
+        release itself when it comes first. A break inside the wait clears it
+        instead — that hold was on its way to the Ask keys.
+        """
+        if self._side_since is None:
+            return
+        self._side_since = None
+        self._to_side(ask=False)
+
+    def _pump_side(self) -> None:
+        """One tick of the wait `_settle_side` ends."""
+        if (self._side_since is not None
+                and time.perf_counter() - self._side_since >= SIDE_SETTLE_SEC):
+            self._settle_side()
+
+    def _pump_events(self) -> None:
+        """Drain what the session said since the last frame.
+
+        The pill itself owns two persistent kinds — an error turns the ring
+        red (and a CLI's failure line joins the panel's result block; a
+        `disarm` that is not a release means the device is gone, and the
+        slash stays until a capture answers). `draft` is a *record*, not a
+        trigger: it says the decode landed, and `_pump_send` decides on the
+        frame whether that finished the utterance a release is waiting for —
+        see there for why the event cannot decide it. The panel owns the rest:
+        a `partial` is the heard block's live text, a `reply` is the answer
+        landing in the result block, and a `mode` closes the band — it belongs
+        to the mode that raised it.
+
+        And the four kinds after `disarm` are the ones that used to fall
+        through, which on a wordless surface is not the same as "nothing to
+        draw": a spoken `send` trigger did nothing at all, and a `drop`, an
+        `edit` and Send's refusal notes were the surface's whole answer to
+        "why did that not work". They go on the notice strip, which is the
+        channel that now exists for exactly this — see `SAID_NOTES` for which
+        notes, and for the ones deliberately left silent. `conversation` still
+        needs nothing: there is nothing of it on this screen to clear.
+        """
+        for ev in self.session.events():
+            if ev.kind == "draft":
+                # Kept, not acted on. Firing here was two defects: a draft that
+                # lands *mid-hold* (the gate closes on any trailing pause, so a
+                # decode can arrive before the release) had to be skipped, and
+                # the skip is what made a release after a pause paste nothing;
+                # and a hold long enough to queue two finals fired on the first
+                # of them, pasting half an utterance and stranding the rest.
+                self._last_draft = ev.text
+            elif ev.kind == "partial":
+                # Not while a talk-keys hold waits to leave Ask: those words
+                # are dictation, and Ask's heard block is not theirs.
+                if self._panel_open and self._side_since is None:
+                    if self._hold_fresh:
+                        # The words of this hold have arrived, so *now* the
+                        # exchange before it goes. `_talk_start` marks the
+                        # hold and clears nothing — see there for the answer
+                        # this used to wipe off the screen at the press.
+                        self._hold_fresh = False
+                        self._panel_result = ""
+                        self._panel_failed = False
+                    # The heard block's live text — italic until the release's
+                    # draft makes it final.
+                    self._panel_heard = ev.text
+                    self._panel_heard_final = False
+            elif ev.kind == "reply":
+                if ev.text:
+                    # Whatever hold is in flight has been overtaken: this
+                    # answer is newer than the exchange that hold was going to
+                    # clear, so the arming goes and the next partial leaves it
+                    # standing. Hold again before the CLI has answered — 4-20 s
+                    # is long enough that people do — and without this the
+                    # answer appeared and was wiped by the first word of the
+                    # follow-up, which is a fact arriving and being taken away.
+                    self._hold_fresh = False
+                    self._panel_failed = False
+                    self._panel_result = ev.text
+                    # Never silent (P2): if the panel was closed while the CLI
+                    # was working, the answer reopens it rather than landing
+                    # nowhere. Esc is "not looking right now", not "never tell
+                    # me" — the question was asked from this surface.
+                    self._open_panel()
+            elif ev.kind == "mode":
+                self._close_panel()
+            elif ev.kind == "error":
+                self._flash = FLASH_FRAMES
+                if (self._panel_open
+                        and ev.text.startswith(("refine failed", "ask failed"))):
+                    # The panel opens holding the raw dictation; the CLI's own
+                    # last line is the message, not a generic failure
+                    # (States.dc.html). Send still works — `_panel_text`
+                    # answers with the raw text, because unrefined text beats
+                    # no text. Notes that are not this stay unread: the
+                    # failure arrives as an `error`, and the rest have no
+                    # surface the artboards draw.
+                    self._panel_failed = True
+                    self._panel_result = ev.text
+            elif ev.kind == "disarm":
+                self.armed = False
+                if ev.text not in ("push-to-talk", "lent"):
+                    # Not a release — the device itself went away and did not
+                    # come back (ui.py:4526-4532's case, the same words). The
+                    # slash and the red ring persist until a capture answers.
+                    self._mic_gone = True
+            elif ev.kind == "send":
+                # The spoken trigger — "boom", or "enter boom" for a paste
+                # that presses Enter after itself (`edits.enter_word`). It
+                # presses the same button the `send` hotkey does, arrived at
+                # by a different route, which is ui.py:4558-4562's rule and
+                # the reason the paste is decided here rather than in the
+                # session: it belongs to this thread and to `paste_target`.
+                # Without this branch the trigger word was simply inert on
+                # this surface, and "enter boom" had nowhere to put its Enter.
+                self._send(submit=ev.text == "enter")
+            elif ev.kind == "drop":
+                # An utterance Flow rejected. Said, never swallowed: P2 is
+                # that a rejection is never silent, and on a pill with no
+                # words the alternative was speech vanishing with no event
+                # anybody could see.
+                self._say(ev.text)
+            elif ev.kind == "edit":
+                # A correction Flow applied — "changed 'thursday' to
+                # 'Tuesday'". The whole feedback a spoken correction gets, and
+                # invisible here until now: the draft is not on screen in Type
+                # mode, so the strip is the only place the change can be seen
+                # at all. The shipped surface offers a way back with it
+                # (`undoable=True`); this one has no chip to offer, and saying
+                # what happened is the half it can do.
+                self._say(ev.text)
+            elif ev.kind == "retype":
+                # A correction to the last Type paste, decided: `_pump_retype`
+                # makes it once the hand is off the keys. Said when it lands (as
+                # an `edit`), not now — until then it has not happened.
+                self._retype_wait = time.perf_counter()
+                self._quicken()
+            elif ev.kind == "note" and ev.text.startswith(SAID_NOTES):
+                # The few notes no colour on this pill can carry — see
+                # `SAID_NOTES`, which is also the list of what stays silent
+                # and why.
+                self._say(ev.text)
+
+    def _pump_send(self) -> None:
+        """Fire the release's armed send, once there is something to send it.
+
+        `Pill._pump_talk`'s second half (flow/ui.py:2858-2877), and it is here
+        for the two defects that come of letting the `draft` event fire
+        instead:
+
+        - **A release after a trailing pause never pasted.** The gate's 800 ms
+          hangover closes mid-hold whenever the speaker pauses, so `_finalise`
+          runs and the `draft` event arrives while the button is still down.
+          `_pump_events` had to skip it — a stale flag must not fire inside the
+          *next* utterance — and by the release `talk_end` had nothing left to
+          report, so nothing ever armed. The words sat in the draft. That is
+          "push to talk does nothing", reported six times against this class of
+          surface.
+        - **A split utterance pasted only its first half.** A hold that crosses
+          `MAX_UTTERANCE_SEC` queues two finals; firing on the first pasted
+          half a sentence and stranded the rest in a draft nothing would come
+          back for.
+
+        Both are the same missing condition, and it is `busy`: the decoder has
+        to be *finished*, not merely to have said something. An empty draft
+        when it finishes simply ends the wait — silence is a normal thing to do
+        with a push-to-talk button, and `_talk_end` has already taken the panel
+        back down.
+        """
+        if not (self._send_pending or self._ask_pending):
+            return
+        if not self.session.busy:
+            paste = self._send_pending
+            self._send_pending = self._ask_pending = False
+            self._send_since = None
+            if not self.session.draft.text.strip():
+                return
+            if paste:
+                self._send()
+            else:
+                self._ask()
+            return
+        if (self._send_since is not None
+                and time.perf_counter() - self._send_since
+                >= PTT_PASTE_WAIT_SEC):
+            # The ceiling, and it is not a discard: the words are in the draft
+            # and the next release sends them all. A paste this far from the
+            # gesture would land in whatever window the user has since moved
+            # to, which is worse than not pasting — and giving up silently is
+            # worse than both (P2), so the wordless pill says this one out
+            # loud, in the strip it keeps for facts no colour can carry.
+            self._send_pending = self._ask_pending = False
+            self._send_since = None
+            self._say(f"still decoding after {PTT_PASTE_WAIT_SEC:.0f}s — "
+                      "press send when it lands")
+
+    def _ask(self) -> None:
+        """The panel-mode release: the heard block's final text goes to the CLI.
+
+        `session.send()` in converse starts the ask and returns "" — the words
+        are never pasted, which is the Type-only paste rule `_talk_end`'s gate
+        states: Ask results land here, not in the window you were in. The
+        answer itself arrives 4-20 s later as a `reply` event.
+
+        The other end of `_talk_start`'s deferred clear: the question is
+        leaving, so the exchange before it goes now if no partial already took
+        it — a short hold whose only words land in the release's draft still
+        starts fresh.
+        """
+        self._ask_pending = False
+        self._send_since = None
+        self._hold_fresh = False
+        self._panel_failed = False
+        # The draft at *fire* time, not the last `draft` event's text: a hold
+        # that queued two finals has two of those events, and the second
+        # carries only its own half. `session.send()` is about to hand the CLI
+        # the whole draft, and the heard block has to show what was asked.
+        # `_last_draft` behind it, for an ask that fires against a draft
+        # already cleared: the same words, one event older.
+        self._panel_heard = self.session.draft.text or self._last_draft
+        self._panel_heard_final = True
+        self._panel_result = ""
+        self.session.send()
+
+    def _send(self, submit: bool = False) -> None:
+        """Hand the draft over: the words paste, or the ring says they could not.
+
+        The shape is ui.py's `_send` (flow/ui.py:3756-3770) — the text from
+        `session.send()`, the paste target this surface polls, the problem the
+        handler hands back — down to the first lines, which are what stops a
+        release and the `send` hotkey pasting the same words twice. Both waits
+        go, not just the paste's: in a panel mode the hotkey has already put
+        the draft to the CLI, and an ask still armed behind it would ask the
+        emptied draft and be refused with "nothing to ask". A hold owns one
+        send, and whoever gets there first has it. The way out itself is
+        `_deliver`'s, shared with the panel's Send.
+
+        `submit` presses Enter after the paste and arrives from one place
+        only: the spoken "enter boom", routed here as a `send` event. No chip
+        and no hotkey can set it, which is the same rule the shipped surface
+        runs under.
+
+        Type is dictate and `session.send()` in dictate never asks — but this
+        is not a Type-only path any more, because the trigger word can be
+        spoken in any mode. In a panel mode `send()` returns "" and starts the
+        ask instead, exactly as it does for the shipped `_send`, and nothing
+        here needs to know which happened: an empty return delivers nothing,
+        and the refusal notes say why when the answer is neither.
+        """
+        self._send_pending = self._ask_pending = False
+        self._send_since = None
+        text = self.session.send()
+        if text:
+            self._deliver(text, submit=submit, typed=True)
+
+    def _deliver(self, text: str, submit: bool = False, typed: bool = False) -> None:
+        """The words' way out, shared by both sends: paste where the user
+        was, or Lite's clipboard — which is not an error state, and says so
+        under the pill rather than flashing (States.dc.html's last case).
+        Where the full pill spends a problem on a bubble card, this one has
+        no words to say it with: a problem is the red flash, the whole
+        vocabulary for "something is wrong" that is not a fallback with its
+        own artboard.
+
+        With no handler the copy is what is left, and a `submit` there is
+        still just a copy: the clipboard cannot press Enter for anybody, so
+        the strip names the step that is theirs. Refusing the enter-variant
+        was the alternative and it is wrong on `edits.enter_word`'s own
+        argument — a decode that drops a word from "enter boom" yields
+        "boom", so refusing would make the degraded decode the working case.
+        """
+        if self.on_send:
+            # Passed only when it is true, the idiom ui.py:3803-3806 keeps for
+            # the same reason: a handler written before the flag existed —
+            # `send_check.py`'s two-argument fixture is one — still works.
+            extra = {"submit": True} if submit else {}
+            # A Type paste stays changeable by voice while nobody types or
+            # clicks (decisions.md 2026-09-23, "Correcting a Type paste"), and
+            # "since" starts *before* the Ctrl-V: a key pressed during the paste
+            # counts against it, which is the safe side to be wrong on.
+            hook = self._key_hook() if typed else None
+            if hook is not None:
+                # And a paste that continues the last one gets the space between
+                # them — decided now, not on the last frame: a key or a click in
+                # the 30 ms since means the caret may be somewhere else.
+                self._watch_paste_run()
+                join = getattr(self.session, "join_paste", None)
+                joined = join(text, self.paste_target) if callable(join) else text
+                if isinstance(joined, str):
+                    text = joined
+                hook.touched = False
+            problem = self.on_send(text, self.paste_target, **extra) or ""
+            if problem:
+                self._flash = FLASH_FRAMES
+            self._handed_over(text, problem,
+                              window=self.paste_target if hook is not None else None,
+                              submitted=submit)
+            return
+        problem = _copy_to_clipboard(self, text)
+        if problem:
+            self._flash = FLASH_FRAMES
+        else:
+            self._say(COPIED_ENTER_TEXT if submit else COPIED_TEXT)
+            self._sync_shell()
+        self._handed_over(text, problem or "", copied=True)
+
+    def _handed_over(self, text: str, problem: str = "",
+                     copied: bool = False, window=None,
+                     submitted: bool = False) -> None:
+        """Tell the session the words left, so History keeps them (when it is
+        kept) and Paste last has them. After the paste, never before it: the
+        keystroke is what somebody is waiting on. `getattr` because a fixture's
+        session may predate the method.
+
+        `window` is a Type paste this surface can watch, so a spoken correction
+        can still change it (`Session._track_paste`); `submitted` is one Enter
+        went in behind. Both are passed only when they say something, so a
+        fixture's older three-argument `delivered` still works."""
+        delivered = getattr(self.session, "delivered", None)
+        if callable(delivered):
+            extra = {}
+            if window:
+                extra["window"] = window
+            if submitted:
+                extra["submitted"] = True
+            delivered(text, problem, copied, **extra)
+
+    def _key_hook(self):
+        """The chord whose keyboard hook is running (`Hotkeys.hook`), or None —
+        the one that knows whether a key was typed since Flow last pasted."""
+        hotkeys = self.hotkeys
+        return getattr(hotkeys, "hook", None) if hotkeys is not None else None
+
+    def _clicked_off_pill(self) -> bool:
+        """Whether a mouse button is down anywhere but on this window — a click
+        that may have moved the caret in the window a paste went to. Polled a
+        frame at a time: a click is longer than a frame. The same geometry as
+        `_outside_click_now`, for its reasons."""
+        if self.lite:
+            return False
+        if not any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MOUSE_BUTTONS):
+            return False
+        pt = _POINT()
+        _user32.GetCursorPos(ctypes.byref(pt))
+        x, y = self._shell_xy
+        return not (x <= pt.x < x + self.dev(self._shell_w)
+                    and y <= pt.y < y + self.dev(self._shell_h))
+
+    def _watch_paste_run(self) -> None:
+        """End what a spoken correction could change, the moment Flow cannot know
+        the words are still where it put them: a key typed that Flow did not
+        send, a click anywhere but the pill, another window in front
+        (decisions.md 2026-09-23, "Correcting a Type paste"). One boolean from
+        the hook and a few reads of the mouse, and only while there is
+        something to watch."""
+        run = getattr(self.session, "paste_run", None)
+        if run is None:
+            return
+        hook = self._key_hook()
+        if hook is None:
+            why = "that paste can't be changed"
+        elif getattr(hook, "touched", True) is not False:
+            why = "you typed after it was pasted"
+        elif self._clicked_off_pill():
+            why = "you clicked after it was pasted"
+        else:
+            fg = foreground_hwnd()
+            why = ("another window came to the front"
+                   if fg and fg != run.window and not owned_by_flow(fg) else "")
+        if why:
+            self.session.end_paste_run(why)
+
+    def _pump_retype(self) -> None:
+        """Make the change a `retype` announced, once the hand is off the keys.
+
+        A Backspace sent under a held Ctrl arrives as Ctrl+Backspace, which takes
+        a whole word per key — so this waits out the hold that said the change,
+        then the modifiers, up to `PASTE_LAST_WAIT_SEC` as Paste last does. The
+        change is taken from the session only now: a paste that landed in the
+        meantime makes it stale, and the session hands back nothing.
+
+        Checked once more on the way out, because the frame's watch runs every
+        30 ms and the keys go in now: nothing typed, the same window in front.
+        """
+        since = self._retype_wait
+        if since is None:
+            return
+        if self._press_talking:
+            # The clock starts at the release: a change said mid-hold waits for it.
+            self._retype_wait = time.perf_counter()
+            return
+        held = modifiers_held()
+        if held and time.perf_counter() - since < PASTE_LAST_WAIT_SEC:
+            return
+        self._retype_wait = None
+        fix = self.session.take_paste_fix()
+        if fix is None:
+            return
+        hook = self._key_hook()
+        if held:
+            problem = "not changed: the keys stayed down - say it again"
+        elif hook is None or getattr(hook, "touched", True) is not False:
+            problem = "not changed: you typed after Flow pasted"
+        elif foreground_hwnd() != fix.run.window:
+            problem = "not changed: that window is not in front any more"
+        elif not self.on_send:
+            problem = "not changed: nothing here can type into another window"
+        else:
+            problem = self.on_send(fix.insert, fix.run.window, remove=fix.remove) or ""
+        # `inject` says "not changed: ..." for a change that did not go in, and a
+        # warning for one that did — "your clipboard held an image" — which is said
+        # and is not a failure.
+        failed = "not changed" in problem
+        self.session.paste_fixed(fix, problem if failed else "")
+        if problem:
+            if failed:
+                self._flash = FLASH_FRAMES
+            self._say(problem)
+
+    def _paste_last(self, restore: bool = False) -> None:
+        """Paste last (decisions.md 2026-09-23, "History"): the newest thing a
+        Send handed over, pasted again into the window in front — from the menu
+        row, the `paste_last` shortcut and the tray.
+
+        Armed here and done by `_pump_paste_last`, never on the spot: the
+        shortcut fires with its keys still down, the menu is still handing the
+        foreground back, and the tray's menu has just taken it. `restore` is
+        the tray's case — its menu leaves one of Flow's own windows in front,
+        which `inject.paste` rightly refuses to paste over, so the window the
+        paste is aimed at is handed the foreground back first.
+        """
+        text = getattr(self.session, "last_handed", "")
+        if not isinstance(text, str) or not text:
+            self._say("nothing to paste yet - Flow has not sent anything")
+            return
+        self._paste_last_wait = (text, time.perf_counter(), restore)
+
+    def _pump_paste_last(self) -> None:
+        """One frame of a pending Paste last: give the foreground back, wait for
+        the hand to leave the keys, then paste through `on_send` — the one way
+        words go into another window — or copy where there is none. Never kept
+        again: it is already kept (`_handed_over` is for new words)."""
+        wait = self._paste_last_wait
+        if wait is None:
+            return
+        text, since, restore = wait
+        if restore:
+            self._paste_last_wait = (text, time.perf_counter(), False)
+            if self.paste_target:
+                _user32.SetForegroundWindow(self.paste_target)
+            return
+        held = modifiers_held()
+        if held and time.perf_counter() - since < PASTE_LAST_WAIT_SEC:
+            return
+        self._paste_last_wait = None
+        if held:
+            self._say("Paste last waited for the keys to come up - press it again")
+            return
+        if self.on_send:
+            problem = self.on_send(text, self.paste_target) or ""
+        else:
+            problem = _copy_to_clipboard(self, text)
+            if not problem:
+                self._say(COPIED_TEXT)
+        # Words Flow did not count went in after the last Type paste: nothing a
+        # spoken correction could change is where it was.
+        end = getattr(self.session, "end_paste_run", None)
+        if callable(end):
+            end("Paste last pasted after it")
+        if problem:
+            self._flash = FLASH_FRAMES
+            self._say(problem)
+
+    def _track_target(self) -> None:
+        """Remember the last window that had the foreground and was not Flow's own.
+
+        ui.py's `Pill._track_target`, the executable's name included now:
+        History says where the words went, and it can only say what this poll
+        found out. By the time `paste()` runs, the gesture that started it has
+        had its chance to move the foreground, so the target is asked a frame
+        at a time rather than at send time. Lite has no target-window
+        awareness and does not ask — which is what makes `--lite` here the
+        same code a Mac runs instead of a rehearsal of it.
+        """
+        if self.lite:
+            return
+        hwnd = foreground_hwnd()
+        if hwnd and not owned_by_flow(hwnd):
+            if hwnd != self.paste_target:
+                # On the edge only, ui.py's rule: `classify` opens a process
+                # handle, and the answer moves a few times an hour. The name is
+                # what History says the words went to, and what a per-app
+                # Refine note is keyed on — this surface used to leave it empty.
+                target = classify(hwnd)
+                if getattr(target, "is_shell", False) is True:
+                    # The taskbar, while a tray click holds it: never a place to
+                    # paste, and the tray's Paste last needs the window before it.
+                    return
+                self.session.target_app = target.process
+            self.paste_target = hwnd
+
+    def _pump_press(self) -> None:
+        """Turn a press that has outlived `PILL_HOLD_SEC` into an utterance.
+
+        Polled here rather than scheduled with `after`: the frame is the only
+        clock, and a timer would be a second thing a bare test fixture has no
+        Tk to run. A press that moved past the drag slop is a drag, not a
+        hold, and never reaches `talk_start`.
+        """
+        if (self._press_at is None or self._press_talking
+                or self._press_moved):
+            return
+        if time.perf_counter() - self._press_at < PILL_HOLD_SEC:
+            return
+        self._talk_start()
+        if not self._press_talking:
+            # The refusal `_toggle` also makes: a green ring over a dead
+            # capture is the one lie this surface must not tell — and this
+            # press is over, so it cannot become a tap either.
+            self._press_at = None
+            return
+
+    # -- the gestures --------------------------------------------------------
+
+    def _talk_start(self, panel: bool = True) -> None:
+        """The hold beginning, shared by the mouse pump and the `talk` hotkey.
+
+        `panel=False` is a talk-keys hold that began on Ask and has not left
+        it yet (`SIDE_SETTLE_SEC`): it captures from the press like any hold,
+        and leaves Ask's band exactly as it was — the answer on screen is not
+        this hold's to clear.
+
+        A hold in a panel mode raises the panel at once — the heard block is
+        where the partials land — and arms a fresh start: "the next hold
+        starts fresh" (Ask.dc.html), which is also what makes the foot's "hold
+        to reply" a reply rather than an append. Type is not in `PANEL_SPEC`,
+        so its holds change nothing on screen (README: "Type never opens a
+        panel").
+
+        **Armed, not done.** The blocks used to be emptied right here, and
+        that read the artboard's sentence as being about the press when it is
+        about the thread: hold to reply, hear nothing or change your mind, let
+        go, and `_talk_end` found nothing pending over an empty band and took
+        the panel down — so the answer somebody was reading vanished because
+        they touched the button, before a single word had arrived. The clear
+        waits for words now (`_hold_fresh`), and a hold that hears nothing
+        leaves the last exchange exactly as it was — which the release's own
+        rule then keeps on screen, the band having something to show.
+
+        A hold into a dead microphone is the one gesture the pill refuses
+        outright (States.dc.html): the refusal is the persistent slashed
+        glyph and red ring, not a flash that forgets by morning. A capture
+        that answers clears the slash — it was about then, not now.
+
+        A hold that begins while a release is still waiting for its decode
+        supersedes it — `Pill._talk_start`'s rule (flow/ui.py:2783-2786), and
+        the words are not dropped by it: the wait is only the *send*, and what
+        was said stays in the draft for this hold's own release to take. Which
+        is also what makes the old skip unnecessary: nothing armed can fire
+        inside the utterance that follows it, because nothing stays armed.
+        """
+        self._send_pending = False
+        self._ask_pending = False
+        self._send_since = None
+        self._press_talking = True
+        try:
+            self.session.talk_start()
+        except Exception as exc:
+            self._press_talking = False
+            self._flash = FLASH_FRAMES
+            loan = getattr(self.session, "mic_on_loan", "")
+            if isinstance(loan, str) and loan:
+                # Flow Home is tuning to this voice: the microphone is fine and busy,
+                # so the strip says why instead of the slash that means "gone".
+                self._say(str(exc))
+            else:
+                self._mic_gone = True
+            return
+        self._mic_gone = False
+        # **Armed here, and this is the whole of "push to talk does nothing".**
+        # `_frame` pumps the session only while armed — `session.tick()` is
+        # what reads the microphone — and this used to be set in
+        # `_pump_press`, which is the *mouse* path. A chord hold went through
+        # here instead, opened the device, and then sat in a frame loop that
+        # never once read from it: `capturing` true, the ring green, and not a
+        # sample pumped for the whole hold. The chord is the documented
+        # push-to-talk gesture, so that was every hold that mattered.
+        self.armed = True
+        # The 5 ms clock, for the release that ends this hold: the chord's
+        # keyup lands on the hotkey queue, and the 30 ms frame is otherwise the
+        # only thing that would look at it.
+        self._quicken()
+        # The hold's own clock: `_on_release` clears `_press_at` before
+        # `_talk_end` runs, so anything measuring the hold needs its own.
+        self._hold_since = time.perf_counter()
+        # And the hold's own baseline, for the release to measure the draft
+        # against: what is in there *now* was not said into this hold.
+        self._draft_at_hold = self.session.draft.text
+        self._recover = 0  # a hold ends the launch notice: seen, and moved on
+        if panel and self.session.mode in PANEL_SPEC:
+            self._panel_mode = self.session.mode
+            if not self._panel_open:
+                # Nothing is on screen to keep. The deferred clear above
+                # exists for an exchange somebody is *looking at*; over a band
+                # they dismissed it did the opposite — a hold that heard
+                # nothing raised the old answer and left it standing, because
+                # `_talk_end` saw a band with something to show. States.dc.html's
+                # third case is straight back to grey, and
+                # `16-compact-silence.png` was a picture of the old exchange.
+                self._panel_heard = ""
+                self._panel_heard_final = False
+                self._panel_result = ""
+                self._panel_failed = False
+            self._hold_fresh = True
+            self._open_panel()
+
+    def _talk_end(self, *, send: bool) -> None:
+        """The release, shared by the mouse and both hotkey endings.
+
+        `send=False` is the `ctrl+win+d` path: the words are still committed
+        and still land in the draft — nothing spoken is ever dropped (P2) —
+        they simply do not paste themselves into whatever window a desktop
+        switch just moved to. ui.py states the same at flow/ui.py:2760-2768.
+
+        The send is *armed*, not fired: the decode is usually still in flight,
+        and `_pump_send` fires it on the frame that finds the decoder finished.
+        What it arms is the mode's own path — Type's paste, a panel mode's ask
+        — and the paste rule stays Type-only: an Ask hold while the panel is
+        up is a reply, and its result lands in the panel, never in the window
+        you were in (README: "Type never opens a panel").
+
+        **`talk_end` is not the only witness that there are words**, and
+        believing it alone was the whole of "a release after a pause pastes
+        nothing". It reports what is still in flight (`_utter`), and the gate's
+        800 ms hangover closes on any trailing pause — so a speaker who pauses
+        before letting go has already had their final decoded, `_utter` is
+        empty, and the words are sitting in `session.draft`. The draft is the
+        second witness, and either one arms the wait.
+
+        The draft is asked *what changed*, not whether it is empty, and that
+        distinction is `ctrl+win+d`'s: a break leaves words in the draft
+        deliberately unpasted, and a later hold with nothing said into it must
+        not be what finally pastes them into whatever window the desktop switch
+        moved to. `_talk_start` took the baseline; this compares against it, so
+        the second witness only ever testifies about *this* hold.
+
+        A hold with nothing said into it ends in nothing: straight back to
+        grey, no panel, no toast (States.dc.html). The band the hold raised
+        has nothing to show, so it goes back down — silence is a normal thing
+        to do with a push-to-talk button.
+        """
+        self._hold_since = None
+        self._press_talking = False
+        pending = self.session.talk_end()
+        draft = self.session.draft.text
+        words = bool(pending or (draft.strip()
+                                 and draft != self._draft_at_hold))
+        self._draft_at_hold = draft
+        if send and words:
+            self._send_since = time.perf_counter()
+            if self.session.mode == DICTATE:
+                self._send_pending = True
+            elif self.session.mode in PANEL_SPEC:
+                self._ask_pending = True
+            # The 5 ms clock again, for the other half of the gesture: the
+            # decode landing. On the frame alone the release-to-paste path
+            # carries up to two more repaints of latency, which the
+            # 2026-09-01 felt-latency pass measured and refused.
+            self._quicken()
+        elif (not words and self._panel_open
+                and not (self._panel_heard or self._panel_result)):
+            self._close_panel()
+
+    def _toggle(self) -> None:
+        """The arm/disarm click's logic, shared by the hotkey of the same name."""
+        if self.armed:
+            self.armed = False
+            self.session.pause()
+        else:
+            try:
+                self.session.start()
+            except Exception:
+                self._flash = FLASH_FRAMES
+                self._mic_gone = True
+                return
+            self._mic_gone = False
+            self.armed = True
+
+    def _on_press(self, e=None) -> None:
+        """The button going down: remember when and where, decide nothing yet.
+
+        Except where: with the panel open, a press in the band is a chip
+        click, never a hold — the foot is the part that stays holdable
+        (README), and the band is the part with buttons on it. The split is
+        the band's *real* height, not `PANEL_H`: with a tall answer up, the
+        old constant fell inside the band, so a press on the footer chips was
+        read as a press on the foot and started a hold instead of copying.
+        """
+        if (self._panel_open and e is not None
+                and self.design(getattr(e, "y", self.dev(PILL_H)))
+                < self._panel_h()):
+            self._panel_click(e)
+            return
+        self._press_at = time.perf_counter()
+        self._press_xy = (getattr(e, "x_root", 0), getattr(e, "y_root", 0))
+        # The grab point, from the event's own window-relative coordinates
+        # rather than from `winfo_rootx()`. Two reasons, and either alone
+        # would decide it: `winfo_*` lags a `geometry` call by a frame (the
+        # staleness `_open_box` records), and touching Tk here recurses
+        # through `tk.Misc.__getattr__` on a `__new__`-built fixture — the
+        # RecursionError this module's class defaults exist to prevent.
+        self._drag = (getattr(e, "x", 0), getattr(e, "y", 0))
+        self._press_moved = False
+        self._press_talking = False
+
+    def _on_motion(self, e=None) -> None:
+        """A press that travels past the slop drags the window.
+
+        This used to only *record* that the press had moved, which made the
+        drag slop work and left the pill nailed to wherever Tk first put it —
+        "Drag it anywhere" (Main.dc.html) was the one gesture on the canvas
+        with no code behind it.
+
+        The order is `Pill._on_motion`'s (flow/ui.py:2712) and for its reason:
+        once capture is open the pointer is irrelevant, because somebody
+        talking into a held pill may well move the mouse and moving the window
+        out from under them is the gesture betraying them. Before that, motion
+        is both the thing that tells a drag from a hold and the drag itself.
+
+        The offset is the grab point inside the window, taken on the press —
+        without it the window snaps its own corner to the cursor on the first
+        motion event, which is the defect flow/ui.py:2588-2592 records.
+        """
+        if self._press_at is None or self._press_talking:
+            return
+        x, y = getattr(e, "x_root", 0), getattr(e, "y_root", 0)
+        # The slop is a design length and the travel is a device one, so the
+        # threshold is converted rather than compared across units: at 300 % an
+        # unconverted 4 px slop is a pixel and a third of real movement, and
+        # every hold by a hand that is not perfectly still becomes a drag.
+        slop = PILL_DRAG_SLOP * self.k
+        if not (abs(x - self._press_xy[0]) > slop
+                or abs(y - self._press_xy[1]) > slop):
+            return
+        self._press_moved = True
+        self._move_window(x - self._drag[0], y - self._drag[1])
+
+    def _move_window(self, x: int, y: int) -> None:
+        """Put the window's top-left at `(x, y)`, clamped to the desktop.
+
+        Its own method because it is the only part of a drag that touches Tk,
+        and `_on_motion`'s other job — telling a drag from a hold — has to
+        stay callable on a `__new__`-built fixture. Clamped so the pill cannot
+        be thrown somewhere only the tray could get it back from; the window
+        is the capsule plus whatever the panel and the notice have added, so
+        the bound is the drawn size and not `PILL_W`/`PILL_H`.
+
+        **Clamped to every monitor, not to the one it is on.** "Drag it
+        anywhere" (Main.dc.html), and `self.work` is one screen: with that as
+        the bound the pill stopped dead at the seam, because the pointer had
+        crossed to the next monitor and the window was being pinned to the
+        edge of this one — which reads as a pill that has snagged on nothing.
+        `desktop` is the union `park_spot` already places against, refreshed by
+        `_sync_monitor`, and the same sync brings `work` up to date a frame or
+        four after the capsule lands on the other side. `None` on a fixture
+        with no Win32 to ask, which then clamps to the single screen it has.
+        """
+        left, top, right, bottom = self.desktop or self.work
+        dw, dh = self.dev(self._shell_w), self.dev(self._shell_h)
+        nx = max(left, min(x, right - dw))
+        ny = max(top, min(y, bottom - dh))
+        self._shell_xy = (nx, ny)
+        # The capsule moved with the window, so the anchor the band grows from
+        # moves too — it sits below whatever panel height is currently drawn.
+        self._capsule_y = ny + self.dev(self._capsule_off)
+        self.geometry(f"{dw}x{dh}+{nx}+{ny}")
+        # No box to re-anchor: the palette holds the keyboard and closes on
+        # `FocusOut`, so the press that starts this drag has already
+        # dismissed it.
+
+    def _on_release(self, e=None) -> None:
+        """The button coming up: a hold ends the talk, anything else is a tap.
+
+        The tap does not re-check the clock. In real time the 30 ms frame has
+        fired ten times inside `PILL_HOLD_SEC`, so a genuine hold is already
+        `_press_talking` before any release can arrive — the pump is the
+        decision, this is the dispatch. A drag is neither, and does nothing.
+        """
+        if self._press_at is None:
+            return
+        talking = self._press_talking
+        moved = self._press_moved
+        self._press_at = None
+        self._press_moved = False
+        if talking:
+            self._talk_end(send=True)
+        elif not moved:
+            self._cycle_mode()
+
+    def _populate_menu(self, m) -> None:
+        """The only menu the design allows (Workspace.dc.html), rebuilt on
+        every open: the mode check and the workspace path are live values,
+        and a stale check over a new mode is the same lie as no check.
+
+        Tk has no sub-line row, so the canvas's `msub` lines are disabled
+        entries — `_dark_menu` already greys them. The mode rows go through
+        `_choose_mode`, which is the chooser API (`toggle_mode(to=)`) plus the
+        rule that has to travel with it: a flip cannot serve "choose Refine"
+        in a three-mode world, and a mode change from here drops a pending
+        paste for the same reason the tap does — see `_choose_mode`, which the
+        radios used to bypass.
+
+        **One row opens everything else: Open Flow** (decisions.md 2026-09-22,
+        "Flow Home"). The pill never grows a setting; Flow Home holds every
+        one. It replaced two rows. Workbench setup was three read-only lines,
+        and Home's Settings and Models pages show and change all three. Design
+        was the row the artboard did not draw — the 2026-09-04 exception that
+        kept the two designs reachable from each other — and Home's Settings
+        page is reachable from both and switches the pill the same way, so the
+        exception has nothing left to protect.
+
+        Nothing else was let back in. Hide to tray and Quit are still gone —
+        the tray icon carries those, raised at launch by `_start_tray`, and
+        Quit is also the `quit` hotkey, which needs neither focus nor menu.
+        """
+        current = self.session.mode
+        # On the instance, not the stack: a Tk variable dies with the frame
+        # that created it, and a radiobutton whose variable is gone draws no
+        # indicator — `.shots/06` showed three modes and no check until this
+        # was `self.`.
+        self._mode_var = tk.StringVar(value=MODE_NAME.get(current, ""))
+        # No CLI on PATH: the cycle skips Refine and Ask, and the menu says so
+        # the same way — grey, not absent (States.dc.html: a smaller Flow,
+        # not a broken one; Flow Home's Models page is what explains it).
+        offered = self._cli_offered()
+        for mode in (DICTATE, REFINE, CONVERSE):
+            name = MODE_NAME[mode]
+            kw = {} if mode == DICTATE or offered else {"state": "disabled"}
+            m.add_radiobutton(
+                label=name, value=name, variable=self._mode_var,
+                command=lambda t=mode: self._choose_mode(t), **kw)
+        m.add_command(label="tap the pill to cycle", state="disabled")
+        m.add_separator()
+        # Paste last (the canvas's Pill artboard, and Wispr Flow's, FluidVoice's
+        # and VoiceInk's menus): the words it would paste, so the row says what
+        # a click does. After a frame, not now — the menu is still handing the
+        # foreground back to the window the paste is aimed at.
+        last = getattr(self.session, "last_handed", "")
+        if isinstance(last, str) and last:
+            m.add_command(label="Paste last",
+                          command=lambda: self.after(60, self._paste_last))
+            m.add_command(label=_menu_quote(last), state="disabled")
+        else:
+            m.add_command(label="Paste last", state="disabled")
+            m.add_command(label="nothing sent yet", state="disabled")
+        m.add_separator()
+        m.add_command(label="Switch workspace", command=self._open_palette)
+        ws = getattr(self.session, "workspace", "") or ""
+        m.add_command(label=ws or "no workspace", state="disabled")
+        m.add_separator()
+        m.add_command(label="Open Flow", command=self._open_home)
+        m.add_command(label="models, microphone, shortcuts, settings",
+                      state="disabled")
+
+    def _open_home(self, page: str = "home") -> None:
+        """Open Flow Home, or say on the strip why it could not open.
+
+        Silent when it works — the window is the answer — and never silent when
+        it does not: a menu row that does nothing is the failure this whole
+        window exists to end.
+        """
+        home = getattr(self.session, "home", None)
+        if home is None:
+            self._say("Flow Home is not available in this session")
+            return
+        why = home.open(page)
+        if why:
+            self._say(why)
+
+    def _on_menu(self, e=None) -> None:
+        """Right-click — the only menu the design allows (Workspace.dc.html).
+
+        Borrows the foreground for the popup's lifetime, the trick `Pill._menu`
+        documents at flow/ui.py:2909-2923: a Tk popup is a native
+        `TrackPopupMenu` whose modal loop only receives input while its owner is
+        the foreground window, and `WS_EX_NOACTIVATE` means the click never made
+        us that. Guarded on `no_activate` — where the style cannot take (Lite,
+        Mac) the window is in the activation chain already, and a borrow would
+        be a Win32 call with nothing behind it. `_user32` is ui.py's `_NoHands`
+        there, so the guard is about clarity, not safety.
+        """
+        if self._menu is None or e is None:
+            return
+        # Rebuilt rather than refreshed: the mode check and the workspace
+        # line are the values of now, not of when the menu was first made.
+        self._menu.delete(0, "end")
+        self._populate_menu(self._menu)
+        previous = foreground_hwnd() if self.no_activate else 0
+        if self.no_activate:
+            _user32.SetForegroundWindow(toplevel_hwnd(self))
+        try:
+            self._menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            self._menu.grab_release()  # the documented idiom; cheap insurance
+            if previous:
+                _user32.SetForegroundWindow(previous)
+
+    # -- the tray ------------------------------------------------------------
+
+    def _start_tray(self) -> bool:
+        """Put the icon in the notification area. True once it is there.
+
+        Raised at launch rather than on demand, and that is what pays for
+        trimming the pill's menu back to the canvas (`_populate_menu`): the
+        menu ends at Open Flow, so Show and Quit have to live somewhere that
+        does not depend on a menu row — the icon's own `Show the pill` /
+        `Quit Flow`, beside its `Open Flow` (`tray.Tray._popup`). It is also the escape
+        hatch the 2026-09-03 decision kept the tray for: a pill dragged
+        somewhere unreachable is now genuinely reachable, which it was not
+        while the way back was a row on the window you had lost.
+
+        Idempotent, and false on a machine with no notification area (a Mac,
+        a Linux desktop) — where `quit` is the hotkey, as it has always been.
+        """
+        if not tray.available():
+            return False
+        if self._tray is None:
+            self._tray = tray.Tray("Flow - press the chord to talk",
+                                   self._tray_events)
+        return self._tray.start()
+
+    def hide_to_tray(self) -> bool:
+        """Park the window behind a notification-area icon. True when it hid.
+
+        ui.py:4038-4051's one act, compact-sized, and kept against the
+        canvas's "no tray menu" (decided 2026-09-03 — the tray is the escape
+        hatch if the pill is ever dragged somewhere unreachable;
+        design/compact/README.md). The icon comes first and hiding is
+        conditional on it: a withdrawn window with nothing in the
+        notification area is a Flow only Task Manager can reach — invariant
+        4, hidden must not mean gone. `withdraw` rather than `park`: the
+        shipped shell re-asserts its geometry every frame and would drag a
+        parked window straight back, and this one re-asserts only on a
+        panel transition, so unmapping is safe here.
+        """
+        if not self._start_tray():
+            self._flash = FLASH_FRAMES
+            return False
+        # The tracked anchor, not `winfo_*`: this is the position the window
+        # was last *given*, and `winfo_rootx` lags a `geometry` call by a
+        # frame or two — so a hide within a frame of a panel closing recorded
+        # the position before last and put the pill back there.
+        self._home = self._shell_xy
+        self._hidden = True
+        self.withdraw()
+        return True
+
+    def show_from_tray(self) -> None:
+        """Bring the window back where the user left it. The icon stays:
+        somebody who hid Flow once will hide it again.
+
+        The anchor goes back with it. `_shell_xy` is what `_sync_shell` grows
+        the band from and what `_outside_click_now` hit-tests against, and a
+        pill returned to `_home` while those still described somewhere else is
+        a pill whose next panel opens off its own capsule.
+        """
+        if not self._hidden:
+            return
+        self._hidden = False
+        if self._home is not None:
+            x, y = self._home
+            self.geometry(f"+{x}+{y}")
+            self._shell_xy = (x, y)
+            self._capsule_y = y + self.dev(self._capsule_off)
+        self.deiconify()
+        self.lift()
+        # A layered window that has just been mapped again has nothing on it:
+        # the bitmap presented before the withdraw is not the window's to keep,
+        # and the key is unchanged by hiding — so the next frame would skip the
+        # draw and the pill would come back invisible. `_open_box` learned the
+        # same thing on `<Map>`; this is the one place the key cannot see.
+        self._drawn_key = None
+
+    def _drain_tray(self) -> None:
+        """What the icon decided, acted on from Tk's own thread — the only
+        place Tk is touched, which is the rule tray.py's whole threading
+        argument exists for."""
+        if self._tray is None:
+            return
+        while True:
+            try:
+                event = self._tray_events.get_nowait()
+            except queue.Empty:
+                return
+            if event == tray.SHOW:
+                self.show_from_tray()
+            elif event == tray.QUIT:
+                self.quit_app()
+                return
+            elif event == tray.HOME:
+                self._open_home()
+            elif event == tray.PASTE_LAST:
+                self._paste_last(restore=True)
+
+    # -- the standalone box --------------------------------------------------
+
+    def _workspace_recents(self) -> list:
+        """The folders Flow has been pointed at, most recent first — the
+        profile's own record, which `session.set_workspace` already writes."""
+        profile = getattr(self.session, "profile", None)
+        return list(getattr(profile, "workspaces", ()) or ())
+
+    def _open_palette(self) -> None:
+        """Switch workspace, from the menu: the search palette in
+        Workspace.dc.html over the folders the profile has recorded."""
+        self._palette = _Palette(self._workspace_recents())
+        self._open_box("palette")
+
+    def _box_height(self) -> int:
+        rows = len(self._palette.rows()) if self._palette is not None else 0
+        return PALETTE_FIELD_H + PALETTE_ROW_H * rows + PALETTE_FOOT_H
+
+    def _open_box(self, kind: str) -> None:
+        """Raise the standalone 360 px box (Workspace.dc.html's `.box`) above
+        the pill, which itself never hides and never moves.
+
+        One at a time. The box *takes* the
+        keyboard, the one window this surface activates on purpose: the
+        palette is a type-ahead, and a type-ahead nobody can type into is a
+        picture of one. It gives the focus back the way it came — Esc,
+        Enter, or a click anywhere else (`FocusOut`, which a no-activate
+        window could never offer, is exactly what taking focus buys).
+        """
+        # Replace, not close: the caller has already set the new box's state
+        # (`_palette`), which `_close_box` would wipe along with the old
+        # window. One at a time still holds.
+        if self._box is not None:
+            self._box.destroy()
+            self._box = None
+            self._box_canvas = None
+            if self._box_paint is not None:
+                close = getattr(self._box_paint, "close", None)
+                if close is not None:
+                    close()
+                self._box_paint = None
+        self._box_kind = kind
+        box = tk.Toplevel(self)
+        bg = _shell_window(box, self.lite, PILL_ALPHA)
+        box.configure(bg=bg)
+        self._box = box
+        self._box_canvas = tk.Canvas(box, bg=bg, highlightthickness=0, bd=0)
+        self._box_canvas.pack(fill="both", expand=True)
+        h = self._box_height()
+        self._box_paint = paint.painter_for(self._box_canvas, BOX_W, h,
+                                            self.lite, PILL_ALPHA, self.k)
+        if getattr(self._box_paint, "antialiased", False):
+            _unkey(box)
+        # Tracked, not read back — and this line said so while reading
+        # `winfo_rootx()` two lines above it. `winfo_*` lags the window
+        # manager by a frame or two after a `geometry` call, and `_sync_box`
+        # re-anchoring off a stale read parked the box above the screen's top
+        # edge; `.shots/12-compact-palette.png` was a picture of the backdrop.
+        # `_shell_xy` is the anchor the window was actually placed at.
+        x, y = self._shell_xy
+        # A 360 px box at a 120 px pill's x runs off the right of the display
+        # whenever the pill is parked near that edge — the same clamp the band
+        # gets in `_sync_shell`, for the same reason: the box is the only
+        # thing on screen with the answer on it. The top is the work area's,
+        # not zero, because a monitor above the primary has a negative one.
+        left, top, right, _bottom = self.work
+        x = max(left, min(x, right - self.dev(BOX_W)))
+        self._box_x = x
+        self._box_foot = max(top, y - self.dev(h + 8)) + self.dev(h)
+        box.geometry(f"{self.dev(BOX_W)}x{self.dev(h)}"
+                     f"+{x}+{self._box_foot - self.dev(h)}")
+        box.bind("<Key>", self._on_box_key)
+        box.bind("<ButtonPress-1>", self._on_box_click)
+        box.bind("<FocusOut>", lambda _e: self._close_box())
+        # Redrawn when Windows puts it on screen, and not only now. A layered
+        # window's content does not survive its own mapping: the frame
+        # presented before the map is discarded, and a box that is only ever
+        # drawn at open and on a keystroke then has nothing on it at all —
+        # which is what an empty `.shots/12-compact-palette.png` was a picture
+        # of, with `present` returning True the whole time.
+        box.bind("<Map>", lambda _e: self._draw_box())
+        box.focus_force()
+        box.update_idletasks()
+        self._draw_box()
+
+    def _close_box(self) -> None:
+        """Idempotent, like every close on this surface: Esc, Enter, a click
+        away and a second menu choice can all mean the same close."""
+        self._palette = None
+        if self._box is not None:
+            self._box.destroy()
+            self._box = None
+            self._box_canvas = None
+            self._box_kind = ""
+        if self._box_paint is not None:
+            close = getattr(self._box_paint, "close", None)
+            if close is not None:
+                close()
+            self._box_paint = None
+
+    def _sync_box(self) -> None:
+        """Re-height and redraw the box after a keystroke changed its rows.
+        Bottom-anchored, like the panel: the box grows upward, off the anchor
+        `_open_box` recorded — see there for why not `winfo_*`.
+
+        It inherits that anchor's clamps rather than repeating them, and can,
+        because a palette is at its tallest the moment it opens: the query is
+        empty, so every workspace is a row, and typing only ever narrows. A
+        foot placed to keep *that* height inside the work area keeps every
+        shorter one inside it too.
+        """
+        if self._box is None:
+            return
+        h = self._box_height()
+        self._box.geometry(
+            f"{self.dev(BOX_W)}x{self.dev(h)}"
+            f"+{self._box_x}+{self._box_foot - self.dev(h)}")
+        resize = getattr(self._box_paint, "resize", None)
+        if resize is not None:
+            resize(BOX_W, h)
+        self._draw_box()
+
+    def _on_box_key(self, e) -> None:
+        """The palette's keyboard: letters build the query, Backspace edits,
+        Enter sets the top hit, Esc leaves it — the footer's own legend."""
+        if e.keysym == "Escape":
+            self._close_box()
+            return
+        if self._box_kind != "palette" or self._palette is None:
+            return
+        if e.keysym == "BackSpace":
+            self._palette.backspace()
+        elif e.keysym == "Return":
+            self.session.set_workspace(self._palette.choose())
+            self._close_box()
+            return
+        elif e.char and e.char.isprintable():
+            self._palette.type(e.char)
+        else:
+            return
+        self._sync_box()
+
+    def _on_box_click(self, e) -> None:
+        """A row tap is the same choice as Enter on it.
+
+        The event's y is a device length and the row heights are design ones,
+        so it is converted first — `_on_press` and `_panel_click` already do
+        the same, and this was the one hit test left comparing across units.
+        At 300 % that divided the click's y by nothing and the rows by three:
+        every tap below the first row chose a workspace three rows above the
+        one under the pointer, which for a "switch workspace" palette is the
+        gesture picking somebody else's answer.
+        """
+        if self._box_kind != "palette" or self._palette is None:
+            return
+        i = int((self.design(e.y) - PALETTE_FIELD_H) // PALETTE_ROW_H)
+        if 0 <= i < len(self._palette.rows()):
+            self.session.set_workspace(self._palette.choose(i))
+            self._close_box()
+
+    def _draw_box(self) -> None:
+        if self._box_paint is None:
+            return
+        c = self._box_paint
+        c.delete("all")
+        if self._box_kind == "palette":
+            self._draw_palette(c)
+        present = getattr(c, "present", None)
+        if self._box is not None and present is not None:
+            # Told where, not asked: the box has just been given its geometry
+            # and `winfo_*` has not caught up, which composited the first
+            # frame off screen and photographed as an empty backdrop.
+            present(self._box,
+                    at=(self._box_x,
+                        self._box_foot - self.dev(self._box_height())))
+
+    # -- the panel -----------------------------------------------------------
+
+    def _spec(self) -> dict:
+        """The panel spec for the mode the panel was raised for (`PANEL_SPEC`).
+
+        Keyed on `_panel_mode` rather than `session.mode`: a mode switch
+        closes the band, but a reply that reopens it lands after the switch,
+        and the answer still draws as the Ask it is.
+        """
+        return PANEL_SPEC.get(self._panel_mode, PANEL_SPEC[CONVERSE])
+
+    def _line_height(self, spec) -> int:
+        """One line of `spec`, through whatever is drawing.
+
+        Through the painter for `_text_width`'s reason: GDI+ and Tk do not
+        agree on metrics, and the one that will lay the glyphs down is the one
+        whose line box the band has to be built out of. A bare fixture — and a
+        painter that refused — gets `LINE_NOMINAL`, which is what FONT_BODY
+        measures here anyway. "Ag" rather than the text itself: a line box is
+        the font's, not the string's, and asking per string would make the
+        band's height depend on whether the answer happened to contain a
+        descender.
+        """
+        cached = self._line_h.get(spec)
+        if cached is not None:
+            return cached
+        h = LINE_NOMINAL
+        measure = getattr(self.paint, "measure", None)
+        if measure is not None:
+            try:
+                h = max(1, int(round(measure("Ag", spec)[1])))
+            except Exception:
+                h = LINE_NOMINAL
+        self._line_h[spec] = h
+        return h
+
+    def _panel_layout(self) -> _Layout:
+        """Where the band's rows go this frame, and how tall it therefore is.
+
+        **The band grows with its text**, which is what the artboards do and
+        what the fixed 200 px did not: `RESULT_Y` put the result's first line
+        at 124, a second line of an 18 px font ended at 160, and the footer
+        chips began at 156 — so a two-line refined prompt was drawn *through*
+        Copy and Send (`.shots/11-compact-refine-panel.png`). Cutting both
+        blocks to two lines was the other half of the same mistake: an Ask
+        answer of ten lines showed two, and the Refine result — the text Send
+        is about to paste — could not be read before it was sent.
+
+        Top to bottom: the strip, the heard tag where the spec has one, the
+        heard block, air, the result tag and block where there is a result,
+        and the footer pinned to the band's bottom edge. `PANEL_H` is the
+        floor, so short blocks keep the resting proportions the artboards drew.
+
+        The one thing that shrinks it back is the screen: the band grows
+        *upward* from the capsule, so the result's line budget is cut to
+        whatever fits between the capsule's top and the work area's, rather
+        than growing off the top of the display. On a fixture — and on a pill
+        parked against the top edge, where nothing would fit anyway — that
+        room is the minimum band.
+        """
+        spec = self._spec()
+        line_h = self._line_height(FONT_BODY)
+        room = max(PANEL_H, int(self.design(self._capsule_y - self.work[1])))
+        heard = _fit(self._panel_heard, LINE_CHARS, HEARD_LINES_MAX)
+
+        def lay(result_cap: int) -> _Layout:
+            result = _fit(self._panel_result, LINE_CHARS, result_cap)
+            y = STRIP_H + PANEL_PAD
+            heard_tag_y = y if spec["heard_tag"] is not None else None
+            if heard_tag_y is not None:
+                y += TAG_GAP
+            heard_y = y
+            y += _lines(heard) * line_h
+            result_tag_y = None
+            if result:
+                y += BLOCK_GAP
+                if spec["result_tag"] is not None and not self._panel_failed:
+                    # Suppressed on a failure for `_draw_panel`'s reason:
+                    # "refined for this repo" over the CLI's last line would
+                    # claim a refinement that did not happen.
+                    result_tag_y = y
+                    y += TAG_GAP
+            result_y = y
+            y += _lines(result) * line_h
+            band = max(PANEL_H, y + FOOT_PAD + CHIP_H + FOOT_PAD)
+            footer_y = band - FOOT_PAD - CHIP_H
+            copy, send = _chip_rects(footer_y)
+            return _Layout(band, line_h, heard, heard_tag_y, heard_y,
+                           result, result_tag_y, result_y, footer_y,
+                           copy, send)
+
+        out = lay(RESULT_LINES_MAX)
+        if out.band_h > room and _lines(out.result) > 1:
+            # It does not fit above the capsule. Drop whole lines off the
+            # result — the block that grows — rather than let the band leave
+            # the screen; `_fit` puts the ellipsis on whatever is left, so the
+            # cut says it happened. Floored at one line, because a result
+            # block with no rows is a panel that answered nothing.
+            over = out.band_h - room
+            keep = max(1, _lines(out.result) - -(-over // line_h))
+            out = lay(keep)
+        return out
+
+    def _panel_h(self) -> int:
+        """The band's height in the window: 0 with no panel, else the layout's.
+
+        The one number `_sync_shell` needs, and the reason it is a method: the
+        band is no longer a constant anybody can read.
+        """
+        return self._panel_layout().band_h if self._panel_open else 0
+
+    def _open_panel(self) -> None:
+        """Raise the band above the foot. Idempotent — a reply that reopens a
+        closed panel and a fresh hold that reuses an open one both land here.
+
+        Only the flag and the geometry: the text blocks are their own state,
+        cleared by the hold that starts fresh (`_talk_start`) and filled by
+        the events that have something to say (`_pump_events`).
+
+        Which is why the idempotence earns its keep now that the band grows
+        with its text: a reply landing in an already-open panel comes back
+        through here, and the `_sync_shell` at the end sizes the window to the
+        answer rather than leaving a ten-line result drawn past the bottom of
+        a 234 px window.
+        """
+        self._panel_open = True
+        self._sync_shell()
+
+    def _close_panel(self) -> None:
+        """Back to 120 wide. Idempotent, for the same reason `quit_app` is:
+        Esc, a click outside, a mode switch and Send can all mean the same
+        close, and nothing upstream can tell which one ran.
+        """
+        if not self._panel_open:
+            return
+        self._panel_open = False
+        self._ask_pending = False
+        self._sync_shell()
+
+    def _sync_shell(self) -> None:
+        """Resize the one window around the capsule: 120×34 alone, 400 wide by
+        the band's own height plus 34 with the panel up, 18 px taller while
+        Lite's copied notice is showing. The band's height is `_panel_h()`,
+        not a constant: it is as tall as its text needs (`_panel_layout`).
+
+        The capsule's screen position is the anchor — "the pill never hides
+        and never moves" (README) — tracked in `_capsule_off` rather than read
+        back off `winfo_*`, which lags the window manager. The band grows
+        upward from it, the notice strip downward, and the result is clamped
+        into the monitor's work area on all four edges: the band goes left
+        rather than off the right (the mic moves before the panel clips), and
+        it stops at the work area's top and bottom rather than at the
+        taskbar's face.
+        """
+        panel_h = self._panel_h()
+        notice_h = NOTICE_H if self._notice else 0
+        w = PANEL_W if self._panel_open else PILL_W
+        if self._notice:
+            # The capsule keeps its own 120 px — `_draw` still draws it at
+            # `PILL_W` — and the window grows around it so the strip beneath
+            # has room for its sentence.
+            w = max(w, self._notice_w)
+        h = PILL_H + panel_h + notice_h
+        if (w, h) == (self._shell_w, self._shell_h):
+            return
+        # Screen arithmetic is in device pixels — `geometry`, `GetCursorPos`
+        # and the monitor rectangles all speak them — so design lengths are
+        # converted before they meet it, never after.
+        # Off the tracked anchor, never off `winfo_*`: the capsule's top edge
+        # is the fixed point of this whole surface — "the pill never hides and
+        # never moves" (README) — and the band grows upward from it while the
+        # notice grows downward.
+        #
+        # **Against `self.work`, and this used to be `winfo_screenwidth()`.**
+        # On Windows that call reports the *primary* monitor's width, while
+        # the pill is placed on the monitor under the pointer, whose rectangle
+        # is in virtual-screen coordinates — so on any right-hand monitor
+        # `x + w` was trivially greater than it, and opening the panel threw
+        # the whole window back onto the primary display. The same read gave
+        # the top edge a floor of 0, which is somebody else's monitor when the
+        # one in use is above the primary and its `top` is negative.
+        left, top, right, bottom = self.work
+        dw, dh = self.dev(w), self.dev(h)
+        x = max(left, min(self._shell_xy[0], right - dw))
+        # The notice strip grows *downward* from a capsule already standing
+        # PANEL_BOTTOM_OFFSET above the taskbar, so it is the one thing here
+        # that can leave the bottom of the work area — and it did, running
+        # under the taskbar with its sentence half-covered. Shifted up by the
+        # overflow instead: a capsule that moved a few pixels is a smaller lie
+        # than a message nobody can read at all.
+        y = max(top, min(self._capsule_y - self.dev(panel_h), bottom - dh))
+        self._shell_w, self._shell_h = w, h
+        self._capsule_off = panel_h
+        self._shell_xy = (x, y)
+        # Where the capsule actually ended up, which is only where it was when
+        # no clamp bit. The anchor has to be re-derived rather than kept, or
+        # the next sync grows its band from a capsule that is no longer there
+        # and walks the window off the edge the clamp just pulled it back from.
+        self._capsule_y = y + self.dev(panel_h)
+        self.geometry(f"{dw}x{dh}+{x}+{y}")
+        resize = getattr(self.paint, "resize", None)
+        if resize is not None:
+            resize(w, h)
+
+    def _panel_click(self, e) -> None:
+        """A press in the band: the only live things there are the strip's
+        close, the footer's Copy, Send when the mode has one, and Ask's
+        Continue in Flow.
+
+        Off the layout, not off the module constants: the footer travels with
+        the band's bottom edge, so the rects a tall panel drew its chips at
+        are the only rects a press on them can be tested against.
+        """
+        x, y = self.design(e.x), self.design(e.y)
+        layout = self._panel_layout()
+        if _hit(layout.close, x, y):
+            self._close_panel()
+        elif _hit(layout.copy, x, y):
+            self._copy_result()
+        elif self._spec()["send"] and _hit(layout.send, x, y):
+            self._panel_send()
+        elif (self._spec().get("continue")
+              and _hit(_continue_rect(layout.footer_y), x, y)):
+            self._continue_in_flow()
+
+    def _panel_text(self) -> str:
+        """What Copy copies and Refine's Send pastes: the result, unless the
+        CLI failed — then the raw dictation, because unrefined text beats no
+        text (States.dc.html)."""
+        if self._panel_failed:
+            return self._panel_heard
+        return self._panel_result or self._panel_heard
+
+    def _copy_result(self) -> None:
+        """The Copy chip: the answer, or the question if that is all there is.
+
+        "Copy leaves the panel up" (Refine.dc.html) — it changes nothing but
+        the clipboard. The borrow is ui.py's one clipboard transaction, shared
+        rather than copied.
+        """
+        text = self._panel_text()
+        if not text:
+            return
+        if _copy_to_clipboard(self, text):
+            self._flash = FLASH_FRAMES
+
+    def _continue_in_flow(self) -> None:
+        """Ask's footer chip: the conversation, carried on in Flow Home's
+        Conversations page — every turn of it, a box to type the next question
+        in, and the notes. The panel goes down behind it: the page is where the
+        exchange is now, and two copies of one answer is one too many."""
+        self._close_panel()
+        self._open_home("ask")
+
+    def _panel_send(self) -> None:
+        """The footer Send: paste the result into `paste_target`, and close.
+
+        The mechanism is Refine's flow — paste the refined text where the user
+        was, through the same `on_send` contract item 1 pasted drafts through,
+        target included, and the Lite clipboard when there is no handler.
+        `_panel_text` is what "Send still works" means on a failed refine:
+        the raw dictation goes, because unrefined text beats no text. Ask's
+        footer has no Send (Ask.dc.html), and Type never opens the panel.
+        """
+        text = self._panel_text()
+        if text:
+            self._deliver(text)
+        self._close_panel()
+
+    def _outside_click_now(self) -> bool:
+        """One frame's answer to "did the user just click somewhere that is
+        not this window". Polled only while the panel is open.
+
+        A NOACTIVATE window is never told it lost focus — it never had it —
+        so click-outside is a poll, not an event: the left button's up→down
+        edge with the cursor outside our rect. Two read-only Win32 calls a
+        frame, and Lite does not ask — no target awareness there, and
+        `_user32` is `_NoHands`.
+
+        **Every length here is a device length.** `GetCursorPos` answers in
+        device pixels and so does the tracked anchor, but `_shell_w` and
+        `_shell_h` are the *design* sizes this module writes everything in —
+        so the rect being tested was the window scaled down by `k`. At 300 %
+        that is a third of the real window, and a click in the right or lower
+        two-thirds of an open panel read as a click outside it and closed the
+        panel under the pointer. `_shell_xy` rather than `winfo_rootx`, for
+        the reason `_shell_xy` exists: `winfo_*` lags a `geometry` call, and
+        this runs every frame.
+        """
+        if self.lite:
+            return False
+        down = bool(_user32.GetAsyncKeyState(_VK_LBUTTON) & 0x8000)
+        was, self._outside_was_down = self._outside_was_down, down
+        if not down or was:
+            return False
+        pt = _POINT()
+        _user32.GetCursorPos(ctypes.byref(pt))
+        x, y = self._shell_xy
+        return not (x <= pt.x < x + self.dev(self._shell_w)
+                    and y <= pt.y < y + self.dev(self._shell_h))
+
+    # -- the drawing ---------------------------------------------------------
+
+    def _ring_colour(self) -> str:
+        """This frame's ring, or "" for none at rest.
+
+        The flash outranks the state, because an error is true regardless of
+        which state raised it — the same layering ui.py's `accent` gives. The
+        two fallbacks that are not session states come next (States.dc.html):
+        the mic's persistent red, then the launch notice's one amber. A
+        disarmed pill is at rest whatever the session thinks: capture is off,
+        and a ring would claim otherwise.
+        """
+        if self._flash:
+            return ERROR
+        if self._mic_gone:
+            return ERROR
+        if self._recover:
+            return RECOVER
+        loading = bool(getattr(self.session.asr, "loading", False))
+        if self.armed:
+            state = RING.get(self.session.state, "")
+            if state:
+                return state
+            if self.session.capturing:
+                # Open and hearing a silent room. `LISTENING` means speech was
+                # *detected*, so without this the pill looked identical
+                # whether it was holding the microphone open or doing nothing
+                # at all — which is what made a muted mic impossible to tell
+                # from a dead application.
+                #
+                # **Above `loading`, and that ordering is the whole point.**
+                # The models take about eighteen seconds to come off disk
+                # here, which is exactly the window somebody spends finding
+                # out whether the thing works — and with loading on top, every
+                # hold in that window answered "loading" to the question "is
+                # my microphone on". Both facts are true; this is the one
+                # being asked.
+                return HEARING
+        if loading:
+            # The models, coming off disk. `session.activity` already calls
+            # this "loading the model" for the shipped surface; this is the
+            # same fact in the only vocabulary this one has, and it is the
+            # answer to "why did my first hold do nothing".
+            return WAITING
+        # A disarmed pill is at rest whatever the session thinks: capture is
+        # off, and a ring would claim otherwise.
+        return ""
+
+    def _glyph_tint(self) -> str:
+        """This frame's mic tint: the mode's hue — or red, while the mic is
+        the thing that is wrong (gen.py's `mic(mode if not slash else state)`)."""
+        if self._mic_gone:
+            return ERROR
+        return MODE_TINT.get(self.session.mode, TEXT)
+
+    def _draw_key(self) -> tuple:
+        """Everything `_draw` and its helpers read, as one comparable value.
+
+        The frame repainted whether or not anything had moved: `delete("all")`,
+        every item back, and a whole bitmap through `UpdateLayeredWindow`,
+        thirty times a second for as long as Flow is open. Measured here at
+        300 % — 0.78 ms a frame with the pill alone and **4.53 ms with the
+        panel open**, 15 % of the 30 ms budget, all of it spent drawing the
+        same picture as last time. `Pill._draw_key` (flow/ui.py:4973) is the
+        shipped surface's answer to exactly this, and decisions.md's
+        "composited, not painted" says the choice reopens if compositing's
+        frame cost ever shows up. It showed up.
+
+        Built from the same reads the drawing makes, under the same guards, so
+        a fixture that can be drawn can be keyed:
+
+          `_ring_colour` folds the flash, the mic, the recover countdown, the
+          session state, `capturing` and `asr.loading` into one colour — which
+          is all the ring is; `_glyph_tint` folds `_mic_gone` and the mode into
+          the other. `_flash` and `_recover` ride along as booleans anyway,
+          because they are countdowns and the frame they reach zero on is a
+          frame that changes.
+
+          `_draw_face` reads the level, rounded to the thousandth here — a
+          thousandth of `BAR_MAX_HALF` is seven thousandths of a pixel of bar.
+
+          `_draw_panel` reads `_panel_mode` (through `_spec`), the session's
+          `workspace`, both heard fields, the result and `_panel_failed`;
+          `_draw_notice` reads `_notice_text` and the two shell dimensions.
+
+        The shell size is in here for a second reason: it is also how a
+        resize invalidates itself. `_sync_shell` only ever reaches the painter
+        after `(w, h)` has changed, and it recreates the bitmap when it does —
+        so the frame after a resize is a frame whose key has already moved,
+        and no second mechanism is needed to force the redraw. A remapped
+        window is the case the key *cannot* see, and `show_from_tray` clears
+        it by hand for the reason `_open_box` binds `<Map>`.
+        """
+        session = self.session
+        return (
+            self._ring_colour(), self._glyph_tint(),
+            round(self._meter_level, 3), self._mic_gone,
+            bool(self._flash), bool(self._recover),
+            self._panel_open, self._panel_mode,
+            self._panel_heard, self._panel_heard_final,
+            self._panel_result, self._panel_failed,
+            bool(self._notice), self._notice_text, self._notice_w,
+            self._shell_w, self._shell_h,
+            # The two the drawing reads off the session directly: the strip
+            # prints the workspace, and the mode is what `_glyph_tint` has
+            # already folded in — kept separate because a mode with no tint of
+            # its own would otherwise be a mode change nothing could see.
+            getattr(session, "workspace", "") or "",
+            getattr(session, "mode", DICTATE),
+        )
+
+    def _draw(self) -> None:
+        """Draw the whole window onto `self.canvas`. Pure: state in, shapes out.
+
+        Tested headless against a recording fake, exactly as `Pill._draw` is —
+        which is why every attribute this reads that a fixture does not set is
+        a class-level default above.
+        """
+        c = self.paint
+        c.delete("all")
+        if self._panel_open:
+            # Sized before it is drawn, and this is the whole of "the window
+            # fits what is on it": the band's height is its text's, and the
+            # text changes on a partial, on the release's draft, on a reply
+            # and on a CLI failure. Syncing here rather than at each of those
+            # four is one place that cannot be forgotten — and `_sync_shell`
+            # no-ops unless the size actually moved, so a resting frame pays
+            # nothing.
+            self._sync_shell()
+            layout = self._panel_layout()
+            self._draw_panel(c, layout)
+            self._draw_foot(c, layout.band_h)
+            if self._notice:
+                self._draw_notice(c)
+            self._present()
+            return
+        # The capsule body first, and it is load-bearing rather than cosmetic:
+        # `_shell_window` keyed the canvas background out with
+        # `-transparentcolor`, and on Windows a keyed pixel is a *click-through*
+        # pixel — an unfilled pill is invisible against the desktop and lets the
+        # press fall to whatever is behind it, which is exactly what the first
+        # photographed run did to the right-click that was meant to open the
+        # menu. A true stadium, as Main.dc.html's `.pill` has it — see
+        # `_capsule` for why not `_round_rect`.
+        _capsule(c, 0, 0, PILL_W, PILL_H, fill=SHELL, outline="")
+        # The chrome, gen.py's `.pill`: a 1 px `RING_OUTER` border and an inset
+        # `RING_TOP` highlight, plus the state ring one pixel further out when
+        # there is one (`box-shadow: 0 0 0 1px <state>` — 1 px, not 2). The
+        # window is exactly the capsule, so "further out" does not exist and
+        # the stack shifts in instead: the ring takes the outermost pixel, the
+        # border steps one in, the highlight one more. `_panel_chrome`
+        # (flow/ui.py:2269) is the same idea for the shipped surface — three
+        # opaque hairlines instead of a shadow no keyed window could composite.
+        ring = self._ring_colour()
+        inset = 0
+        if ring:
+            _capsule_ring(c, 0, 0, PILL_W, PILL_H, ring)
+            inset = 1
+        _capsule_ring(c, inset, inset, PILL_W - inset, PILL_H - inset, RING_OUTER)
+        hi = inset + 1
+        # `inset 0 1px 0 RING_TOP` is a *straight* line along the top, the way
+        # `_panel_chrome` draws its own (flow/ui.py:2301) — not a curve. This
+        # was an arc over the full 120×32 bbox, which is an ellipse the width
+        # of the pill: it photographed as a bulge sweeping across the capsule
+        # and reading as the shape's own edge. It spans the flat run between
+        # the two end-cap centres, because that is the only part of a stadium
+        # a horizontal inset line can sit on.
+        c.create_line(hi + PILL_H // 2, hi, PILL_W - hi - PILL_H // 2, hi,
+                      fill=RING_TOP)
+        self._draw_face(c, 0, BARS)
+        if self._notice:
+            self._draw_notice(c)
+        self._present()
+
+    def _present(self) -> None:
+        """Hand the finished frame to the desktop, where there is one to hand.
+
+        A no-op on the real canvas — Tk has already painted it — and the whole
+        of the layered path everywhere else: nothing `_draw` drew is visible
+        until this runs, which is also why this surface cannot flicker. The
+        frame is composited whole rather than assembled in front of the user.
+        """
+        present = getattr(self.paint, "present", None)
+        if present is None:
+            return
+        try:
+            present(self)
+        except tk.TclError:
+            # "application has been destroyed". `quit_app` destroys the window
+            # while a frame that began before it is still running, and this is
+            # the first line of that frame to ask Tk for anything — so the
+            # whole traceback lands on the console of somebody who has just
+            # pressed quit and thinks they broke something. Nothing is wrong:
+            # there is no window left to composite onto.
+            self._alive = False
+
+    def _say(self, text: str, frames: int = COPIED_FRAMES) -> None:
+        """Put one sentence under the pill for `frames` frames.
+
+        The wordless pill's only words, and it has them for the same reason
+        Lite's "copied" line has them: there are a handful of facts that no
+        colour can carry, and a surface that cannot say them leaves somebody
+        holding a button that does nothing with no way to find out why.
+        """
+        self._notice_text = text
+        self._notice = frames
+        self._notice_w = self._text_width(text, FONT_TAG) + 2 * NOTICE_PAD
+        self._sync_shell()
+
+    def _text_width(self, text: str, spec) -> int:
+        """How wide `text` is in `spec`, through whatever is drawing.
+
+        Through the painter, because GDI+ and Tk do not agree on metrics and
+        the one that will lay the glyphs down is the one worth asking. Falls
+        back to a nominal advance where neither can answer — a bare fixture,
+        which has no window to size anyway.
+        """
+        measure = getattr(self.paint, "measure", None)
+        if measure is not None:
+            try:
+                return int(measure(text, spec)[0])
+            except Exception:
+                pass
+        return int(len(text) * abs(spec[1]) * 0.55)
+
+    def _draw_notice(self, c) -> None:
+        """Lite's last inch, said once and never in an error colour
+        (States.dc.html): the words are on the clipboard and the last step is
+        the user's. The strip has a body, not just floating glyphs: Tk
+        anti-aliases text against the canvas behind it, and on the keyed-out
+        region that background is the magenta the window is keyed by — text
+        drawn without one photographed as the key colour itself
+        (`.shots/19-compact-copied.png` before this strip had a fill)."""
+        y = self._shell_h - NOTICE_H
+        w = self._shell_w
+        _capsule(c, 0, y, w, self._shell_h, square_top=True,
+                 fill=SHELL, outline="")
+        _capsule_ring(c, 0, y, w, self._shell_h, RING_OUTER,
+                      square_top=True, top=False)
+        c.create_text(w // 2, y + NOTICE_H // 2, text=self._notice_text,
+                      font=FONT_TAG, fill=DIM)
+
+    def _draw_foot(self, c, y0: int) -> None:
+        """The pill as the panel's foot: the same face, 400 wide, squared on
+        the join.
+
+        `y0` is the band's height — where the foot starts — and it is passed
+        rather than read off a constant because the band grows with its text.
+
+        gen.py's `.foot`: `border-radius: 0 0 17px 17px`, `border-top: 0`, no
+        inset highlight — the seam above is the panel's to draw, and the light
+        source would read as a second line under it. The state ring is the
+        exception to `border-top: 0`: it is a `box-shadow`, and a box-shadow
+        wraps all four sides. The ring is the foot's, not the window's — the
+        panel band above keeps its own neutral border.
+        """
+        _capsule(c, 0, y0, PANEL_W, y0 + PILL_H, square_top=True,
+                 fill=SHELL, outline="")
+        ring = self._ring_colour()
+        inset = 0
+        if ring:
+            _capsule_ring(c, 0, y0, PANEL_W, y0 + PILL_H, ring,
+                          square_top=True, top=True)
+            inset = 1
+        _capsule_ring(c, inset, y0 + inset, PANEL_W - inset,
+                      y0 + PILL_H - inset, RING_OUTER,
+                      square_top=True, top=False)
+        self._draw_face(c, y0, BARS_FOOT)
+
+    def _draw_face(self, c, y0: int, bars: int) -> None:
+        """The mic and the meter, shared by the capsule (y0=0, 15 bars) and
+        the foot (y0=PANEL_H, 40): one face, two window sizes."""
+        tint = self._glyph_tint()
+        # The mic, stroked not filled — gen.py's `mic()`: a capsule, an arc
+        # cradle, a stem, in a 14×18 viewBox with round caps, and the slashed
+        # variant (States.dc.html) when the device is gone: one diagonal across
+        # the glyph, "the one gesture the pill refuses outright", in the same
+        # red the ring wears. `flow/glyphs.py` draws it for both surfaces now —
+        # the shipped row drew a filled capsule with a stroked cradle, which was
+        # two mics for one microphone.
+        glyphs.mic(c, MIC_X, y0 + MIC_Y, tint, slash=self._mic_gone)
+        # The meter (R13's live level, restated wordless): 2 px bars on a 2 px
+        # gap, 3 px at rest, blooming around the centre line so quiet reads as
+        # a flat line rather than an empty box. Rest is gen.py's `DIM` — grey
+        # claims no state — the mode's tint is earned by an actual level.
+        mid = y0 + PILL_H // 2
+        lvl = self._meter_level
+        shade = tint if lvl > 0.04 else DIM
+        centre = (bars - 1) / 2
+        for i in range(bars):
+            envelope = 1.0 - 0.6 * abs(i - centre) / centre
+            h = 1.5 + lvl * BAR_MAX_HALF * envelope
+            x = METER_X + i * (BAR_W + BAR_GAP)
+            # gen.py's `.meter i` carries `border-radius: 1px`, so the caps
+            # are round — the same call ui.py:5060 makes for its own bars, and
+            # squared off below the cap's own diameter for its reason: a
+            # smoothed polygon pinches into a lozenge there.
+            if h * 2 > BAR_W:
+                _round_rect(c, x, mid - h, x + BAR_W, mid + h, BAR_W / 2,
+                            fill=shade, outline="")
+            else:
+                c.create_rectangle(x, mid - h, x + BAR_W, mid + h,
+                                   fill=shade, outline="")
+
+    def _draw_panel(self, c, layout: _Layout) -> None:
+        """The band above the foot: strip, heard, result, footer.
+
+        gen.py's `.shell`: SHELL fill, a 1 px `RING_OUTER` border on the
+        rounded top corners (18 px) and the sides, and a `SEAM`-coloured
+        bottom border that is the one line between panel and foot — the join
+        reads as an internal divider, not two windows touching
+        (flow/ui.py:4985-5000's `seam="top"`, adapted to the capsule).
+
+        Every row comes from `layout`, which is also what sized the window:
+        the band grows with its text the way the artboards do, and one piece
+        of arithmetic deciding both the height and the rows is what stops a
+        block being drawn somewhere the band does not reach.
+        """
+        spec = self._spec()
+        band_h = layout.band_h
+        # The band, then the seam, then the strip — the foot's fill, drawn
+        # after this, covers the border's bottom stroke, which is why the
+        # seam is a line of its own rather than the border's fourth side.
+        _round_rect(c, 0, 0, PANEL_W - 1, band_h, (18, 18, 0, 0),
+                    fill=SHELL, outline=RING_OUTER)
+        c.create_line(0, band_h - 1, PANEL_W, band_h - 1, fill=SEAM)
+        _round_rect(c, 1, 1, PANEL_W - 2, STRIP_H, (16, 16, 0, 0),
+                    fill=STRIP, outline="")
+        c.create_line(0, STRIP_H, PANEL_W, STRIP_H, fill=SEAM)
+        # The workspace strip: folder, path, note, close (gen.py `strip()`).
+        # The workspace is the CLI's system role (README) — this line is where
+        # the panel says which repo it is about to be about.
+        ws = getattr(self.session, "workspace", "") or ""
+        self._draw_folder(c, PAD_X, STRIP_H // 2, HEARING if ws else DIM)
+        c.create_text(PAD_X + 20, STRIP_H // 2, anchor="w",
+                      text=ws or "no workspace", font=FONT_TAG,
+                      fill=CODE if ws else PLACEHOLDER)
+        c.create_text(layout.close[0] - 10, STRIP_H // 2, anchor="e",
+                      text="grounded" if ws else "plain talk",
+                      font=FONT_TAG, fill=DIM)
+        cx, cy = (layout.close[0] + layout.close[2]) // 2, STRIP_H // 2
+        # gen.py's close cross, in the same box it was drawn at by hand: the
+        # 16-unit glyph puts its two lines 8 px apart, which is where they were.
+        glyphs.close(c, cx - 8, cy - 8, DIM)
+        # The heard block: the question, live. Partials draw italic until the
+        # release's draft makes them final — the same honesty FONT_PARTIAL
+        # gives the shipped bubble.
+        if layout.heard_tag_y is not None:
+            c.create_text(PAD_X, layout.heard_tag_y, anchor="w",
+                          text=spec["heard_tag"], font=FONT_TAG, fill=DIM)
+        if layout.heard:
+            c.create_text(PAD_X, layout.heard_y, anchor="nw", text=layout.heard,
+                          font=FONT_BODY if self._panel_heard_final
+                          else FONT_PARTIAL,
+                          fill=spec["heard_fill"])
+        # The result block: the answer, on its accent bar (Ask.dc.html's
+        # card) or under its tag (Refine.dc.html). Nothing at all while the
+        # CLI is still working — the foot's blue ring is already saying that.
+        result = layout.result
+        if result:
+            accent = spec["result_accent"]
+            if layout.result_tag_y is not None:
+                # Refine.dc.html: the tag carries the hue, the text is plain.
+                # `result_tag_y` is None on a failure — "refined for this repo"
+                # over the CLI's last line would claim a refinement that did
+                # not happen — and the block simply starts where the tag would.
+                c.create_text(PAD_X, layout.result_tag_y, anchor="w",
+                              text=spec["result_tag"], font=FONT_TAG,
+                              fill=accent)
+                c.create_text(PAD_X, layout.result_y, anchor="nw", text=result,
+                              font=FONT_BODY, fill=TEXT)
+            elif spec["result_tag"] is not None:
+                c.create_text(PAD_X, layout.result_y, anchor="nw", text=result,
+                              font=FONT_BODY, fill=TEXT)
+            else:
+                # Ask.dc.html's card: a violet left bar, no tag. The bar spans
+                # the block it belongs to — it was a fixed 44 px, which under
+                # a one-line answer hung past it and under a long one stopped
+                # a third of the way down.
+                if accent:
+                    c.create_rectangle(
+                        PAD_X, layout.result_y, PAD_X + 2,
+                        layout.result_y + _lines(result) * layout.line_h,
+                        fill=accent, outline="")
+                c.create_text(PAD_X + 12, layout.result_y, anchor="nw",
+                              text=result, font=FONT_BODY, fill=TEXT)
+        # The footer: Copy, the hold hint, and Send in the modes that have one
+        # (Refine.dc.html). Ask has no Send; its right-hand slot carries the
+        # conversation to Flow Home instead (the canvas's Pill artboard).
+        x1, y1, x2, y2 = layout.copy
+        _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
+        # gen.py's chip is `{COPY_ICON}Copy` — two offset rounded rectangles,
+        # the back one open where the front overlaps it. The label sits after
+        # the glyph rather than centred in the chip, which is what the flex
+        # row with its 6 px gap does. `glyphs.copy` is the same drawing the
+        # shipped panel's Copy mark makes, at gen.py's own 13 px.
+        gx, gy = x1 + 11, (y1 + y2) // 2
+        glyphs.copy(c, x1 + 6, gy - 6.5, MUTED, size=13)
+        c.create_text(gx + 13, gy, anchor="w", text="Copy",
+                      font=FONT_CHIP, fill=CODE)
+        c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
+                      text=spec["hint"], font=FONT_TAG, fill=DIM)
+        if spec["send"]:
+            x1, y1, x2, y2 = layout.send
+            _round_rect(c, x1, y1, x2, y2, CHIP_H // 2,
+                        fill=PRIMARY_FILL, outline="")
+            c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Send",
+                          font=FONT_CHIP_PRIMARY, fill=PRIMARY_TEXT)
+        if spec.get("continue"):
+            x1, y1, x2, y2 = _continue_rect(layout.footer_y)
+            _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
+            c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=CONTINUE_LABEL,
+                          font=FONT_CHIP, fill=CODE)
+
+    def _draw_folder(self, c, x: int, cy: int, colour: str = DIM) -> None:
+        """The strip's folder glyph, stroked like the mic: gen.py's `FOLDER`,
+        13 px square, drawn by `glyphs.folder`.
+
+        It was a square-cornered rectangle with a tab line over it — a folder
+        reduced to two readable lines while this module drew its own marks. The
+        shared glyph has the canvas's rounded body, which is the same folder the
+        artboard shows.
+
+        `colour` because gen.py's `strip()` and `wsrow()` both take one, and
+        it carries meaning rather than decoration: green says this workspace
+        is real and grounded, grey says there is none. Drawn `DIM` whatever
+        the state, the strip claimed "no workspace" over a live path."""
+        glyphs.folder(c, x, cy - 6.5, colour, size=13)
+
+    def _draw_box_chrome(self, c, h: int) -> None:
+        """The `.box` shell both standalone windows share: SHELL, the 1 px
+        `RING_OUTER` border at 18 px, and the `RING_TOP` inset highlight —
+        the pill's own three hairlines at the box's radius."""
+        _round_rect(c, 0, 0, BOX_W - 1, h, 18, fill=SHELL, outline=RING_OUTER)
+        c.create_line(19, 1, BOX_W - 19, 1, fill=RING_TOP)
+
+    def _draw_palette(self, c) -> None:
+        """The search palette from Workspace.dc.html: field with caret, the
+        filtered folders with the top hit lit, the matched letters tinted, the
+        pinned last row, the footer legend.
+
+        The `.hit` tint is measured, not skipped. It was left out as needing
+        "font metrics a 30 ms frame will not pay for" — but this box does not
+        redraw at 30 ms. It redraws on a keystroke, which is the only thing
+        that can change what matched, and `tkfont.Font.measure` on one cached
+        font is nothing at that rate."""
+        h = self._box_height()
+        self._draw_box_chrome(c, h)
+        # The field: search glyph, the query so far, the caret. gen.py's
+        # `search_icon` at its own 14 px, centred in the field's height.
+        glyphs.search(c, 15, PALETTE_FIELD_H / 2 - 7, DIM, size=14)
+        query = self._palette.query
+        c.create_text(38, PALETTE_FIELD_H // 2, anchor="w", text=query,
+                      font=(FONT_MONO, -13), fill=TEXT)
+        caret = 38 + len(query) * 8
+        c.create_line(caret, 11, caret, PALETTE_FIELD_H - 11,
+                      fill=HEARING, width=1)
+        c.create_line(0, PALETTE_FIELD_H, BOX_W, PALETTE_FIELD_H, fill=SEAM)
+        for i, (label, is_none) in enumerate(self._palette.rows()):
+            y = PALETTE_FIELD_H + i * PALETTE_ROW_H
+            if i == 0:
+                # "Top hit highlighted" — the row, not the matched letters.
+                c.create_rectangle(1, y, BOX_W - 1, y + PALETTE_ROW_H,
+                                   fill=CHIP, outline="")
+            cy = y + PALETTE_ROW_H // 2
+            # gen.py's `wsrow`: the current row's folder is green, the rest
+            # grey, and the "just talk" row's is grey because there is no
+            # folder behind it.
+            self._draw_folder(c, 16, cy,
+                              HEARING if i == 0 and not is_none else DIM)
+            font = (FONT_MONO, -12)
+            hit = -1 if is_none or not query else label.lower().find(query.lower())
+            if hit >= 0:
+                # gen.py's `.hit`: the matched letters carry a green wash and
+                # step up to `TEXT`. The wash is a blend rather than an alpha
+                # — this window is colour-keyed and cannot composite, which is
+                # the rule `_mix` exists for (flow/ui.py:1850).
+                m = self._measure(c, font)
+                x0 = 38 + m(label[:hit])
+                x1 = x0 + m(label[hit:hit + len(query)])
+                c.create_rectangle(x0 - 1, cy - 8, x1 + 1, cy + 8,
+                                   fill=_mix(CHIP if i == 0 else SHELL,
+                                             HEARING, 0.16), outline="")
+            c.create_text(38, cy, anchor="w", text=label, font=font,
+                          fill=PLACEHOLDER if is_none else CODE)
+            if hit >= 0:
+                c.create_text(x0, cy, anchor="w",
+                              text=label[hit:hit + len(query)],
+                              font=font, fill=TEXT)
+        foot = h - PALETTE_FOOT_H
+        c.create_line(0, foot, BOX_W, foot, fill=SEAM)
+        c.create_text(16, foot + PALETTE_FOOT_H // 2, anchor="w",
+                      text="↵ set    esc leave it", font=FONT_TAG, fill=DIM)
+
+    def _measure(self, c, spec):
+        """A text-width function for `spec` on the target that is drawing.
+
+        Through `c` and not always through Tk, because the two do not agree:
+        the palette measures a prefix to place the `.hit` tint over the
+        letters that matched, and measuring in Tk's metrics while GDI+ draws
+        the glyphs put the tint further off with every character
+        (`.shots/12-compact-palette.png`, where the highlight and the text it
+        was highlighting had come apart).
+
+        The Tk answer is cached per spec, because building a `tkfont.Font`
+        asks the interpreter for metrics and the palette would otherwise do it
+        per row per keystroke. `GdiCanvas` does its own caching.
+        """
+        measure = getattr(c, "measure", None)
+        if measure is not None:
+            return lambda text: measure(text, spec)[0]
+        fn = self._fonts.get(spec)
+        if fn is None:
+            try:
+                fn = tkfont.Font(font=spec).measure
+            except (tk.TclError, RuntimeError):
+                # No interpreter behind this instance, or none yet — every
+                # headless draw test. The palette's font is mono, so the nominal advance is
+                # the real answer there rather than a stand-in, and it is the
+                # same number the field's caret already steps by.
+                advance = abs(spec[1]) * 2 // 3
+                fn = lambda s, _w=advance: len(s) * _w  # noqa: E731
+            self._fonts[spec] = fn
+        return fn
+
+    def _eased(self, target: float) -> float:
+        """This frame's drawn level, one step closer to `target` than the last.
+
+        ui.py's one-pole, at the same 30 ms tick and the same two time
+        constants (rise 60 ms → 0.3935, fall 160 ms → 0.1639 — hardcoded in
+        ui.py rather than recomputed, for the reason flow/ui.py:995-1000
+        states): peaks fall slower than they rise, so a loud spike does not
+        vanish in the frame it arrived in.
+        """
+        alpha = LEVEL_RISE_ALPHA if target > self._eased_level else LEVEL_FALL_ALPHA
+        self._eased_level += (target - self._eased_level) * alpha
+        return self._eased_level
+
+    @staticmethod
+    def _norm(db: float) -> float:
+        return max(0.0, min(1.0, (db - DB_FLOOR) / (DB_CEIL - DB_FLOOR)))

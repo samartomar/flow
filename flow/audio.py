@@ -140,6 +140,10 @@ def refresh_devices() -> bool:
         return False
 
 
+class NotConnected(OSError):
+    """The microphone somebody chose by name is not in today's device list."""
+
+
 class Mic:
     """Bounded, non-blocking capture, and whether it is still happening.
 
@@ -158,6 +162,10 @@ class Mic:
 
     def __init__(self, device: int | None = None, max_blocks: int = 256) -> None:
         self._device = device
+        #: The name of a microphone somebody chose (Flow Home, or the profile at launch),
+        #: or None. The index above is still the pin; this is how `start` finds the
+        #: same microphone again after the machine's device list has changed under it.
+        self.want: str | None = None
         self._q: queue.Queue[np.ndarray] = queue.Queue(maxsize=max_blocks)
         self._stream: sd.InputStream | None = None
         self._level = -90.0
@@ -216,6 +224,17 @@ class Mic:
             self.dropped += 1
 
     def start(self) -> None:
+        # A microphone chosen by name is opened by name, every time: indexes are handed
+        # out in enumeration order, so once anything is plugged in or pulled out its old
+        # one can belong to a different microphone. Not in the list is refused rather
+        # than opened by that old number — never quietly recording through something
+        # nobody chose. Asked before anything below changes, so a refusal leaves this
+        # object as it was, and the session's retry asks again until it is back.
+        if self.want:
+            index = find_input(self.want)
+            if index is None:
+                raise NotConnected(f"{self.want} is not connected")
+            self._device = index
         # Ask the device for 16 kHz mono directly and let the driver resample; the
         # local mic is natively 44.1 kHz stereo, and doing it here would mean writing
         # a resampler we do not need.
@@ -374,7 +393,10 @@ class Mic:
         guaranteed to be wrong when the reason for reopening is that the hardware
         changed. A pinned index is re-read from the same fresh list, so `--device 3`
         keeps meaning index 3 on the machine as it is now — and `opened_name` is what
-        lets the caller notice when index 3 has become a different microphone.
+        lets the caller notice when index 3 has become a different microphone. A
+        microphone chosen by name is found again by name in that same fresh list, and
+        one that is not there raises `NotConnected` rather than opening its old index
+        (`start`).
 
         Between the close and the open, because that is the only window in which
         `refresh_devices` is safe — read its second paragraph before moving this line.
@@ -392,6 +414,39 @@ class Mic:
         """
         return refresh_devices()
 
+    def use(self, name: str | None) -> str:
+        """Capture from the input device called `name`, or the system default for None.
+
+        Returns "" when it switched, or why it did not. The stream is reopened only if
+        one was open, so choosing a microphone while Flow is not listening changes what
+        the next arm opens and nothing else.
+
+        The device list is refreshed first, between the close and the open — the only
+        window in which that is safe (see `refresh_devices`) — so a headset plugged in
+        after launch can be chosen. **The caller has to know no reply is playing**, for
+        the reason that function's second paragraph gives; `Session.set_microphone`
+        refuses while Flow is talking.
+
+        A name that is not connected leaves the old device in place and reopened: a
+        failed switch must not be the thing that leaves somebody with no microphone.
+        """
+        was_open = self._stream is not None
+        if was_open:
+            self.stop()
+        self.refresh()
+        index = None
+        if name:
+            index = find_input(name)
+            if index is None:
+                if was_open:
+                    self.start()
+                return f"{name} is not connected"
+        self._device = index
+        self.want = name or None
+        if was_open:
+            self.start()
+        return ""
+
     def drain(self) -> list[np.ndarray]:
         """Take every block captured since the last call."""
         out = []
@@ -400,6 +455,72 @@ class Mic:
                 out.append(self._q.get_nowait())
             except queue.Empty:
                 return out
+
+
+#: Names a host API gives its "the default device" entry. See `input_devices`.
+STAND_INS = ("Microsoft Sound Mapper", "Primary Sound Capture Driver")
+
+
+def input_devices() -> list[dict]:
+    """The microphones a person could choose, once each: `{"index", "name", "default"}`.
+
+    Windows lists every device once per host API — MME, DirectSound, WASAPI and WDM-KS
+    each number it again, and MME truncates the name to 31 characters — so the raw list
+    shows one headset four times under three spellings. Only the default input's host
+    API is kept, which is the one `device=None` opens through, so the names here are
+    exactly the names `Mic.device_name` reports and the choice round-trips.
+
+    The host API's own stand-ins for "whatever the default is" — MME's Sound Mapper,
+    DirectSound's Primary Sound Capture Driver — are left out: the page's first choice
+    is already "the system default", and a second row meaning the same thing under a
+    driver's name is a choice nobody can tell apart from the first.
+
+    Never raises. This fills a settings page, and PortAudio refusing to describe a
+    device that is being unplugged must cost that page one row, not the page.
+    """
+    try:
+        default = sd.default.device[0]
+        devices = sd.query_devices()
+    except Exception:
+        return []
+    try:
+        api = sd.query_devices(default)["hostapi"] if default is not None and default >= 0 \
+            else None
+    except Exception:
+        api = None
+    out = []
+    for index, dev in enumerate(devices):
+        try:
+            if dev["max_input_channels"] <= 0:
+                continue
+            if api is not None and dev["hostapi"] != api:
+                continue
+            name = str(dev["name"])
+            if name.startswith(STAND_INS):
+                continue
+            out.append({"index": index, "name": name, "default": index == default})
+        except Exception:
+            continue
+    return out
+
+
+def find_input(name: str) -> int | None:
+    """The index of the input device called `name` in today's list, or None.
+
+    By name because indexes shift whenever anything is plugged in (see
+    `Mic.device_name`); exact match first, then a prefix either way, which is what
+    survives MME's 31-character truncation of the same device's name.
+    """
+    if not name:
+        return None
+    devices = [dev for dev in input_devices() if dev["name"]]
+    for dev in devices:
+        if dev["name"] == name:
+            return dev["index"]
+    for dev in devices:
+        if dev["name"].startswith(name) or name.startswith(dev["name"]):
+            return dev["index"]
+    return None
 
 
 class SpeechGate:

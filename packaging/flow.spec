@@ -65,6 +65,22 @@ datas += _sd_datas
 binaries += _sd_binaries
 hiddenimports += _sd_hidden
 
+# The two voice engines Flow Home's Better voices card offers (decisions.md 2026-09-23,
+# "Better voices from Flow Home"). A frozen download cannot install anything into itself,
+# so it carries both — release.yml syncs the `voice` and `edge` extras before building.
+# Both are imported lazily (`flow/piper.py`, `flow/edge.py`), which an import scan cannot
+# see, and Piper carries espeak-ng's data and its bridge beside its modules; `collect_all`
+# takes all three. Skipped when absent, so a local build without the extras still builds
+# — and says on its Models page that this download cannot add them.
+import importlib.util as _util  # noqa: E402
+
+for _pkg in ("piper", "edge_tts"):
+    if _util.find_spec(_pkg) is not None:
+        _d, _b, _h = collect_all(_pkg)
+        datas += _d
+        binaries += _b
+        hiddenimports += _h
+
 # PyInstaller collects modules, not distributions, so a frozen bundle carries no
 # `.dist-info` unless it is asked for one — and `flow --version` is
 # `importlib.metadata.version("flow")` (see `flow/version.py`). Without this the exe
@@ -74,6 +90,18 @@ hiddenimports += _sd_hidden
 # time against the installed project, so a build environment with no `flow` installed
 # fails here rather than shipping a bundle that cannot name itself.
 datas += copy_metadata("flow")
+
+# Files Flow reads off its own package directory at runtime rather than imports: the IBM
+# Plex faces both pills draw with and Flow Home's page serves, and Flow Home's page itself
+# (`flow/home/server.py` serves a fixed list of files from there). `collect_submodules`
+# finds modules only, so without these the bundle carries neither.
+datas += [
+    (os.path.join(ROOT, "flow", "assets", "fonts"), os.path.join("flow", "assets", "fonts")),
+    (os.path.join(ROOT, "flow", "home", "static"), os.path.join("flow", "home", "static")),
+    # Flow's icon, read at runtime by the tray, the pill's windows and Flow Home.
+    (os.path.join(ROOT, "flow", "assets", "flow.ico"), os.path.join("flow", "assets")),
+    (os.path.join(ROOT, "flow", "assets", "flow.svg"), os.path.join("flow", "assets")),
+]
 
 a = Analysis(  # noqa: F821
     [os.path.join(SPECPATH, "entrypoint.py")],  # noqa: F821
@@ -95,6 +123,9 @@ exe = EXE(  # noqa: F821
     [],
     exclude_binaries=True,  # onedir: everything else lands beside the exe
     name="flow",
+    # The same icon the tray and the windows wear (decisions.md 2026-09-23), so the .exe
+    # in Explorer and on the taskbar is recognisably the thing on screen.
+    icon=os.path.join(ROOT, "flow", "assets", "flow.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -261,7 +261,7 @@ class TestTheCountdownIsHeld(unittest.TestCase):
 
     def test_nothing_is_asked_while_the_editor_is_open(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         self.assertEqual(s.mode, CONVERSE)
         s.draft.set("what is a rollback")
         s._after_draft_change()
@@ -276,7 +276,7 @@ class TestTheCountdownIsHeld(unittest.TestCase):
 
     def test_the_countdown_starts_again_from_the_commit_not_from_before_it(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("what is a rollback")
         s._after_draft_change()
         s.begin_edit()
@@ -289,7 +289,7 @@ class TestTheCountdownIsHeld(unittest.TestCase):
 
     def test_a_cancel_releases_the_hold_as_well(self):
         s = session()
-        s.toggle_mode()
+        s.toggle_mode(to=CONVERSE)
         s.draft.set("what is a rollback")
         s._after_draft_change()
         s.begin_edit()
@@ -539,8 +539,9 @@ class MeasuringCanvas:
     def itemconfigure(self, *a, **kw) -> None: ...
 
     def create_window(self, *a, **kw) -> None:
-        """The embedded editor's slot. Recorded as nothing: this fake measures text, and
-        a `tk.Text` measures itself — see `FakeBox`."""
+        """Nothing in `ui.py` embeds a widget any more — the editor is a `Toplevel` of
+        its own and the canvas keeps only the well it stands in. Left here so a fake
+        that stops matching the code fails loudly rather than by `AttributeError`."""
         ...
 
     def create_text(self, x, y, text="", **kw):

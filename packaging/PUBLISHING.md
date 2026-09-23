@@ -41,7 +41,7 @@ a future spec renames the bundle, both files move with it.
 beside the zip, and the number can be read without downloading 126 MB:
 
 ```powershell
-(Invoke-RestMethod https://github.com/samartomar/flow/releases/download/v0.5.1/flow-windows-x64.zip.sha256).Split(" ")[0]
+(Invoke-RestMethod https://github.com/samartomar/flow/releases/download/v0.6.0/flow-windows-x64.zip.sha256).Split(" ")[0]
 ```
 
 **For v0.5.1 itself, and anything older, that asset does not exist** - the checksum step
@@ -99,7 +99,7 @@ In your own bucket, that is driven by the Scoop bucket template's
 ## 3. winget: submitting
 
 Both tools below open the pull request against `microsoft/winget-pkgs` for you, where the
-files belong at `manifests/s/SamarTomar/Flow/0.5.1/`. Both need a GitHub token with
+files belong at `manifests/s/SamarTomar/Flow/0.6.0/`. Both need a GitHub token with
 `public_repo`, and both will fork the repository under your account the first time.
 
 **wingetcreate** takes the prepared directory as it stands:
@@ -115,14 +115,14 @@ placeholder is a word rather than a plausible-looking string of hex.
 For the *next* version, the shorter path is to let it build the manifests from the release:
 
 ```powershell
-wingetcreate update SamarTomar.Flow --version 0.5.2 --urls https://github.com/samartomar/flow/releases/download/v0.5.2/flow-windows-x64.zip --submit --token <github-token>
+wingetcreate update SamarTomar.Flow --version 0.6.1 --urls https://github.com/samartomar/flow/releases/download/v0.6.1/flow-windows-x64.zip --submit --token <github-token>
 ```
 
 **komac** does the same job and computes the checksum itself, from the URL these prepared
 files name, so the placeholder never has to be filled on this path:
 
 ```powershell
-komac update SamarTomar.Flow --version 0.5.1 --urls https://github.com/samartomar/flow/releases/download/v0.5.1/flow-windows-x64.zip --submit
+komac update SamarTomar.Flow --version 0.6.0 --urls https://github.com/samartomar/flow/releases/download/v0.6.0/flow-windows-x64.zip --submit
 ```
 
 To send the prepared files verbatim instead of regenerating them, komac takes the
@@ -151,9 +151,9 @@ number published from the machine that built it, and refuse the install if it di
 `pyproject.toml` is the source of truth for the version. Four files in this directory
 repeat it and none of them can read it, so all four are moved by hand at release time:
 
-- `packaging/scoop/flow.json` - `version`, and the `v0.5.1` in the architecture URL
+- `packaging/scoop/flow.json` - `version`, and the `v0.6.0` in the architecture URL
 - `packaging/winget/SamarTomar.Flow.yaml` - `PackageVersion`
-- `packaging/winget/SamarTomar.Flow.installer.yaml` - `PackageVersion`, and the `v0.5.1`
+- `packaging/winget/SamarTomar.Flow.installer.yaml` - `PackageVersion`, and the `v0.6.0`
   in `InstallerUrl`
 - `packaging/winget/SamarTomar.Flow.locale.en-US.yaml` - `PackageVersion`
 

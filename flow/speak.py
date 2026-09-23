@@ -314,6 +314,31 @@ def all_voices(refresh: bool = False) -> list[Voice]:
     return _ALL
 
 
+def voices_changed(engine: str) -> None:
+    """One engine's voices changed under a running Flow — an engine added from Flow Home,
+    a Piper voice downloaded or deleted there (`home.voicepacks`, decisions.md 2026-09-23).
+
+    That engine alone is read again, and both lists are rebuilt from it and from what the
+    other two already said. `refresh=True` would ask all three: a PowerShell start-up for
+    Windows' voices, which did not change, and a request to Microsoft's service for a
+    catalogue that did not either. The rule that hides the 2013 voices once a better one
+    exists is `installed_voices`' own, applied the same way here.
+    """
+    global _ALL, _CACHE
+    from . import edge, piper
+
+    if engine == "piper":
+        piper.voices(refresh=True)
+    elif engine == "edge":
+        edge.voices(refresh=True)
+    sapi = ([v for v in _ALL if v.engine == "sapi"] if _ALL is not None
+            else _sapi_voices())
+    every = edge.voices() + piper.voices() + sapi
+    modern = [v for v in every if v.engine != "sapi"]
+    _ALL = every
+    _CACHE = modern or sapi
+
+
 def _sapi_voices() -> list[Voice]:
     """What Windows offers, via one short-lived PowerShell. Empty off Windows."""
     try:

@@ -1,0 +1,26 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",      "x": 0,    "y": 0, "w": 560, "h": 1080 },
+    { "file": "Refine.dc.html",    "x": 700,  "y": 0, "w": 560, "h": 940 },
+    { "file": "Ask.dc.html",       "x": 1400, "y": 0, "w": 560, "h": 940 },
+    { "file": "Workspace.dc.html", "x": 2100, "y": 0, "w": 500, "h": 1220 },
+    { "file": "States.dc.html",    "x": 2740, "y": 0, "w": 600, "h": 1120 }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -200,
+      "w": 700,
+      "text": "Three things, one pill.\nThe glyph colour is which thing (Type, Refine, Ask); the ring colour is what Flow is doing (hearing, CLI, wrong). Tap cycles the mode, hold talks, right-click is the only menu.\nA panel never replaces the pill: it rises above it and the pill becomes its foot, still holdable."
+    },
+    {
+      "id": "same-panel",
+      "x": 1400,
+      "y": 980,
+      "w": 560,
+      "text": "Refine and Ask are the same 400px panel over the same pill. What differs is where the text lands: your other window, or back to you."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow</title>
+<link rel="icon" href="/flow.ico">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Flow">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Flow</span></div>
+    <div id="nav" class="nav"></div>
+    <div id="status" class="status" aria-live="polite"></div>
+  </nav>
+  <main id="page" class="page" tabindex="-1"></main>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="gone" class="gone" hidden>
+  <div class="gone-card">
+    <h1>Flow is not running</h1>
+    <p id="gone-why">This window belongs to a Flow that has quit. Start Flow, then open Flow Home from the pill's menu.</p>
+  </div>
+</div>
+</body>
+</html>

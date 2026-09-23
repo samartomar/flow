@@ -6,6 +6,1124 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — Better voices from Flow Home
+
+The owner looked at the voice list and asked whether nine 2013 voices were all there was.
+They were, for a default install: the Windows 11 voices Narrator uses are unreachable by
+any public API (`speak.installed_voices`), and the two engines that sound like people —
+Piper on this PC, the Microsoft natural voices over Microsoft's service — were extras
+installed from a terminal. The owner's two had quietly gone: a `uv sync` removes extras it
+is not told about, so Cori and Alan sat in `~/.flow/voices/` with no engine to speak them.
+
+**Models ▸ Better voices adds either engine with a press**, chosen by the owner over
+making them dependencies. The install goes into the environment Flow runs from, with the
+extras' own specs (a test holds them equal): `uv pip install` when uv is here — `uv run`
+names itself in `UV` — then `python -m pip`, and in the Windows download neither: a frozen
+bundle cannot add to itself, so **the release builds with both extras** and ships both. An
+install is judged by whether the engine imports afterwards, not by the installer's exit
+code alone, and the engine's voices join the list without a restart
+(`speak.voices_changed` re-reads that one engine). The default install still declares
+three dependencies (R16): Piper costs 34 MB — onnxruntime came with faster-whisper — and
+the Microsoft voices about 2 MB, when somebody asks for them.
+
+**Piper's voices download there too**: eight single-speaker English voices from Piper's
+own catalogue, pinned to its `v1.0.0` tag, fetched into `~/.flow/voices/` with progress
+and checked against the catalogue's MD5 before they are renamed into place; a download
+that does not finish leaves nothing behind. No genders on the list — Piper's catalogue
+states none, and `piper._gender` says why Flow reads none off a name; the page links
+Piper's samples instead.
+
+**Adding is not choosing.** Adding the Microsoft voices lists them; picking one in the list
+is still what sends an answer's text to Microsoft, and the card says so before the button.
+The voice in use stays in the list even after the 2013 voices leave it.
+
+**Reopens if** an install from the page leaves somebody's environment broken — then the
+button becomes the command to run — or the release's download grows past what the second
+engine is worth.
+
+### 2026-09-23 — Flow gets an icon
+
+The tray wore Windows' stock application icon — `tray.py` said so, "a line to change when
+Flow has artwork" — the .exe had PyInstaller's, the pill's windows Tk's feather, and Flow
+Home a hand-drawn microphone. The owner asked for something better and chose, from four
+sketches, **the pill's level bars ending in a violet text cursor**: what Flow does — the
+meter the pill shows while it hears you, becoming a caret where the words land — in the
+pill's own colours (the shell, the text white, Ask's violet). The alternatives were the
+pill itself (truest to the screen, muddy at 16 px), a wave flattening into a line, and an
+F in the three mode colours.
+
+`scripts/make_icon.py` draws it with numpy and the stdlib — no image library joins the
+dependencies — into `flow/assets/flow.ico` and `flow.svg`, and `--check` fails the suite
+if the committed files drift from the drawing. It compares what they show, not their
+bytes: CPython 3.14 on Windows ships zlib-ng, which deflates the 256 px PNG into other
+bytes for the same pixels, and the first CI run failed on exactly that. **The sizes
+Windows actually shows are drawn again on whole pixels**: 16, 20, 24 and 32 px are the
+tray and taskbar at 100, 125, 150 and 200% scaling, and scaled from the 64-unit drawing
+their bars land between pixels and smear. BMP inside the icon below 256 px and PNG at 256, which every Windows reader
+takes, Tk's included. The tray loads it at `SM_CXSMICON` and keeps the stock icon as the
+fallback; both pills set it as their windows' default; Flow Home serves it as the page's
+icon, which the Edge app window takes for its taskbar button, and as the rail's mark; the
+.exe is built with it.
+
+**Reopens if** it is mistaken for another app's in the tray — the mark would then need
+more of Flow in it than the colours.
+
+### 2026-09-23 — Type pastes in a row get their space
+
+Found while building the entry below: two Type holds pasted as "Hello there.How are you?"
+— each paste is a draft of its own, and a draft never starts with a space. Spacing well in
+general means knowing what is in front of the caret, which means reading another program's
+text; Flow reads none, and that stays true. What it has now is the one case where it knows
+anyway: **a paste that continues its own last paste**, in the same window, with nothing
+typed or clicked since — the changeable run below. There the next paste gets a space in
+front (`Session.join_paste`), unless the two already meet at a space or a line break, the
+new one starts with punctuation that belongs to the word before (", and", ".5", "?"), or
+the last one ends in a bracket, a hyphen or a slash ("well-" then "known", "src/" then
+"flow"). Terminals too: "git commit" then "-m fix" wants its space as much as prose does.
+The space is kept in the run, because the window holds it and a "scratch that" has to take
+it back; History and Paste last keep the words without it. The compact pill decides on the
+spot, not on the last frame's watch: a key or a click in those 30 ms means the caret may
+have moved.
+
+**What stays glued:** a first paste into text Flow did not write — it cannot see what is
+in front of the caret, and adds nothing rather than guess.
+
+**Reopens if** a program people paste into keeps a trailing space of its own after a paste
+(then Flow's space doubles it), or if reading the caret's context through UI Automation is
+ever argued past R16.
+
+### 2026-09-23 — Correcting a Type paste
+
+The second half of step 5. Type pastes on the release and clears the draft, so a
+correction said in the next hold found nothing to act on and was pasted as words —
+"scratch that" typed into somebody's message. The Classic pill kept its draft on screen
+until Send, where a correction had something to act on; compact Type never did.
+
+**A Type paste stays changeable for as long as Flow can know its words are where it put
+them**: the same window in front, **nothing typed** — the chord's hook keeps one more
+boolean, `Chord.touched`, "a key Flow did not send went down", and Flow signs its own
+keystrokes (`inject.INPUT_MARK` in `dwExtraInfo`) so an on-screen keyboard's count as much
+as a hand's — **nothing clicked** off the pill, polled a frame at a time, and **a
+minute** at most. Inside that, the next hold's correction is routed against the newest
+paste with the draft's own grammar, and made the one way a program can change another
+program's text without its help: Flow's own characters taken back with Backspace and the
+corrected ones pasted after them, in **one `SendInput`**, so no keystroke can land between
+them — and only the tail after what the two versions share, so the fewest keys go in. It
+waits for the hand to leave the keys first: a Backspace sent under a held Ctrl deletes a
+word. Without a chord there is no hook, and nothing is changeable.
+
+**Stricter than the draft in two places, because the change lands in another program.**
+Undo only as the whole utterance: "never mind the weather" is dictation here, where in a
+draft it costs one undo of words still on screen. And a change only where its words are in
+the newest paste: "change the oil to synthetic" with no oil in it is pasted as the
+sentence it probably is, and "scratch that" takes it back. "Scratch that" walks back
+through the changes, then the paste, then up to three pastes before it in that window.
+"That was a command" takes the pasted command back out; reading it again against the paste
+before would route it exactly as the first time, so saying it differently is what is left.
+"New paragraph" goes in with the next words — it used to be pasted as the two words. With
+nothing changeable, the bare verbs are refused out loud with the reason ("nothing to take
+back - you typed after it was pasted") rather than pasted.
+
+**The count has to stay honest.** A Backspace takes a character, and a line break however
+the window stored it. An emoji, a combining mark, a joiner or a tab has no count every
+program agrees on, so a change over one is refused. Claude Code folds a paste of more than
+800 characters or more than two lines into a "[Pasted text]" placeholder (wmedia.es,
+"Expand pasted text in Claude Code"), and no count sees into that — so no paste past either
+bound is changeable, and no change may push one past them. Known and not guarded: a
+program that rewrites pasted text as it lands — Word's smart spacing, an editor that turns
+pasted Markdown into formatting — throws the count off by what it rewrote.
+
+**The records follow the window.** The History entry is revised to the words as they now
+stand ("pasted, then changed"); a paste taken back is kept, marked "taken back", and is
+still what Paste last pastes — the way back from a "scratch that" said by mistake. A change
+teaches its confusion pair, as a spoken correction in a draft does. The compact pill only:
+the Classic pill's draft is on screen, and its corrections happen there.
+
+**Reopens if** a take-back ever removes a character Flow did not paste — the guards are then
+missing a way the caret moves — or if people correct a paste older than the newest often
+enough that a change has to reach it.
+
+### 2026-09-23 — Ask's own hold
+
+Step 5 of the Flow Home plan, building decision 4 of 2026-09-22: **ctrl+alt+win holds a
+question, whatever the pill is on** — Wispr Flow's keys for its Command Mode on Windows
+("Ctrl + Win + Alt", pressed and held, released to run; Wispr Flow's help centre). The talk
+keys dictate whatever the tint: from Ask they take the pill back to the side the Ask keys
+took it from, Type or Refine, and to Type when it was tapped to Ask by hand. The pill's tap
+and its own hold are unchanged, and still follow the tint.
+
+**One hook, not two.** A chord of modifiers alone needs `WH_KEYBOARD_LL`, the narrowing of
+R16 that `flow/hotkey.py` records. The Ask chord rides the talk chord's hook
+(`Chord.riders`): one callback compares each virtual key against both shapes, so the input
+path of every keystroke carries what it carried before. It installs a hook of its own only
+when the talk chord is off. Always a hold, whatever the talk keys' gesture: a question is a
+sentence.
+
+**The overlap is the design problem.** ctrl+win is inside ctrl+alt+win, and the bottom row
+reads Ctrl, Win, Alt — pressed in that order, the talk chord forms first. Its hold breaks on
+the Alt, a third key, so nothing is pasted (the `ctrl+win+d` rule), and the Ask hold starts
+on the same keystroke. From Ask, the talk keys wait 150 ms before leaving it
+(`SIDE_SETTLE_SEC`), so a hold on its way to the Ask keys neither flickers the pill to Type
+nor clears the answer on screen; capture starts at the press either way.
+
+**Off stays off.** `"chord": ""` was read back as the shipped chord at the next launch — the
+loader took the empty string for absent — so Flow Home's "empty turns it off" lasted one
+launch. Both chords keep "" now. The Ask keys are refused when they are the talk keys, at
+launch and in Flow Home: one press would start both holds.
+
+**Reopens if** a program people use every day binds ctrl+alt+win, or people go on tapping
+to Ask rather than hold three keys.
+
+### 2026-09-23 — A ctrl+alt shortcut must not take an AltGr character
+
+Found while moving Paste last (below): **Windows sends AltGr as left Ctrl plus right
+Alt**, so every `RegisterHotKey` on ctrl+alt+<key> is also AltGr+<key>. Five of Flow's six
+shipped primaries are ctrl+alt. On a German keyboard AltGr+Q is **@** and AltGr+M is
+**µ** (kbdlayout.info, KBDGR) — so for as long as Flow ran, typing an email address
+quit it, and µ switched its mode. US-International, which Spanish- and Portuguese-
+speaking developers use on US keyboards, has AltGr+Q = ä and AltGr+M = µ (KBDUSX);
+Hungarian has Q = \, M = < and Space = a non-breaking space (KBDHU).
+
+Not a table of dangerous keys: which keys are dangerous depends on the layouts a person
+installed. At registration Flow asks Windows (`ToUnicodeEx` with Ctrl and Alt held, once
+per layout from `GetKeyboardLayoutList`, without disturbing dead-key state) what AltGr
+types, and a **shipped** ctrl+alt alternative that types a character — or is a dead key —
+on any installed layout is passed over for the next alternative. Every action has a
+ctrl+shift fallback AltGr cannot reach. A plain space does not count; a non-breaking one
+does. The startup block says which combo was passed over and what it would have taken,
+before the combos that registered. A combo the person **chose** in `profile.json` is
+registered anyway and the same line names the character it takes: their choice, now
+with the facts. On a machine with no AltGr layout — this one, en-US only — nothing
+changes, which the suite pins alongside a German fake.
+
+**Reopens if** a layout Flow's users actually use turns out to leave an action with every
+alternative passed over, or a layout added after launch matters — the check runs at
+registration, once per launch.
+
+### 2026-09-23 — The first run: five steps in Flow Home, and compact is the default
+
+Step 4 of the Flow Home plan, and step 4 of docs/one-surface.md's.
+
+**A new profile opens Flow Home at five steps**, drawn from the canvas's FirstRun
+artboard: the two sides and their keys; which microphone, with a test that shows it
+hearing you; the speech model this PC will use, with its download and progress; tuning,
+the Voice page's own; and the history question, beside a box to try a first dictation
+in. Every step can be skipped, and "Skip setup" ends it from any of them. Finishing or
+skipping writes `profile.welcomed`, the flag the Classic pill's welcome card kept — so a
+profile that saw the card is never shown this, and one that never did (every compact
+user's, since that surface never had a card) is shown it once. `--no-profile` has nowhere
+to remember it and never shows it. **The welcome card is deleted**, with its rows and
+tests; the colour legend it carried stays in the Help sheet.
+
+**A first launch does not start a silent download.** Warming at launch used to mean
+fetching three gigabytes behind "loading the model". With the first run on screen to
+show that download with its progress, the launch warms only when the models are already
+on this PC, and otherwise says so on the console and waits. The step fetches the models
+the session will use **without pinning them** in the profile, so a PC that gains a GPU
+later still gets what suits it, and warms the session when the last one lands
+(`Home.warm_when_ready`); "use the smaller models" is a choice and is saved as one.
+
+**The microphone test says "hearing you" only for a voice.** `calibrate.heard` always
+splits what it hears into a quieter and a louder half, so a silent room has "speech" in
+it; the test instead counts blocks at least 15 dB over the quietest tenth, for 0.6 s
+(`voice.voice_seconds`). It stops before a microphone switch, because the switch
+refreshes PortAudio, which frees every open stream in the process.
+
+**Compact is the default.** `DESIGN_DEFAULT` is `"compact"`. A profile that names a
+design keeps it — every save writes the field, so nobody who has launched Flow before is
+moved — and the Classic pill stays one switch away on Flow Home's Settings page for this
+release, as one-surface.md's step 4 asked. `Pill.DESIGN` is the literal `"current"` now:
+it named the class by the default, which would have made the Classic pill call itself
+compact the moment the default moved.
+
+**Reopens if** people skip the first run more often than they finish it — the answer
+then is fewer steps, not a second welcome — or if a Classic user who never chose a design
+turns out to have been moved by the flip, which would mean some save path did not write
+the field.
+
+### 2026-09-23 — Paste last moves to Alt+Shift+Z
+
+The owner asked for the right combination after the History entry below shipped Paste
+last on `ctrl+alt+V` and named its cost. Measured the same day:
+
+- **`ctrl+alt+V` is taken where people work.** Paste Special in Excel, Word and classic
+  Outlook (Microsoft's own shortcut pages), and Extract Variable in every JetBrains IDE —
+  a refactoring developers press all day (JetBrains' Windows reference card).
+- **`ctrl+alt` is AltGr.** On a Hungarian keyboard AltGr+V types **@** (kbdlayout.info,
+  KBDHU), so a global `ctrl+alt+V` takes the @ key away for as long as Flow runs; the same
+  holds on Czech and Slovak layouts. No combination with Ctrl and Alt together can be
+  safe on every layout.
+- **`alt+shift+Z` is Wispr Flow's own default for this action on Windows** ("Paste last
+  transcript: Shift+Alt+Z", Wispr Flow's help centre), so the people most likely to reach
+  for it already have it in their hands. VS Code's and JetBrains' Windows cards bind
+  neither `alt+shift+Z` nor `alt+shift+V`, Word's shortcut list has neither, and a combo
+  with no Ctrl in it cannot meet AltGr.
+
+So: `alt+shift+Z`, then `alt+shift+V` for the machine where Wispr Flow itself is running
+and owns Z. `tests/test_history.py` pins that no alternative holds Ctrl and Alt together.
+The wider finding — the other five shortcuts are all `ctrl+alt`, and German AltGr+Q is
+@ — is its own piece of work.
+
+**Reopens if** a program people use every day turns out to bind `alt+shift+Z`, or
+Windows starts using it.
+
+### 2026-09-23 — History: kept only when chosen, one file, and Paste last waits for the hand
+
+Step 3 of the Flow Home plan: History, Paste last and Conversations. What it decided.
+
+**Nothing is kept until somebody chooses, and one choice covers everything.** The
+2026-08-03 bar ("an opt-in on-disk history, never a default one") and decision 3 above,
+kept exactly: `Profile.history` is None until a person presses one of two equal buttons —
+on the History page now, at first run from step 4 — and None keeps nothing, as "off" does.
+None rather than False because "never asked" and "said no" are different facts, and only
+the first is asked. One file, `~/.flow/history.jsonl`, holds five kinds: what a Send
+handed over (dictated, or refined by the CLI, with the program it went to), what the
+speech filter set aside, and both halves of an Ask. One file because one choice governs
+it, and "everything Flow keeps is in history.jsonl" is a sentence a person can check in
+Notepad. Kept 7, 30 or 90 days, bounded at 20 000 entries; **choosing "off" deletes the
+file**, because "don't keep it" is a promise about the disk and not only about tomorrow.
+Pause stops keeping for the rest of a launch without changing the choice. The file is
+written on a thread of its own — a Send ends in a paste on the UI thread — and Flow Home's
+reads go through the same queue, so a page told "deleted" cannot show the entry again.
+What stays as it was: Recent is memory only, the trace holds no words, and item 65's test
+still finds the settings folder untouched, because unchosen is where every profile starts.
+
+**The words are recorded where they leave.** `send()` hands text back and cannot tell a
+paste from a refusal, and in Refine the words that go are the panel's, sent by a button
+`send()` never sees. So both surfaces call `Session.delivered(text, problem, copied)` after
+every handover, and the session adds what only it knows: text that is the last refine's
+result is kept as refined, beside the words it was made from. The compact pill now names
+the program in front on the window's edge, as the Classic one always did — which also
+gives the per-app Refine notes a surface they were missing. The taskbar is never tracked
+as a paste target (`inject.SHELL_CLASSES`): a tray click holds it for a moment.
+
+**Set aside can be had back.** A final's rejection is kept with its reason, and the same
+words again within two minutes fold into the one kept — Whisper's "Thank you." at the end
+of a hold is the commonest catch, and a page of it would be a page nobody reads.
+
+**A word fixed in History can stay fixed.** Select the words in an entry and say what
+they should have been: *Fix it here* changes the entry; *Always fix it* first appends the
+correction to the dictionary through `lexicon.append_pair` — the Voice page's own door,
+with its rules — so a correction the file refuses leaves the entry as it was.
+
+**Paste last.** The newest handover — this launch's from memory, after a restart the
+newest kept entry, so it survives a quit exactly when history is kept — pasted again into
+the window in front, from the compact menu (quoting the words it will paste), the tray,
+and `ctrl+alt+V`, with `ctrl+alt+shift+V` behind it and never `ctrl+shift+V`, which is
+paste-as-plain-text in most programs. A shortcut fires with its keys down, and a Ctrl-V
+sent then arrives as Ctrl-Alt-V — Paste Special in Word and Excel, AltGr-V on many
+layouts — so the paste waits up to 3 s for the hand to leave the keys and says so rather
+than paste through them. The tray's menu leaves one of Flow's windows in front, which
+`inject.paste` rightly refuses, so that path hands the foreground back first. A Paste last
+is never kept again: it is already kept. *(The combination moved the same day — see
+"Paste last moves to Alt+Shift+Z" above.)*
+
+**Conversations move between the pill and the page.** The conversation on screen lives in
+the session whatever the choice (`Session.exchanges`, under an id that changes wherever
+the thread is cleared as a topic switch). Flow Home draws it and takes typed questions
+(`Session.ask`): the same thread, framing and workspace as a spoken one, but the answer
+arrives as an `answer` event rather than a `reply`, is not read aloud, and neither raises
+the pill's panel nor changes its mode. A kept conversation opens read-only and can be
+carried on (`Session.resume` rebuilds the thread the CLI is told; the workspace is left
+alone and the page says which one the next answer will stand on). Keep note, Read aloud,
+Copy and Wrap up work from the page. The compact Ask panel's footer gains **Continue in
+Flow**, in the slot where Refine has Send.
+
+**Not built from the canvas:** *Use as draft* on the page, and "Flow heard cube control —
+what did you say?". The first needs a draft the page can see, the second per-word
+confidence; the session has neither yet.
+
+**Reopens if** somebody who keeps history finds set-aside entries noise rather than
+recovery — then only the "unconfident" rejections, the ones a person may have meant, are
+kept — or if `ctrl+alt+V`'s cost to Office users is reported, in which case the default
+moves to its alternative.
+
+### 2026-09-23 — Flow Home's Voice page: Remove joins Add, and the microphone is lent, not shared
+
+Step 2 of the Flow Home plan: tuning, the accuracy check, and the dictionary, on one page.
+Three things it decided that are worth the record.
+
+**The dictionary file gains a Remove.** "Flow appends one line and never edits, reorders,
+removes or reformats one" was the promise, and it was right for a file only a menu offer
+could write to. A page that lists every entry with an Add beside it and no way to take
+one back would be a page that teaches people to open the file anyway. So Flow may now
+remove an entry — only on a Remove the person pressed, about an entry they can see, only
+the lines that read as that entry, and every other byte back exactly as it was (read and
+written with `newline=""`, so even the line endings survive; a file that is not valid
+UTF-8 is refused rather than rewritten). The promise that survives is the one that
+mattered: Flow never changes the file on its own. `lexicon.append_term` is the Add's
+twin of `append_pair`, and both now refuse text that would change what the line means
+(`#` starts a comment, `->` starts a correction) instead of writing it and letting
+`entries` drop it silently.
+
+**What Flow learned is shown, with its evidence and three verbs.** Every pair counted at
+least `PROMOTE_AFTER` times is listed with the count: *Always fix* declares it (the
+menu's offer), *Never* stops asking and keeps the bias (the old "Never offer"), and
+*Forget* is new — it unlearns the pair, so the bias goes too. A bias nobody could see was
+a bias nobody could take back.
+
+**The microphone is lent, never shared.** Tuning and the check are a person reading
+aloud, and those words are not dictation. `Session.lend_mic` stops capture (a `pause`,
+which also refuses anything decoded from before it), closes a lingering stream, emits a
+`disarm` whose text is `lent` so neither surface draws a microphone that went away, and
+makes `start` refuse with the reason — which the compact pill puts on its strip instead
+of the slash it uses for a dead device. The task opens a stream of its own on the same
+device, and gives the microphone back on every exit path. Refused while a reply plays,
+for `set_microphone`'s reason. The alternative — both reading one stream — would have
+made the calibration passage a draft.
+
+**The accuracy check scores the pipeline, not the model.** Five sentences, decoded by the
+session's own transcriber with the dictionary applied, aligned word by word (fewest
+errors, then most matches, so the page shows the misses a person would name). Only
+missed names are offered for the dictionary: biasing common words is the measured harm
+in `flow/lexicon.py`.
+
+**Reopens if** a person's corrections outgrow the 64-line cap in practice — the page
+refuses past it and says so, which is the honest answer until the constrained re-decode
+changes what a line costs.
+
+### 2026-09-22 — Flow Home: the pill never grows a setting, and one window holds every one
+
+The owner's verdict on the build: the engine is good — accented dictation, Ask like
+ChatGPT — and it is not a product. The audit behind that sentence, done the same day
+against the code: **about fifteen capabilities could be reached only through a flag or a
+hand-edited file** (the speech models and where they run, the microphone, calibration,
+the lexicon and its corrections, the CLI's wait, a custom send word, the hotkeys and the
+chord, per-app instructions, placement, stats, the update check). Nothing the user would
+look for was kept past a quit. A first-run download of three gigabytes said "loading the
+model" and nothing else, because faster-whisper turns its progress bar off. And the
+compact surface — the one the owner uses — had no settings, no help and no way to reach
+the lexicon at all. The owner had asked for exactly this on 2026-08-01 ("unless it is
+exposed to UI right click or dedicated settings page i will not be able to use it"), and
+the "no settings dialog" stance, having survived four challenges, answered with a menu.
+
+Four decisions, all the owner's, taken together:
+
+1. **Flow Home exists.** One window for everything that is not talking; the pill never
+   grows a setting. This reverses the no-settings-page stance *for the product* and keeps
+   it for the pill, which is where the stance was right: its argument was that a surface
+   people talk through must not accumulate options, and it never needed to mean that the
+   options had nowhere to live. What survives from it: every setting still writes the two
+   files that were always the settings, a flag given at launch still wins over what Home
+   remembers, and the send word is still chosen from the tested presets — a box that
+   accepts any word would be the free text the 2026-08-01 entry refused for a measured
+   reason.
+2. **HTML in an Edge app window, served by Flow on 127.0.0.1.** No new Python
+   dependency: `http.server` is the stdlib and Edge ships with Windows 11. The page is the
+   design canvas's own medium, so design and build are the same artefact. The server
+   starts the first time the window is opened, answers only its own host, its own origin
+   and a token made per launch, and serves a fixed list of files (`flow/home/server.py`
+   says why each check is there). Off Windows, and on a Windows without Edge, the page
+   opens in the default browser — so Lite gets Home without a line of platform code. Tk
+   was the alternative and the reason against it is cost, not taste: every list, text box
+   and scroll view would be hand-drawn, and the pill and its panel alone took weeks.
+3. **History is opt-in, chosen at first run with nothing preselected** — the 2026-08-03
+   bar ("an opt-in on-disk history, never a default one") kept exactly. Step 3 built it
+   (2026-09-23, "History").
+4. **Ask gets its own hold, Ctrl+Alt+Win** — the keys Wispr Flow users already know from
+   its command mode. The hand picks the side; the tint no longer has to be read before a
+   hold. Step 5 builds it.
+
+**What step 1 landed.** Home, Models and Settings, and the pages still to come shown as
+such rather than hidden. Every change is made on the session's own thread
+(`Session.post`, drained by the `pump_results` both surfaces call every frame), and
+applied now wherever the session can apply it now: **a model swap is live**
+(`WhisperTranscriber.swap` drops only the tier that changed; `_model` reloads a tier a
+swap dropped between a load and a decode, so a decode can never be handed `None`), and so
+is **the microphone, chosen by name** (`Mic.use` refreshes PortAudio between the close and
+the open, which is why it is refused while a reply is playing). Keys and the chord apply
+at the next start, and say so — the hook and the registrations are built once, and
+re-registering from a settings page is the one change the OS may refuse halfway. Model
+downloads report bytes through `snapshot_download`'s own progress class. Six settings that
+were flags are profile fields now (`partial_model`, `final_model`, `decode_device`,
+`mic_device`, `cli_timeout`, `warm`), all additive, all absent-means-before.
+
+**The menus.** The compact pill's Workbench setup and Design rows became one row, **Open
+Flow**; the setup box is deleted rather than left unreachable. This supersedes the
+2026-09-04 entry "The compact menu gets one row the artboard does not draw": its reason —
+two designs must be reachable from each other — is kept by Home, which both surfaces open
+and which switches the pill in place. The Classic pill's menu gains Open Flow as a
+seventh row and keeps its Settings cascade until the design retires. The tray gains Open
+Flow above Show the pill.
+
+**Reopens if** Edge's app window proves unreliable on a supported Windows — it does not
+open, or cannot be brought forward — in which case the answer is a native window over
+WebView2 (pywebview), at the price of a dependency R16 would have to be argued for.
+
+### 2026-09-03 — The compact design: a second surface, switched, not a reskin
+
+`design/compact/` specs a wordless pill — glyph colour for mode, ring colour for state,
+tap to cycle, hold to talk — and the question was whether it replaces the shipped UI or
+stands beside it. **Beside it, as a module of its own** (`flow/ui_compact.py`), chosen
+from the profile's `design` field or `--design`, default `current`.
+
+**A sibling module rather than a branch inside `Pill`**, the way `lite` is a branch.
+Lite is the same windows with their hands tied; the compact design is a different
+window with different gestures, and a flag that deep inside a 7 400-line class is two
+designs sharing one file's blame. The seam was already clean: `main()` speaks to the
+surface through one constructor, `mainloop()` and `quit_app()`, and the surface pulls
+from the session — so a second class honouring that contract costs the shipped one
+nothing, and every test that pins `Pill` keeps meaning what it meant.
+
+**The switch is launch-time, said out loud.** A design's window tree is built once, in
+its constructor, so a live swap is a rebuild-the-world pattern nothing here has. The
+menu entry writes `profile.design` and the note names the cost: "launches next time" —
+the same rule `--lite` has always run under, and better than a switch that applied
+silently later and read as one that did nothing now.
+
+**The spec's three modes land on the session's two.** The canvas draws Type / Refine /
+Ask on the pill; the session knows DICTATE and CONVERSE. The scaffold maps Type to
+dictate and Ask to converse — white glyph, violet glyph, the hues the shipped UI
+already gives them — and Refine-as-a-pill-mode stays a TODO citing the artboards,
+because giving the session a third mode is core work, not surface work, and smuggling
+it into a UI scaffold is how two half-features ship as one. Tap-to-cycle is real (it is
+`toggle_mode` with a threshold); the docked 400 px panel and the workspace palette are
+stubbed, likewise cited.
+
+**The name.** "Compact" was already spoken for by the compact pass of 2026-09-01 — the
+shrink of the shipped pill — so its test is `tests/test_compact_pass.py` now and the
+bare word belongs to the design. Comments that narrate the pass keep saying "the
+compact pass", which is what they always meant.
+
+**Reopens if** the compact design reaches spec parity and one of the two stops being
+used — a second surface is a standing cost, justified only while both are real.
+Parity is what the 2026-09-03 build brief (`design/compact/BUILD_BRIEF.md`) was, and
+it has landed: all seven items are on the branch, from Type working end to end to
+spoken punctuation, so the bar is now live rather than hypothetical.
+
+### 2026-09-03 — REFINE as a third session mode, in the session and not the surface
+
+The compact canvas draws three modes on the pill; the session had two, and a scaffold
+that faked the third in the UI was the cheap way to ship two half-features. **Refine
+is a mode of the session** (`flow/session.py`'s `REFINE`, cycling DICTATE → REFINE →
+CONVERSE), built on the machinery that already existed: the polish pass over a held
+draft, with the workspace as the CLI's system role — `GROUNDING_WHERE` and
+`_refine_cwd` were the seam, and no second pipeline was built.
+
+**Refine-as-an-action and refine-as-a-mode share one pipeline and differ in
+delivery.** A spoken "make this shorter" still rewrites the draft in place; a mode
+Send delivers the shaped text as a `reply` — a result to be shown and sent on
+purpose, because the draft it would have been checked against was already committed
+by `send()`. The shipped surface consumes that reply the way it consumes an answer
+(the card holds it, Take pastes it); the compact panel's result block shows it and
+its Send pastes it. Both are one call path, which is the whole point of doing this
+in the session.
+
+**The cycle of three is the defect that does not announce itself.** Every two-way
+`!= DICTATE` read in the shipped UI had to be audited — the mode menu, the settings
+glyph, the auto-ask entry, `--converse` at launch — because a third value read as
+CONVERSE pastes nothing and reads as DICTATE asks nothing, and neither failure has
+a sound. `toggle_mode(to=)` is the chooser API the audit produced: a cycle cannot
+serve "choose Converse" in a three-mode world.
+
+**Reopens if** a fourth mode is ever proposed — the audit was sized for three, and
+the answer then is a mode registry, not a fourth constant beside three.
+
+### 2026-09-03 — The compact surface is composited, not painted
+
+Beside the artboard, the built pill was visibly stair-stepped where the design
+is smooth, and the owner's review would not pass it. The cause is not the
+drawing code: **Tk 8.6's canvas has no antialiasing**, so every curve it draws
+is a hard-edged stair, and these windows are colour-keyed
+(`-transparentcolor`), which makes transparency *binary* — a pixel is either
+wholly the pill or wholly see-through, so the silhouette has no partial
+coverage available to be smooth with. No amount of redrawing reaches the
+artboard from there.
+
+**So the compact surface renders itself and hands Windows the result.**
+`flow/paint.py`'s `GdiCanvas` draws with GDI+ into a premultiplied BGRA bitmap
+and presents it with `UpdateLayeredWindow`, which is the per-pixel-alpha path.
+Antialiased shapes, antialiased text, a feathered edge. **No new dependency** —
+`ctypes` and `gdiplus.dll` are both already on the machine, so R16's
+three-package install is untouched.
+
+**It wears `tk.Canvas`'s own vocabulary rather than one of its own.** The
+drawing code in `ui_compact.py` was already a display list written in
+`create_line` / `create_polygon` / `create_arc` / `create_text`; making the
+painter speak those means one body of code draws the surface whichever backend
+renders it, and the real canvas is the fallback rather than a second
+implementation to keep in step. `painter_for` hands back the canvas itself on a
+Mac, on Linux, and in Lite — where every line of drawing code is unchanged and
+Tk's stairs are what a Flow looks like, which is a Flow.
+
+**The shipped design is untouched.** This is the compact surface's module, and
+`flow/ui.py` still paints its canvas the way it always has. Whether the shipped
+pill wants the same treatment is a separate question with a separate cost.
+
+**Three things this cost, all recorded because they will be met again.** A
+layered window keeps whichever of Windows' two alpha modes it is put in first,
+and Tk's `-alpha` is the other one — so `-alpha` comes off, its opacity moves
+to the blend's `SourceConstantAlpha`, and a refused present re-takes the style
+and retries rather than trusting a flag. A layered window's content does not
+survive its own mapping, so a box drawn once at open had nothing on it until
+`<Map>` redrew it. And GDI+ measures text with padding Tk does not, which put
+the palette's `.hit` tint further off with every character until both calls
+shared one typographic string format.
+
+**Reopens if** a machine turns up where `UpdateLayeredWindow` is refused for a
+reason the retry does not fix, or if the frame cost of compositing the panel at
+30 ms shows up in the numbers `docs/speed.md` keeps.
+
+### 2026-09-04 — The shipped surface cannot be composited: it contains a text editor
+
+Asked to give `flow/ui.py` the GDI+ compositing the compact surface has, and
+it was built far enough to find the wall rather than argue about it. Recorded
+because the wall is structural, and somebody will otherwise try again.
+
+**What worked.** `TeeCanvas` — every drawing call to the real `tk.Canvas`
+*and* into a retained display list — solves the problem that stopped the port
+being attempted at all: the canvas keeps every item, so the eighteen
+`tag_bind` sites and the hover tooltips go on working untouched, and the list
+is what a `GdiCanvas` replays. It composited. The pill row came out antialiased
+with its rounded corners and its status label intact.
+
+**What it cost to get there, and all of it is kept**, because these were bugs
+in the painter rather than in the port: GDI+'s closed cardinal spline is not
+Tk's `smooth=True` — the same twelve points render as two different shapes,
+which took the radius off every corner — so `_tk_smooth` computes Tk's own
+quadratic B-spline instead. A string may never wrap (`StringFormatFlagsNoWrap`)
+or `LISTENING` breaks into `LI STENI NG`. And a missing *monospaced* family
+must be replaced by a monospaced one: none of the IBM Plex faces are installed
+here, and `Pill._bar_label` places every glyph itself on a fixed 7 px pitch,
+which a proportional stand-in tears apart.
+
+**The wall.** The shipped design is a one-window overlay: the draft panel and
+the conversation card are `tk.Frame`s inside the pill's own window, so a
+bitmap covering that window must merge their display lists too — which was
+built, at their placement offsets, with per-canvas dirty tracking. And inside
+`Bubble` is `self._editor`, a real `tk.Text`: focusable, editable, with a
+caret and a selection, drawn by Tk into that same window. **A layered window
+shows the bitmap and nothing else**, so the editor would simply not be there.
+Compositing this surface means writing a text editor, and that is not a
+rendering change.
+
+**So the shipped surface stays as it is** — Tk-drawn, aliased, and working —
+and the decision is not "later", it is "not while it edits text in place". The
+compact surface has no such widget, which is not a coincidence: it was drawn
+without one.
+
+**Reopens if** the hand editor moves out of the composited window — a separate
+Toplevel of its own would be enough, and would cost that window its seam with
+the panel.
+
+### 2026-09-04 — The chord opened the microphone into a loop that never read it
+
+Six reports of "push to talk does not do anything", and the sixth carried the
+fact that settled it: **the shipped design worked on the same microphone,
+minute for minute.** Every diagnosis that blamed the device died there.
+
+`_frame` pumps the session only while `armed` — `session.tick()` is what reads
+the audio — and `self.armed = True` lived in `_pump_press`, the *mouse* path.
+A chord hold goes through `_talk_start` instead. So the chord opened the
+device, lit the ring green, reported `capturing` true, and sat in a frame loop
+that never once read a sample from it. The chord is the documented push-to-talk
+gesture, so that was every hold that mattered. Arming now happens in
+`_talk_start`, the one seam both gestures pass through, and six tests pin that
+each of them arms.
+
+**The mic accusation is withdrawn.** The notice added hours earlier — a hold
+that heard nothing saying "is it muted?" — was built on top of this bug and
+told the owner their working microphone was muted. Measured afterwards, an
+*idle but healthy* device ranges -97 to -90 dB, which is where a muted one
+sits too: absolute level cannot separate "muted" from "quiet", and the check
+was guessing. `States.dc.html` was right the first time — silence goes back to
+grey and says nothing.
+
+**What survives is the part that was not a guess.** The waiting ring while the
+models load, and the green ring while the microphone is open, are both facts
+the session already knows and neither infers anything. That is the line: a
+surface that removed its words may report what it *knows*, and may not diagnose
+what it does not.
+
+**The rule this cost.** A diagnostic built on an untested assumption does not
+merely fail to help — it actively misdirects, and it spends the owner's trust
+to do it. The accusation should have been the last thing added, after the
+mechanism was proven, not the first.
+
+**Reopens if** a device ever reports something that genuinely distinguishes a
+muted input from a quiet one — a mute flag from the OS, not a level.
+
+### 2026-09-04 — A wordless pill still has to say three things
+
+Five reports in a row of "push to talk does not do anything", ending in "I am
+not sure why, I cannot explain the failure to you". That last sentence is the
+finding. It is not a vague bug report — it is the accurate description of a
+surface with no feedback: **a colour that is missing is not a colour anybody
+can report.** The pill was working the whole time. It simply could not say so,
+and neither could it say what was wrong.
+
+Three facts got a colour, and each was invisible before:
+
+- **The models loading.** ~17.5 s off disk here for `large-v3` on CUDA,
+  measured — which is exactly the window somebody spends finding out whether
+  the thing works, and during all of it the pill looked identical to rest. It
+  is the waiting ring now. `session.activity` has called this "loading the
+  model" for the shipped surface all along; this is the same fact in the only
+  vocabulary this one has.
+- **The microphone being open.** `State.LISTENING` means speech was *detected*,
+  so a mic held open over a silent room reports `IDLE` — correctly, and
+  catastrophically for a surface whose only vocabulary is the ring: holding and
+  doing nothing looked the same. `Session.capturing` is the new public seam,
+  and the ring is green whenever it is true. **Above loading**, and that
+  ordering is the decision: both are true during those first seconds, and "is
+  my microphone on" is the question actually being asked.
+- **A microphone that hears nothing at all.** `States.dc.html` sends "held, but
+  nothing was said" straight back to grey, which is right for a quiet moment in
+  a working room and wrong for a muted device — the pill then looks the same
+  every single time and the only available report is "nothing happens". A hold
+  over `SILENT_AFTER_SEC` whose peak never rose `SILENT_MARGIN_DB` above the
+  meter's floor now says so, in the strip Lite's "copied" line already used,
+  and in `DIM` rather than red: a muted mic is a thing to go and fix, not a
+  failure of Flow's.
+
+**The strip sizes to its sentence.** It kept the capsule's 120 px at first and
+cut its own message in half, which is a special kind of useless.
+
+**The general rule.** A surface that removes words takes on the obligation to
+answer, in whatever vocabulary it has left, the questions the words were
+answering. "Is it on", "is it busy", and "did it hear me" are not decoration.
+
+**Reopens if** the ring runs out of room — five meanings on one ring is already
+the most it can carry, and a sixth needs a different channel, not a sixth hue.
+
+### 2026-09-04 — The compact review: the release waits for the decoder, and the band grows
+
+The build brief's seven items had landed and the owner had said the compact surface is
+the one they use, so it was read the way the shipped surface was read on 2026-08-02: for
+where it fails, with every suspicion tested rather than argued. Twelve findings, in
+[audit-2026-09-04/compact-surface.md](audit-2026-09-04/compact-surface.md), fixed in
+ten commits — nine by five agents in parallel worktrees, one where two of their fixes
+met. Two of the fixes changed a contract this record had stated, and those are the
+decisions.
+
+**The release arms a wait; the decoder's idleness fires it.** The 2026-09-03 send path
+fired the paste on the `draft` event that brought the words. That was wrong in both
+directions and both were reproduced headlessly: a hold ending in a pause longer than
+the gate's 800 ms hangover had its final decoded *during* the hold, so the release
+found nothing in flight and armed nothing — the words sat in the draft and nothing
+pasted, said, or showed; and a hold long enough to queue two finals fired on the first,
+pasting half. The shipped `Pill._pump_talk` had the rule all along: the decode has to be
+*finished*, not merely to have said something. The compact surface now arms on the
+release whenever there are words — in flight or already in the draft, measured against
+what the draft held when the hold began, so a break's deliberately unpasted words are
+not sent by a later silent hold — and a per-frame pump fires on `not session.busy`,
+with the shipped surface's ceiling and a strip line when it is hit. A 5 ms clock runs
+while a hold or a wait is in flight, as it does on the shipped surface.
+
+**The band grows with its text, to a cap.** The panel was a fixed 200 px of fixed
+rows, and `11-compact-refine-panel.png` showed the refined prompt drawn through the
+Copy and Send chips: `RESULT_Y + 16 + 2 × 18 = 160`, past a footer at 156. Both blocks
+were also cut to two lines, so an answer could not be read and the text Send was about
+to paste could not be checked. The artboards grow with their text; the band does now
+(`_panel_layout`, one source of truth for the drawing, the window and the hit tests),
+up to four heard lines and twelve result lines, shrinking its result rather than leaving
+the screen when the capsule stands too close to the top. `PANEL_H` is the floor, so a
+short exchange still photographs as drawn. Paragraph breaks and indentation survive
+`_fit`, so a refined prompt's bullets display as bullets.
+
+**Three more that were measured rather than guessed.** GDI+ never saw the bundled IBM
+Plex faces — `FR_PRIVATE` is a GDI registration and GDI+ keeps its own collection — so
+the whole surface had been composited in Segoe UI and Consolas; a private collection
+fixes it, and a Plex string now measures 158 px where Consolas measured 145. Every
+frame repainted and re-presented: 0.78 ms idle and 4.5 ms with the panel open at 300 %,
+now 0.01 ms for an unchanged frame under a draw key. And the panel's clamp used
+`winfo_screenwidth()`, the primary monitor's width, so opening it on a right-hand
+monitor threw the window onto the primary; the monitor is re-asked every fourth frame
+about the capsule's own centre now, and drags may cross the seam.
+
+**What the review raised rather than took** is in `NEEDS_YOU.md`: whether the two
+surfaces become one ([one-surface.md](one-surface.md)), and whether spoken
+punctuation's five bare words should need a lead-in.
+
+**Reopens if** the wait's ceiling is ever hit in ordinary use — that is a decoder
+problem wearing a send problem's clothes — or if twelve result lines turn out to be
+too few for the answers people actually ask for, at which point the panel scrolls
+rather than grows further.
+
+### 2026-09-04 — The compact menu gets one row the artboard does not draw
+
+`Workspace.dc.html` says "this is everything it offers", and on 2026-09-03 the
+compact menu was trimmed to exactly that. It cost more than it looked like.
+
+`profile.design` decides which surface launches, and the control that writes it
+is **Settings → Design in the shipped design's menu** — which is real, rendered
+and photographed (`.shots/16-menu-settings.png`), and completely unreachable
+once `compact` is the stored value. The only switch lived inside the surface you
+had just switched away from. The owner asked where v1 had gone, and the honest
+answer was "behind a door that only opens from the other side".
+
+**So Design is a cascade on the compact menu too**, mirroring the shipped one
+row for row: the same names, the same `(current)` marker, the same promise that
+it lands next launch. Nothing else came back — Hide to tray and Quit are still
+the tray icon's, and the artboard is still the authority on everything the menu
+draws above this row.
+
+**The general rule this is an instance of.** A surface may leave out anything
+the drawing leaves out *except the way out of itself*. An escape hatch that
+lives only in the state you are trying to leave is not an escape hatch.
+
+**Two things the episode also taught.** `--design current` is not an answer for
+somebody who launched from a shortcut, and a menu row with no test is a row
+nobody knows is missing: `_design_menu` had shipped on 2026-09-03 with no test
+asserting it appears anywhere, so the claim that the shipped design could switch
+rested on reading the source. It has tests now, on both surfaces.
+
+**Reopens if** the two designs ever stop being a user-visible choice — one
+surface needs no switch, and the row goes with the choice.
+
+**Superseded 2026-09-22** ("Flow Home"): the row moved rather than went. Flow Home's
+Settings page switches the design, both surfaces open Home, so the two designs are still
+reachable from each other — through the one row, Open Flow, that the compact menu keeps.
+
+### 2026-09-04 — The shipped surface is composited after all: the editor moved out
+
+The entry below this run of four — "The shipped surface cannot be composited: it
+contains a text editor" — ended with its own reopen bar: *"if the hand editor moves out
+of the composited window — a separate Toplevel of its own would be enough, and would
+cost that window its seam with the panel."* The owner asked for the two designs to be
+one product, and the shipped surface's soft, aliased, colour-keyed row was the most
+visible way they were not. So the bar was taken up.
+
+**The editor is a window of its own.** `Bubble._edit` builds the `tk.Text` inside a
+bare `-topmost` Toplevel and places it over a *well* the panel now draws in the slot
+(`SHELL` in a `RING` outline, recorded and composited like everything else), off the
+pill's tracked `x`/`y` — never `winfo_rootx`, which lags — and re-places it from
+`_render` on every key and from `reposition` on every drag. `SetForegroundWindow`
+targets the editor's own toplevel; the `owned_by_flow` verification is unchanged
+because it asks about the process. The cost the bar named is paid: the box no longer
+shares the window's seam, and it is a Tk-drawn text box over a composited panel. It is
+also the right price, because a text box is the one thing on this surface that has to
+*take keystrokes*, and a layered window shows a bitmap and nothing else.
+
+**Then the port that stopped in the morning finished in the evening.** `TeeCanvas`
+over the row's `ScaledCanvas` and a `GdiCanvas` the size of the window;
+`paint.recorder` on both panel frames; one present per frame, bands at the origin and
+the row last under `at_self=(0, h - PILL_H)`, only when a tee is dirty; `_sync_shell`
+resizes the bitmap; the idle dim writes `constant_alpha` because `-alpha` is the other
+layered mode and a window put into it refuses every present after; the Help sheet is
+composited the same way. The interaction layer is untouched — the real canvas keeps
+every item at device coordinates, which is the whole reason the tee exists, and
+`18-draft-context.png` is a right-click landing on the composited panel.
+
+**Three painter bugs the photographs found, all measured.** A GDI+ pen in `UnitPixel`
+is not touched by the world transform — at scale 3, widths of 1, 1.5 and 2 all rendered
+the same two device rows, so every stroked mark came out a third of its weight; an
+explicit width is a design length and scales now, an absent one stays a one-device-pixel
+hairline, which is what `_panel_chrome` relies on. A Tk *point* size taken for a pixel
+size is three-quarters of the face; GDI+'s own `UnitPoint` was three times too large, so
+points are converted at 96/72 design pixels, the arithmetic `tk scaling` does (3.996
+measured against 96·3/72). And a `create_text` `width` is a wrap column: under the
+label format the draft, the note and the answer ran off the panel in one line, so there
+are two string formats and the width selects the wrapping one. The first of these
+changes the compact surface too — its ring and mic go from a hairline to the one design
+pixel its canvas draws — and it was re-photographed.
+
+**Frame cost on the 300 % display:** an idle frame is 0.03 ms with the panel up (the
+`_draw_key` skip plus the dirty check), a present of the 400×149 shell is 5.7 ms and is
+paid only while something moves — the same order as the compact surface's own 4.5 ms.
+
+**Reopens if** the editor's separate window is reported as jarring — a box that lifts
+above a panel instead of sitting in it — in which case the answer is a composited text
+box drawn by hand, which is the "writing a text editor" the morning entry refused, and
+would want its own decision.
+
+### 2026-09-04 — Two designs, one product: the switch is live
+
+The 2026-09-03 entry above says *"the switch is launch-time, said out loud"*, and
+gives the reason: a design's whole window tree is built in its constructor, so a live
+swap is "a rebuild-the-world pattern nothing here has". The owner's verdict on the
+built surfaces was that two designs you can only reach by relaunching are two products,
+not one — and the review that morning had already found the premise under the other
+reason (below: the shipped surface was never DPI-aware, so the two could not share a
+process). Both reasons gone, the pattern is built, at the one seam that already
+existed.
+
+**`main()` runs a loop.** It builds the class for the chosen design, runs `mainloop()`,
+and reads `switch_to` when that returns: `None` is a quit, a name is a switch, and the
+loop builds the other class **around the same session, the same hotkeys, the same
+`on_send`**. Each surface grew `switch_design(name)` — store the preference, name the
+successor, hand the window back — and `detach()`, which is `quit_app` minus three lines:
+the session is not closed, the hotkeys are not stopped, the fonts are not unloaded,
+because the next surface needs all three. What survives the press is everything that was
+never the window's: the draft, the thread, the workspace, the mode, the chord. What does
+not is the window, an open panel, and the arm — `detach` pauses an armed session on the
+way out, because a microphone left open under a surface that is not pumping it is the
+"chord never pumped the session" failure of the same day, and the new surface starts
+disarmed.
+
+**Measured on the real desktop through the real menu rows**, both directions: one
+`Session` object across three surfaces, the draft intact on the far side, `main`
+returning 0. Two facts the episode settled: a second `tk.Tk` in one process is fine
+once `_load_fonts` is idempotent and the old window's `after` callbacks are cancelled
+before the new interpreter pumps the same thread; and a menu row may destroy its own
+window, because Tk on Windows dispatches a popup's command after `tk_popup` returns —
+which is why the shipped Quit row was always safe.
+
+**Reopens if** a third surface ever arrives — the loop is written for two names, and a
+registry is the answer then, the way a fourth mode wants a mode registry.
+
+### 2026-09-04 — One glyph language, and the colours stay where their decisions put them
+
+Side by side, the two surfaces read as two products before they read as two layouts:
+the shipped row's gear was a filled body with a hub punched out in the background
+colour, its speaker a filled wedge, its marks 2 px strokes in 16 px boxes; the compact
+pill's mic, folder and copy were 1.4 px round-capped strokes in the canvas's language
+(`design/compact/gen.py`). The owner asked for one product, and the icons were the most
+visible seam.
+
+**`flow/glyphs.py` is the one hand.** Every glyph both surfaces draw — mic, folder,
+copy, close, search, gear, speaker, the three mode marks, and the command marks — is a
+pure drawing function in the compact canvas's language: strokes only at one weight
+(`STROKE = 1.5`: 1 px on an aliased Tk canvas, antialiased under GDI+, 4-5 px at 300 %),
+round caps, no fills except a dot the stroke's own size, a rounded rect built from arcs
+and lines so it renders the same through `GdiCanvas` and Tk. `ui.py`'s `_gear`,
+`_speaker`, `_mode_glyph` and `_glyph_*` keep their names and delegate, so the eighteen
+`tag_bind` sites and the tests that name them are untouched; the shipped mic and the
+compact mic are now literally one drawing.
+
+**What did not change is colour.** The shipped marks carry the four canvas hues and the
+row's gold/cyan/pink because the owner insisted on them ("this is what you build, this is
+what you promise", the 2026-09-01 coloured-marks commit), and the compact pill is
+monochrome because its canvas is.
+The language unifies shape and weight; the hues stay with the decisions that chose them,
+and `glyphs.py` takes colour from its caller for exactly that reason.
+
+**Reopens if** the compact surface becomes the only one (one-surface.md) — then the
+shipped hues have no row to live on, and the question of whether the compact panel's
+chips want a hue is a fresh one.
+
+### 2026-09-04 — The shipped surface renders at native resolution too, without the port
+
+Two questions had been travelling as one, and separating them is the decision.
+*Composite this surface with GDI+* is blocked by the text editor inside it (see
+above) and by its item-based hit testing. *Render it at the display's real
+resolution* is neither of those things, and it had been left undone because
+`flow/ui.py` was **already claiming to do it** and silently failing.
+
+`_dpi_aware` called `SetProcessDpiAwarenessContext(-4)` with no `argtypes`. On
+64-bit Windows ctypes then passes a 32-bit -4 where a pointer-sized
+`DPI_AWARENESS_CONTEXT` is wanted, the handle arrives truncated, and the call
+answers **0** — and a *return* of zero is not an exception, so the two fallbacks
+underneath it never ran either. Probed on the 300 % machine: return 0,
+`GetDpiForSystem()` 96, reported scale 1.0. The process was DPI-*unaware* for the
+whole of the surface's life: Windows told it the screen was 1280×720, it drew a
+third-size pill, and the compositor stretched the result by three with a bilinear
+filter. **That stretch was the softness**, and it was also the magenta fringe —
+`-transparentcolor` keys an exact colour, and a bilinear filter blends that colour
+with its neighbour along every edge the key has. `paint.make_dpi_aware` is the
+same call with its argument declared, which is where the bug was found first.
+
+**The conversion is `ui_compact.py`'s rule, moved to the canvas.** Every size in
+`flow/ui.py` stays in design pixels; `SCALE`, `dev()` and `design()` convert where
+a number meets Tk geometry or a Win32 rectangle, and `paint.ScaledCanvas` — a
+proxy that multiplies coordinates, widths and pixel-sized fonts on the way in and
+divides `bbox`/`coords` on the way back — stands at the one seam every drawing
+call already passes through. That is what makes this a change nobody has to
+remember: the next `create_line` written in this file is correct by default.
+Point-sized fonts are left alone because Tk's own `tk scaling` already carries
+them — 3.996 aware against 1.333 unaware, measured. At 100 % nothing is wrapped
+at all, so a Mac and a 1:1 display run the code they ran before.
+
+**Hit-testing is why this works where compositing does not.** The items are real
+Tk items at real device coordinates, which is where the mouse is — so the eighteen
+`tag_bind` sites and the item-based hover are untouched, and the interaction-layer
+rewrite the port needs is not needed here.
+
+Photographed, 32 shots, the same walk: the fringe is gone, the type is sharp, and
+the chips and marks are where they were. Three converse-mode panels came out one
+body line taller, because a line of the note font measures 14.33 design pixels at
+288 dpi against 14 at 96 and `_settled_h` snaps to whole lines — the honest
+measurement, and more room rather than less.
+
+**Reopens if** a window is dragged between monitors of different scales. The
+factor is read once at construction, as the compact surface reads its own;
+per-monitor-v2 sends a `WM_DPICHANGED` that neither surface listens for yet, so
+until then a dragged window keeps the scale it was born with.
+
+### 2026-09-04 — GDISCALED does nothing for a Tk surface, measured
+
+The compact surface renders at native resolution (see above); the shipped one
+cannot **be composited**, because `flow/ui.py` hit-tests through canvas items —
+eighteen `tag_bind` sites plus item-based hover — and a `GdiCanvas` has no items
+to bind to. Porting it means rewriting its interaction layer across 7 400 lines
+with ~1 400 tests pinned to it, which is its own piece of work. (Native
+*resolution* turned out to be a separate question with a separate answer — see
+the entry above, taken the same day this one was.)
+
+`DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED` looked like the cheap middle: a
+context that leaves a process's coordinates virtualised — so no constant moves
+and no hit test shifts — while Windows renders its GDI drawing at the display's
+real resolution. One line, no risk.
+
+**It changes nothing here, and that is measured rather than guessed.** The same
+pill was photographed under both contexts on a 300 % display and the two PNGs
+differ in **zero of 293 040 pixels**. `SetProcessDpiAwarenessContext` returns
+success; Tk simply does not render through the GDI paths the context uplifts —
+it draws into its own offscreen pixmap and its text with its own rasteriser, so
+there is nothing for Windows to re-render at native DPI.
+
+The function is not kept. A tested helper nobody calls, documenting a benefit
+that does not exist, is worse than this paragraph — and the paragraph is the
+thing that stops it being tried a second time.
+
+**Reopens if** Tk is ever built against a backend that does draw through GDI,
+or if the shipped surface's canvases move onto `GdiCanvas` — at which point the
+question is answered by the port and not by a context flag.
+
+### 2026-09-03 — The compact design keeps the tray, against its own canvas
+
+`Workspace.dc.html` says "There is no preferences window and no tray menu", and the
+decision is to keep the tray anyway. The canvas's argument is aesthetic; the tray's
+is that **it is the escape hatch if the pill is ever dragged somewhere unreachable**
+— a wordless 120 px capsule with no menu bar and no taskbar presence, parked
+somewhere the user cannot find, is a Flow that cannot be reached, configured or
+quit except through Task Manager. That is invariant 4 in a new place: hidden must
+not mean gone. **The icon goes up at launch, and the pill's menu is untouched** —
+`_start_tray` in `flow/ui_compact.py` raises it in the constructor, and `Show Flow`
+/ `Quit Flow` live there. That is the second half of this decision, taken the same
+day it was first written the other way round: the menu had grown Hide to tray and
+Quit rows, and the owner's review of the built surface was that the right-click is
+the artboard's menu and nothing else. Both halves survive, because the reason for
+keeping the tray was never that it needed a row on the pill — it was that there has
+to be a way back that does not depend on the window you have lost. A row on that
+window was the one place the hatch could not be. The canvas's "no tray menu" line
+is superseded; its menu drawing is not, and is now matched exactly.
+
+**Reopens if** the tray ever becomes the *only* way the compact surface is used —
+an escape hatch used daily is a design that failed somewhere else, and the answer
+then is to fix the somewhere else, not to remove the hatch.
+
+### 2026-09-03 — A failing CLI's reason comes from whichever stream it used
+
+`_invoke` read **stderr alone** on a non-zero exit, on the stream discipline this module
+documents and measures at the top: the answer on stdout, the banner and prompt echo and
+token accounting on stderr. That discipline is real and it holds while a CLI is
+*working*. It does not hold when one refuses.
+
+Measured here, 2026-09-03, claude 2.1.248:
+
+    claude --safe-mode -p   ->  exit 1
+                                stdout: "Not logged in · Please run /login"
+                                stderr: ""
+
+So an ask with a logged-out claude reached the card as `ask failed (claude exited 1: ;
+then kiro-cli exited 1: Not logged in. Set the KIRO_API_KEY environment variable or run
+kiro-cli login first.)` — the only CLI that explained itself was the *fallback*, and the
+line the user could act on for the CLI they actually run was thrown away between the
+colon and the semicolon. **A refusal that prints an empty reason is worse than a silent
+one: it looks like it said something.** That is P2 failing in the one place it is hardest
+to notice, because the note is there and merely says nothing.
+
+`_why(err, out)` takes the first non-blank line of stderr, and stdout only when stderr
+had none. **stderr keeps first place** for two reasons and not one: it is where a CLI
+that separates its streams puts the error, and a CLI can exit non-zero having already
+written a partial answer to stdout — repeating the head of that answer as the diagnosis
+would be a fabrication, which is worse than the blank it replaces. Bounded to one line
+and `_WHY_CHARS`, because some CLIs print a stack trace and a panel is not a terminal.
+
+**Reopens if** a CLI is found that writes its real error to stdout *and* a partial answer
+alongside it, which is the one shape this ordering cannot get right. The fix then is
+per-CLI knowledge on `Cli`, not a cleverer heuristic here.
+
+### 2026-09-03 — The mic view: a controls-free pill, and why it is a view and not a mode
+
+Push-to-talk is a gesture with no decisions in it — hold, speak, release, and the words
+are pasted — and every control on the pill row is a decision it never asks for. So the
+row drops to what the gesture actually needs, in **two frames inside one 90 px box**
+(`MIC_W`, against 400 for the narrowest panel): at rest the focused app's name and the
+mic glyph, and while the chord is held the level bars and nothing else. Off by default,
+one checkbutton under Settings, and offered only while the chord is the hold gesture.
+
+**Two frames rather than one row that dims parts of itself**, because the question
+changes with the gesture. Before the hold it is *where will these words go* — which is
+the one mistake a hold can make that it cannot otherwise see — and during it there is
+exactly one question, *is it hearing me*, to which a mic glyph and an app initial are
+answers nobody is asking for mid-sentence. A resting meter is the same waste in the
+other direction: a control's worth of pixels reporting a level nobody is producing.
+
+**One width across both**, and the arithmetic made that free: the meter plus `PAD`
+either side, and the name slot plus the glyph plus `PAD` either side, both come to 90.
+This was drafted with two widths and an argument for why they were not the 205 -> 420
+jump of 2026-08-09; the numbers made the argument unnecessary, which is the better
+outcome. The press swaps what is drawn inside a box that does not move.
+
+**The name, not an initial.** The first cut showed one character on the reasoning that
+the slot only has to catch the wrong-window mistake. It does not catch it: `C` is Code,
+Chrome, Claude and cmd. The row is small enough to say the word, so `MIC_NAME_W` is 50 —
+six pixels wider than the full row's `APP_SLOT_W`, because here nothing competes for the
+line — and `app_label` and `APP_NAME_CHARS` are the same rules the full row uses.
+
+The frame is `Pill.mic_talking`: the chord hold (`_ptt_since`) or the pill's own
+press-and-hold (`_press_talking`), and deliberately **not** `_ptt_wait`. That is the
+decode still running after the key came up, and nothing is being captured during it — a
+meter left up there is the same false "hearing you" `_flatten` exists to kill. The
+release falls straight back to the resting frame and the words arrive by paste when they
+arrive. For the same reason the waiting dots are drawn in neither frame: there is no
+resting meter for them to stand in for, and the mic glyph already carries `accent`.
+
+**It is a view, not a mode, and that is the load-bearing decision.** `flow/session.py` is
+untouched: it emits exactly the events it emits without this, and `Pill._pump_events`
+draws fewer of them — `draft` and `partial`, and nothing else. That is what makes "no
+impact on the existing behaviour" structural rather than a promise, because there is no
+branch in a session route to get wrong. If one is ever needed, the design is wrong and
+not the file; `tests/test_mic.py` asserts both halves, against the source and against a
+scripted drain whose session-side calls are identical either way.
+
+**The paste is the existing paste-on-release.** Nothing here makes words arrive sooner.
+Optimistic paste — paste the partial, reconcile with the final — stays rejected for the
+reason already on this record: a paste cannot be taken back in a terminal.
+
+**The hard part was the note.** With no panels there is nowhere for a refine's commentary,
+an unreachable CLI or an unverified-CLI line to land, and swallowing one would make this
+the only place in Flow where a refusal is silent (P2). Because this is a view, it can grow
+back to the full pill for that moment and shrink again **with no state change**:
+`Pill.mic_view` is a property that reads whether a surface is up, so the grow-back is
+`Bubble.note` calling `surface` on a hidden bubble — one gate, only under the view — and
+the shrink is that surface going away. Nothing is entered and nothing has to be unwound,
+which is the difference a mode would have made and the argument for not building one.
+
+**Placement is free here, and only here.** `PLACES` has two entries because the pill
+anchors a stack that must fit a 400/480/580 px panel on whichever monitor the pointer is
+on; this row anchors nothing, so it persists an (x, y) instead (`profile.mic_at`, set by
+dragging the thing itself, saved on the release rather than per motion event). Re-clamped
+against `_work_area` on the way out, because the answer is per monitor and the profile is
+not: a position saved on a display that is no longer plugged in must land somewhere
+visible.
+
+**The sent card is the route that had to be found by using it.** A release ends in
+`_pump_talk` calling `Pill._send`, and `_send` put a sent card on screen for words that
+had *already* been pasted — so the panel opened on every single utterance, and it opened
+through the one door that is not an event and that `_pump_events`' gate therefore never
+saw. On the full row that card is the record of what was sent; under this view the record
+is the words now sitting in the app whose name the row was showing a moment ago. Gated.
+The failure branch is not: a paste that failed or could not be guaranteed still opens the
+panel and still flashes, because it is the one thing here that cannot be read off the
+other window.
+
+**The grow-back needed a way back, and two doors needed closing.** Found by running the
+app rather than the suite, which had asserted the shrink by calling `hide()` by hand:
+
+- *A note that grew the panel back never left.* Nothing hides a surfaced note — on the
+  full row it lands on a panel that was already up and the next draft clears it, and here
+  there is no next draft. One line from a settings row left the pill 400 px wide for as
+  long as Flow ran; measured at twelve seconds and still up. `Bubble.tick_note` gives the
+  row back after `MIC_NOTE_SEC` (7 s, longer than the sent card's 4 because that is a
+  receipt for something the user just did and this is a line they did not ask for),
+  stamped only where this view surfaced it, and dropped the moment the panel has a second
+  reason to be there.
+- *Progress opened a panel.* `tick_activity` surfaces the bubble for a wait with nothing
+  else on screen, which is right on the full row and wrong here: the model load opened a
+  400 px panel on every launch and held it for the eight seconds the load takes — 90x34 at
+  0.76 s, 400x98 at 1.07 s, back at 9.52 s from a cold start. The grow-back is for a
+  *refusal*, and an activity is the opposite: the mic glyph already carries that state in
+  its colour and there is nothing to act on. It declines to *open* one; a wait already up
+  is left alone, and a note arriving during a load still surfaces.
+
+**Reopens if** the view needs a fourth thing on the row — the honest answer then is that
+the gesture has grown a decision and the full row is the surface for it — or if the
+grow-back is reported as jarring rather than as the panel doing its job, in which case
+what changes is the animation, not the state model.
+
 ### 2026-09-03 — A Windows-only module must still be *importable* everywhere
 
 The macOS CI leg had never been green, and one line was the whole reason. `flow/tray.py`
@@ -79,7 +1197,7 @@ tip at the foot of the panel above it, since the row's own canvas would clip one
 
 **Why 400 and not 360.** The first proposal was 360/440/540. With the marks on the row
 the floor is the row's: app slot, mic, meter, four marks, three icons and the label sum
-to ~393 px at these sizes, and `tests/test_compact.py` adds them up against the
+to ~393 px at these sizes, and `tests/test_compact_pass.py` adds them up against the
 narrowest width so the floor cannot drift below the marks again. Reopen if the row
 ever has to carry a fifth mark, or if the app-name slot at 44 px proves too short for
 what people actually dictate into — the slot, the meter's bar count and the label's

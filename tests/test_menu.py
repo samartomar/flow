@@ -73,6 +73,20 @@ class FakeMenu:
 
     def add_separator(self) -> None: ...
 
+    def delete(self, first=0, last=None) -> None:
+        """Empty it, whatever range was asked for.
+
+        The one call is `delete(0, "end")` — a menu rebuilt on open, and the
+        Design submenu refreshed rather than replaced — so a fake that clears
+        everything answers it exactly. A range that meant something else would
+        be a fake with more opinions than the code it stands in for.
+        """
+        self.commands.clear()
+        self.radios.clear()
+        self.checks.clear()
+        self.cascades.clear()
+        self.order.clear()
+
     def add_cascade(self, label="", menu=None, **kw) -> None:
         self.cascades[label] = menu
         self.order.append(label)
@@ -96,7 +110,8 @@ class Menu(unittest.TestCase):
 
     def build(self, profile=None, *, speaker=None, converse=False, clis=(),
               workspace=None, voices=(), recent=(), notes=None,
-              can_take_reply=True, armed=False) -> FakeMenu:
+              can_take_reply=True, armed=False, gesture=None,
+              mic=False, mode=None) -> FakeMenu:
         import tkinter as tk
 
         import flow.ui as ui
@@ -109,7 +124,7 @@ class Menu(unittest.TestCase):
 
         self.pill = pill = ui.Pill.__new__(ui.Pill)
         pill.session = mock.Mock(
-            mode=ui.State.DRAFT if converse else ui.DICTATE,
+            mode=mode or (ui.CONVERSE if converse else ui.DICTATE),
             speaker=speaker, profile=profile, muted=False, auto_ask=True, cli=None,
             send_words=(SEND_WORD, SEND_ENTER_WORD), workspace=workspace,
         )
@@ -123,7 +138,19 @@ class Menu(unittest.TestCase):
         pill.session.notes = notes
         pill.session.can_take_reply = can_take_reply
         pill.settings_path = self.folder / "lexicon.txt"
-        pill.hotkeys = None
+        #: No chord by default — `--no-chord`, or a hook the OS refused — which is the
+        #: state the rows that describe one are absent in. A test that wants those rows
+        #: asks for a gesture, and gets the live `Chord` they read it off.
+        pill.hotkeys = None if gesture is None else mock.Mock(
+            chord=mock.Mock(gesture=gesture, **{"describe.return_value": "Ctrl+Win"}))
+        pill.mic_view_on = mic
+        pill._mic_at = None
+        pill._sync_shell = mock.Mock()
+        #: A monitor to be placed against, for the rows that re-place the window when
+        #: they are chosen — the mic view's width and position both change with its tick.
+        pill.full = (0, 0, 1920, 1080)
+        pill.work = (0, 0, 1920, 1040)
+        pill.x, pill.y = 0, 0
         pill.bubble = mock.Mock()
         pill.card = mock.Mock()
         pill.card.note = self.notes.append
@@ -149,13 +176,25 @@ class Menu(unittest.TestCase):
 
 
 class TestWhatStaysOneTap(Menu):
-    """Six rows now, not eleven — and the split is state to read, not verbs to act on."""
+    """Seven rows, not eleven — and the split is state to read, not verbs to act on.
 
-    def test_the_top_level_is_exactly_six_rows(self):
+    Six until 2026-09-22, when Open Flow joined them: Flow Home is where every setting
+    lives now, and the Classic pill keeps its Settings cascade beside it only for as long
+    as this design is still shipped."""
+
+    def test_the_top_level_is_exactly_seven_rows(self):
         top = self.build(self.profile())
         self.assertEqual(
-            top.order, ["Listening", "Dictate", "Draft", "Settings", "Help", "Quit Flow"]
+            top.order,
+            ["Listening", "Dictate", "Draft", "Open Flow", "Settings", "Help", "Quit Flow"],
         )
+
+    def test_open_flow_opens_home(self):
+        top = self.build(self.profile())
+        home = self.pill.session.home = mock.Mock()
+        home.open.return_value = ""
+        top.commands["Open Flow"]()
+        home.open.assert_called_once_with("home")
 
     def test_and_the_four_cascades_are_the_only_things_added(self):
         top = self.build(self.profile())
@@ -190,6 +229,19 @@ class TestWhatStaysOneTap(Menu):
         # itself says where you are; what is inside it is the choice.
         self.assertIn("Dictate", self.build(self.profile()).cascades)
         self.assertIn("Converse", self.build(self.profile(), converse=True).cascades)
+
+    def test_the_mode_radios_offer_all_three_and_choose_directly(self):
+        # A three-mode world cannot choose by flipping: one blind toggle from
+        # Dictate lands on Refine. Every radio goes straight at its target.
+        top = self.build(self.profile())
+        radios = top.cascades["Dictate"].radios
+        self.assertEqual([label for label, _v in radios],
+                         ["Dictate", "Refine", "Converse"])
+        top.cascades["Dictate"].commands["Converse"]()
+        self.pill.session.toggle_mode.assert_called_once_with(to="converse")
+
+    def test_the_mode_cascade_names_refine_when_in_it(self):
+        self.assertIn("Refine", self.build(self.profile(), mode="refine").cascades)
 
     def test_copy_sits_above_clear_inside_draft(self):
         # One saves the words and one destroys them; the order is which hand reaches
@@ -383,6 +435,12 @@ class TestWhatMovedInside(Menu):
                          self.settings(self.profile()).commands)
         self.assertIn("Ask only when I press it",
                       self.settings(self.profile(), converse=True).commands)
+
+    def test_the_auto_ask_toggle_stays_out_of_refine_mode(self):
+        # Refine settles nothing on a pause — the countdown is converse's, and
+        # the `!= DICTATE` read used to offer it there anyway.
+        self.assertNotIn("Ask only when I press it",
+                         self.settings(self.profile(), mode="refine").commands)
 
     def test_the_cli_picker_appears_only_when_there_is_a_choice(self):
         # `Mock(name=...)` names the mock rather than setting the attribute, and the
