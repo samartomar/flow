@@ -6,6 +6,32 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — A ctrl+alt shortcut must not take an AltGr character
+
+Found while moving Paste last (below): **Windows sends AltGr as left Ctrl plus right
+Alt**, so every `RegisterHotKey` on ctrl+alt+<key> is also AltGr+<key>. Five of Flow's six
+shipped primaries are ctrl+alt. On a German keyboard AltGr+Q is **@** and AltGr+M is
+**µ** (kbdlayout.info, KBDGR) — so for as long as Flow ran, typing an email address
+quit it, and µ switched its mode. US-International, which Spanish- and Portuguese-
+speaking developers use on US keyboards, has AltGr+Q = ä and AltGr+M = µ (KBDUSX);
+Hungarian has Q = \, M = < and Space = a non-breaking space (KBDHU).
+
+Not a table of dangerous keys: which keys are dangerous depends on the layouts a person
+installed. At registration Flow asks Windows (`ToUnicodeEx` with Ctrl and Alt held, once
+per layout from `GetKeyboardLayoutList`, without disturbing dead-key state) what AltGr
+types, and a **shipped** ctrl+alt alternative that types a character — or is a dead key —
+on any installed layout is passed over for the next alternative. Every action has a
+ctrl+shift fallback AltGr cannot reach. A plain space does not count; a non-breaking one
+does. The startup block says which combo was passed over and what it would have taken,
+before the combos that registered. A combo the person **chose** in `profile.json` is
+registered anyway and the same line names the character it takes: their choice, now
+with the facts. On a machine with no AltGr layout — this one, en-US only — nothing
+changes, which the suite pins alongside a German fake.
+
+**Reopens if** a layout Flow's users actually use turns out to leave an action with every
+alternative passed over, or a layout added after launch matters — the check runs at
+registration, once per launch.
+
 ### 2026-09-23 — The first run: five steps in Flow Home, and compact is the default
 
 Step 4 of the Flow Home plan, and step 4 of docs/one-surface.md's.

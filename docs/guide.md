@@ -375,7 +375,23 @@ answer, and the retry budget is spent afterwards exactly as it would have been.
 
 Combos already owned by another app fall back automatically, in that order. The startup
 log prints which one actually registered, so a dead shortcut is never a silent mystery;
-if every alternative for an action is taken, that is printed too. **Right-click ▸ Help ▸
+if every alternative for an action is taken, that is printed too.
+
+**On a keyboard with AltGr, a `ctrl+alt` combo that would take a character is passed
+over.** Windows sends AltGr as Ctrl+Alt, so `ctrl+alt+Q` is also AltGr+Q — which types
+**@** on a German keyboard, and **ä** on US-International. Flow asks Windows what AltGr
+types on each keyboard layout you have installed, and a shipped `ctrl+alt` combo that
+types something on any of them is skipped for its `ctrl+shift` fallback. The startup log
+says so, before the combos that did register:
+
+```
+hotkey  quit     not ctrl+alt+Q - AltGr+Q types @ on the de-DE keyboard
+hotkey  quit     ctrl+shift+Q
+```
+
+A combo you chose yourself in `profile.json` is registered anyway, and the log names the
+character it takes. With only layouts that have no AltGr — US, standard UK — nothing
+changes. **Right-click ▸ Help ▸
 Commands & shortcuts** answers the same question after the log has scrolled away: a
 read-only window listing the combos that registered on your machine this launch — not the
 primaries in the table above — along with your trigger words and one example of every
