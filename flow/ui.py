@@ -3100,6 +3100,10 @@ class Pill(tk.Tk):
         )
         self._mode_menu(m)
         self._draft_menu(m)
+        # Flow Home is where every setting lives now (decisions.md 2026-09-22). The
+        # Settings cascade stays beside it while this design does: it is the design being
+        # retired, and taking its cascade away first would make its last release worse.
+        m.add_command(label="Open Flow", command=self._open_home)
         self._settings_menu(m)
         self._help_menu(m)
         m.add_separator()
@@ -4251,6 +4255,23 @@ class Pill(tk.Tk):
                 self.show_from_tray()
             elif event == tray.QUIT:
                 self.quit_app()
+            elif event == tray.HOME:
+                self._open_home()
+
+    def _open_home(self, page: str = "home") -> None:
+        """Open Flow Home (decisions.md 2026-09-22): models, microphone, shortcuts and
+        every other setting, in a window of its own.
+
+        The note is said only when the window could not come, because a menu row that
+        does nothing and says nothing is the failure Flow Home exists to end.
+        """
+        home = getattr(self.session, "home", None)
+        if home is None:
+            self.front.note("Flow Home is not available in this session")
+            return
+        why = home.open(page)
+        if why:
+            self.front.note(why)
 
     def quit_app(self) -> None:
         # Idempotent, because ctrl+C reaches here down either of two paths and nothing

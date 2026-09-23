@@ -1388,9 +1388,9 @@ class TestThePanelDraws(unittest.TestCase):
 class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
     """The right-click menu: three modes with the check on the current one,
     the hints as disabled entries (Tk has no sub-line row), Switch workspace
-    with the path beneath it, Workbench setup with its hint, and Design — the
-    one row the artboard does not draw, because without it the two surfaces
-    cannot be reached from each other."""
+    with the path beneath it, and Open Flow with its hint — the one door to
+    everything the pill does not do (decisions.md 2026-09-22). Workbench setup
+    and Design moved into Flow Home, which both surfaces can reach."""
 
     def build(self, mode=DICTATE, workspace="~/dev/products/flow",
               design="compact"):
@@ -1410,33 +1410,35 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
             ["Type", "Refine", "Ask",
              "tap the pill to cycle",
              "Switch workspace", "~/dev/products/flow",
-             "Workbench setup", "mic, CLI, where it pastes",
-             "Design"])
+             "Open Flow", "models, microphone, shortcuts, settings"])
         # The hints are disabled entries, never verbs.
         for hint in ("tap the pill to cycle", "~/dev/products/flow",
-                     "mic, CLI, where it pastes"):
+                     "models, microphone, shortcuts, settings"):
             self.assertIsNone(m.commands[hint])
 
-    def test_design_names_both_surfaces_and_marks_the_one_running(self):
-        # The shipped design's own Design menu, in this surface's idiom: the
-        # same names and the same `(current)` marker, so somebody who has seen
-        # one recognises the other. The marker is `DESIGN` — what this class
-        # *is* — rather than `profile.design`, which under `--no-profile` is
-        # not an answer to "which surface am I looking at".
-        _p, m = self.build(design="current")
-        sub = m.cascades["Design"]
-        self.assertEqual(sub.order, ["Current", "Compact   (current)"])
-
-    def test_the_row_switches_the_running_surface(self):
-        # Not "writes the profile for next time" any more: the row hands the
-        # name to `switch_design`, which stores it, sets `switch_to` and takes
-        # the window down so `__main__` can build the other one. What that
-        # method does with the name is `tests/test_switch.py`'s subject; what
-        # is pinned here is that the row is wired to it.
+    def test_open_flow_opens_home(self):
         p, m = self.build()
-        p.switch_design = mock.Mock()
-        m.cascades["Design"].commands["Current"]()
-        p.switch_design.assert_called_once_with("current")
+        p.session.home = mock.Mock()
+        p.session.home.open.return_value = ""
+        m.commands["Open Flow"]()
+        p.session.home.open.assert_called_once_with("home")
+
+    def test_a_home_that_cannot_open_says_why_on_the_strip(self):
+        # A menu row that does nothing and says nothing is the failure Flow
+        # Home exists to end — so the reason reaches the one line this pill has.
+        p, m = self.build()
+        p.session.home = mock.Mock()
+        p.session.home.open.return_value = "could not open a window"
+        p._say = mock.Mock()
+        m.commands["Open Flow"]()
+        p._say.assert_called_once_with("could not open a window")
+
+    def test_there_is_no_design_cascade_any_more(self):
+        # The design switch lives on Flow Home's Settings page, which both
+        # surfaces reach — so the 2026-09-04 exception has nothing to protect.
+        _p, m = self.build()
+        self.assertNotIn("Design", m.order)
+        self.assertEqual(m.cascades, {})
 
     def test_the_menu_ends_where_the_artboard_ends(self):
         # "There is no preferences window and no tray menu. The pill is the
@@ -1444,11 +1446,10 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
         # (Workspace.dc.html). Hide to tray and Quit were rows here and are
         # not on the canvas; they live on the tray icon, which `_start_tray`
         # raises at launch so that removing them costs nobody the way out.
-        # Design is the one row let back in, on 2026-09-04 and for a named
-        # reason. Everything else the canvas leaves out is still out.
+        # Open Flow is the last row: the door to everything else.
         _p, m = self.build()
-        self.assertEqual(m.order[-1], "Design")
-        for gone in ("Hide to tray", "Quit"):
+        self.assertEqual(m.order[-2], "Open Flow")
+        for gone in ("Hide to tray", "Quit", "Design", "Workbench setup"):
             self.assertNotIn(gone, m.order)
 
     def test_the_check_is_on_the_current_mode(self):
@@ -1587,7 +1588,7 @@ class TestThePaletteWindow(unittest.TestCase):
         p._close_box.assert_called_once()
 
 
-class TestThePaletteAndSetupDraw(unittest.TestCase):
+class TestThePaletteDraws(unittest.TestCase):
     def test_the_palette_draws_the_top_hit_lit_and_the_pinned_row_grey(self):
         p = panel_pill(mode=CONVERSE)
         p._palette = uc._Palette(["~/dev/products/flow", "~/work/riverflow"])
@@ -1603,28 +1604,6 @@ class TestThePaletteAndSetupDraw(unittest.TestCase):
         self.assertEqual(labels[uc._Palette.NONE], uc.PLACEHOLDER)
         self.assertEqual(labels["~/dev/products/flow"], uc.CODE)
         self.assertIn("↵ set    esc leave it", labels)
-
-    def test_the_setup_box_draws_three_read_only_lines(self):
-        p = panel_pill(mode=CONVERSE)
-        p.session.mic = mock.Mock(device_name="Yeti Nano")
-        p.session.provider = "claude"
-        p.session.pastes = True
-        c = Canvas()
-        p._draw_setup(c)
-        texts = [t[1] for t in c.texts]
-        for line in ("Microphone", "Yeti Nano", "Agent CLI", "claude",
-                     "On release", "paste into last window"):
-            self.assertIn(line, texts)
-
-    def test_the_setup_lines_say_none_found_and_the_clipboard_answer(self):
-        p = panel_pill(mode=CONVERSE)
-        p.session.mic = mock.Mock(device_name="")
-        p.session.provider = ""
-        p.session.pastes = False
-        rows = p._setup_rows()
-        self.assertEqual(rows, [("Microphone", "none found"),
-                                ("Agent CLI", "none found"),
-                                ("On release", "copy — you paste it")])
 
 
 class TestTheTrayStays(unittest.TestCase):

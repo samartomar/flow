@@ -1,0 +1,639 @@
+/* Flow Home. One page, six views, no build step and no dependencies.
+ *
+ * The server hands this window a token once, in the URL fragment (which never reaches a
+ * server); it is kept in sessionStorage and sent on every call as X-Flow-Token. Views
+ * are rendered from the API's JSON with every value escaped. The server's content
+ * security policy allows no inline style, so the few dynamic sizes — a progress bar, a
+ * level meter — are set through the DOM after each render (`sizes`).
+ */
+"use strict";
+
+(() => {
+  // ------------------------------------------------------------------ token, routes
+  const PAGES = ["home", "history", "voice", "ask", "models", "settings"];
+  const start = new URLSearchParams(location.hash.slice(1));
+  if (start.get("token")) {
+    try { sessionStorage.setItem("flow-token", start.get("token")); } catch (_) { /* private */ }
+    history.replaceState(null, "", "#/" + (PAGES.includes(start.get("page")) ? start.get("page") : "home"));
+  }
+  let TOKEN = "";
+  try { TOKEN = sessionStorage.getItem("flow-token") || start.get("token") || ""; } catch (_) { TOKEN = start.get("token") || ""; }
+
+  const current = () => {
+    const m = location.hash.match(/^#\/([a-z]+)/);
+    return m && PAGES.includes(m[1]) ? m[1] : "home";
+  };
+
+  // ------------------------------------------------------------------ the API
+  class Gone extends Error {}
+
+  async function api(path, body) {
+    let res;
+    try {
+      res = await fetch("/api/" + path, {
+        method: body === undefined ? "GET" : "POST",
+        headers: { "X-Flow-Token": TOKEN, "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        cache: "no-store",
+      });
+    } catch (_) {
+      throw new Gone("Flow is not running. Start it, then open Flow Home from the pill's menu.");
+    }
+    let payload = {};
+    try { payload = await res.json(); } catch (_) { payload = {}; }
+    if (res.status === 401) throw new Gone(payload.error || "This window belongs to a Flow that has quit.");
+    if (!res.ok) throw new Error(payload.error || "That did not work.");
+    return payload;
+  }
+
+  // ------------------------------------------------------------------ small html
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const C = {
+    text: "#E6E8ED", muted: "#A0A6B2", dim: "#656B78", soft: "#8A909C", code: "#C7CBD4",
+    green: "#3ECF8E", blue: "#7AA2F7", red: "#F2584A", amber: "#E8A33D",
+    type: "#E6E8ED", refine: "#E1B75C", ask: "#B48EF5",
+  };
+  const PATHS = {
+    home: '<path d="M4 10.5 12 4l8 6.5v9a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
+    history: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v3.2h3.2"/><path d="M12 8.2v4.3l2.8 1.8"/>',
+    wave: '<path d="M4 10.5v3M8 7.5v9M12 4.5v15M16 8.5v7M20 10.5v3"/>',
+    chat: '<path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4.5 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>',
+    layers: '<path d="M12 3.5 20 8l-8 4.5L4 8z"/><path d="M4 12.2 12 16.7l8-4.5"/><path d="M4 16.2 12 20.7l8-4.5"/>',
+    sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+    folder: '<path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4l2 2h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
+    terminal: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="m7.5 10 2.5 2-2.5 2M12.5 15h4"/>',
+    download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>',
+    trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7"/>',
+    check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+    x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+    play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+    chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 9.5h5v5h-5z"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+    shield: '<path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z"/>',
+    lock: '<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
+    warn: '<path d="M12 4.5 20.5 19h-17z"/><path d="M12 10v4M12 16.5v.01"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    open: '<path d="M14 5h5v5M19 5l-8 8"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
+    circle: '<circle cx="12" cy="12" r="8"/>',
+    circlecheck: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.3 2.4 2.4 4.6-4.9"/>',
+    refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v3.2h-3.2"/>',
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/>',
+  };
+  const icon = (name, color = C.muted, size = 18, sw = 1.6) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
+  // The pill's own mic glyph (design/compact/gen.py), so Home and the pill draw one mark.
+  const glyph = (color, k = 1) =>
+    `<svg width="${14 * k}" height="${18 * k}" viewBox="0 0 14 18" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="4.3" y="1.2" width="5.4" height="9.6" rx="2.7"/><path d="M1.8 8.4a5.2 5.2 0 0 0 10.4 0"/><path d="M7 13.6V16.4"/></svg>`;
+  const keys = (combo) => {
+    if (!combo) return "";
+    const parts = String(combo).split("+").map((k) => k.trim()).filter(Boolean)
+      .map((k) => `<span class="kbd">${esc(k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1))}</span>`);
+    return `<span class="keys">${parts.join('<span class="plus">+</span>')}</span>`;
+  };
+  const sw = (on, act, label, extra = "") =>
+    `<button type="button" class="switch" role="switch" aria-checked="${on ? "true" : "false"}" aria-label="${esc(label)}" data-act="${act}" ${extra}><span></span></button>`;
+  const seg = (options, value, act, label) =>
+    `<div class="seg" role="group" aria-label="${esc(label)}">${options.map((o) => {
+      const [v, text] = Array.isArray(o) ? o : [o, o];
+      return `<button type="button" aria-pressed="${v === value ? "true" : "false"}" data-act="${act}" data-value="${esc(v)}">${esc(text)}</button>`;
+    }).join("")}</div>`;
+  const bars = (n = 12, cls = "") => `<span class="meter ${cls}" data-meter="${n}">${"<i></i>".repeat(n)}</span>`;
+  const human = (bytes) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+  const SIDE_TINT = { dictate: C.type, refine: C.refine, ask: C.ask };
+  const MODE_WORD = { dictate: "Dictate", refine: "Refine", ask: "Ask" };
+
+  // ------------------------------------------------------------------ the rail
+  const NAV = [
+    { id: "home", label: "Home", icon: "home" },
+    { group: "Dictate" },
+    { id: "history", label: "History", icon: "history", tint: C.type, soon: true },
+    { id: "voice", label: "Voice", icon: "wave", tint: C.type, soon: true },
+    { group: "Ask" },
+    { id: "ask", label: "Conversations", icon: "chat", tint: C.ask, soon: true },
+    { group: "Setup" },
+    { id: "models", label: "Models", icon: "layers" },
+    { id: "settings", label: "Settings", icon: "sliders" },
+  ];
+
+  function renderNav() {
+    const here = current();
+    document.getElementById("nav").innerHTML = NAV.map((n) => {
+      if (n.group) return `<div class="label">${esc(n.group)}</div>`;
+      const on = n.id === here;
+      const tint = on ? (n.tint || C.text) : C.muted;
+      return `<a href="#/${n.id}" ${on ? 'aria-current="page"' : ""} title="${esc(n.label)}">${icon(n.icon, tint)}<span class="nav-text">${esc(n.label)}</span>${n.soon ? '<span class="soon">soon</span>' : ""}</a>`;
+    }).join("");
+  }
+
+  let live = null;
+
+  function renderStatus() {
+    const el = document.getElementById("status");
+    if (!live) { el.innerHTML = '<span class="fine">connecting to Flow</span>'; return; }
+    const heard = live.capturing ? C.green : C.muted;
+    const model = live.loading ? "loading the speech model"
+      : live.models ? `${live.models[1]} for your words` : "speech model not loaded yet";
+    el.innerHTML = `
+      <div class="row">${icon("mic", heard, 15)}<span class="grow ellipsis">${esc(live.mic || "no microphone")}</span>${bars(6, live.capturing ? "live" : "")}</div>
+      <div class="row">${icon("layers", C.muted, 15)}<span class="grow ellipsis">${esc(model)}</span></div>
+      <div class="row">${icon("terminal", C.muted, 15)}<span class="grow ellipsis">${esc(live.cli || "no agent CLI")}</span></div>
+      <hr class="rule">
+      <div class="row">${glyph(SIDE_TINT[live.mode] || C.type, 0.8)}<span class="mode grow">${esc(MODE_WORD[live.mode] || "Dictate")}</span><span class="fine">${esc(live.activity || "")}</span></div>`;
+    level(el, live.capturing ? live.level_db : -90);
+  }
+
+  // Heights for a meter from a level in dB: the same -60..-10 window the pill reads.
+  function level(root, db) {
+    const norm = Math.max(0, Math.min(1, (db + 60) / 50));
+    root.querySelectorAll("[data-meter]").forEach((m) => {
+      const n = m.children.length;
+      [...m.children].forEach((bar, i) => {
+        const shape = 0.45 + 0.55 * Math.sin(((i + 1) / (n + 1)) * Math.PI);
+        bar.style.height = `${Math.max(3, Math.round(3 + 15 * norm * shape))}px`;
+      });
+    });
+  }
+
+  function sizes(root) {
+    root.querySelectorAll("[data-w]").forEach((el) => { el.style.width = `${el.dataset.w}%`; });
+  }
+
+  // ------------------------------------------------------------------ toast, gone
+  let toastTimer = 0;
+  function toast(text, bad = false) {
+    const el = document.getElementById("toast");
+    el.textContent = text;
+    el.classList.toggle("bad", bad);
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, bad ? 6000 : 3000);
+  }
+  function gone(why) {
+    document.getElementById("gone-why").textContent = why;
+    document.getElementById("gone").hidden = false;
+  }
+
+  // ------------------------------------------------------------------ Home
+  function renderHome(d) {
+    const s = d.stats || {};
+    const sc = d.shortcuts || {};
+    const done = d.setup.filter((i) => i.done).length;
+    const gesture = sc.gesture === "toggle" ? "press, talk, press again" : "hold, talk, let go";
+    const askHow = sc.mode
+      ? `Tap the pill until its mic is violet, or press ${keys(sc.mode)}, then hold to talk.`
+      : "Tap the pill until its mic is violet, then hold to talk.";
+    const recent = (d.recent || []).map((r) => `
+      <div class="recent">${glyph(r.side === "ask" ? C.ask : C.type, 0.8)}
+        <span class="kind">${esc(r.kind === "said" ? "Said" : r.kind === "asked" ? "Asked" : "Answer")}</span>
+        <span class="text">${esc(r.text)}</span></div>`).join("");
+    return `
+      <div class="page-head"><div class="grow"><h1>Home</h1><p class="sub">Two things Flow does. Hold a key, talk, let go.</p></div></div>
+      <div class="split stretch">
+        <section class="card side-card">
+          <div class="row"><span class="disc">${glyph(C.type, 1.15)}</span><h2 class="grow">Dictate</h2>${keys(sc.dictate)}<span class="fine">${esc(sc.dictate ? gesture : "")}</span></div>
+          <p class="lead">Talk into any window. Let go and it pastes where you were, accurate in your accent.</p>
+          <div class="stats">
+            <div class="stat"><b>${Number(s.today_words || 0).toLocaleString()}</b><span>words ${s.since ? "since " + esc(s.since) : "today"}</span></div>
+            <div class="stat"><b>${s.saved_minutes ? "&asymp; " + s.saved_minutes + " min" : "&ndash;"}</b><span>saved vs typing at ${esc(s.typing_wpm)} wpm</span></div>
+            ${s.all_words != null ? `<div class="stat"><b>${Number(s.all_words).toLocaleString()}</b><span>words all time</span></div>` : ""}
+          </div>
+          <hr class="rule">
+          <div class="row">${glyph(C.refine, 0.8)}<p class="note">Tap the pill to gold for <b class="warn">Refine</b>: shaped for your project before you send it.</p></div>
+        </section>
+        <section class="card side-card">
+          <div class="row"><span class="disc">${glyph(C.ask, 1.15)}</span><h2 class="grow">Ask</h2>${d.mode === "ask" ? '<span class="badge violet">the pill is on Ask</span>' : ""}</div>
+          <p class="lead">Ask anything, like ChatGPT. With a workspace set, the answer knows your code.</p>
+          <p class="note">${askHow}</p>
+          <hr class="rule">
+          <div class="row">${icon("folder", d.workspace ? C.green : C.soft, 16)}<span class="mono grow ellipsis">${esc(d.workspace || "no workspace - answers are about anything")}</span><a class="btn ghost sm" href="#/settings">Change</a></div>
+          <div class="row">${icon("terminal", C.muted, 16)}<span class="note grow">${d.cli ? `${esc(d.cli)} answers, with the words you say and the workspace path.` : "No agent CLI found. Install claude or codex to ask."}</span></div>
+        </section>
+      </div>
+      <div class="split stretch">
+        <section class="card">
+          <div class="row"><h2 class="grow">Finish setting up</h2><span class="note">${done} of ${d.setup.length}</span></div>
+          <div class="progress green"><div data-w="${Math.round((done / d.setup.length) * 100)}"></div></div>
+          <div class="col">${d.setup.map((i) => `
+            <div class="check ${i.done ? "done" : ""}">${icon(i.done ? "circlecheck" : "circle", i.done ? C.green : C.dim, 20)}
+              <div class="text"><b>${esc(i.title)}</b><span class="note ellipsis">${esc(i.detail)}</span></div>
+              ${i.done ? "" : `<a class="btn sm" href="#/${esc(i.page)}">Open</a>`}</div>`).join("")}</div>
+        </section>
+        <section class="card">
+          <div class="row"><h2 class="grow">This session</h2></div>
+          <div class="col">${recent || '<p class="note">Nothing yet. What you say and ask shows up here.</p>'}</div>
+          <div class="row">${icon("lock", C.soft, 14)}<p class="fine">In memory only - gone when Flow quits. Nothing here is written to disk.</p></div>
+        </section>
+      </div>`;
+  }
+
+  // ------------------------------------------------------------------ Models
+  function modelActions(m, busy) {
+    if (!m.catalog) return "";
+    const dl = m.download;
+    if (dl && dl.state === "running") {
+      const total = dl.total || 0;
+      const pct = total ? Math.min(100, Math.round((dl.done / total) * 100))
+        : dl.files_total ? Math.round((dl.files_done / dl.files_total) * 100) : 0;
+      const said = total ? `${human(dl.done)} of ${human(total)}` : "starting";
+      return `<div class="col"><div class="progress ${pct ? "" : "busy"}"><div data-w="${pct}"></div></div>
+        <div class="row"><span class="note">Downloading - ${esc(said)}</span><button type="button" class="btn ghost sm" data-act="cancel" data-name="${esc(m.name)}">Cancel</button></div></div>`;
+    }
+    const failed = dl && dl.state === "failed"
+      ? `<span class="note warn ellipsis" title="${esc(dl.error)}">${esc(dl.error)}</span>` : "";
+    if (m.installed) {
+      const using = m.in_use.length > 0;
+      return `${failed}<span class="note">on this PC</span>
+        <button type="button" class="icon-btn" aria-label="Delete ${esc(m.name)}" title="${using ? "In use - choose another model first" : "Delete"}" data-act="delete" data-name="${esc(m.name)}" ${using || busy ? "disabled" : ""}>${icon("trash", using ? C.dim : C.soft, 16)}</button>`;
+    }
+    return `${failed}<button type="button" class="btn sm" data-act="download" data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
+  }
+
+  function renderModels(d) {
+    const sp = d.speech;
+    const ag = d.agent;
+    const vo = d.voice;
+    const gpu = sp.gpu;
+    const onGpu = sp.device === "cuda";
+    const catalog = sp.models.filter((m) => m.catalog);
+    const option = (tier, chosen, auto) => [`<option value="" ${chosen ? "" : "selected"}>Automatic (${esc(auto)})</option>`]
+      .concat(catalog.map((m) => `<option value="${esc(m.name)}" ${m.name === chosen ? "selected" : ""}>${esc(m.name)}${m.installed ? "" : " - downloads first"}${m.blind ? " - invents words in silence" : ""}</option>`))
+      .join("");
+    const now = sp.models.filter((m) => m.in_use.length);
+    const finalNow = (now.find((m) => m.in_use.includes("final")) || {}).name || sp.automatic.final;
+    const partialNow = (now.find((m) => m.in_use.includes("partial")) || {}).name || sp.automatic.partial;
+    const rows = sp.models.map((m) => {
+      const tags = [];
+      if (m.in_use.includes("final")) tags.push('<span class="badge green">your words</span>');
+      if (m.in_use.includes("partial")) tags.push('<span class="badge green">live preview</span>');
+      if (m.name === sp.automatic.final && !m.in_use.includes("final")) tags.push('<span class="badge">recommended here</span>');
+      if (m.blind) tags.push(`<span class="badge amber">${icon("warn", C.amber, 12)}invents words in silence</span>`);
+      return `<div class="tr ${m.in_use.length ? "using" : ""}" role="row">
+        <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
+        <div role="cell" class="note">${esc(m.size_text)}</div>
+        <div role="cell">${m.errors != null ? `<span class="${m.name === "large-v3" ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
+        <div role="cell" class="note">${m.speed != null ? m.speed + "&times;" : "&ndash;"}</div>
+        <div role="cell" class="acts">${modelActions(m, sp.loading)}</div></div>`;
+    }).join("");
+    const clis = ag.available.length
+      ? [["auto", "Automatic"]].concat(ag.available.map((n) => [n, n])).map(([v, t]) => `
+          <label class="row"><input type="radio" name="cli" value="${esc(v)}" data-change="cli" ${(ag.pinned || "auto") === v ? "checked" : ""}>${esc(t)}</label>`).join("")
+      : "";
+    const groups = {};
+    (vo.voices || []).forEach((v) => { (groups[v.group] = groups[v.group] || []).push(v); });
+    const voiceOptions = [`<option value="" ${vo.current ? "" : "selected"}>The engine's default</option>`]
+      .concat(Object.entries(groups).map(([g, vs]) => `<optgroup label="${esc(g)}">${vs.map((v) =>
+        `<option value="${esc(v.name)}" ${v.name === vo.current ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</optgroup>`)).join("");
+    return `
+      <div class="page-head"><div class="grow"><h1>Models</h1><p class="sub">What hears you, what answers you, and what talks back.</p></div></div>
+      <section class="card tight"><div class="row wrap pc">
+        ${icon("chip", onGpu ? C.green : C.muted, 22)}
+        <div class="col grow">
+          <div class="row wrap"><b>${esc(gpu ? gpu.name : "No NVIDIA GPU found")}</b>${gpu && gpu.memory_mb ? `<span class="note">${Math.round(gpu.memory_mb / 1024)} GB</span>` : ""}
+            <span class="badge ${onGpu ? "green" : ""}">${onGpu ? '<span class="dot green"></span>speech runs on the GPU' : "speech runs on the CPU"}</span>
+            ${sp.compute_types.includes("int8") && onGpu && !sp.compute_types.includes("float16") ? '<span class="badge">int8</span>' : ""}</div>
+          <p class="note">${onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
+            : esc(sp.why_cpu || "The CPU runs the smaller models in time; the large ones need a GPU.")}</p>
+        </div>
+        <div class="col"><b>${esc(sp.cache.text)}</b><span class="fine">of speech models on disk</span></div>
+        <button type="button" class="btn" data-act="open" data-what="models">${icon("folder", C.text, 15)}Open folder</button>
+      </div></section>
+      <section class="card">
+        <div class="row"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}</div>
+        <p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>
+        ${sp.swappable ? `<div class="choose">
+          <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
+          <label>Live preview<select id="partial-model">${option("partial", sp.chosen.partial, sp.automatic.partial)}</select></label>
+          <label>Run speech on<select id="decode-device">${[["", "Automatic"], ["cuda", "The GPU"], ["cpu", "The CPU"]].map(([v, t]) =>
+            `<option value="${v}" ${(sp.device_asked === v || (!v && sp.device_asked === "auto")) ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        </div>
+        <div class="row"><button type="button" class="btn primary" data-act="use-models">Use these</button><p class="note">Applies now. A model that is not on this PC downloads first, then takes over.</p></div>`
+        : '<p class="note">This speech engine has no models to choose between.</p>'}
+        <div class="table" role="table" aria-label="Speech models">
+          <div class="tr head" role="row"><span class="label" role="columnheader">Model</span><span class="label" role="columnheader">Size</span><span class="label" role="columnheader">Errors / 100 words</span><span class="label" role="columnheader">Speed</span><span role="columnheader"></span></div>
+          ${rows}
+        </div>
+        <p class="fine">Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement. The marked models skip the silence signal Flow's filter relies on, so they hear &ldquo;thank you&rdquo; in an empty room.</p>
+      </section>
+      <div class="split">
+        <section class="card">
+          <div class="row"><h2 class="grow">Ask and Refine</h2><span class="note">${ag.available.length ? "found on this PC" : ""}</span></div>
+          <p class="note">The agent CLI you already use does the answering. Flow never holds a key.</p>
+          ${ag.available.length ? `<div class="row wrap">${clis}</div>
+          <div class="row"><label class="note" for="cli-model">Model</label><input id="cli-model" class="input grow" list="cli-models" value="${esc(ag.model)}" placeholder="the CLI's own default" maxlength="120"><datalist id="cli-models">${ag.models.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist><button type="button" class="btn sm" data-act="cli-model">Save</button></div>
+          <div class="row"><span class="note">Effort</span>${seg(ag.efforts, ag.effort, "effort", "How hard the CLI may think")}</div>
+          <div class="row"><label class="note" for="cli-timeout">Wait up to</label><input id="cli-timeout" class="input" type="number" min="1" max="600" step="1" value="${Math.round(ag.timeout)}"><span class="note grow">seconds</span><button type="button" class="btn sm" data-act="cli-timeout">Save</button></div>`
+          : '<p class="note">None found. Install <span class="mono">claude</span> or <span class="mono">codex</span> and sign in to it - Flow finds it on your PATH.</p>'}
+        </section>
+        <section class="card">
+          <div class="row"><h2 class="grow">Spoken replies</h2>${vo.available ? sw(!vo.muted, "mute", "Read answers aloud") : ""}</div>
+          ${vo.available ? `<p class="note">Answers from Ask can be read aloud. Flow never listens while it talks.</p>
+          <div class="row"><select id="voice" class="grow" data-change="voice" aria-label="Voice">${voiceOptions}</select><button type="button" class="btn" data-act="preview">${icon("play", C.text, 14)}Preview</button></div>
+          <div class="row top">${icon("shield", C.soft, 14)}<p class="fine">Natural voices send the answer's text to Microsoft to be spoken. Windows and Piper voices stay on this PC.</p></div>`
+          : '<p class="note">No speech engine answered on this PC, so answers are shown and not read.</p>'}
+        </section>
+      </div>`;
+  }
+
+  // ------------------------------------------------------------------ Settings
+  function renderSettings(d) {
+    const mic = d.mic;
+    const sh = d.shortcuts;
+    const devices = [`<option value="" ${mic.chosen ? "" : "selected"}>The system default${!mic.chosen && mic.current ? " (" + esc(mic.current) + ")" : ""}</option>`]
+      .concat(mic.devices.map((dev) => `<option value="${esc(dev.name)}" ${dev.name === mic.chosen ? "selected" : ""}>${esc(dev.name)}</option>`)).join("");
+    const hot = sh.available ? `
+      <div class="hotkey"><span class="what">Talk</span>${keys(sh.chord.describe) || '<span class="note">off</span>'}<span class="grow"></span>${seg([["hold", "Hold"], ["toggle", "Toggle"]], sh.chord.gesture, "gesture", "How the talk keys work")}</div>
+      <div class="hotkey"><label class="what" for="chord-keys">Talk keys</label><input id="chord-keys" class="input mono grow" value="${esc(sh.chord.keys)}" placeholder="ctrl+win - empty turns it off"><button type="button" class="btn sm" data-act="chord">Save</button></div>
+      ${sh.hotkeys.map((h) => `
+      <div class="hotkey"><span class="what">${esc(h.label)}</span>${h.combo ? keys(h.combo) : '<span class="note">not registered</span>'}<span class="grow"></span>
+        <input class="input mono" data-hotkey="${esc(h.action)}" value="${esc(h.override)}" placeholder="ctrl+alt+..." aria-label="New keys for ${esc(h.label)}">
+        <button type="button" class="btn sm" data-act="hotkey" data-action="${esc(h.action)}">Save</button></div>`).join("")}
+      <p class="fine">Hold and Toggle change now. New keys take effect the next time Flow starts.</p>`
+      : `<p class="note">${sh.lite ? "No global shortcuts in Lite: hold the pill to talk. Nothing to grant but the microphone." : "Global shortcuts are off for this launch."}</p>`;
+    const ws = d.workspaces;
+    const wsRows = ws.recent.map((p) => `
+      <div class="ws"><label><input type="radio" name="ws" value="${esc(p)}" data-change="ws" ${p === ws.current ? "checked" : ""}>${icon("folder", C.green, 16)}<span class="mono ellipsis">${esc(p)}</span></label>
+        <button type="button" class="icon-btn" aria-label="Forget ${esc(p)}" data-act="ws-forget" data-path="${esc(p)}">${icon("x", C.soft, 14)}</button></div>`).join("");
+    const apps = d.apps.map((a) => `
+      <div class="app-row"><span class="mono ellipsis">${esc(a.exe)}</span><span class="note ellipsis" title="${esc(a.instruction)}">${esc(a.instruction)}</span>
+        <button type="button" class="icon-btn" aria-label="Remove ${esc(a.exe)}" data-act="app-remove" data-exe="${esc(a.exe)}">${icon("x", C.soft, 14)}</button></div>`).join("");
+    return `
+      <div class="page-head"><div class="grow"><h1>Settings</h1><p class="sub">Everything Flow remembers about how you like it. The pill never grows one of these.</p></div></div>
+      ${d.profile ? "" : '<section class="card tight"><p class="note warn">Flow was started with --no-profile: changes here last until it quits.</p></section>'}
+      <div class="split">
+        <div class="col">
+          <section class="card">
+            <h2>Microphone</h2>
+            <div class="row"><select id="mic" class="grow" data-change="mic" aria-label="Microphone">${devices}</select>${bars(12)}</div>
+            <p class="note">${mic.flag ? "Chosen by --device for this launch. " : ""}${mic.chosen || mic.flag
+              ? "If it goes away, Flow keeps trying this one and tells you - it never switches to another on its own."
+              : "Follows the one Windows uses, and moves with it when you plug something in."} The level moves while Flow is listening.</p>
+          </section>
+          <section class="card"><h2>Shortcuts</h2>${hot}</section>
+          <section class="card">
+            <h2>Saying send</h2>
+            <div class="row"><select id="send" data-change="send" aria-label="Send word">${d.send.presets.concat(d.send.presets.includes(d.send.word) ? [] : [d.send.word]).map((w) =>
+              `<option value="${esc(w)}" ${w === d.send.word ? "selected" : ""}>${esc(w)}</option>`).join("")}</select>
+              <p class="note grow">Say &ldquo;${esc(d.send.word)}&rdquo; on its own to send${d.send.pastes ? `, or &ldquo;${esc(d.send.enter_word)}&rdquo; to send and press Enter` : ""}.</p></div>
+            <p class="fine">Each word here was tested against hundreds of real recordings so it does not fire by accident.</p>
+          </section>
+          <section class="card">
+            <h2>Start and update</h2>
+            <div class="setting"><div class="text"><b>Load the speech model when Flow starts</b><span class="note">The first words come faster; starting takes a moment longer.</span></div>${sw(d.startup.warm, "warm", "Load the model at startup")}</div>
+            <div class="setting"><div class="text"><b>Flow ${esc(d.version)}</b><span class="note" id="update-line">Flow asks for updates only when you press this.</span></div><button type="button" class="btn" data-act="update">${icon("refresh", C.text, 15)}Check for updates</button></div>
+          </section>
+        </div>
+        <div class="col">
+          <section class="card">
+            <div class="row"><h2 class="grow">Workspaces</h2><button type="button" class="btn" data-act="ws-add">${icon("plus", C.text, 15)}Add a folder</button></div>
+            <p class="note">The project folder Ask and Refine answer about. Kept notes are written there.</p>
+            <div class="col">${wsRows}
+              <div class="ws"><label><input type="radio" name="ws" value="" data-change="ws" ${ws.current ? "" : "checked"}>${icon("chat", C.soft, 16)}<span class="note">No workspace: just talk</span></label></div>
+            </div>
+            <div class="row"><input id="ws-path" class="input mono grow" placeholder="or paste a folder path" aria-label="Folder path"><button type="button" class="btn sm" data-act="ws-add-path">Add</button></div>
+          </section>
+          <section class="card">
+            <h2>Ask</h2>
+            <div class="setting"><div class="text"><b>Ask after a pause</b><span class="note">In Ask, a few quiet seconds send the question. Off: send it yourself.</span></div>${sw(d.ask.auto_ask, "auto-ask", "Ask after a pause")}</div>
+          </section>
+          <section class="card">
+            <h2>The pill</h2>
+            <div class="setting"><div class="text"><b>Design</b><span class="note">Switches now, keeping what you were saying.</span></div>${seg(d.design.options.map((o) => [o.name, o.label]), d.design.current, "design", "Pill design")}</div>
+            <div class="setting"><div class="text"><b>Classic panel</b><span class="note">Width and place of the Classic pill's panel, from its next start.</span></div>
+              <select data-change="panel" aria-label="Panel width">${d.classic.panels.map((p) => `<option ${p === d.classic.panel ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
+              <select data-change="place" aria-label="Where the pill sits">${d.classic.places.map((p) => `<option ${p === d.classic.place ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></div>
+          </section>
+          <section class="card">
+            <h2>Refine, per app</h2>
+            <p class="note">An extra instruction for Refine when a program is in front - say, &ldquo;keep it to one line&rdquo; for a chat app.</p>
+            <div class="col">${apps || '<p class="fine">None yet.</p>'}</div>
+            <div class="app-row"><input id="app-exe" class="input mono" placeholder="slack.exe" aria-label="Program"><input id="app-text" class="input" placeholder="the instruction" aria-label="Instruction" maxlength="400"><button type="button" class="btn sm" data-act="app-add">Add</button></div>
+          </section>
+          <section class="card">
+            <h2>What leaves this PC</h2>
+            <div class="privacy">${icon("circlecheck", C.green, 18)}<div class="col"><b>Your voice never does</b><span class="note">Speech is recognised here. No account, no key.</span></div></div>
+            <div class="privacy">${icon("terminal", C.blue, 18)}<div class="col"><b>Ask and Refine send text to your agent CLI</b><span class="note">The words, and the workspace path when one is set.</span></div></div>
+            <div class="privacy">${icon("lock", C.soft, 18)}<div class="col"><b>The trace keeps timings and counts, never words</b><span class="note">Flow's own diagnostics, on this PC.</span></div></div>
+            <div class="row wrap"><button type="button" class="btn sm" data-act="open" data-what="settings">${icon("folder", C.text, 14)}Settings folder</button><button type="button" class="btn sm" data-act="open" data-what="trace">${icon("folder", C.text, 14)}Trace folder</button></div>
+          </section>
+        </div>
+      </div>`;
+  }
+
+  // ------------------------------------------------------------------ pages still to come
+  const SOON = {
+    history: {
+      title: "History", sub: "What you dictated, where it went, and anything Flow set aside.",
+      coming: ["Search everything you dictated and refined, kept on this PC for as long as you choose - or not at all.",
+        "Paste anything again, or copy it.", "Fix a word Flow got wrong, and have it stay fixed.",
+        "Get back words Flow set aside as noise."],
+      today: "Home lists what you said this session, in memory only.",
+    },
+    voice: {
+      title: "Voice", sub: "Teach Flow how you speak. Everything on this page stays on this PC.",
+      coming: ["Tune Flow to your room and your voice in 60 seconds of reading.",
+        "Check how well Flow hears you, and add what it missed in one click.",
+        "Your dictionary: words to listen for, and corrections Flow learned from your fixes."],
+      today: 'Tune it now with <span class="mono">flow --calibrate</span> in a terminal while Flow is closed. Your words live in <span class="mono">lexicon.txt</span>:',
+      action: '<button type="button" class="btn sm" data-act="open" data-what="lexicon">Open its folder</button>',
+    },
+    ask: {
+      title: "Conversations", sub: "Ask like ChatGPT, about your code or about anything.",
+      coming: ["Every conversation kept, grouped by workspace.", "Type or talk; answers with code blocks you can copy.",
+        "Carry on here from the pill, or send an answer back as your draft."],
+      today: "Switch the pill to Ask and hold to talk; the answer rises above the pill.",
+    },
+  };
+  function renderSoon(name) {
+    const s = SOON[name];
+    return `
+      <div class="page-head"><div class="grow"><h1>${esc(s.title)}</h1><p class="sub">${esc(s.sub)}</p></div></div>
+      <section class="card soon-card">
+        <div class="row"><span class="badge">arrives next</span></div>
+        <ul>${s.coming.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+        <hr class="rule">
+        <div class="row wrap"><p class="note grow">Until then: ${s.today}</p>${s.action || ""}</div>
+      </section>`;
+  }
+
+  // ------------------------------------------------------------------ showing a page
+  const LOAD = { home: "home", models: "models", settings: "settings" };
+  const DRAW = { home: renderHome, models: renderModels, settings: renderSettings };
+  let data = null;
+  let shown = "";
+
+  async function show(force = false) {
+    const name = current();
+    renderNav();
+    const pageEl = document.getElementById("page");
+    if (!LOAD[name]) {
+      data = null;
+      shown = name;
+      pageEl.innerHTML = renderSoon(name);
+      return;
+    }
+    try {
+      const fresh = await api(LOAD[name]);
+      if (current() !== name) return;
+      data = fresh;
+      draw(name, force || shown !== name);
+      shown = name;
+    } catch (e) {
+      if (e instanceof Gone) gone(e.message); else toast(e.message, true);
+    }
+  }
+
+  // How to find the focused control again after a re-draw replaced it: by id, or by the
+  // data attributes that say what it does. Keyboard users keep their place.
+  function focusKey(el) {
+    if (!el || el === document.body) return "";
+    if (el.id) return `#${CSS.escape(el.id)}`;
+    const attrs = ["act", "change", "value", "name", "action", "what", "path", "exe", "hotkey"]
+      .filter((k) => el.dataset && el.dataset[k] !== undefined)
+      .map((k) => `[data-${k}="${CSS.escape(el.dataset[k])}"]`);
+    return attrs.length ? attrs.join("") : "";
+  }
+
+  // A poll never re-draws under somebody typing; an action they took always re-draws.
+  function draw(name, fresh, force = false) {
+    const pageEl = document.getElementById("page");
+    const active = document.activeElement;
+    const typing = active && pageEl.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName);
+    if (typing && !fresh && !force) return;
+    const key = pageEl.contains(active) ? focusKey(active) : "";
+    const top = pageEl.scrollTop;
+    pageEl.innerHTML = DRAW[name](data);
+    sizes(pageEl);
+    pageEl.scrollTop = fresh ? 0 : top;
+    if (fresh) {
+      pageEl.focus({ preventScroll: true });
+    } else if (key) {
+      const again = pageEl.querySelector(key);
+      if (again) again.focus({ preventScroll: true });
+    }
+  }
+
+  function redrawWith(payload) {
+    data = payload;
+    draw(current(), false, true);
+  }
+
+  // ------------------------------------------------------------------ actions
+  const value = (id) => (document.getElementById(id) || {}).value;
+  async function run(fn, done) {
+    try {
+      const out = await fn();
+      if (out && typeof out === "object" && !Array.isArray(out) && LOAD[current()]) redrawWith(out);
+      if (done) toast(done);
+    } catch (e) {
+      if (e instanceof Gone) gone(e.message); else toast(e.message, true);
+    }
+  }
+
+  const ACT = {
+    download: (el) => run(() => api("models/download", { name: el.dataset.name }), `Downloading ${el.dataset.name}`),
+    cancel: (el) => run(() => api("models/cancel", { name: el.dataset.name }), "Cancelled"),
+    delete: (el) => {
+      if (!confirm(`Delete ${el.dataset.name} from this PC? You can download it again.`)) return;
+      run(() => api("models/delete", { name: el.dataset.name }), `Deleted ${el.dataset.name}`);
+    },
+    "use-models": () => run(() => api("models/use", {
+      final: value("final-model") || null, partial: value("partial-model") || null,
+      device: value("decode-device") || "auto",
+    }), "Switching models - the pill shows the load"),
+    "cli-model": () => run(() => api("agent", { model: value("cli-model") || "" }), "Saved"),
+    "cli-timeout": () => run(() => api("agent", { timeout: Number(value("cli-timeout")) }), "Saved"),
+    effort: (el) => run(() => api("agent", { effort: el.dataset.value }), `Effort: ${el.dataset.value}`),
+    mute: (el) => run(() => api("voice", { muted: el.getAttribute("aria-checked") === "true" })),
+    preview: () => run(() => api("voice/preview", {})),
+    gesture: (el) => run(() => api("settings/gesture", { gesture: el.dataset.value }), "Changed"),
+    chord: () => run(() => api("settings/chord", { keys: value("chord-keys") || "" }), "Saved - applies when Flow next starts"),
+    hotkey: (el) => {
+      const input = document.querySelector(`[data-hotkey="${el.dataset.action}"]`);
+      run(() => api("settings/hotkey", { action: el.dataset.action, combo: input ? input.value : "" }),
+        "Saved - applies when Flow next starts");
+    },
+    "ws-add": () => run(() => api("settings/workspace/add", {})),
+    "ws-add-path": () => {
+      const path = (value("ws-path") || "").trim();
+      if (path) run(() => api("settings/workspace/add", { path }), "Workspace added");
+    },
+    "ws-forget": (el) => run(() => api("settings/workspace/forget", { path: el.dataset.path })),
+    "auto-ask": (el) => run(() => api("settings/auto_ask", { on: el.getAttribute("aria-checked") !== "true" })),
+    warm: (el) => run(() => api("settings/warm", { on: el.getAttribute("aria-checked") !== "true" }), "Saved"),
+    design: (el) => run(() => api("settings/design", { name: el.dataset.value }), "Switching the pill"),
+    "app-add": () => {
+      const exe = (value("app-exe") || "").trim(), instruction = (value("app-text") || "").trim();
+      if (exe && instruction) run(() => api("settings/apps", { exe, instruction }), "Saved");
+    },
+    "app-remove": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, instruction: "" })),
+    open: (el) => run(() => api("open", { what: el.dataset.what })),
+    update: async () => {
+      const line = document.getElementById("update-line");
+      if (line) line.textContent = "Asking GitHub...";
+      try {
+        const out = await api("update", {});
+        if (line) line.textContent = out.line;
+      } catch (e) {
+        if (e instanceof Gone) gone(e.message); else if (line) line.textContent = e.message;
+      }
+    },
+  };
+  const CHANGE = {
+    cli: (el) => run(() => api("agent", { cli: el.value }), el.value === "auto" ? "Automatic" : `Pinned to ${el.value}`),
+    voice: (el) => run(() => api("voice", { voice: el.value || null }), "Voice changed"),
+    mic: (el) => run(() => api("settings/mic", { name: el.value || null }), "Microphone changed"),
+    send: (el) => run(() => api("settings/send", { word: el.value }), `Say "${el.value}" to send`),
+    ws: (el) => run(() => api("settings/workspace", { path: el.value || null }), "Workspace changed"),
+    panel: (el) => run(() => api("settings/classic", { panel: el.value }), "Saved"),
+    place: (el) => run(() => api("settings/classic", { place: el.value }), "Saved"),
+  };
+
+  document.addEventListener("click", (ev) => {
+    const el = ev.target.closest("[data-act]");
+    if (!el || el.disabled) return;
+    const fn = ACT[el.dataset.act];
+    if (fn) { ev.preventDefault(); fn(el); }
+  });
+  document.addEventListener("change", (ev) => {
+    const el = ev.target.closest("[data-change]");
+    if (!el) return;
+    const fn = CHANGE[el.dataset.change];
+    if (fn) fn(el);
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.keyCode !== 13) return;
+    const el = ev.target;
+    if (el.id === "ws-path") ACT["ws-add-path"]();
+    else if (el.id === "cli-model") ACT["cli-model"]();
+    else if (el.id === "chord-keys") ACT.chord();
+  });
+  window.addEventListener("hashchange", () => show(true));
+
+  // ------------------------------------------------------------------ the poll
+  let polls = 0;
+  async function poll() {
+    try {
+      live = await api("state");
+      renderStatus();
+      if (live.navigate && live.navigate !== current()) location.hash = "#/" + live.navigate;
+      const name = current();
+      if (name === "settings") level(document.getElementById("page"), live.capturing ? live.level_db : -90);
+      polls += 1;
+      // Models refreshes while something is moving on it; Home every few seconds.
+      const moving = name === "models" && data && data.speech
+        && (data.speech.loading || data.speech.models.some((m) => m.download && m.download.state === "running"));
+      if (moving || (name === "home" && polls % 5 === 0)) {
+        const fresh = await api(LOAD[name]);
+        if (current() === name) { data = fresh; draw(name, false); }
+      }
+    } catch (e) {
+      if (e instanceof Gone) { gone(e.message); return; }
+    }
+    setTimeout(poll, current() === "settings" ? 250 : 1000);
+  }
+
+  renderNav();
+  renderStatus();
+  show(true);
+  poll();
+})();

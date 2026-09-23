@@ -16,7 +16,7 @@ rule living in one of the two places that need it:
   "a pending paste belongs to the mode it was spoken in" rule that the tap
   obeys was bypassed by the other way of changing mode;
 - `_design_menu` built a fresh submenu per right-click, which `delete` unlinks
-  and never destroys;
+  and never destroys (the cascade itself has since moved to Flow Home);
 - `_talk_start` cleared the panel's blocks at the press, so a hold that heard
   nothing destroyed the answer that was on screen.
 
@@ -306,14 +306,15 @@ class TestOneSeamForEveryModeChange(unittest.TestCase):
                          "the deploy failed after the migration")
 
 
-class TestTheDesignSubmenuIsBuiltOnce(unittest.TestCase):
+class TestTheMenuBuildsNoSubmenu(unittest.TestCase):
     """`_on_menu` rebuilds the menu on every open, and `delete` unlinks a
-    cascade entry without destroying the submenu behind it — so every
-    right-click leaked a `tk.Menu` on a surface that is never closed."""
+    cascade entry without destroying the submenu behind it — which is how the
+    Design cascade used to leak a `tk.Menu` per right-click. The design switch
+    moved to Flow Home (decisions.md 2026-09-22), and the menu has no cascade
+    left: the leak cannot come back without a test here noticing."""
 
-    def clicking(self):
+    def test_right_clicks_build_no_menu_of_their_own(self):
         p = pill(mode=DICTATE)
-        p.session.profile = mock.Mock(design="compact")
         p._menu = FakeMenu()
         p.no_activate = False
         built = []
@@ -323,53 +324,12 @@ class TestTheDesignSubmenuIsBuiltOnce(unittest.TestCase):
             built.append(m)
             return m
 
-        return p, built, factory
-
-    def open_twice(self, p, factory):
         with mock.patch.object(uc.tk, "StringVar", FakeVar), \
                 mock.patch.object(uc, "_dark_menu", factory):
             p._on_menu(mock.Mock(x_root=10, y_root=10))
             p._on_menu(mock.Mock(x_root=10, y_root=10))
-
-    def test_two_right_clicks_build_one_submenu(self):
-        p, built, factory = self.clicking()
-        self.open_twice(p, factory)
-        self.assertEqual(len(built), 1)
-        self.assertIs(p._design_sub, built[0])
-
-    def test_the_second_open_shows_the_cascade_again(self):
-        # Kept once is not kept away: the entry is re-added to the rebuilt
-        # menu, so the row is there on every open.
-        p, built, factory = self.clicking()
-        self.open_twice(p, factory)
-        self.assertIs(p._menu.cascades["Design"], p._design_sub)
-
-    def test_the_rows_are_refreshed_not_doubled(self):
-        # The refresh is what the `(current)` marker needs — and a submenu
-        # that was added to twice would show every design twice.
-        p, built, factory = self.clicking()
-        self.open_twice(p, factory)
-        self.assertEqual(p._design_sub.order, ["Current", "Compact   (current)"])
-
-    def test_a_kept_submenu_still_moves_its_marker(self):
-        # The rows are read off the surface on every open rather than frozen
-        # when the submenu was first built. `DESIGN` is what the marker follows
-        # now — the surface you are looking at, not the field the profile
-        # stores — and no live pill changes it mid-process, so the fixture
-        # moves it by hand to prove the refresh is a refresh.
-        p, built, factory = self.clicking()
-        with mock.patch.object(uc.tk, "StringVar", FakeVar), \
-                mock.patch.object(uc, "_dark_menu", factory):
-            p._on_menu(mock.Mock(x_root=10, y_root=10))
-            p.DESIGN = "current"
-            p._on_menu(mock.Mock(x_root=10, y_root=10))
-        self.assertEqual(p._design_sub.order, ["Current   (current)", "Compact"])
-
-    def test_the_default_is_on_the_class(self):
-        # The same RecursionError guard every other attribute here carries:
-        # `_design_menu` reads it on a `__new__`-built fixture.
-        self.assertTrue(hasattr(uc.CompactPill, "_design_sub"))
-        self.assertIsNone(uc.CompactPill._design_sub)
+        self.assertEqual(built, [])
+        self.assertEqual(p._menu.cascades, {})
 
 
 class TestASilentHoldKeepsTheAnswer(unittest.TestCase):
@@ -498,9 +458,8 @@ class TestASilentHoldKeepsTheAnswer(unittest.TestCase):
 
 
 class TestTheProviderIsAPublicSeam(unittest.TestCase):
-    """`_cli_offered` and `_setup_rows` called `session._provider()` — a UI
-    reading the session's implementation for a fact the session is happy to
-    state. `Session.provider` is that fact, read-only, and cheap enough for a
+    """`_cli_offered` called `session._provider()` — a UI reading the
+    session's implementation for a fact the session is happy to state. `Session.provider` is that fact, read-only, and cheap enough for a
     frame: a pin or `_available`'s `CLI_LOOKUP_SEC` cache is underneath it."""
 
     def test_the_property_answers_what_provider_answers(self):
@@ -509,8 +468,8 @@ class TestTheProviderIsAPublicSeam(unittest.TestCase):
             self.assertEqual(s.provider, "claude")
 
     def test_no_cli_is_the_empty_string_not_none(self):
-        # `_cli_offered` is `bool(...)` over this, and the setup box's
-        # "none found" is `or`-ed onto it: both want a falsey string.
+        # `_cli_offered` is `bool(...)` over this, and Flow Home names the
+        # CLI straight off it: both want a falsey string.
         with mock.patch.object(Session, "_provider", return_value=""):
             s = Session.__new__(Session)
             self.assertEqual(s.provider, "")
@@ -528,13 +487,6 @@ class TestTheProviderIsAPublicSeam(unittest.TestCase):
         self.assertTrue(p._cli_offered())
         p.session.provider = ""
         self.assertFalse(p._cli_offered())
-
-    def test_the_setup_box_names_it(self):
-        p = panel_pill(mode=CONVERSE)
-        p.session.mic = mock.Mock(device_name="Yeti Nano")
-        p.session.provider = "claude"
-        p.session.pastes = True
-        self.assertEqual(p._setup_rows()[1], ("Agent CLI", "claude"))
 
     def test_the_surface_no_longer_reaches_for_the_private_one(self):
         # The two call sites, pinned as calls rather than as the word: a

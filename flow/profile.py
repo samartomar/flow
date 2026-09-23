@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Sequence
 
 from . import edits
-from .refine import EFFORT_DEFAULT, EFFORTS
+from .refine import EFFORT_DEFAULT, EFFORTS, MAX_TIMEOUT_SEC
 
 
 # -- per-field validation ---------------------------------------------------
@@ -250,6 +250,11 @@ GESTURE_DEFAULT = "hold"
 DESIGN_DEFAULT = "current"
 DESIGNS = ("current", "compact")
 
+#: Where decoding may run, as `--decode-device` spells it. Spelled here rather than
+#: imported from `flow/asr.py`, which pulls in numpy and the decoder: this module is read
+#: on every launch and by `flow --stats`, which loads no model.
+DECODE_DEVICES = ("auto", "cuda", "cpu")
+
 #: How many model names the settings menu will remember. A ceiling rather than a
 #: judgement: this list is only ever appended to, by hand, one name at a time, and a menu
 #: is not a place for an unbounded list.
@@ -463,6 +468,29 @@ class Profile:
         #: this list *is* the menu: a name arrives once through `--cli-model` and is a
         #: click from then on.
         self.cli_models: tuple[str, ...] = ()
+        #: The settings Flow Home gave a place (decisions.md 2026-09-22, "Flow Home"),
+        #: each of which could until then only be set by a flag at every launch. All
+        #: additive, schema stays 1, and every one reads absent as "what Flow did before
+        #: this field existed", so an older profile launches exactly as it always did.
+        #:
+        #: The speech models, by name, or None for whatever the device should run
+        #: (`asr.default_models`). A flag still wins over these, as `--voice` wins over
+        #: `voice`: a flag is a decision for one launch, this is the standing preference.
+        self.partial_model: str | None = None
+        self.final_model: str | None = None
+        #: "auto", "cuda" or "cpu" — `--decode-device`, remembered.
+        self.decode_device: str = "auto"
+        #: The microphone, by *name* and never by index — see `Mic.device_name` for why
+        #: an index stored across launches comes to mean a different device. None follows
+        #: the system default, which is also what a name that is not connected falls back
+        #: to, said out loud at launch.
+        self.mic_device: str | None = None
+        #: How long to wait for the agent CLI, in seconds, or None for the shipped
+        #: `refine.TIMEOUT_SEC`. `--cli-timeout` wins over it.
+        self.cli_timeout: float | None = None
+        #: Whether the speech model loads at launch. `--no-warm` still turns it off for
+        #: one launch; this is for the machine where paying the load at sign-in is wrong.
+        self.warm: bool = True
         #: Field names that were present in the file and unusable, so a caller can say so
         #: rather than leaving the user to notice their setting reverted. Empty on a first
         #: run and on any valid file.
@@ -555,6 +583,21 @@ class Profile:
         self.cli_models = tuple(
             take("cli_models", lambda v, _d=None: _text_list(v, CLI_MODEL_CAP), [])
         )
+        self.partial_model = take("partial_model", _text)
+        self.final_model = take("final_model", _text)
+        self.decode_device = take("decode_device", _text, "auto")
+        if self.decode_device not in DECODE_DEVICES:
+            self.faults.append("decode_device")
+            self.decode_device = "auto"
+        self.mic_device = take("mic_device", _text)
+        # A wait is a positive number of seconds no longer than the flag would accept;
+        # anything else degrades to the shipped wait and is named, like any wrong type.
+        timeout = take("cli_timeout", _number)
+        if timeout is not None and not 0 < timeout <= MAX_TIMEOUT_SEC:
+            self.faults.append("cli_timeout")
+            timeout = None
+        self.cli_timeout = timeout
+        self.warm = take("warm", _flag, True)
         self.pairs = take("pairs", lambda v, _d: _counter(v), Counter())
         self.misroutes = take("misroutes", lambda v, _d: _counter(v), Counter())
         # `stored=[]` because JSON has no set: `save` writes this one as a sorted list,
@@ -602,6 +645,12 @@ class Profile:
             "cli_model": self.cli_model,
             "cli_effort": self.cli_effort,
             "cli_models": list(self.cli_models),
+            "partial_model": self.partial_model,
+            "final_model": self.final_model,
+            "decode_device": self.decode_device,
+            "mic_device": self.mic_device,
+            "cli_timeout": self.cli_timeout,
+            "warm": self.warm,
             "pairs": dict(self.pairs.most_common(MAX_PAIRS)),
             "misroutes": dict(self.misroutes.most_common(MAX_MISROUTES)),
             # Sorted so two saves of the same state produce the same file — a set's

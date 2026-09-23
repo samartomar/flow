@@ -267,8 +267,11 @@ def main(argv: list[str] | None = None) -> int:
         help="pin BOTH tiers to one model (benchmarking, or a low-memory machine)",
     )
     ap.add_argument(
-        "--decode-device", default=DEVICE, choices=("auto", "cuda", "cpu"),
-        help="where decoding runs (default auto: the GPU when there is a working one)",
+        # None rather than DEVICE, so a launch that did not ask can be told apart from
+        # one that asked for "auto": the first follows the profile, the second wins.
+        "--decode-device", default=None, choices=("auto", "cuda", "cpu"),
+        help="where decoding runs (default auto: the GPU when there is a working one; "
+             "Flow Home remembers a choice)",
     )
     ap.add_argument(
         "--engine", default="auto", choices=("auto", "whisper", "native"),
@@ -343,6 +346,11 @@ def main(argv: list[str] | None = None) -> int:
              f"({', '.join(c.name for c in CANDIDATES if c.verified)})",
     )
     ap.add_argument(
+        "--home", action="store_true",
+        help="open Flow Home as soon as the pill is up - models, microphone, shortcuts "
+             "and every other setting, in one window",
+    )
+    ap.add_argument(
         "--no-warm", action="store_true",
         # For a launcher that starts with the machine, where paying a model load at login
         # is the wrong trade — and for measuring the cold path on purpose.
@@ -362,8 +370,9 @@ def main(argv: list[str] | None = None) -> int:
              f"({', '.join(EFFORTS)}; default {EFFORT_DEFAULT})",
     )
     ap.add_argument(
-        "--cli-timeout", type=_timeout_arg, default=REFINE_TIMEOUT_SEC, metavar="SEC",
-        help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f})",
+        "--cli-timeout", type=_timeout_arg, default=None, metavar="SEC",
+        help=f"how long to wait for a CLI call (default {REFINE_TIMEOUT_SEC:.0f}, "
+             "or what Flow Home remembers)",
     )
     ap.add_argument(
         "--lite", action="store_true",
@@ -425,6 +434,15 @@ def main(argv: list[str] | None = None) -> int:
         for line in report:
             say(line)
         return 0 if counted else 1
+
+    # Read before anything below is chosen, because some of what gets chosen — the speech
+    # models, where they run, the CLI's wait, the microphone — is remembered there now
+    # (Flow Home, decisions.md 2026-09-22), and each is resolved the way `--voice` always
+    # was: a flag given for this launch wins, the profile is the standing preference, and
+    # the shipped default is what is left.
+    from .profile import CLI_MODEL_CAP, Profile, resolve_workspace
+
+    profile = None if args.no_profile else Profile()
 
     # The platform is read once, here, and only to choose a body. Everything downstream
     # reads `lite`, which is why `--lite` on Windows runs the same code a Mac runs rather
@@ -505,7 +523,11 @@ def main(argv: list[str] | None = None) -> int:
     # find, and the person who installed it is the one who can end the difference.
     for cli in unverified():
         say(f"  ({unverified_note(cli)})")
-    say(f"CLI timeout: {args.cli_timeout:.0f}s per call")
+    cli_timeout = args.cli_timeout
+    if cli_timeout is None:
+        cli_timeout = (profile.cli_timeout if profile is not None and profile.cli_timeout
+                       else REFINE_TIMEOUT_SEC)
+    say(f"CLI timeout: {cli_timeout:.0f}s per call")
 
     # The device first, because which model each tier should be depends on it: a GPU
     # runs one strong model for both paths and a CPU cannot. Named out loud for the same
@@ -513,8 +535,13 @@ def main(argv: list[str] | None = None) -> int:
     # and somebody whose GPU quietly did not engage has no other way to tell.
     from .asr import cuda_reason, default_models, resolve_device
 
-    asked_partial = args.model or args.partial_model
-    asked_final = args.model or args.final_model
+    asked_partial = (args.model or args.partial_model
+                     or (profile.partial_model if profile is not None else None))
+    asked_final = (args.model or args.final_model
+                   or (profile.final_model if profile is not None else None))
+    decode_device = (args.decode_device
+                     or (profile.decode_device if profile is not None else None)
+                     or DEVICE)
 
     def decode_plan() -> tuple[str, str, list[str]]:
         """Both tier names, and the startup lines that name the device and them.
@@ -532,11 +559,11 @@ def main(argv: list[str] | None = None) -> int:
         and a completely different line to read, and only the second is something the
         reader can act on.
         """
-        decode_device = resolve_device(args.decode_device)
-        lines = [f"decoding on: {decode_device}"
-                 + ("" if decode_device != "cpu" or args.decode_device == "cpu"
+        resolved = resolve_device(decode_device)
+        lines = [f"decoding on: {resolved}"
+                 + ("" if resolved != "cpu" or decode_device == "cpu"
                     else f" ({cuda_reason()})")]
-        default_partial, default_final = default_models(decode_device)
+        default_partial, default_final = default_models(resolved)
         return asked_partial or default_partial, asked_final or default_final, lines
 
     planned = None
@@ -563,12 +590,7 @@ def main(argv: list[str] | None = None) -> int:
             say(f"models: {partial} for partials, {final} for finals{engine_why}")
 
     from .diag import Diag
-    from .profile import CLI_MODEL_CAP, Profile, resolve_workspace
 
-    # Tied to the same flag as the profile, and deliberately: --no-profile means
-    # "write nothing about me this session", and a trace is a thing written about
-    # somebody even when it holds none of their words.
-    profile = None if args.no_profile else Profile()
     # Written to the profile before the session reads it, so `--cli-model` is a *setting*
     # and not a one-run override: the settings menu has no way to type a name, so a flag
     # that vanished at exit would leave the menu permanently empty. `--cli-model ""`
@@ -683,23 +705,40 @@ def main(argv: list[str] | None = None) -> int:
         profile.note_workspace(workspace)
         profile.save()
 
+    # The microphone: an index from `--device` is a pin for this launch, and a name the
+    # profile remembers is resolved against the devices plugged in right now. A name that
+    # is not connected falls back to the system default and says so — a missing headset
+    # must not be the reason Flow cannot hear anyone.
+    mic_index = args.device
+    if mic_index is None and profile is not None and profile.mic_device:
+        from .audio import find_input
+
+        mic_index = find_input(profile.mic_device)
+        if mic_index is None:
+            say(f"microphone: {profile.mic_device} is not connected - using the system default")
+        else:
+            say(f"microphone: {profile.mic_device}")
+
     session = Session(
         # The asked-for names, or None: the transcriber resolves a None to the tier
         # its device wants, the same answer `decode_plan` reaches for the startup line.
         asr=(_native_transcriber() if engine == "native" else WhisperTranscriber(
             asked_partial, asked_final, lexicon=lexicon,
             baseline=profile.confidence if profile is not None else None,
-            device=args.decode_device,
+            device=decode_device,
         )),
-        device=args.device,
+        device=mic_index,
         speaker=speaker,
         profile=profile,
         diag=diag,
         cli=pinned,
-        cli_timeout=args.cli_timeout,
+        cli_timeout=cli_timeout,
         refine_cwd=workspace,
         lite=lite,
     )
+    if args.device is None and mic_index is not None and profile is not None:
+        # Found by name at launch, so found by name again after a device change.
+        session.mic.want = profile.mic_device
 
     if args.calibrate:
         from .calibrate import run as calibrate_run
@@ -907,6 +946,19 @@ def main(argv: list[str] | None = None) -> int:
     # What the mode notes read, and the same fact `on_send` is keyed off.
     session.pastes = paste is not None
 
+    # Flow Home: the window for everything that is not talking (decisions.md 2026-09-22).
+    # Built now and started never — the server binds its port the first time somebody
+    # opens the window, so a session that never opens it never listens on anything.
+    # Hung off the session like `hotkeys`, because both surfaces reach it from a menu row
+    # and neither surface outlives a design switch.
+    from .home import Home
+
+    home = Home(
+        session, profile=profile, hotkeys=hotkeys, lite=lite,
+        lexicon_path=lexicon.path, trace_path=diag.path if diag is not None else None,
+    )
+    session.home = home
+
     def build(name: str, arm: bool = False):
         """The surface `name` draws, over the session that is already running.
 
@@ -925,7 +977,7 @@ def main(argv: list[str] | None = None) -> int:
             from .ui_compact import CompactPill as cls
         else:
             cls = Pill
-        return cls(
+        surface = cls(
             # Keyed off whether an injector was imported, not off `lite`. The two came
             # apart the day a Mac got a paste path: it is Lite in every other sense and
             # can still put the words in the other window.
@@ -934,6 +986,11 @@ def main(argv: list[str] | None = None) -> int:
             settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
             lite=lite,
         )
+        # Home switches designs from its Settings page, and a switch is a method on the
+        # surface that is on screen — so Home is told which one that is, every time.
+        home.surface = surface
+        home.design = name
+        return surface
 
     say_gesture(design, args.arm)
     pill = build(design, arm=args.arm)
@@ -951,8 +1008,12 @@ def main(argv: list[str] | None = None) -> int:
     # Once, on the first surface only, and the same goes for the two threads and the
     # identity record below: all four are about the *process* starting, not about a
     # window appearing, and a design switch does not restart the process.
-    if not args.no_warm:
+    if not args.no_warm and (profile is None or profile.warm):
         session.warm()
+    if args.home:
+        # After the first frame rather than now, so the pill is on screen before a
+        # browser process starts beside it.
+        pill.after(300, lambda: home.open("home"))
     # Beside the window, not in front of it — see each one for what it used to cost.
     _threading.Thread(target=say_models, daemon=True, name="startup-lines").start()
     if not args.no_speak:
@@ -967,30 +1028,36 @@ def main(argv: list[str] | None = None) -> int:
     # quit, while `switch_design` sets it to the other name and this builds that one
     # against the session, the hotkeys and the draft the last surface was already
     # driving. Nothing below the window is torn down in between.
-    while True:
-        try:
-            pill.mainloop()
-        except KeyboardInterrupt:
-            # The other half of the guard in `Pill._tick`, and the reason the pill is
-            # bound to a name at all. Tkinter reports and swallows whatever a callback
-            # raises, so nearly every ctrl+C is caught in the frame pump — but one that
-            # lands at the entry to a callback, before Tkinter's own `try`, comes out of
-            # `mainloop` instead, and that is the exit which skips teardown entirely.
-            #
-            # 0 rather than 130: ctrl+C is now a way to quit Flow rather than a way to
-            # interrupt it, and it should report what ctrl+alt+Q reports.
-            pill.quit_app()
-            return 0
-        # `in DESIGNS` rather than "not None": this is read off whatever object the
-        # surface class handed back, and a name nobody knows how to build is a quit
-        # rather than a crash.
-        wanted = getattr(pill, "switch_to", None)
-        if wanted not in DESIGNS or wanted == design:
-            return 0
-        design = wanted
-        say(f"design: {design}")
-        say_gesture(design, False)
-        pill = build(design)
+    try:
+        while True:
+            try:
+                pill.mainloop()
+            except KeyboardInterrupt:
+                # The other half of the guard in `Pill._tick`, and the reason the pill is
+                # bound to a name at all. Tkinter reports and swallows whatever a callback
+                # raises, so nearly every ctrl+C is caught in the frame pump — but one that
+                # lands at the entry to a callback, before Tkinter's own `try`, comes out
+                # of `mainloop` instead, and that is the exit which skips teardown
+                # entirely.
+                #
+                # 0 rather than 130: ctrl+C is now a way to quit Flow rather than a way
+                # to interrupt it, and it should report what ctrl+alt+Q reports.
+                pill.quit_app()
+                return 0
+            # `in DESIGNS` rather than "not None": this is read off whatever object the
+            # surface class handed back, and a name nobody knows how to build is a quit
+            # rather than a crash.
+            wanted = getattr(pill, "switch_to", None)
+            if wanted not in DESIGNS or wanted == design:
+                return 0
+            design = wanted
+            say(f"design: {design}")
+            say_gesture(design, False)
+            pill = build(design)
+    finally:
+        # The port closes with the process either way; this is so a Home window left
+        # open says "Flow has quit" at its next poll instead of waiting on a socket.
+        home.close()
 
 
 if __name__ == "__main__":

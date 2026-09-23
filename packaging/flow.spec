@@ -75,6 +75,15 @@ hiddenimports += _sd_hidden
 # fails here rather than shipping a bundle that cannot name itself.
 datas += copy_metadata("flow")
 
+# Files Flow reads off its own package directory at runtime rather than imports: the IBM
+# Plex faces both pills draw with and Flow Home's page serves, and Flow Home's page itself
+# (`flow/home/server.py` serves a fixed list of files from there). `collect_submodules`
+# finds modules only, so without these the bundle carries neither.
+datas += [
+    (os.path.join(ROOT, "flow", "assets", "fonts"), os.path.join("flow", "assets", "fonts")),
+    (os.path.join(ROOT, "flow", "home", "static"), os.path.join("flow", "home", "static")),
+]
+
 a = Analysis(  # noqa: F821
     [os.path.join(SPECPATH, "entrypoint.py")],  # noqa: F821
     pathex=[ROOT],

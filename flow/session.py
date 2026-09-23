@@ -11,8 +11,10 @@ further behind speech the longer someone talked.
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
+import traceback
 from collections import deque
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -881,6 +883,11 @@ class Session:
         self._post_hoc: str | None = None
         self._decoded_sec = 0.0
         self._events: deque[Event] = deque()
+        #: Work another thread handed this session to do on its own thread — Flow Home's
+        #: requests, which arrive on the HTTP server's threads. Drained at the top of
+        #: `pump_results`, which both surfaces call on every frame whether or not the
+        #: microphone is armed; see `post`.
+        self._posted: queue.SimpleQueue = queue.SimpleQueue()
         self._refine_cwd = refine_cwd
         #: A pinned agent CLI, or None to walk the preference order with fallback.
         #: Pinning is a decision and is never second-guessed; None is a preference.
@@ -1665,6 +1672,7 @@ class Session:
         disarming while waiting is the natural thing to do — especially now that Flow
         goes deaf while it reads a reply aloud.
         """
+        self._run_posted()
         # First, so a save owed by *last* frame's decode lands here — after the paste
         # that frame went on to do — rather than in front of this frame's.
         self._pump_saves()
@@ -1673,6 +1681,30 @@ class Session:
         self._pump_refine()
         self._pump_ask()
         self._pump_linger()
+
+    def post(self, fn) -> None:
+        """Run `fn` on the thread that pumps this session, at its next frame.
+
+        The session is not thread-safe and was never meant to be: it is driven from one
+        thread by the pull contract both surfaces follow. Flow Home's requests arrive on
+        the HTTP server's threads, so every change they make is posted here and run by
+        `pump_results`, which is called on every frame whether or not anything is armed
+        — the one call both surfaces are guaranteed to make. `flow/home/bridge.py` waits
+        on the answer.
+        """
+        self._posted.put(fn)
+
+    def _run_posted(self) -> None:
+        """Run what other threads posted. One failure costs that call, not the frame."""
+        while True:
+            try:
+                fn = self._posted.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                fn()
+            except Exception:
+                traceback.print_exc()
 
     def _request_save(self) -> None:
         """Ask for `profile.save()` on the next frame. See `_save_pending`."""
@@ -3198,6 +3230,96 @@ class Session:
             self.profile.cli_effort = effort
             self.profile.save()
         self._emit("note", f"effort: {effort}")
+
+    @property
+    def cli_timeout(self) -> float:
+        """How long a CLI call may take, in seconds."""
+        return self._cli_timeout
+
+    def set_cli_timeout(self, seconds: float) -> None:
+        """How long to wait for the agent CLI, applied to the next call and remembered.
+
+        Judged by `refine.sane_timeout`, the belt every caller that did not come through
+        `--cli-timeout` already wears, so a nonsense value cannot make every call time
+        out before it starts or never time out at all.
+        """
+        from .refine import sane_timeout
+
+        self._cli_timeout = sane_timeout(seconds)
+        if self.profile is not None:
+            self.profile.cli_timeout = self._cli_timeout
+            self.profile.save()
+        self._emit("note", f"the agent CLI gets {self._cli_timeout:.0f} s per call")
+
+    def set_models(self, partial: str | None, final: str | None,
+                   device: str | None = None) -> bool:
+        """Choose the speech models, mid-session. None means what this device should run.
+
+        Flow Home's Models page is the caller. Remembered in the profile, and applied now
+        rather than at the next launch: `asr.swap` drops whichever tier changed and the
+        preload builds the new model in the background, so the next utterance decodes on
+        it or waits on its load — which the pill already names.
+
+        The swap itself runs on a thread of its own, because it waits out any build in
+        progress, and on a first run that build is a download measured in gigabytes. The
+        choice is recorded here, on the session's thread, before it starts.
+        """
+        swap = getattr(self.asr, "swap", None)
+        if not callable(swap):
+            self._emit("note", "this speech engine has no models to choose between")
+            return False
+        partial = (partial or "").strip() or None
+        final = (final or "").strip() or None
+        if self.profile is not None:
+            self.profile.partial_model = partial
+            self.profile.final_model = final
+            if device is not None:
+                self.profile.decode_device = device
+            self.profile.save()
+
+        def run() -> None:
+            try:
+                changed = swap(partial, final, device)
+            except Exception as exc:
+                self._emit("error", f"could not switch speech models: {exc}")
+                return
+            if changed:
+                self._warm()
+
+        threading.Thread(target=run, daemon=True, name="swap-models").start()
+        self._emit("note", "switching speech models - the next words may wait on the load")
+        return True
+
+    def set_microphone(self, name: str | None) -> bool:
+        """Capture from the input device called `name`, or the system default for None.
+
+        Refused while a reply is being read aloud, and for a reason rather than out of
+        caution: switching refreshes PortAudio's device list, which closes every stream
+        in the process — including the one the reply is playing through, leaving the
+        voice engine holding freed memory (see `audio.refresh_devices`). Refused, not
+        queued: the person is looking at the setting now, and a switch that happened
+        seconds later on its own would look like the choice being ignored.
+        """
+        if self.talking:
+            self._emit("note", "finish the reply first - switching the microphone would cut it off")
+            return False
+        use = getattr(self.mic, "use", None)
+        if not callable(use):
+            self._emit("note", "this microphone cannot be switched")
+            return False
+        why = use(name)
+        if why:
+            self._emit("note", f"microphone: {why} - kept {self.mic.device_name or 'the default'}")
+            return False
+        if self.profile is not None:
+            self.profile.mic_device = name
+            self.profile.save()
+        self._emit("note", f"microphone: {name or 'the system default'}")
+        # A different device is a different calibration; say so now rather than at the
+        # next arm, which may be a long time from the moment it was chosen.
+        self._noted_device = ""
+        self._check_calibrated_device()
+        return True
 
     def toggle_auto_ask(self) -> bool:
         self.auto_ask = not self.auto_ask

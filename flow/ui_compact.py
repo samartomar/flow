@@ -75,7 +75,6 @@ from .ui import (
     FONT_CHIP,
     FONT_CHIP_PRIMARY,
     FONT_MONO,
-    FONT_NOTE,
     FONT_PARTIAL,
     HEARING,
     LEVEL_FALL_ALPHA,
@@ -357,14 +356,14 @@ PANEL_SPEC = {
 #: UI's Dictate/Converse named the mechanism; the compact names the job.
 MODE_NAME = {DICTATE: "Type", REFINE: "Refine", CONVERSE: "Ask"}
 
-#: The standalone box (Workspace.dc.html's `.box`) the palette and the setup
-#: share: 360 px wide, SHELL with a `RING_OUTER` border and the `RING_TOP`
-#: inset highlight. Its rows, measured off the artboard.
+#: The standalone box (Workspace.dc.html's `.box`) the palette draws in: 360 px
+#: wide, SHELL with a `RING_OUTER` border and the `RING_TOP` inset highlight.
+#: Its rows, measured off the artboard. The Workbench setup box that shared it
+#: became Flow Home's Settings and Models pages (decisions.md 2026-09-22).
 BOX_W = 360
 PALETTE_FIELD_H = 40
 PALETTE_ROW_H = 30
 PALETTE_FOOT_H = 34
-SETUP_ROW_H = 42
 
 #: TODO: spoken punctuation ("press enter", "tab"), resolved locally so Type
 #: gets it without a CLI (design/compact/README.md). The session's decode
@@ -718,12 +717,6 @@ class CompactPill(tk.Tk):
     #: created it (see `_populate_menu`).
     _menu = None
     _mode_var = None
-    #: The Design cascade's submenu, built once and kept. `_populate_menu`
-    #: clears the top-level menu on every open, and Tk's `delete` unlinks a
-    #: cascade *entry* while the submenu behind it is a widget of its own that
-    #: outlives it — so a fresh `_dark_menu` per right-click leaked one
-    #: `tk.Menu` per right-click, for the life of a process that is always on.
-    _design_sub = None
     #: What the last `draft` event carried — the text the send path hands
     #: over, and what item 3's panel `heard` block will read. "" on a fixture,
     #: which is also the true answer for a pill that has heard nothing.
@@ -790,9 +783,9 @@ class CompactPill(tk.Tk):
     #: Where the window was when it was hidden, so `show_from_tray` puts it
     #: back rather than where the window manager feels like.
     _home = None
-    #: The standalone box (palette or setup) and its state: one at a time,
-    #: None when closed — which is all a fixture ever sees. `_palette` holds
-    #: the palette's logic while its box is open; `_box_kind` says which box.
+    #: The standalone box (the workspace palette) and its state: None when
+    #: closed — which is all a fixture ever sees. `_palette` holds the
+    #: palette's logic while its box is open; `_box_kind` says which box.
     _box = None
     _box_canvas = None
     _box_kind = ""
@@ -1403,7 +1396,7 @@ class CompactPill(tk.Tk):
     def _cli_offered(self) -> bool:
         """Whether Refine and Ask exist on this machine right now
         (States.dc.html: with no agent CLI on PATH they are simply not
-        offered). The same answer the setup box's "none found" gives —
+        offered). The same answer Flow Home's Models page gives —
         `Session.provider`'s own cache pays the PATH lookup, and it is the
         public seam for it: this is a surface asking the session a question,
         not a surface reading the session's implementation."""
@@ -1996,9 +1989,9 @@ class CompactPill(tk.Tk):
         # moves too — it sits below whatever panel height is currently drawn.
         self._capsule_y = ny + self.dev(self._capsule_off)
         self.geometry(f"{dw}x{dh}+{nx}+{ny}")
-        # No box to re-anchor: the palette and the setup box hold the keyboard
-        # and close on `FocusOut`, so the press that starts this drag has
-        # already dismissed either of them.
+        # No box to re-anchor: the palette holds the keyboard and closes on
+        # `FocusOut`, so the press that starts this drag has already
+        # dismissed it.
 
     def _on_release(self, e=None) -> None:
         """The button coming up: a hold ends the talk, anything else is a tap.
@@ -2032,16 +2025,14 @@ class CompactPill(tk.Tk):
         paste for the same reason the tap does — see `_choose_mode`, which the
         radios used to bypass.
 
-        **One row is here that the artboard does not draw**, and it is the
-        one that lets somebody leave. `profile.design` decides which surface
-        launches, and the control that writes it is a row in the *shipped*
-        design's Settings menu — so with compact stored, the only switch there
-        was lived inside the surface you could no longer reach. A one-way
-        door, and `--design current` typed at a shell is not an answer for
-        somebody who launched Flow from a shortcut. The owner relaxed the
-        artboard's "everything it offers" for exactly this on 2026-09-04; the
-        two designs are reachable from each other or they are not two designs
-        somebody can choose between.
+        **One row opens everything else: Open Flow** (decisions.md 2026-09-22,
+        "Flow Home"). The pill never grows a setting; Flow Home holds every
+        one. It replaced two rows. Workbench setup was three read-only lines,
+        and Home's Settings and Models pages show and change all three. Design
+        was the row the artboard did not draw — the 2026-09-04 exception that
+        kept the two designs reachable from each other — and Home's Settings
+        page is reachable from both and switches the pill the same way, so the
+        exception has nothing left to protect.
 
         Nothing else was let back in. Hide to tray and Quit are still gone —
         the tray icon carries those, raised at launch by `_start_tray`, and
@@ -2055,7 +2046,7 @@ class CompactPill(tk.Tk):
         self._mode_var = tk.StringVar(value=MODE_NAME.get(current, ""))
         # No CLI on PATH: the cycle skips Refine and Ask, and the menu says so
         # the same way — grey, not absent (States.dc.html: a smaller Flow,
-        # not a broken one; Workbench setup is the row that explains it).
+        # not a broken one; Flow Home's Models page is what explains it).
         offered = self._cli_offered()
         for mode in (DICTATE, REFINE, CONVERSE):
             name = MODE_NAME[mode]
@@ -2069,47 +2060,24 @@ class CompactPill(tk.Tk):
         ws = getattr(self.session, "workspace", "") or ""
         m.add_command(label=ws or "no workspace", state="disabled")
         m.add_separator()
-        m.add_command(label="Workbench setup", command=self._open_setup)
-        m.add_command(label="mic, CLI, where it pastes", state="disabled")
-        m.add_separator()
-        self._design_menu(m)
+        m.add_command(label="Open Flow", command=self._open_home)
+        m.add_command(label="models, microphone, shortcuts, settings",
+                      state="disabled")
 
-    def _design_menu(self, parent) -> None:
-        """Which surface is on screen, changed here and now.
+    def _open_home(self, page: str = "home") -> None:
+        """Open Flow Home, or say on the strip why it could not open.
 
-        The shipped design's `_design_menu` (flow/ui.py:3126) in this surface's
-        idiom, and deliberately the same shape: the same names, the same
-        `(current)` marker, and — since the switch became live — the same
-        press. `switch_design` ends this surface and names its successor;
-        `__main__` builds the other class against the session this one was
-        driving, so the words in the draft are still there on the other side.
-
-        The marker comes off `DESIGN` rather than off `profile.design`: the row
-        answers "which surface am I looking at", which under `--no-profile` is
-        not what the stored field says.
-
-        **Built once, refreshed after.** `_on_menu` rebuilds the whole menu on
-        every open, because the mode check and the workspace path are the
-        values of now — and `delete(0, "end")` removes the *cascade entry*
-        while the submenu behind it is a window of its own that goes on
-        existing, unreferenced and undestroyed. A fresh `_dark_menu` per
-        right-click was therefore one leaked `tk.Menu` per right-click, on the
-        one surface in this app that is never closed. The rows are the part
-        that changes — the `(current)` marker moves — and refreshing them is
-        all that ever needed to happen.
+        Silent when it works — the window is the answer — and never silent when
+        it does not: a menu row that does nothing is the failure this whole
+        window exists to end.
         """
-        sub = self._design_sub
-        if sub is None:
-            sub = self._design_sub = _dark_menu(parent)
-        else:
-            sub.delete(0, "end")
-        for name in DESIGNS:
-            sub.add_command(
-                label=name.capitalize() + ("   (current)" if name == self.DESIGN
-                                           else ""),
-                command=lambda n=name: self.switch_design(n),
-            )
-        parent.add_cascade(label="Design", menu=sub)
+        home = getattr(self.session, "home", None)
+        if home is None:
+            self._say("Flow Home is not available in this session")
+            return
+        why = home.open(page)
+        if why:
+            self._say(why)
 
     def _on_menu(self, e=None) -> None:
         """Right-click — the only menu the design allows (Workspace.dc.html).
@@ -2146,9 +2114,9 @@ class CompactPill(tk.Tk):
 
         Raised at launch rather than on demand, and that is what pays for
         trimming the pill's menu back to the canvas (`_populate_menu`): the
-        artboard's menu ends at Workbench setup, so Show and Quit have to
-        live somewhere that does not depend on a menu row — the icon's own
-        `Show Flow` / `Quit Flow` (tray.py:308-309). It is also the escape
+        menu ends at Open Flow, so Show and Quit have to live somewhere that
+        does not depend on a menu row — the icon's own `Show the pill` /
+        `Quit Flow`, beside its `Open Flow` (`tray.Tray._popup`). It is also the escape
         hatch the 2026-09-03 decision kept the tray for: a pill dragged
         somewhere unreachable is now genuinely reachable, which it was not
         while the way back was a row on the window you had lost.
@@ -2231,6 +2199,8 @@ class CompactPill(tk.Tk):
             elif event == tray.QUIT:
                 self.quit_app()
                 return
+            elif event == tray.HOME:
+                self._open_home()
 
     # -- the standalone box --------------------------------------------------
 
@@ -2246,24 +2216,15 @@ class CompactPill(tk.Tk):
         self._palette = _Palette(self._workspace_recents())
         self._open_box("palette")
 
-    def _open_setup(self) -> None:
-        """Workbench setup, from the menu: three read-only lines with the
-        values Flow already found."""
-        self._palette = None
-        self._open_box("setup")
-
     def _box_height(self) -> int:
-        if self._box_kind == "palette" and self._palette is not None:
-            return (PALETTE_FIELD_H
-                    + PALETTE_ROW_H * len(self._palette.rows())
-                    + PALETTE_FOOT_H)
-        return SETUP_ROW_H * 3 + 2
+        rows = len(self._palette.rows()) if self._palette is not None else 0
+        return PALETTE_FIELD_H + PALETTE_ROW_H * rows + PALETTE_FOOT_H
 
     def _open_box(self, kind: str) -> None:
         """Raise the standalone 360 px box (Workspace.dc.html's `.box`) above
         the pill, which itself never hides and never moves.
 
-        One at a time — palette or setup, not both. The box *takes* the
+        One at a time. The box *takes* the
         keyboard, the one window this surface activates on purpose: the
         palette is a type-ahead, and a type-ahead nobody can type into is a
         picture of one. It gives the focus back the way it came — Esc,
@@ -2384,8 +2345,7 @@ class CompactPill(tk.Tk):
         self._sync_box()
 
     def _on_box_click(self, e) -> None:
-        """A row tap is the same choice as Enter on it. Read-only boxes
-        (setup) swallow the click and stay.
+        """A row tap is the same choice as Enter on it.
 
         The event's y is a device length and the row heights are design ones,
         so it is converted first — `_on_press` and `_panel_click` already do
@@ -2409,8 +2369,6 @@ class CompactPill(tk.Tk):
         c.delete("all")
         if self._box_kind == "palette":
             self._draw_palette(c)
-        else:
-            self._draw_setup(c)
         present = getattr(c, "present", None)
         if self._box is not None and present is not None:
             # Told where, not asked: the box has just been given its geometry
@@ -3197,18 +3155,6 @@ class CompactPill(tk.Tk):
         c.create_text(16, foot + PALETTE_FOOT_H // 2, anchor="w",
                       text="↵ set    esc leave it", font=FONT_TAG, fill=DIM)
 
-    def _setup_rows(self) -> list:
-        """The workbench's three answers (Workspace.dc.html), each a value
-        Flow already found: the microphone PortAudio opened, the CLI
-        `Session.provider` names — "none found" when there isn't one, which
-        item 6's no-CLI fallback needs too — and where a release's words go."""
-        mic = self.session.mic.device_name or "none found"
-        cli = self.session.provider or "none found"
-        on_release = ("paste into last window" if self.session.pastes
-                      else "copy — you paste it")
-        return [("Microphone", mic), ("Agent CLI", cli),
-                ("On release", on_release)]
-
     def _measure(self, c, spec):
         """A text-width function for `spec` on the target that is drawing.
 
@@ -3239,49 +3185,6 @@ class CompactPill(tk.Tk):
                 fn = lambda s, _w=advance: len(s) * _w  # noqa: E731
             self._fonts[spec] = fn
         return fn
-
-    def _draw_setup_icon(self, c, row: int, x: int, cy: int) -> None:
-        """Workbench setup's three glyphs (gen.py's `workspace` page), stroked
-        at 14 px like every other glyph on this surface: a microphone and a
-        terminal in `HEARING`, and a muted arrow-into-a-baseline for where the
-        words land.
-
-        All three are `flow/glyphs.py`'s now, and the first two stopped being
-        near-copies of drawings that already existed: the row's own mic was a
-        second, slightly shorter mic, and the arrow is the same arrow the
-        shipped panel's "Use this" mark draws (`glyphs.take`).
-
-        The mic is drawn at 11, not 14, because it is the one glyph here that
-        is taller than it is wide: 11 across is 14 tall, which is the height
-        the other two are and the height the artboard's row is drawn to. The
-        artboard reaches that by dropping the stem; keeping it and shrinking
-        the box keeps this the same microphone as the pill's."""
-        if row == 0:  # Microphone — the pill's own glyph, at the row's height
-            glyphs.mic(c, x + 1.5, cy - 7, HEARING, size=11)
-        elif row == 1:  # Agent CLI — a prompt chevron and its line, in a box
-            glyphs.terminal(c, x, cy - 7, HEARING, size=14)
-        else:  # On release — down into a baseline
-            glyphs.into_baseline(c, x, cy - 7, MUTED, size=14)
-
-    def _draw_setup(self, c) -> None:
-        """Workbench setup: three read-only lines. Open it when something is
-        wrong; otherwise never (Workspace.dc.html)."""
-        self._draw_box_chrome(c, self._box_height())
-        for i, (name, value) in enumerate(self._setup_rows()):
-            y = i * SETUP_ROW_H
-            if i:
-                c.create_line(0, y, BOX_W, y, fill=SEAM)
-            cy = y + SETUP_ROW_H // 2
-            # Each row leads with its glyph (gen.py's `.row`: a 14 px icon,
-            # then a 10 px gap, then the label). Green on the two Flow found
-            # for itself, muted on the one that is a preference rather than a
-            # discovery — the artboard's own split, and the reason the box can
-            # be read at a glance instead of line by line.
-            self._draw_setup_icon(c, i, 16, cy)
-            c.create_text(38, cy, anchor="w", text=name,
-                          font=FONT_BODY, fill=TEXT)
-            c.create_text(BOX_W - 16, cy, anchor="e", text=value,
-                          font=FONT_NOTE, fill=MUTED)
 
     def _eased(self, target: float) -> float:
         """This frame's drawn level, one step closer to `target` than the last.

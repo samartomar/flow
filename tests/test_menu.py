@@ -176,13 +176,25 @@ class Menu(unittest.TestCase):
 
 
 class TestWhatStaysOneTap(Menu):
-    """Six rows now, not eleven — and the split is state to read, not verbs to act on."""
+    """Seven rows, not eleven — and the split is state to read, not verbs to act on.
 
-    def test_the_top_level_is_exactly_six_rows(self):
+    Six until 2026-09-22, when Open Flow joined them: Flow Home is where every setting
+    lives now, and the Classic pill keeps its Settings cascade beside it only for as long
+    as this design is still shipped."""
+
+    def test_the_top_level_is_exactly_seven_rows(self):
         top = self.build(self.profile())
         self.assertEqual(
-            top.order, ["Listening", "Dictate", "Draft", "Settings", "Help", "Quit Flow"]
+            top.order,
+            ["Listening", "Dictate", "Draft", "Open Flow", "Settings", "Help", "Quit Flow"],
         )
+
+    def test_open_flow_opens_home(self):
+        top = self.build(self.profile())
+        home = self.pill.session.home = mock.Mock()
+        home.open.return_value = ""
+        top.commands["Open Flow"]()
+        home.open.assert_called_once_with("home")
 
     def test_and_the_four_cascades_are_the_only_things_added(self):
         top = self.build(self.profile())
