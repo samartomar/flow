@@ -7,7 +7,7 @@ does — the meter the pill shows while it hears you, turning into a caret where
 land — and it stays readable at the tray's 16 px, where the others blurred.
 
     uv run python scripts/make_icon.py            # write both files
-    uv run python scripts/make_icon.py --check    # exit 1 if they would change
+    uv run python scripts/make_icon.py --check    # exit 1 if the drawing would change
 
 No image library: numpy (already a dependency) and the stdlib. Each shape is a rounded
 rectangle, rasterised by supersampling its signed distance, and composited in order.
@@ -160,11 +160,59 @@ def ico(sizes=SIZES) -> bytes:
     return out + b"".join(data for _, data in images)
 
 
+def drawn(data: bytes) -> list:
+    """An .ico as what it shows rather than how it was packed: each entry's directory
+    row without its size and offset, and its image, a PNG's rows inflated. Deflate's
+    bytes are the compressor's choice, and zlib builds choose differently — CPython 3.14
+    on Windows ships zlib-ng, which packs the same 256 px rows into other bytes."""
+    _reserved, _kind, count = struct.unpack_from("<HHH", data, 0)
+    out = []
+    for i in range(count):
+        *row, size, offset = struct.unpack_from("<BBBBHHII", data, 6 + 16 * i)
+        blob = data[offset:offset + size]
+        out.append((tuple(row), _inflated(blob) if blob.startswith(b"\x89PNG") else blob))
+    return out
+
+
+def _inflated(blob: bytes) -> tuple[bytes, bytes]:
+    """A PNG's header and its rows, uncompressed."""
+    pos, header, idat = 8, b"", b""
+    while pos < len(blob):
+        (length,) = struct.unpack_from(">I", blob, pos)
+        kind, body = blob[pos + 4:pos + 8], blob[pos + 8:pos + 8 + length]
+        if kind == b"IHDR":
+            header = body
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + length
+    return header, zlib.decompress(idat)
+
+
 def svg() -> str:
     parts = [f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" fill="{c}"/>'
              for x, y, w, h, r, c in LARGE]
     return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" '
             'height="64">\n  <title>Flow</title>\n  ' + "\n  ".join(parts) + "\n</svg>\n")
+
+
+def same(path: Path, data: bytes) -> bool:
+    """Whether `path` already holds what `data` draws.
+
+    Neither file is compared as bytes, because neither's bytes are the drawing. The SVG
+    is text, so a checkout with `core.autocrlf` — every Windows runner's default — hands
+    it back with CRLF. The icon's 256 px PNG is deflated, and which bytes deflate picks
+    depends on the zlib Python was built with (`drawn`). A file that is not an icon at
+    all is out of date rather than a traceback.
+    """
+    if not path.is_file():
+        return False
+    have = path.read_bytes()
+    if path.suffix == ".svg":
+        return have.replace(b"\r\n", b"\n") == data
+    try:
+        return drawn(have) == drawn(data)
+    except (struct.error, zlib.error):
+        return False
 
 
 def main(argv=None) -> int:
@@ -174,15 +222,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     want = {ICO: ico(), SVG: svg().encode("utf-8")}
     if args.check:
-        # The SVG is text, so a checkout with `core.autocrlf` — every Windows runner's
-        # default — hands it back with CRLF; its line endings are not the drawing.
-        def same(path: Path, data: bytes) -> bool:
-            have = path.read_bytes()
-            if path.suffix == ".svg":
-                have = have.replace(b"\r\n", b"\n")
-            return have == data
-
-        stale = [p for p, data in want.items() if not p.is_file() or not same(p, data)]
+        stale = [p for p, data in want.items() if not same(p, data)]
         for p in stale:
             print(f"out of date: {p.relative_to(ROOT)}")
         return 1 if stale else 0

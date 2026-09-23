@@ -678,7 +678,10 @@ class TestTheConversationsPage(unittest.TestCase):
     def test_kept_conversations_are_listed_and_viewed_and_carried_on(self):
         h = Pumped(self, choice=KEEP)
         hist = h.session.history
-        hist.keep(make_entry(ASKED, "an old question", conv="old", ws="D:\\dev\\acme",
+        # The workspace in this machine's own shape: a history is read where it was
+        # kept, and on a Mac `D:\dev\acme` is one folder name with backslashes in it.
+        ws = str(Path("/dev", "acme"))
+        hist.keep(make_entry(ASKED, "an old question", conv="old", ws=ws,
                              at=time.time() - 9 * 86400))
         hist.keep(make_entry(ANSWERED, "an old answer", conv="old",
                              at=time.time() - 9 * 86400 + 4))
@@ -822,6 +825,8 @@ class TestTheCompactSurfaceHandsOver(unittest.TestCase):
             p._deliver("the words")
         p.session.delivered.assert_called_once_with("the words", "", True)
 
+    @unittest.skipUnless(sys.platform == "win32",
+                         "Windows-only: flow.inject binds user32 at import")
     def test_the_target_is_named_on_the_edge_and_the_taskbar_is_skipped(self):
         from flow.inject import Target
 
@@ -924,6 +929,8 @@ class TestPasteLast(unittest.TestCase):
         self.assertTrue(m.order[i + 1].endswith("\u2026\u201d"))
         self.assertIsNotNone(m.commands["Paste last"])
 
+    @unittest.skipUnless(sys.platform == "win32",
+                         "Windows-only: flow.hotkey binds user32 at import")
     def test_the_hotkey_is_wispr_flows_and_never_an_altgr_combo(self):
         # alt+shift+Z is Wispr Flow's own default for this action on Windows. No
         # alternative may hold Ctrl and Alt together: that pair *is* AltGr, and AltGr+V

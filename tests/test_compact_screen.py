@@ -469,8 +469,12 @@ class TestTheMonitorHelperIsSharedRatherThanCopied(unittest.TestCase):
     not get copied)."""
 
     def test_the_pointer_answer_is_the_monitor_at_the_cursor(self):
-        with mock.patch.object(ui, "_monitor_at",
-                               return_value=RIGHT) as at:
+        # The cursor is faked along with the answer: off Windows there is no
+        # `GetCursorPos` to ask, and what is pinned here is the hand-off to `_monitor_at`.
+        hands = mock.Mock()
+        hands.user32.GetCursorPos.return_value = 1
+        with mock.patch.object(ui.ctypes, "windll", hands, create=True), \
+                mock.patch.object(ui, "_monitor_at", return_value=RIGHT) as at:
             self.assertEqual(ui._pointer_monitor(1280, 720), RIGHT)
         self.assertEqual(at.call_args.args[2:], (1280, 720, None))
 

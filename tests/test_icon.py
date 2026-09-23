@@ -55,6 +55,46 @@ class TestTheFileIsTheDrawing(unittest.TestCase):
                          "flow/assets/flow.ico or flow.svg is out of date - run "
                          "scripts/make_icon.py")
 
+    def test_the_check_reads_the_pixels_not_the_compressor(self):
+        # CPython 3.14 on Windows ships zlib-ng, which deflates the 256 px rows into
+        # other bytes than zlib does, and the py3.14 CI leg failed on exactly that.
+        # Other bytes are the same drawing; one pixel that moved is not.
+        import zlib
+
+        import make_icon
+
+        data = make_icon.ico()
+        deflate = zlib.compress
+        with mock.patch.object(make_icon.zlib, "compress",
+                               lambda raw, _level: deflate(raw, 1)):
+            repacked = make_icon.ico()
+        self.assertNotEqual(repacked, data)
+        self.assertEqual(make_icon.drawn(repacked), make_icon.drawn(data))
+
+        render = make_icon.render
+
+        def nudged(size):
+            px = render(size)
+            if size == 256:
+                px = px.copy()
+                px[128, 128, 0] ^= 1
+            return px
+
+        with mock.patch.object(make_icon, "render", nudged):
+            moved = make_icon.ico()
+        self.assertNotEqual(make_icon.drawn(moved), make_icon.drawn(data))
+
+    def test_a_file_that_is_not_an_icon_is_out_of_date_rather_than_a_traceback(self):
+        import tempfile
+
+        import make_icon
+
+        with tempfile.TemporaryDirectory() as tmp:
+            junk = Path(tmp) / "flow.ico"
+            junk.write_bytes(b"\x00\x00\x01\x00\x01\x00")  # one image promised, none there
+            self.assertFalse(make_icon.same(junk, make_icon.ico()))
+            self.assertFalse(make_icon.same(Path(tmp) / "absent.ico", make_icon.ico()))
+
     def test_every_size_windows_asks_for(self):
         found = entries(ICON.read_bytes())
         self.assertEqual(set(found), SIZES)
