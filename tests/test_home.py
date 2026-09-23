@@ -401,6 +401,22 @@ class TestTheModelsPage(unittest.TestCase):
         self.assertEqual(h.session.asr.swaps[-1], (None, "medium.en", None))
         self.assertIsNone(h.home.pending_models)
 
+    def test_a_choice_that_applies_now_ends_one_still_waiting(self):
+        # A model that had to download, then one that is here: the download's finish
+        # must not swap back to the choice that was abandoned.
+        h = Pumped(self)
+        with mock.patch.object(models_mod.Downloader, "start"):
+            self.call(h, "POST", "/api/models/use", {"partial": None, "final": "medium.en"})
+        self.call(h, "POST", "/api/models/use",
+                  {"partial": None, "final": "large-v3", "device": "auto"})
+        self.assertIsNone(h.home.pending_models)
+        job = models_mod.Download("medium.en", state="done", then_use="final")
+        with mock.patch.object(models_mod, "complete", return_value=True), \
+                mock.patch.object(h.session, "post") as post:
+            h.home._downloaded(job)
+        post.assert_not_called()
+        self.assertEqual(h.session.asr.swaps[-1], (None, "large-v3", "auto"))
+
     def test_an_unknown_model_is_refused(self):
         h = Pumped(self)
         status, body = self.call(h, "POST", "/api/models/use", {"final": "gpt-4"})
@@ -480,6 +496,27 @@ class TestTheSettingsPage(unittest.TestCase):
                                   {"path": str(h.folder / "not-there")})
         self.assertEqual(status, 400)
         self.assertIn("not a folder", body["error"])
+
+    def test_a_refused_switch_is_an_error_and_not_a_change(self):
+        # An answer still in flight refuses the switch (`Session.set_workspace`), and
+        # the page must not say "Workspace changed" about a project the next question
+        # will not be grounded in.
+        h = Pumped(self)
+        with mock.patch.object(audio, "input_devices", return_value=[]), \
+                mock.patch.object(h.session, "set_workspace", return_value=False):
+            for route in ("/api/settings/workspace", "/api/settings/workspace/add"):
+                with self.subTest(route=route):
+                    status, body = h.call("POST", route, {"path": str(h.folder)})
+                    self.assertEqual(status, 400)
+                    self.assertIn("did not change", body["error"])
+
+    def test_the_folder_it_is_already_in_is_not_a_refusal(self):
+        h = Pumped(self)
+        h.session.workspace = str(h.folder)
+        with mock.patch.object(audio, "input_devices", return_value=[]), \
+                mock.patch.object(h.session, "set_workspace", return_value=False):
+            status, _body = h.call("POST", "/api/settings/workspace", {"path": str(h.folder)})
+        self.assertEqual(status, 200)
 
     def test_a_forgotten_workspace_leaves_the_list(self):
         h = Pumped(self)
@@ -808,21 +845,52 @@ class TestAChosenMicrophoneIsFoundByNameAgain(unittest.TestCase):
             self.assertIn("not connected", mic.use("Headset"))
         self.assertEqual((mic.pinned, mic.want), (1, None))
 
+    def opening(self):
+        """`start` for real, with PortAudio's stream faked: what the open was asked for."""
+        return (mock.patch.object(audio.Mic, "refresh"),
+                mock.patch.object(audio.Mic, "stop"),
+                mock.patch.object(audio, "sd"))
+
     def test_a_reopen_finds_it_at_its_new_index(self):
         mic = audio.Mic(device=1)
         mic.want = "Yeti Nano (Blue)"
-        a, b, c = self.quiet()
-        with a, b, c, mock.patch.object(audio, "find_input", return_value=4):
+        a, b, c = self.opening()
+        with a, b, c as sd, mock.patch.object(audio, "find_input", return_value=4):
             mic.restart()
         self.assertEqual(mic.pinned, 4)
+        self.assertEqual(sd.InputStream.call_args.kwargs["device"], 4)
 
-    def test_a_reopen_while_it_is_gone_keeps_the_pin(self):
+    def test_a_reopen_while_it_is_gone_opens_nothing(self):
+        # After a device comes and goes its old index can belong to a different
+        # microphone, and opening it would be recording through something nobody
+        # chose. Refused instead, so the session's retry asks again until it is back.
         mic = audio.Mic(device=1)
         mic.want = "Yeti Nano (Blue)"
-        a, b, c = self.quiet()
-        with a, b, c, mock.patch.object(audio, "find_input", return_value=None):
-            mic.restart()
+        a, b, c = self.opening()
+        with a, b, c as sd, mock.patch.object(audio, "find_input", return_value=None):
+            with self.assertRaises(audio.NotConnected) as raised:
+                mic.restart()
+        sd.InputStream.assert_not_called()
+        self.assertIn("Yeti Nano (Blue) is not connected", str(raised.exception))
         self.assertEqual(mic.pinned, 1)
+
+    def test_an_arm_opens_it_by_name_too(self):
+        # Arming opens without a restart, and a headset plugged in since the choice
+        # renumbers the list just the same.
+        mic = audio.Mic(device=1)
+        mic.want = "Yeti Nano (Blue)"
+        with mock.patch.object(audio, "sd") as sd, \
+                mock.patch.object(audio, "find_input", return_value=5):
+            mic.start()
+        self.assertEqual(sd.InputStream.call_args.kwargs["device"], 5)
+
+    def test_a_default_mic_is_not_looked_up(self):
+        mic = audio.Mic(device=None)
+        with mock.patch.object(audio, "sd") as sd, \
+                mock.patch.object(audio, "find_input") as find:
+            mic.start()
+        find.assert_not_called()
+        self.assertIsNone(sd.InputStream.call_args.kwargs["device"])
 
 
 class TestProfileKeepsWhatFlagsUsedTo(unittest.TestCase):

@@ -566,6 +566,9 @@ class Api:
             # what was asked for even if the page is closed by then.
             self.home.pending_models = (partial, final, device)
         else:
+            # A choice that applies now also ends one still waiting on a download: that
+            # download's finish must not swap back to what was chosen before this.
+            self.home.pending_models = None
             self._call(lambda: self.session.set_models(partial, final, device))
         return self.models({})
 
@@ -1523,7 +1526,7 @@ class Api:
             raise ApiError("a workspace is a folder path")
         if path and not Path(path).is_dir():
             raise ApiError(f"{path} is not a folder on this PC")
-        self._call(lambda: self.session.set_workspace(path or None))
+        self._switch_workspace(path or None)
         return self.settings({})
 
     def add_workspace(self, body: dict) -> dict:
@@ -1534,8 +1537,28 @@ class Api:
                 return self.settings({})
         if not isinstance(path, str) or not Path(path).is_dir():
             raise ApiError(f"{path} is not a folder on this PC")
-        self._call(lambda: self.session.set_workspace(path))
+        self._switch_workspace(path)
         return self.settings({})
+
+    def _switch_workspace(self, path: str | None) -> None:
+        """Move Ask to `path`, or say that it stayed.
+
+        `Session.set_workspace` answers False both for the folder it is already in, which
+        is no refusal at all, and for a switch it refused — the folder has gone, or an
+        answer is still in flight — with a note on the pill saying which. Only the second
+        is an error here: the page must not report a change that the next question will
+        not be grounded in.
+        """
+        from ..profile import path_key
+
+        s = self.session
+
+        def switch() -> bool:
+            return bool(s.set_workspace(path)) or \
+                path_key(getattr(s, "workspace", None)) == path_key(path)
+
+        if not self._call(switch):
+            raise ApiError("the workspace did not change - the note on the pill says why")
 
     def forget_workspace(self, body: dict) -> dict:
         path = body.get("path")

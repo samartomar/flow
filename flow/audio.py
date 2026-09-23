@@ -140,6 +140,10 @@ def refresh_devices() -> bool:
         return False
 
 
+class NotConnected(OSError):
+    """The microphone somebody chose by name is not in today's device list."""
+
+
 class Mic:
     """Bounded, non-blocking capture, and whether it is still happening.
 
@@ -159,7 +163,7 @@ class Mic:
     def __init__(self, device: int | None = None, max_blocks: int = 256) -> None:
         self._device = device
         #: The name of a microphone somebody chose (Flow Home, or the profile at launch),
-        #: or None. The index above is still the pin; this is how `restart` finds the
+        #: or None. The index above is still the pin; this is how `start` finds the
         #: same microphone again after the machine's device list has changed under it.
         self.want: str | None = None
         self._q: queue.Queue[np.ndarray] = queue.Queue(maxsize=max_blocks)
@@ -220,6 +224,17 @@ class Mic:
             self.dropped += 1
 
     def start(self) -> None:
+        # A microphone chosen by name is opened by name, every time: indexes are handed
+        # out in enumeration order, so once anything is plugged in or pulled out its old
+        # one can belong to a different microphone. Not in the list is refused rather
+        # than opened by that old number — never quietly recording through something
+        # nobody chose. Asked before anything below changes, so a refusal leaves this
+        # object as it was, and the session's retry asks again until it is back.
+        if self.want:
+            index = find_input(self.want)
+            if index is None:
+                raise NotConnected(f"{self.want} is not connected")
+            self._device = index
         # Ask the device for 16 kHz mono directly and let the driver resample; the
         # local mic is natively 44.1 kHz stereo, and doing it here would mean writing
         # a resampler we do not need.
@@ -378,21 +393,16 @@ class Mic:
         guaranteed to be wrong when the reason for reopening is that the hardware
         changed. A pinned index is re-read from the same fresh list, so `--device 3`
         keeps meaning index 3 on the machine as it is now — and `opened_name` is what
-        lets the caller notice when index 3 has become a different microphone.
+        lets the caller notice when index 3 has become a different microphone. A
+        microphone chosen by name is found again by name in that same fresh list, and
+        one that is not there raises `NotConnected` rather than opening its old index
+        (`start`).
 
         Between the close and the open, because that is the only window in which
         `refresh_devices` is safe — read its second paragraph before moving this line.
         """
         self.stop()
         self.refresh()
-        if self.want:
-            # A microphone chosen by name is found again by name: after a device comes
-            # and goes, its old index can belong to a different microphone. Not found
-            # means the index stays and the open fails, which is the pinned promise —
-            # never quietly recording through something else.
-            index = find_input(self.want)
-            if index is not None:
-                self._device = index
         self.start()
 
     def refresh(self) -> bool:
