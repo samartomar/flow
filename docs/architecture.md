@@ -907,6 +907,13 @@ paste"). Three parts, split where the knowledge is:
 A change that did not go in ends the run — Windows reports how many keys it took, never
 which — and one that did revises the History entry and what Paste last pastes.
 
+The same run is how consecutive Type pastes get their space: `CompactPill._deliver` asks
+`Session.join_paste(text, window)` just before the Ctrl-V, after re-running the watch on
+the spot, and a paste that continues the run's newest paste gets a space in front unless
+the two already meet or join (`_JOINS_LEFT`, `_JOINS_RIGHT`). The run keeps the space —
+the window holds it, and a take-back has to count it — while `delivered` strips it for
+History and Paste last.
+
 ### Lite
 
 `--lite`, and automatic when `sys.platform` is not `win32`. **The platform decides what

@@ -6,6 +6,30 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — Type pastes in a row get their space
+
+Found while building the entry below: two Type holds pasted as "Hello there.How are you?"
+— each paste is a draft of its own, and a draft never starts with a space. Spacing well in
+general means knowing what is in front of the caret, which means reading another program's
+text; Flow reads none, and that stays true. What it has now is the one case where it knows
+anyway: **a paste that continues its own last paste**, in the same window, with nothing
+typed or clicked since — the changeable run below. There the next paste gets a space in
+front (`Session.join_paste`), unless the two already meet at a space or a line break, the
+new one starts with punctuation that belongs to the word before (", and", ".5", "?"), or
+the last one ends in a bracket, a hyphen or a slash ("well-" then "known", "src/" then
+"flow"). Terminals too: "git commit" then "-m fix" wants its space as much as prose does.
+The space is kept in the run, because the window holds it and a "scratch that" has to take
+it back; History and Paste last keep the words without it. The compact pill decides on the
+spot, not on the last frame's watch: a key or a click in those 30 ms means the caret may
+have moved.
+
+**What stays glued:** a first paste into text Flow did not write — it cannot see what is
+in front of the caret, and adds nothing rather than guess.
+
+**Reopens if** a program people paste into keeps a trailing space of its own after a paste
+(then Flow's space doubles it), or if reading the caret's context through UI Automation is
+ever argued past R16.
+
 ### 2026-09-23 — Correcting a Type paste
 
 The second half of step 5. Type pastes on the release and clears the draft, so a

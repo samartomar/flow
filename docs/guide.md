@@ -1290,6 +1290,15 @@ with it (*pasted, then changed*); a paste you took back stays in History marked 
 back*, and Paste last still has it, which is the way back from a "scratch that" you did not
 mean.
 
+**Holds in a row get their space.** The same knowledge fixes something older: two holds
+used to paste as *Hello there.How are you?*. When a paste continues Flow's own last paste
+in that window — nothing typed or clicked since — it gets a space in front, unless the two
+already meet at a space or a line break, it starts with punctuation that belongs to the
+word before (*, and*, *.5*), or the last one ended in a bracket, a hyphen or a slash
+(*well-* then *known*). The first paste into text you typed yourself gets none: Flow does
+not read other programs' text, so it cannot see what is in front of the caret
+([decisions.md](decisions.md), 2026-09-23, "Type pastes in a row get their space").
+
 ### Continuing a thread
 
 Send does not erase. The prompts you have sent are kept, bounded at 20 turns / 20,000
