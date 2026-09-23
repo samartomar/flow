@@ -207,12 +207,42 @@ class TestAnAnswerIsDrawnOnlyOnThePageThatAsked(unittest.TestCase):
 
     def test_run_remembers_the_page_and_checks_it_before_drawing(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
-        body = js[js.index("async function run(fn, done)"):]
+        body = js[js.index("async function run(fn, done"):]
         body = body[:body.index("\n  }\n")]
         self.assertIn("const page = current();", body)
         self.assertIn("current() === page", body)
         self.assertIn("LOAD[page]", body)
         self.assertNotIn("LOAD[current()]", body)
+
+    def test_an_acknowledgment_is_never_drawn_as_a_page(self):
+        # "Open folder" (Settings, Models, Voice) and Preview answer `{"ok": True}`, and
+        # drawn as the page that is a page with no microphone and no models — the
+        # "reading 'chosen'" error on the owner's Settings page. Every route that answers
+        # like that must be called with `run(..., false)`, which does not redraw.
+        import ast
+        import re
+
+        api_src = (Path(__file__).resolve().parent.parent / "flow" / "home" / "api.py"
+                   ).read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        routes = dict(re.findall(r'\("POST", "/api/([^"]+)"\): self\.(\w+)', api_src))
+        tree = ast.parse(api_src)
+        acks = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in routes.values():
+                for ret in ast.walk(node):
+                    if (isinstance(ret, ast.Return) and isinstance(ret.value, ast.Dict)
+                            and [getattr(k, "value", None) for k in ret.value.keys]
+                            == ["ok"]):
+                        acks.add(node.name)
+        called = {route for route, name in routes.items() if name in acks}
+        self.assertEqual(called, {"open", "replies/preview"})
+        for route in called:
+            with self.subTest(route=route):
+                calls = re.findall(r'run\(\(\) => api\("%s"[^\n]*' % re.escape(route), js)
+                self.assertTrue(calls, f"{route} is not called through run()")
+                for call in calls:
+                    self.assertTrue(call.rstrip(",").endswith("null, false)"), call)
 
     def test_every_other_redraw_is_already_guarded(self):
         # The page fetch and the poll both check the page after their await; `run` was

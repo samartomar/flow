@@ -1090,15 +1090,19 @@
 
   // ------------------------------------------------------------------ actions
   const value = (id) => (document.getElementById(id) || {}).value;
-  async function run(fn, done) {
+  // `redraws` is false for an action whose answer is an acknowledgment, not a page:
+  // opening a folder, previewing the voice. Drawn as if it were the page, `{ok: true}`
+  // is a page with no microphone and no models - "Cannot read properties of undefined
+  // (reading 'chosen')" on Settings, Models and Voice alike.
+  async function run(fn, done, redraws = true) {
     // The page this was pressed on: its answer is that page's data. Drawn into whatever
     // page is showing when it lands, a voice change on Models followed by a click on
-    // Settings drew Settings from Models' payload - "Cannot read properties of undefined
-    // (reading 'chosen')". A page left behind is re-read by its own `show` anyway.
+    // Settings drew Settings from Models' payload. A page left behind is re-read by its
+    // own `show` anyway.
     const page = current();
     try {
       const out = await fn();
-      if (out && typeof out === "object" && !Array.isArray(out) && LOAD[page]
+      if (redraws && out && typeof out === "object" && !Array.isArray(out) && LOAD[page]
           && current() === page) redrawWith(out);
       if (done) toast(done);
     } catch (e) {
@@ -1182,7 +1186,7 @@
     "cli-timeout": () => run(() => api("agent", { timeout: Number(value("cli-timeout")) }), "Saved"),
     effort: (el) => run(() => api("agent", { effort: el.dataset.value }), `Effort: ${el.dataset.value}`),
     mute: (el) => run(() => api("replies", { muted: el.getAttribute("aria-checked") === "true" })),
-    preview: () => run(() => api("replies/preview", {})),
+    preview: () => run(() => api("replies/preview", {}), null, false),
     "tune-start": () => run(() => here(api("voice/tune", { action: "start" }))),
     "tune-finish": () => run(() => here(api("voice/tune", { action: "finish" }))),
     "tune-cancel": () => run(() => here(api("voice/tune", { action: "cancel" })), "Cancelled - nothing was saved"),
@@ -1286,7 +1290,7 @@
       if (exe && instruction) run(() => api("settings/apps", { exe, instruction }), "Saved");
     },
     "app-remove": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, instruction: "" })),
-    open: (el) => run(() => api("open", { what: el.dataset.what })),
+    open: (el) => run(() => api("open", { what: el.dataset.what }), null, false),
     update: async () => {
       const line = document.getElementById("update-line");
       if (line) line.textContent = "Asking GitHub...";
