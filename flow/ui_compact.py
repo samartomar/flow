@@ -1531,7 +1531,7 @@ class CompactPill(tk.Tk):
                     self._panel_result = ev.text
             elif ev.kind == "disarm":
                 self.armed = False
-                if ev.text != "push-to-talk":
+                if ev.text not in ("push-to-talk", "lent"):
                     # Not a release — the device itself went away and did not
                     # come back (ui.py:4526-4532's case, the same words). The
                     # slash and the red ring persist until a capture answers.
@@ -1786,10 +1786,16 @@ class CompactPill(tk.Tk):
         self._press_talking = True
         try:
             self.session.talk_start()
-        except Exception:
+        except Exception as exc:
             self._press_talking = False
-            self._mic_gone = True
             self._flash = FLASH_FRAMES
+            loan = getattr(self.session, "mic_on_loan", "")
+            if isinstance(loan, str) and loan:
+                # Flow Home is tuning to this voice: the microphone is fine and busy,
+                # so the strip says why instead of the slash that means "gone".
+                self._say(str(exc))
+            else:
+                self._mic_gone = True
             return
         self._mic_gone = False
         # **Armed here, and this is the whole of "push to talk does nothing".**

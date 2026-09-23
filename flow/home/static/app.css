@@ -240,6 +240,40 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--hearing); marg
 
 .pc > .col.grow { flex: 1 1 280px; }
 
+/* ---------------------------------------------------------------- Voice */
+.passage {
+  font-size: 16px; line-height: 26px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+}
+.sentence { font-size: 19px; line-height: 28px; font-weight: 500; color: var(--text); padding: 6px 0; }
+.heard { font-size: 13.5px; line-height: 21px; color: var(--code); }
+.heard .label { margin-right: 6px; }
+.heard del { color: var(--red-text); text-decoration: line-through; text-decoration-color: var(--error); }
+.heard ins { color: var(--amber-text); text-decoration: none; border-bottom: 1px dotted var(--recover); }
+.big { font-size: 36px; line-height: 40px; font-weight: 600; letter-spacing: -0.5px; margin-right: 6px; }
+.good { color: var(--hearing); }
+.scale { position: relative; height: 8px; border-radius: 4px; background: var(--ring); margin: 8px 0 6px; }
+.scale .band { position: absolute; top: 0; bottom: 0; background: var(--green-line); border-radius: 4px; }
+.scale .mark { position: absolute; top: -5px; width: 2px; height: 18px; margin-left: -1px; border-radius: 1px; }
+.scale .room { background: var(--muted); }
+.scale .you { background: var(--hearing); }
+.pair { display: flex; align-items: center; gap: 10px; min-height: 38px; flex-wrap: wrap; }
+.pair .wrong { color: var(--red-text); }
+.pair .right { color: var(--hearing); }
+.label.amber { color: var(--amber-text); }
+.badge.word { padding-right: 3px; }
+.chip-x {
+  width: 18px; height: 18px; border-radius: 9px; border: 0; padding: 0; background: transparent;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.chip-x:hover { background: var(--ring); }
+button.badge { cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 500; }
+.says { gap: 0; }
+.say { display: flex; align-items: baseline; gap: 12px; min-height: 30px; }
+.say .mono { min-width: 210px; flex-shrink: 0; }
+details summary { cursor: pointer; margin: 2px 0 6px; }
+details .col { gap: 6px; }
+
 /* ---------------------------------------------------------------- narrower windows */
 /* The window opens at 1200 wide; somebody can make it anything. Two columns become
    one, the model table folds its actions under the row, and below that the rail keeps

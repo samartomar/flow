@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from ..edits import SEND_ENTER_WORD, SEND_WORD
 from ..session import CONVERSE, DICTATE, RECENT_ANSWERED, RECENT_ASKED, RECENT_SAID
@@ -51,6 +52,36 @@ class FakeTranscriber:
         self.swaps.append((partial, final, device))
         return before != self.names
 
+    #: What the pretend decoder hears for each accuracy sentence: the kind of misses an
+    #: accent produces, so the demo's check has something to show.
+    MISHEARD = {
+        "Please review": "Please we view the pull request before the release on Wednesday.",
+        "Ask Priya": "Ask pria to check the Kubernetes logs for the staging cluster.",
+        "Send the summary": "Send the summary to Semir and set up a meeting on Thursday afternoon.",
+    }
+
+    def text(self, audio, *, final: bool = False, hotwords: str = "") -> str:
+        """A take shorter than ten seconds is an accuracy sentence, heard in order; a
+        longer one is the tuning passage. The pretend decoder cannot know which sentence
+        was read, so it takes them in turn — the demo reads them in turn too."""
+        from ..accuracy import SENTENCES
+        from ..calibrate import PASSAGE
+        from .. import SAMPLE_RATE
+
+        if len(audio) >= 10 * SAMPLE_RATE:
+            return PASSAGE
+        said = SENTENCES[self._takes % len(SENTENCES)]
+        self._takes += 1
+        for start, heard in self.MISHEARD.items():
+            if said.startswith(start):
+                return heard
+        return said
+
+    _takes = 0
+
+    def take_confidence(self):
+        return -0.31
+
 
 class FakeMic:
     def __init__(self) -> None:
@@ -63,6 +94,53 @@ class FakeMic:
         self.want = name or None
         self.pinned = 1 if name else None
         return ""
+
+
+class ReadingMic:
+    """A microphone that hears a person reading: a quiet room, then speech, then quiet.
+
+    For the Voice page's two listeners in the demo and the suite. Blocks arrive at the
+    real rate, so the gate ends a take and the tuning minute passes the way they would.
+    """
+
+    def __init__(self, speech_sec: float = 2.5, lead_sec: float = 0.4, rate: float = 1.0) -> None:
+        self.speech_sec, self.lead_sec, self.rate = speech_sec, lead_sec, rate
+        self._t0 = None
+        self._sent = 0
+        self.device_name = "Yeti Nano"
+        self.want = None
+
+    def start(self) -> None:
+        import time as _time
+
+        self._t0 = _time.monotonic()
+        self._sent = 0
+
+    def stop(self) -> None:
+        self._t0 = None
+
+    def drain(self):
+        import time as _time
+
+        import numpy as _np
+
+        from ..audio import BLOCK
+        from .. import SAMPLE_RATE
+
+        if self._t0 is None:
+            return []
+        due = int((_time.monotonic() - self._t0) * self.rate * SAMPLE_RATE / BLOCK)
+        out = []
+        rng = _np.random.default_rng(self._sent)
+        while self._sent < due:
+            t = self._sent * BLOCK / SAMPLE_RATE
+            # Speech in bursts with short pauses, the way a paragraph is read.
+            talking = self.lead_sec <= t < self.lead_sec + self.speech_sec \
+                or (t > 3 and int(t) % 4 != 0 and t < 58)
+            loud = 0.08 if talking else 0.0015
+            out.append((rng.standard_normal(BLOCK) * loud).astype(_np.float32))
+            self._sent += 1
+        return out
 
 
 class FakeSpeaker:
@@ -106,6 +184,8 @@ class FakeSession:
         self.cli_effort = "low"
         self.cli_timeout = 20.0
         self.notes: list[str] = []
+        #: The live gate a tuning is applied to; only its two numbers are ever read.
+        self.gate = SimpleNamespace(floor_db=-55.0, margin_db=10.0)
         self._posted: queue.SimpleQueue = queue.SimpleQueue()
         self._recent = [
             (RECENT_SAID, "claude, look at session.py and figure out why the decode worker "
@@ -203,6 +283,18 @@ class FakeSession:
         self.mode = to or (CONVERSE if self.mode == DICTATE else DICTATE)
         return self.mode
 
+    mic_on_loan = ""
+
+    def lend_mic(self, why: str) -> str:
+        if self.mic_on_loan:
+            return f"{self.mic_on_loan} - wait for it to finish"
+        self.mic_on_loan = why
+        return ""
+
+    def return_mic(self) -> None:
+        self.mic_on_loan = ""
+
+
 
 def build(profile_dir: Path | None = None):
     """A Home over a FakeSession, with its pump running. Returns (home, session)."""
@@ -222,6 +314,7 @@ def build(profile_dir: Path | None = None):
     home = Home(session, profile=profile, hotkeys=None, lite=False,
                 lexicon_path=folder / "lexicon.txt", trace_path=folder / "diag.jsonl")
     home.design = "compact"
+    home.mic_factory = ReadingMic
     return home, session
 
 

@@ -78,6 +78,7 @@
     circlecheck: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.3 2.4 2.4 4.6-4.9"/>',
     refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v3.2h-3.2"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   };
   const icon = (name, color = C.muted, size = 18, sw = 1.6) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
@@ -107,7 +108,7 @@
     { id: "home", label: "Home", icon: "home" },
     { group: "Dictate" },
     { id: "history", label: "History", icon: "history", tint: C.type, soon: true },
-    { id: "voice", label: "Voice", icon: "wave", tint: C.type, soon: true },
+    { id: "voice", label: "Voice", icon: "wave", tint: C.type },
     { group: "Ask" },
     { id: "ask", label: "Conversations", icon: "chat", tint: C.ask, soon: true },
     { group: "Setup" },
@@ -138,7 +139,8 @@
       <div class="row">${icon("layers", C.muted, 15)}<span class="grow ellipsis">${esc(model)}</span></div>
       <div class="row">${icon("terminal", C.muted, 15)}<span class="grow ellipsis">${esc(live.cli || "no agent CLI")}</span></div>
       <hr class="rule">
-      <div class="row">${glyph(SIDE_TINT[live.mode] || C.type, 0.8)}<span class="mode grow">${esc(MODE_WORD[live.mode] || "Dictate")}</span><span class="fine">${esc(live.activity || "")}</span></div>`;
+      <div class="row">${glyph(SIDE_TINT[live.mode] || C.type, 0.8)}<span class="mode grow">${esc(MODE_WORD[live.mode] || "Dictate")}</span><span class="fine">${esc(live.activity || "")}</span></div>
+      ${live.lent ? `<div class="row">${icon("wave", C.amber, 15)}<span class="fine grow">${esc(live.lent)}; the pill waits</span></div>` : ""}`;
     level(el, live.capturing ? live.level_db : -90);
   }
 
@@ -156,6 +158,12 @@
 
   function sizes(root) {
     root.querySelectorAll("[data-w]").forEach((el) => { el.style.width = `${el.dataset.w}%`; });
+    root.querySelectorAll("[data-x]").forEach((el) => { el.style.left = `${el.dataset.x}%`; });
+    // A live level on the page belongs to whichever voice task is listening.
+    if (data && data.tune && data.check && root.querySelector(".card [data-meter]")) {
+      const t = data.tune, c = data.check;
+      level(root, t.state === "listening" ? t.level_db : c.state === "recording" ? c.level_db : -90);
+    }
   }
 
   // ------------------------------------------------------------------ toast, gone
@@ -419,6 +427,146 @@
       </div>`;
   }
 
+  // ------------------------------------------------------------------ Voice
+  // A sentence as Flow heard it: missed words struck, extra words marked.
+  function diff(steps) {
+    return steps.map((s) => s.op === "ok" ? esc(s.said)
+      : s.op === "sub" ? `<del>${esc(s.said)}</del> <ins>${esc(s.heard)}</ins>`
+        : s.op === "del" ? `<del>${esc(s.said)}</del>` : `<ins>${esc(s.heard)}</ins>`).join(" ");
+  }
+
+  // Where a level sits on the -90..-10 dB scale the tuning card draws.
+  const onScale = (db) => Math.max(0, Math.min(100, ((db + 90) / 80) * 100)).toFixed(1);
+
+  function tuneCard(t) {
+    const last = t.last;
+    if (t.state === "listening" || t.state === "measuring") {
+      const pct = Math.min(100, Math.round((t.elapsed / t.seconds) * 100));
+      return `
+        <section class="card">
+          <div class="row"><h2 class="grow">Read this aloud</h2><span class="note">${Math.round(t.elapsed)} s of ${Math.round(t.seconds)}</span></div>
+          <p class="passage">${esc(t.passage)}</p>
+          <div class="progress green"><div data-w="${pct}"></div></div>
+          ${t.state === "measuring"
+            ? '<div class="row"><span class="badge"><span class="dot blue"></span>measuring what you read</span></div>'
+            : `<div class="row">${bars(14, "live")}<span class="note grow">${t.enough ? "That is enough to measure - finish now, or read to the end." : "Read at your normal pace, with your normal pauses."}</span>
+                 <button type="button" class="btn primary" data-act="tune-finish" ${t.enough ? "" : "disabled"}>Done reading</button>
+                 <button type="button" class="btn ghost" data-act="tune-cancel">Cancel</button></div>`}
+        </section>`;
+    }
+    const gap = last ? last.gap_db : null;
+    const verdict = gap == null ? "" : gap >= 20 ? "apart: easy to tell apart" : gap >= 12 ? "apart: fine" : "apart: close - speak up, or move the microphone nearer";
+    return `
+      <section class="card">
+        <div class="row"><h2 class="grow">Your room and your voice</h2><span class="note">${last ? `tuned ${esc(last.at)}${last.device ? ", " + esc(last.device) : ""}` : "not tuned yet"}</span></div>
+        ${last ? `
+        <div class="stats">
+          <div class="stat"><b>${last.floor_db} dB</b><span>room, between sentences</span></div>
+          <div class="stat"><b>${last.speech_db} dB</b><span>your voice</span></div>
+          <div class="stat"><b>${gap} dB</b><span>${esc(verdict)}</span></div>
+        </div>
+        <div class="scale" aria-hidden="true"><span class="band" data-x="${onScale(last.floor_db)}" data-w="${(onScale(last.speech_db) - onScale(last.floor_db)).toFixed(1)}"></span>
+          <span class="mark room" data-x="${onScale(last.floor_db)}"></span><span class="mark you" data-x="${onScale(last.speech_db)}"></span></div>`
+          : '<p class="note">Flow is using settings measured on someone else\'s microphone. One minute of reading measures yours: how quiet your room is, how loud you speak, and how clearly Flow hears you.</p>'}
+        ${t.state === "done" ? '<p class="note good">Saved. Flow is listening with these now.</p>' : ""}
+        ${t.state === "failed" ? `<p class="note warn">${esc(t.error)}</p>` : ""}
+        <div class="row"><button type="button" class="btn ${last ? "" : "primary"}" data-act="tune-start" ${t.profile ? "" : "disabled"}>${icon("mic", last ? C.text : "#15171C", 15)}${last ? "Tune again" : "Tune Flow to your voice"}</button>
+          <p class="note">${t.profile ? "Read one paragraph aloud, about 45 seconds. Nothing leaves this PC." : "Started with --no-profile: a tuning has nowhere to be saved."}</p></div>
+      </section>`;
+  }
+
+  function checkCard(c, dict) {
+    const addWord = (w) => `<button type="button" class="badge red" data-act="dict-add" data-term="${esc(w)}" title="Add ${esc(w)} to the dictionary">${icon("plus", C.red, 12)}${esc(w)}</button>`;
+    if (c.state === "ready" || c.state === "recording" || c.state === "decoding") {
+      const last = c.scores.length ? c.scores[c.scores.length - 1] : null;
+      return `
+        <section class="card">
+          <div class="row"><h2 class="grow">How well Flow hears you</h2><span class="note">sentence ${c.index + 1} of ${c.total}</span></div>
+          <p class="sentence">${esc(c.sentence)}</p>
+          ${c.state === "recording"
+            ? `<div class="row">${bars(14, "live")}<span class="note grow">Listening - it stops when you do.</span><button type="button" class="btn" data-act="check-stop">Stop</button></div>`
+            : c.state === "decoding"
+              ? '<div class="row"><span class="badge"><span class="dot blue"></span>checking what Flow heard</span></div>'
+              : `<div class="row"><button type="button" class="btn primary" data-act="check-record">${icon("mic", "#15171C", 15)}Read it</button><span class="note grow">${esc(c.note || "Press, read the sentence as you normally would, then pause.")}</span><button type="button" class="btn ghost" data-act="check-cancel">Cancel</button></div>`}
+          ${last ? `<p class="heard"><span class="label">last one</span> ${diff(last.steps)}</p>` : ""}
+        </section>`;
+    }
+    const done = c.state === "done" && c.per_hundred != null;
+    return `
+      <section class="card">
+        <div class="row"><h2 class="grow">How well Flow hears you</h2>${done ? '<span class="note">checked just now</span>' : ""}</div>
+        ${done ? `
+          <div class="row top"><span class="big">${c.per_hundred}</span><div class="col"><b>errors in 100 words, your voice</b><span class="note">The Models page's numbers are other people's voices. This one is yours.</span></div></div>
+          ${c.offers.length ? `<div class="row wrap"><span class="note">Missed</span>${c.offers.map(addWord).join("")}<span class="fine">add a name to the dictionary so Flow listens for it</span></div>` : '<p class="note good">No names or terms missed.</p>'}
+          <details><summary class="note">What it heard, sentence by sentence</summary>
+            <div class="col">${c.scores.map((s) => `<p class="heard">${diff(s.steps)}</p>`).join("")}</div></details>`
+          : '<p class="note">Read five short sentences. Flow shows exactly which words it got wrong, and offers the names it missed for the dictionary.</p>'}
+        ${c.state === "failed" ? `<p class="note warn">${esc(c.error)}</p>` : ""}
+        <div class="row"><button type="button" class="btn ${done ? "" : "primary"}" data-act="check-start">${icon("refresh", done ? C.text : "#15171C", 15)}${done ? "Check again" : "Start the check"}</button>
+          <p class="note">About a minute. The pill waits until it is done.</p></div>
+      </section>`;
+  }
+
+  function dictionaryCard(d) {
+    if (!d.enabled) {
+      return `<section class="card"><h2>Dictionary</h2><p class="note">Off for this launch: Flow was started with --no-lexicon.</p></section>`;
+    }
+    const learned = d.learned.map((l) => `
+      <div class="pair">
+        <span class="mono wrong">${esc(l.wrong)}</span>${icon("arrow", C.soft, 14)}<span class="mono right">${esc(l.right)}</span>
+        <span class="note grow">you fixed this ${l.times} times</span>
+        ${l.status === "offer" ? `<button type="button" class="btn sm" data-act="learned" data-action="fix" data-wrong="${esc(l.wrong)}" data-right="${esc(l.right)}">${icon("check", C.text, 14)}Always fix</button>
+          <button type="button" class="btn ghost sm" data-act="learned" data-action="never" data-wrong="${esc(l.wrong)}" data-right="${esc(l.right)}">Never</button>`
+          : l.status === "fixed" ? '<span class="badge green">fixed every time</span>' : '<span class="badge">listened for, not fixed</span>'}
+        <button type="button" class="icon-btn" aria-label="Forget ${esc(l.wrong)} to ${esc(l.right)}" title="Forget it: Flow stops listening for it" data-act="learned" data-action="forget" data-wrong="${esc(l.wrong)}" data-right="${esc(l.right)}">${icon("x", C.soft, 14)}</button>
+      </div>`).join("");
+    const corrections = d.corrections.map((c) => `
+      <div class="pair"><span class="mono wrong">${esc(c.wrong)}</span>${icon("arrow", C.soft, 14)}<span class="mono right">${esc(c.right)}</span><span class="grow"></span>
+        <button type="button" class="icon-btn" aria-label="Remove the correction for ${esc(c.wrong)}" data-act="correction-remove" data-wrong="${esc(c.wrong)}">${icon("trash", C.soft, 14)}</button></div>`).join("");
+    const words = d.terms.map((t) => `<span class="badge word">${esc(t)}<button type="button" class="chip-x" aria-label="Remove ${esc(t)}" data-act="word-remove" data-term="${esc(t)}">${icon("x", C.soft, 11)}</button></span>`).join("");
+    return `
+      <section class="card">
+        <div class="row"><h2 class="grow">Dictionary</h2><span class="note">${d.used} of ${d.cap} lines</span>
+          <button type="button" class="btn ghost sm" data-act="open" data-what="lexicon">${icon("folder", C.muted, 14)}The file</button></div>
+        <div class="col">
+          <div class="row"><span class="dot amber"></span><span class="label amber">Learned from your fixes</span></div>
+          ${learned || '<p class="fine">When you correct the same word twice, it shows up here, and Flow starts listening for the right spelling.</p>'}
+        </div>
+        <hr class="rule">
+        <div class="col">
+          <div class="row"><span class="label">Corrections</span><span class="note">when Flow hears the left, it writes the right</span></div>
+          ${corrections || '<p class="fine">None yet.</p>'}
+          <div class="row"><input id="fix-wrong" class="input mono" placeholder="what Flow writes" aria-label="What Flow writes" maxlength="40">${icon("arrow", C.soft, 14)}
+            <input id="fix-right" class="input mono" placeholder="what it should" aria-label="What it should write" maxlength="40"><button type="button" class="btn sm" data-act="correction-add">Add</button></div>
+        </div>
+        <hr class="rule">
+        <div class="col">
+          <span class="label">Words to listen for</span>
+          <div class="row wrap">${words || '<span class="fine">None yet.</span>'}</div>
+          <div class="row"><input id="word-new" class="input grow" placeholder="a name, a tool, a repo" aria-label="New word" maxlength="40"><button type="button" class="btn sm" data-act="word-add">Add</button></div>
+          <p class="fine">Each word helps when you say it and costs a little accuracy when you don't. Add the ones you say often.</p>
+        </div>
+      </section>`;
+  }
+
+  function renderVoice(d) {
+    const send = d.send;
+    return `
+      <div class="page-head"><div class="grow"><h1>Voice</h1><p class="sub">Teach Flow how you speak. Everything on this page stays on this PC.</p></div></div>
+      <div class="split stretch">${tuneCard(d.tune)}${checkCard(d.check, d.dictionary)}</div>
+      <div class="split">
+        ${dictionaryCard(d.dictionary)}
+        <section class="card">
+          <h2>Things you can say</h2>
+          <div class="col says">${d.commands.map((c) => `<div class="say"><span class="mono">&ldquo;${esc(c.say)}&rdquo;</span><span class="note">${esc(c.does)}</span></div>`).join("")}
+            <div class="say"><span class="mono">&ldquo;${esc(send.word)}&rdquo;</span><span class="note">send, on its own</span></div>
+            ${send.pastes ? `<div class="say"><span class="mono">&ldquo;${esc(send.enter_word)}&rdquo;</span><span class="note">send, then press Enter</span></div>` : ""}
+          </div>
+          <p class="fine">A correction counts only when the words it names are in your draft. The send word is on <a href="#/settings">Settings</a>.</p>
+        </section>
+      </div>`;
+  }
+
   // ------------------------------------------------------------------ pages still to come
   const SOON = {
     history: {
@@ -427,14 +575,6 @@
         "Paste anything again, or copy it.", "Fix a word Flow got wrong, and have it stay fixed.",
         "Get back words Flow set aside as noise."],
       today: "Home lists what you said this session, in memory only.",
-    },
-    voice: {
-      title: "Voice", sub: "Teach Flow how you speak. Everything on this page stays on this PC.",
-      coming: ["Tune Flow to your room and your voice in 60 seconds of reading.",
-        "Check how well Flow hears you, and add what it missed in one click.",
-        "Your dictionary: words to listen for, and corrections Flow learned from your fixes."],
-      today: 'Tune it now with <span class="mono">flow --calibrate</span> in a terminal while Flow is closed. Your words live in <span class="mono">lexicon.txt</span>:',
-      action: '<button type="button" class="btn sm" data-act="open" data-what="lexicon">Open its folder</button>',
     },
     ask: {
       title: "Conversations", sub: "Ask like ChatGPT, about your code or about anything.",
@@ -456,8 +596,8 @@
   }
 
   // ------------------------------------------------------------------ showing a page
-  const LOAD = { home: "home", models: "models", settings: "settings" };
-  const DRAW = { home: renderHome, models: renderModels, settings: renderSettings };
+  const LOAD = { home: "home", models: "models", settings: "settings", voice: "voice" };
+  const DRAW = { home: renderHome, models: renderModels, settings: renderSettings, voice: renderVoice };
   let data = null;
   let shown = "";
 
@@ -487,7 +627,8 @@
   function focusKey(el) {
     if (!el || el === document.body) return "";
     if (el.id) return `#${CSS.escape(el.id)}`;
-    const attrs = ["act", "change", "value", "name", "action", "what", "path", "exe", "hotkey"]
+    const attrs = ["act", "change", "value", "name", "action", "what", "path", "exe", "hotkey",
+      "term", "wrong", "right"]
       .filter((k) => el.dataset && el.dataset[k] !== undefined)
       .map((k) => `[data-${k}="${CSS.escape(el.dataset[k])}"]`);
     return attrs.length ? attrs.join("") : "";
@@ -543,8 +684,28 @@
     "cli-model": () => run(() => api("agent", { model: value("cli-model") || "" }), "Saved"),
     "cli-timeout": () => run(() => api("agent", { timeout: Number(value("cli-timeout")) }), "Saved"),
     effort: (el) => run(() => api("agent", { effort: el.dataset.value }), `Effort: ${el.dataset.value}`),
-    mute: (el) => run(() => api("voice", { muted: el.getAttribute("aria-checked") === "true" })),
-    preview: () => run(() => api("voice/preview", {})),
+    mute: (el) => run(() => api("replies", { muted: el.getAttribute("aria-checked") === "true" })),
+    preview: () => run(() => api("replies/preview", {})),
+    "tune-start": () => run(() => api("voice/tune", { action: "start" })),
+    "tune-finish": () => run(() => api("voice/tune", { action: "finish" })),
+    "tune-cancel": () => run(() => api("voice/tune", { action: "cancel" }), "Cancelled - nothing was saved"),
+    "check-start": () => run(() => api("voice/check", { action: "start" })),
+    "check-record": () => run(() => api("voice/check", { action: "record" })),
+    "check-stop": () => run(() => api("voice/check", { action: "stop" })),
+    "check-cancel": () => run(() => api("voice/check", { action: "cancel" })),
+    "dict-add": (el) => run(() => api("voice/word", { term: el.dataset.term }), `Flow listens for ${el.dataset.term} now`),
+    "word-add": () => {
+      const term = (value("word-new") || "").trim();
+      if (term) run(() => api("voice/word", { term }), `Flow listens for ${term} now`);
+    },
+    "word-remove": (el) => run(() => api("voice/word/remove", { term: el.dataset.term }), "Removed"),
+    "correction-add": () => {
+      const wrong = (value("fix-wrong") || "").trim(), right = (value("fix-right") || "").trim();
+      if (wrong && right) run(() => api("voice/correction", { wrong, right }), `${wrong} becomes ${right} from now on`);
+    },
+    "correction-remove": (el) => run(() => api("voice/correction/remove", { wrong: el.dataset.wrong }), "Removed"),
+    learned: (el) => run(() => api("voice/learned", { wrong: el.dataset.wrong, right: el.dataset.right, action: el.dataset.action }),
+      el.dataset.action === "fix" ? "Fixed every time from now on" : el.dataset.action === "never" ? "Flow will not ask again" : "Forgotten"),
     gesture: (el) => run(() => api("settings/gesture", { gesture: el.dataset.value }), "Changed"),
     chord: () => run(() => api("settings/chord", { keys: value("chord-keys") || "" }), "Saved - applies when Flow next starts"),
     hotkey: (el) => {
@@ -580,7 +741,7 @@
   };
   const CHANGE = {
     cli: (el) => run(() => api("agent", { cli: el.value }), el.value === "auto" ? "Automatic" : `Pinned to ${el.value}`),
-    voice: (el) => run(() => api("voice", { voice: el.value || null }), "Voice changed"),
+    voice: (el) => run(() => api("replies", { voice: el.value || null }), "Voice changed"),
     mic: (el) => run(() => api("settings/mic", { name: el.value || null }), "Microphone changed"),
     send: (el) => run(() => api("settings/send", { word: el.value }), `Say "${el.value}" to send`),
     ws: (el) => run(() => api("settings/workspace", { path: el.value || null }), "Workspace changed"),
@@ -606,6 +767,8 @@
     if (el.id === "ws-path") ACT["ws-add-path"]();
     else if (el.id === "cli-model") ACT["cli-model"]();
     else if (el.id === "chord-keys") ACT.chord();
+    else if (el.id === "word-new") ACT["word-add"]();
+    else if (el.id === "fix-right") ACT["correction-add"]();
   });
   window.addEventListener("hashchange", () => show(true));
 
@@ -619,17 +782,25 @@
       const name = current();
       if (name === "settings") level(document.getElementById("page"), live.capturing ? live.level_db : -90);
       polls += 1;
-      // Models refreshes while something is moving on it; Home every few seconds.
+      // Models refreshes while something is moving on it; Voice while it is listening;
+      // Home every few seconds.
       const moving = name === "models" && data && data.speech
         && (data.speech.loading || data.speech.models.some((m) => m.download && m.download.state === "running"));
-      if (moving || (name === "home" && polls % 5 === 0)) {
+      const listening = voiceBusy(name);
+      if (moving || listening || (name === "home" && polls % 5 === 0)) {
         const fresh = await api(LOAD[name]);
         if (current() === name) { data = fresh; draw(name, false); }
       }
     } catch (e) {
       if (e instanceof Gone) { gone(e.message); return; }
     }
-    setTimeout(poll, current() === "settings" ? 250 : 1000);
+    setTimeout(poll, current() === "settings" || voiceBusy(current()) ? 250 : 1000);
+  }
+
+  function voiceBusy(name) {
+    if (name !== "voice" || !data || !data.tune || !data.check) return false;
+    return ["listening", "measuring"].includes(data.tune.state)
+      || ["recording", "decoding"].includes(data.check.state);
   }
 
   renderNav();

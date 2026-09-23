@@ -378,12 +378,12 @@ class TestTheModelsPage(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("not installed", body["error"])
 
-    def test_the_voice_and_mute(self):
+    def test_the_reply_voice_and_mute(self):
         h = Pumped(self)
-        self.call(h, "POST", "/api/voice", {"voice": "Microsoft Zira Desktop", "muted": True})
+        self.call(h, "POST", "/api/replies", {"voice": "Microsoft Zira Desktop", "muted": True})
         self.assertEqual(h.session.speaker.voice, "Microsoft Zira Desktop")
         self.assertTrue(h.session.muted)
-        status, body = self.call(h, "POST", "/api/voice", {"voice": "Nobody"})
+        status, body = self.call(h, "POST", "/api/replies", {"voice": "Nobody"})
         self.assertEqual(status, 400)
 
 

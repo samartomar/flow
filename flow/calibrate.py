@@ -110,6 +110,8 @@ def measure(
     asr=None,
     seconds: float = LISTEN_SEC,
     on_level=None,
+    stop=None,
+    on_decode=None,
 ) -> Calibration:
     """Listen for `seconds` and return what this room and this voice measure at.
 
@@ -117,6 +119,13 @@ def measure(
     gate, deliberately: the gate is the thing being calibrated, so using it to decide
     what counts as speech would make the measurement agree with whatever the gate
     already believed.
+
+    `stop`, when given, is asked between reads and ends the listening early — Flow
+    Home's "Done reading" and its Cancel. What was heard until then is measured as it
+    stands; `usable` still decides whether it is enough, so stopping early costs nothing
+    once the minimum is in. `on_decode` is called once, when the listening is over and
+    the decode of what was read begins — the few seconds a page has to call something
+    other than "listening".
     """
     levels: list[float] = []
     blocks: list[np.ndarray] = []
@@ -139,6 +148,8 @@ def measure(
     while time.monotonic() < end:
         for block in mic.drain():
             observe(block, time.monotonic() - (end - seconds))
+        if stop is not None and stop():
+            break
         time.sleep(0.02)
     for block in mic.drain():
         observe(block)
@@ -155,6 +166,8 @@ def measure(
     quiet_sec = sum(1 for x in levels if x < mid) * per_block
 
     confidence, text = None, ""
+    if on_decode is not None:
+        on_decode()
     if asr is not None and blocks and speech_sec >= MIN_SPEECH_SEC:
         loud = [b for b, lv in zip(blocks, levels) if lv >= mid]
         if loud:
@@ -166,6 +179,23 @@ def measure(
             confidence = take() if callable(take) else None
 
     return Calibration(floor, speech, confidence, speech_sec, quiet_sec, text)
+
+
+def heard(levels: list[float]) -> tuple[float, float]:
+    """(speech seconds, quiet seconds) in the block levels heard so far, split the way
+    `measure` will split them — so a page can say when stopping early is safe."""
+    if len(levels) < 4:
+        return 0.0, 0.0
+    _floor, _speech, mid = _split(levels)
+    per_block = BLOCK / SAMPLE_RATE
+    return (sum(1 for x in levels if x >= mid) * per_block,
+            sum(1 for x in levels if x < mid) * per_block)
+
+
+def enough(levels: list[float]) -> bool:
+    """Whether what was heard so far would already make a usable reading."""
+    speech, quiet = heard(levels)
+    return speech >= MIN_SPEECH_SEC and quiet >= MIN_QUIET_SEC
 
 
 def apply(profile, gate: SpeechGate) -> bool:

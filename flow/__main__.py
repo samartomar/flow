@@ -620,7 +620,8 @@ def main(argv: list[str] | None = None) -> int:
         say(f"profile: room {profile.floor_db:.1f} dB, "
             f"margin {profile.margin_db():.1f} dB, {len(profile.pairs)} learned pairs")
     elif profile is not None:
-        say("profile: not calibrated - run `flow --calibrate` once for this room")
+        say("profile: not calibrated - Flow Home > Voice > Tune Flow to your voice "
+            "(or `flow --calibrate`)")
     # Said out loud, unprompted. A file that records what somebody did is one they are
     # entitled to know exists and to delete, and the surest way to make it feel like
     # telemetry is for them to find it by accident.
@@ -639,8 +640,8 @@ def main(argv: list[str] | None = None) -> int:
         # creating is a plausible cause of "it got worse".
         say(f"lexicon: {n_terms} terms from {lexicon.path}")
     else:
-        say("lexicon: none - right-click > Open settings folder, or create "
-            f"{lexicon.path}, to add names and corrections")
+        say("lexicon: none - add names and corrections on Flow Home > Voice "
+            f"(it writes {lexicon.path})")
 
     # Built unless refused, not only when asked for. Speech used to be a launch flag
     # while the mode it serves is a runtime toggle, so anyone who discovered converse

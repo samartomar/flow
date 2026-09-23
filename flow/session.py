@@ -888,6 +888,9 @@ class Session:
         #: `pump_results`, which both surfaces call on every frame whether or not the
         #: microphone is armed; see `post`.
         self._posted: queue.SimpleQueue = queue.SimpleQueue()
+        #: What has borrowed the microphone, in words for the pill — "tuning Flow to your
+        #: voice" — or "" when nothing has. See `lend_mic`.
+        self._mic_on_loan = ""
         self._refine_cwd = refine_cwd
         #: A pinned agent CLI, or None to walk the preference order with fallback.
         #: Pinning is a decision and is never second-guessed; None is a preference.
@@ -1086,6 +1089,11 @@ class Session:
         with self._lifecycle:
             if self._closed:
                 raise RuntimeError("this session is closed")
+        if self._mic_on_loan:
+            # Raised rather than queued, the way every refusal to start is: the pill
+            # turns it into a sentence where the person is looking, and a hold that
+            # silently waited for a calibration to finish would read as a dead button.
+            raise RuntimeError(f"{self._mic_on_loan} - the pill listens again when it is done")
         # Let PortAudio see the machine again before the stream is opened, so that an
         # arm — including the re-arm the give-up path offers — really does open against
         # the current default rather than the default as it was at launch. Arming is one
@@ -3289,6 +3297,46 @@ class Session:
         threading.Thread(target=run, daemon=True, name="swap-models").start()
         self._emit("note", "switching speech models - the next words may wait on the load")
         return True
+
+    @property
+    def mic_on_loan(self) -> str:
+        """What is using the microphone instead of the pill, or "" — see `lend_mic`."""
+        return self._mic_on_loan
+
+    def lend_mic(self, why: str) -> str:
+        """Hand the microphone to a Flow Home task: stop capturing, refuse to arm until it
+        comes back. "" when lent, otherwise why not.
+
+        Tuning Flow to a voice and checking how well it hears one both mean a person
+        reading aloud into the microphone for a minute, and those words are not
+        dictation — an armed pill would paste the calibration passage into whatever window
+        was in front. So capture stops (`pause`, which also refuses anything already in
+        flight from before it), a stream left lingering by a release is closed, and
+        `start` refuses with `why` until `return_mic`. The task opens a stream of its own.
+
+        Refused while a reply is being read aloud, for the reason `set_microphone` gives.
+        """
+        why = why.strip() or "Flow Home is using the microphone"
+        if self._mic_on_loan:
+            return f"{self._mic_on_loan} - wait for it to finish"
+        if self.talking:
+            return "finish the reply first"
+        if self._mic_started:
+            self.pause()
+            # "lent", so a surface that reads the reason does not draw it as a device
+            # that went away: the microphone is fine, it is busy.
+            self._emit("disarm", "lent")
+        if self._mic_lingering:
+            self._end_linger()
+        self._mic_on_loan = why
+        self._emit("note", f"{why} - the pill listens again when it is done")
+        return ""
+
+    def return_mic(self) -> None:
+        """The task is done with the microphone; the pill may arm again."""
+        if self._mic_on_loan:
+            self._mic_on_loan = ""
+            self._emit("note", "the microphone is back - hold the pill to talk")
 
     def set_microphone(self, name: str | None) -> bool:
         """Capture from the input device called `name`, or the system default for None.

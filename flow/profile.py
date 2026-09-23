@@ -758,10 +758,10 @@ class Profile:
                 out.append(right)
         return out
 
-    #: How many offers the menu may carry. It is a native modal loop that already costs
-    #: a measured ~16 s stall at worst and one mic-overflow note, so it must not grow
-    #: with the profile. The full list has no other UI on purpose: this is not a
-    #: settings page, and building one stays refused.
+    #: How many offers the draft's right-click menu may carry. It is a native modal loop
+    #: that already costs a measured ~16 s stall at worst and one mic-overflow note, so it
+    #: must not grow with the profile. The full list lives on Flow Home's Voice page
+    #: (decisions.md 2026-09-22), which asks for it with a larger `limit`.
     MAX_OFFERS = 3
 
     def offered_pairs(
@@ -805,6 +805,31 @@ class Profile:
         rewrites nothing. Only the substitution did.
         """
         self.dismissed.add(f"{wrong.lower()} -> {right}")
+
+    def learned_pairs(self, promote_after: int = PROMOTE_AFTER) -> list[tuple[str, str, int]]:
+        """(wrong, right, times) for every pair counted often enough to be biasing now.
+
+        The list `learned_terms` is built from, with its evidence attached: Flow Home's
+        Voice page shows what Flow learned and why, because a bias nobody can see is a
+        bias nobody can take back.
+        """
+        out = []
+        for key, count in self.pairs.most_common():
+            if count < promote_after:
+                continue
+            wrong, _, right = key.partition(" -> ")
+            if wrong and right:
+                out.append((wrong, right, count))
+        return out
+
+    def forget_pair(self, wrong: str, right: str) -> bool:
+        """Unlearn one pair: its count goes, and with it the bias toward `right`. True if
+        there was one. The file is untouched — a declared correction is the person's."""
+        key = f"{wrong.lower()} -> {right}"
+        if key not in self.pairs:
+            return False
+        del self.pairs[key]
+        return True
 
     def note_workspace(self, path: str) -> None:
         """A workspace was chosen — by `--cwd` or by a menu tap. Most recent first.

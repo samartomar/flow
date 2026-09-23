@@ -76,8 +76,16 @@ class Api:
             ("POST", "/api/models/delete"): self.model_delete,
             ("POST", "/api/models/use"): self.model_use,
             ("POST", "/api/agent"): self.agent,
-            ("POST", "/api/voice"): self.voice,
-            ("POST", "/api/voice/preview"): self.voice_preview,
+            ("POST", "/api/replies"): self.replies,
+            ("POST", "/api/replies/preview"): self.replies_preview,
+            ("GET", "/api/voice"): self.voice_page,
+            ("POST", "/api/voice/word"): self.add_word,
+            ("POST", "/api/voice/word/remove"): self.remove_word,
+            ("POST", "/api/voice/correction"): self.add_correction,
+            ("POST", "/api/voice/correction/remove"): self.remove_correction,
+            ("POST", "/api/voice/learned"): self.learned,
+            ("POST", "/api/voice/tune"): self.tune,
+            ("POST", "/api/voice/check"): self.check,
             ("GET", "/api/settings"): self.settings,
             ("POST", "/api/settings/mic"): self.set_mic,
             ("POST", "/api/settings/gesture"): self.set_gesture,
@@ -158,6 +166,7 @@ class Api:
                 "models": list(names) if isinstance(names, tuple) else None,
                 "mic": getattr(getattr(s, "mic", None), "device_name", "") or "",
                 "cli": getattr(s, "provider", "") or "",
+                "lent": getattr(s, "mic_on_loan", "") or "",
             }
 
         data = self._call(read)
@@ -400,7 +409,8 @@ class Api:
             self._call(lambda: s.set_cli_timeout(seconds))
         return self.models({})
 
-    def voice(self, body: dict) -> dict:
+    def replies(self, body: dict) -> dict:
+        """The voice that reads answers aloud, and whether it does. On the Models page."""
         s = self.session
         if getattr(s, "speaker", None) is None:
             raise ApiError("spoken replies are not available on this PC")
@@ -414,13 +424,210 @@ class Api:
             self._call(lambda: s.toggle_speech() if bool(s.muted) != want else None)
         return self.models({})
 
-    def voice_preview(self, _body: dict) -> dict:
+    def replies_preview(self, _body: dict) -> dict:
         s = self.session
         speaker = getattr(s, "speaker", None)
         if speaker is None:
             raise ApiError("spoken replies are not available on this PC")
         self._call(lambda: speaker.say("This is how Flow will read its answers to you."))
         return {"ok": True}
+
+    # -- Voice ------------------------------------------------------------------
+
+    def _lexicon_path(self) -> Path | None:
+        """The dictionary file this session reads, or None when `--no-lexicon` turned it
+        off — in which case nothing on the page may write to one."""
+        from ..lexicon import NUL_PATH
+
+        path = self.home.lexicon_path
+        if path is None or Path(path) == NUL_PATH:
+            return None
+        return Path(path)
+
+    def _writable_lexicon(self) -> Path:
+        path = self._lexicon_path()
+        if path is None:
+            raise ApiError("the dictionary is off for this launch (--no-lexicon)")
+        return path
+
+    def voice_page(self, _body: dict) -> dict:
+        from ..help import COMMANDS
+        from ..lexicon import MAX_TERMS, entries
+
+        path = self._lexicon_path()
+        terms: list[str] = []
+        corrections: list[tuple[str, str]] = []
+        exists = False
+        if path is not None:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                exists = True
+            except OSError:
+                text = ""
+            terms, corrections = entries(text)
+        profile = self.profile
+        declared = {w.lower() for w, _r in corrections}
+
+        def read() -> dict:
+            if profile is None:
+                return {"learned": [], "last": None}
+            rows = []
+            for wrong, right, times in profile.learned_pairs():
+                key = f"{wrong.lower()} -> {right}"
+                status = ("fixed" if wrong.lower() in declared
+                          else "declined" if key in profile.dismissed else "offer")
+                rows.append({"wrong": wrong, "right": right, "times": times, "status": status})
+            last = None
+            if profile.calibrated:
+                last = {"floor_db": profile.floor_db, "speech_db": profile.speech_db,
+                        "gap_db": round(profile.speech_db - profile.floor_db, 1),
+                        "confidence": profile.confidence,
+                        "at": (time.strftime("%d %b %Y", time.localtime(profile.calibrated_at))
+                               if profile.calibrated_at else ""),
+                        "device": profile.calibrated_device or ""}
+            return {"learned": rows, "last": last}
+
+        live = self._call(read)
+        s = self.session
+        # A name the check offered and the person then added is not offered twice.
+        check = self.home.voice.check.public()
+        known = {t.lower() for t in terms}
+        check["offers"] = [w for w in check["offers"] if w.lower() not in known]
+        for score in check["scores"]:
+            score["offer"] = [w for w in score["offer"] if w.lower() not in known]
+        return {
+            "dictionary": {
+                "enabled": path is not None,
+                "exists": exists,
+                "path": str(path) if path is not None else "",
+                "terms": terms,
+                "corrections": [{"wrong": w, "right": r} for w, r in corrections],
+                "used": len(terms) + len(corrections),
+                "cap": MAX_TERMS,
+                "learned": live["learned"],
+            },
+            "tune": {**self.home.voice.tune.public(), "last": live["last"],
+                     "profile": profile is not None},
+            "check": check,
+            "commands": [{"say": say, "does": does} for say, does, _route in COMMANDS],
+            "send": {"word": s.send_words[0], "enter_word": s.send_words[1],
+                     "pastes": bool(getattr(s, "pastes", True))},
+        }
+
+    def add_word(self, body: dict) -> dict:
+        from ..lexicon import append_term
+
+        term = body.get("term")
+        if not isinstance(term, str):
+            raise ApiError("type a word first")
+        why = append_term(self._writable_lexicon(), term)
+        if why:
+            raise ApiError(why)
+        return self.voice_page({})
+
+    def remove_word(self, body: dict) -> dict:
+        from ..lexicon import remove_entry
+
+        term = body.get("term")
+        if not isinstance(term, str) or not term.strip():
+            raise ApiError("name the word to remove")
+        why = remove_entry(self._writable_lexicon(), term=term)
+        if why:
+            raise ApiError(why)
+        return self.voice_page({})
+
+    def add_correction(self, body: dict) -> dict:
+        from ..lexicon import append_pair
+
+        wrong, right = body.get("wrong"), body.get("right")
+        if not isinstance(wrong, str) or not isinstance(right, str):
+            raise ApiError("a correction is what Flow hears, and what to write instead")
+        why = append_pair(self._writable_lexicon(), wrong, right)
+        if why:
+            raise ApiError(why)
+        return self.voice_page({})
+
+    def remove_correction(self, body: dict) -> dict:
+        from ..lexicon import remove_entry
+
+        wrong = body.get("wrong")
+        if not isinstance(wrong, str) or not wrong.strip():
+            raise ApiError("name the correction to remove")
+        why = remove_entry(self._writable_lexicon(), wrong=wrong)
+        if why:
+            raise ApiError(why)
+        return self.voice_page({})
+
+    def learned(self, body: dict) -> dict:
+        """What to do with a pair Flow learned from the person's fixes.
+
+        `fix` declares it — one arrow line appended to the dictionary, the same act as
+        the draft menu's offer. `never` stops the offer and keeps the learned spelling
+        listened for (`dismiss_pair` — asking is what needed consent, biasing never did).
+        `forget` unlearns it: the count goes, and the bias with it.
+        """
+        from ..lexicon import append_pair
+
+        wrong, right, action = body.get("wrong"), body.get("right"), body.get("action")
+        if not isinstance(wrong, str) or not isinstance(right, str):
+            raise ApiError("name the pair")
+        profile = self._need_profile()
+        if action == "fix":
+            why = append_pair(self._writable_lexicon(), wrong, right)
+            if why:
+                raise ApiError(why)
+        elif action == "never":
+            self._call(lambda: profile.dismiss_pair(wrong, right))
+            self._save()
+        elif action == "forget":
+            if not self._call(lambda: profile.forget_pair(wrong, right)):
+                raise ApiError("Flow had not learned that one")
+            self._save()
+        else:
+            raise ApiError("the action is fix, never or forget")
+        return self.voice_page({})
+
+    def tune(self, body: dict) -> dict:
+        """Tuning Flow to this voice: start, finish ("done reading"), cancel."""
+        task = self.home.voice.tune
+        action = body.get("action")
+        if action == "start":
+            busy = self.home.voice.busy()
+            if busy:
+                raise ApiError(busy)
+            why = task.start()
+            if why:
+                raise ApiError(why)
+        elif action == "finish":
+            task.finish()
+        elif action == "cancel":
+            task.cancel()
+        else:
+            raise ApiError("the action is start, finish or cancel")
+        return self.voice_page({})
+
+    def check(self, body: dict) -> dict:
+        """The accuracy check: start, record the current sentence, stop it, cancel."""
+        task = self.home.voice.check
+        action = body.get("action")
+        if action == "start":
+            busy = self.home.voice.busy()
+            if busy:
+                raise ApiError(busy)
+            why = task.start()
+        elif action == "record":
+            why = task.record()
+        elif action == "stop":
+            task.stop()
+            why = ""
+        elif action == "cancel":
+            task.cancel()
+            why = ""
+        else:
+            raise ApiError("the action is start, record, stop or cancel")
+        if why:
+            raise ApiError(why)
+        return self.voice_page({})
 
     # -- Settings -------------------------------------------------------------
 

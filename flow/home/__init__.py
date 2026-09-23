@@ -45,6 +45,12 @@ class Home:
         self.pending_models: tuple | None = None
         self.bridge = Bridge(session.post)
         self.models = ModelManager(session, on_downloaded=self._downloaded)
+        #: What the Voice page's listening tasks open instead of a real microphone, or
+        #: None for the real one. The demo and the suite set it.
+        self.mic_factory = None
+        from .voice import VoiceTasks
+
+        self.voice = VoiceTasks(self)
         self.api = Api(self)
         self._server: HomeServer | None = None
         self._lock = threading.Lock()
@@ -99,6 +105,10 @@ class Home:
         return page
 
     def close(self) -> None:
+        # A tuning or a check still listening gives the microphone back first; the
+        # process is going, but a stream left open is a stream Windows shows as in use.
+        self.voice.tune.cancel()
+        self.voice.check.cancel()
         with self._lock:
             server, self._server = self._server, None
         if server is not None:
