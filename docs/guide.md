@@ -7,10 +7,10 @@ spoken command, both modes, and what is stored where.
 ## Contents
 
 - [Install, in detail](#install) · [Requirements](#requirements)
-- [Running it](#running-it) — [flags](#flags), [the microphone going away](#if-the-microphone-goes-away-mid-session), [hotkeys](#hotkeys), [the pill](#the-pill-and-the-bubble)
+- [Running it](#running-it) — [flags](#flags), [the microphone going away](#if-the-microphone-goes-away-mid-session), [hotkeys](#hotkeys), [Ask's keys](#asks-chord-ctrlaltwin), [the pill](#the-pill-and-the-bubble)
 - [Flow Home](#flow-home) — models, microphone, shortcuts and every other setting, in one window
 - [Dictate mode](#dictate-mode) — [saying the send](#sending-it-without-touching-anything)
-- [Talking to the draft](#talking-to-the-draft) — [local corrections](#local-corrections), [rewrites](#rewrites-via-the-agent-cli)
+- [Talking to the draft](#talking-to-the-draft) — [local corrections](#local-corrections), [rewrites](#rewrites-via-the-agent-cli), [after a Type paste](#after-a-type-paste)
 - [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [taking the answer](#taking-the-answer), [voices](#choosing-the-voice)
 - [Calibration](#calibration-p8) · [Vocabulary](#vocabulary-p4)
 - [The numbers](#the-numbers) — how much you have dictated
@@ -22,10 +22,11 @@ spoken command, both modes, and what is stored where.
 | | |
 |---|---|
 | **Hold, talk, let go** | Hold `ctrl+win` or the pill; letting go pastes into the window you were in |
+| **Hold to ask** | Hold `ctrl+alt+win` and ask, whatever the pill is on; the answer rises above the pill |
 | **Three modes, one tap** | Type pastes; Refine shapes it into a prompt first; Ask puts it to your agent CLI |
 | **Live text while you speak** | Partials refresh roughly every second as you talk |
 | **You decide when it goes** | Letting go is the send in Type; Refine and Ask wait for Send or the next hold; the Classic pill holds a draft until you send it |
-| **Correct it by voice** | "change Tuesday to Wednesday" edits the draft in place |
+| **Correct it by voice** | "change Tuesday to Wednesday" edits the draft in place — or, in the next hold, what Type just pasted |
 | **Keep talking** | Anything that isn't a correction is appended |
 | **Shape it into a prompt** | "make it a proper prompt" restructures dictation via your agent CLI |
 | **Work the prompt over** | Converse mode puts the draft to `codex`/`claude` as a prompt to improve, reads the reply back, and **Use this** makes that reply the draft |
@@ -247,7 +248,9 @@ hotkey  cancel   ctrl+alt+esc
 hotkey  mode     ctrl+alt+M
 hotkey  quit     ctrl+alt+Q
 hotkey  paste_last alt+shift+Z
-hold the pill or ctrl+win to talk | tap the pill to cycle Type / Refine / Ask | right-click for the menu | ctrl+alt+Q quits
+chord   hold     ctrl+win  (hold to talk, release to send)
+chord   ask      ctrl+alt+win  (hold to ask, release to send the question)
+hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | tap the pill to cycle Type / Refine / Ask | right-click for the menu | ctrl+alt+Q quits
 ```
 
 ### Flags
@@ -596,6 +599,37 @@ block says so on one line and Flow carries on with the registered combos:
 chord   unavailable (keyboard hook refused); the toggle hotkey still works
 ```
 
+### Ask's chord (ctrl+alt+win)
+
+**Hold `ctrl+alt+win`, ask, let go** — whatever the pill is on. The pill goes to Ask, the
+panel rises with your question in it, and the answer lands there, as it does from a violet
+pill. They are the keys Wispr Flow uses for its Command Mode on Windows, so if you have
+used that, your hand already knows them ([decisions.md](decisions.md), 2026-09-23, "Ask's
+own hold").
+
+**The hand picks the side, so the colour no longer has to be read first.** `ctrl+win`
+dictates whatever the pill is on: from Ask it takes the pill back to where the Ask keys
+took it from — Type, or Refine if that is where you were — and to Type if you tapped to Ask
+by hand. Tapping the pill and holding the pill are unchanged: they still follow the colour.
+
+Pressing the three keys in the order they sit — Ctrl, Win, Alt — forms `ctrl+win` first
+for a moment. That is fine: the Alt stops it without pasting anything, and the question
+starts on the same keystroke. From Ask, `ctrl+win` waits 150 ms before leaving Ask, so a
+hold on its way to `ctrl+alt+win` does not flash the pill to Type or clear the answer you
+are reading.
+
+It is always a hold, even when the talk keys are set to Toggle. It needs an agent CLI —
+with none on this PC the strip says so and nothing starts. It uses the talk keys' keyboard
+hook rather than a second one, and has its own only when the talk keys are off.
+
+Change it or turn it off on Flow Home's **Settings** page (**Ask keys**), or with
+`ask_chord` in `~/.flow/profile.json` — the same rules as `chord`, and `"ask_chord": ""`
+turns it off. It cannot be the talk keys: one press would start both.
+
+```
+chord   ask      ctrl+alt+win  (hold to ask, release to send the question)
+```
+
 ### Without HuggingFace
 
 faster-whisper's model files are published on HuggingFace and nowhere else official —
@@ -890,7 +924,7 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
 | **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The two models that invent words in silence are marked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; and the voice that reads answers aloud |
-| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
+| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
 | **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
 | **History** | Only if you choose to keep one: what you dictated, the program it went to, whether it pasted, what the agent CLI made of a Refine and what it was made from, and anything the speech filter set aside — by day, searchable, each with Copy, Fix a word and Delete ([History and Paste last](#history-and-paste-last)) |
 | **Conversations** | The Ask conversation on screen, with a box to type the next question into; answers with their code blocks, Copy, Keep note and Read aloud; Wrap up for the kept notes; and, if you keep a history, earlier conversations by workspace, which you can open and carry on ([Conversations in Flow Home](#conversations-in-flow-home)) |
@@ -1216,6 +1250,45 @@ the **Was a command** chip). Flow withdraws the append, re-reads those words as 
 instruction, and if they still are not one, re-decodes the stored audio biased toward the
 command vocabulary and your draft's own words. If nothing works the words go back exactly
 where they were — dictation is never the price of a failed guess.
+
+### After a Type paste
+
+Type pastes the moment you let go, so by the next hold there is no draft left to correct.
+**The same commands work on what Type just pasted**, in the window it landed in
+([decisions.md](decisions.md), 2026-09-23, "Correcting a Type paste"):
+
+```
+change Tuesday to Thursday     fixes it where it landed
+scratch that                   takes back the last change, then the paste itself,
+                               then the pastes before it in that window
+delete the last two words      and every other local correction above
+that was a command             takes back a command that got pasted as words
+new paragraph                  goes in with the words you say next
+```
+
+Flow makes the change the only way one program can change text in another: it takes its
+own characters back with Backspace and pastes the corrected ones, in one burst, touching
+only the part that changed. The strip under the pill says what it did — *changed
+“Tuesday.” to “Thursday.”*.
+
+**Only while Flow can know the words are where it put them:** the same window in front,
+**nothing typed and nothing clicked** since the paste (clicking the pill is fine), and for
+**a minute**. After that, "scratch that" says why it cannot — *nothing to take back - you
+typed after it was pasted* — and is never pasted as words. It needs the talk or Ask keys'
+keyboard hook to know nobody typed, so with no chord (`--no-chord`, or both chords off)
+and in Lite a paste cannot be changed.
+
+Two rules are stricter here than in a draft, because the change lands in another program.
+"Scratch that" counts only on its own — *"never mind the weather, let's go"* is dictation.
+And a change needs its words in the newest paste: *"change the oil to synthetic"* with no
+oil in it is pasted as the sentence it probably is, and "scratch that" takes it back.
+
+A paste is changeable only if Flow can count its way back over it: up to 800 characters
+and one line break — Claude Code folds anything longer into a *[Pasted text]* placeholder
+that a count of Backspaces cannot see into — and no emoji. The kept History entry changes
+with it (*pasted, then changed*); a paste you took back stays in History marked *taken
+back*, and Paste last still has it, which is the way back from a "scratch that" you did not
+mean.
 
 ### Continuing a thread
 
@@ -1822,6 +1895,13 @@ tracked at all, and which parts of it are deliberately not.
   global shortcut belongs to whichever program registered it first: with Wispr Flow
   running first, Flow takes `alt+shift+V` instead, and the startup lines and Flow Home ▸
   Settings say which one it got.
+- **Correcting a Type paste counts on the words landing as Flow sent them.** It takes its
+  own characters back with Backspace, so a program that rewrites pasted text as it
+  arrives — Word's smart spacing, an editor that turns pasted Markdown into formatting —
+  leaves the count wrong by what it rewrote, and a take-back there can stop short or go
+  one character too far. Typing, clicking, another window, a minute passing, more than
+  800 characters or an emoji all make a paste unchangeable on purpose; this one Flow
+  cannot see ([After a Type paste](#after-a-type-paste)).
 - **A kept history is plain text.** `~/.flow/history.jsonl` is readable by anything that
   can read your user folder, the same as `lexicon.txt` and `profile.json`. It is kept only
   if you chose to keep it, and deleted when you stop.

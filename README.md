@@ -77,8 +77,11 @@ what would fund it is evidence from Lite.
 
 1. **Hold `ctrl+win`** — or hold the pill — and talk.
 2. **Let go.** The words paste into the window you were working in.
-3. **Pasted into the wrong window?** Click the right one and press **Paste last**
+3. **Said it wrong?** Hold again and say *"change Tuesday to Thursday"* or *"scratch
+   that"* — Flow fixes what it just pasted, as long as you have not typed or clicked since.
+4. **Pasted into the wrong window?** Click the right one and press **Paste last**
    (`alt+shift+Z`, or the pill's right-click menu).
+5. **Want an answer instead?** Hold **`ctrl+alt+win`** and ask — whatever the pill is on.
 
 The first time, Flow Home walks you through five steps — the microphone, the speech
 model with its download, a 45-second tuning to your voice, and whether to keep a
@@ -93,7 +96,9 @@ Tap the pill to cycle it:
   or `claude`, and shown to you; nothing pastes until you press Send.
 - **Ask** (violet): the question goes to your agent CLI, and the answer rises above the
   pill and is read aloud. **Continue in Flow** carries the conversation to a window where
-  you can read all of it and type the next question.
+  you can read all of it and type the next question. `ctrl+alt+win` asks from any mode —
+  the keys Wispr Flow users hold for its Command Mode — and `ctrl+win` goes back to
+  dictating.
 
 Point Refine and Ask at a project — Flow Home ▸ Settings ▸ Workspaces, or `--cwd` — and
 the answers are about your code.
@@ -189,7 +194,7 @@ where Flow mishears them. That is the one thing I cannot measure alone.
 ```bash
 git clone https://github.com/samartomar/flow && cd flow
 uv sync && uv run flow                          # run it
-uv run python -m unittest discover -s tests     # ~3,000 tests, ~90 s, no mic needed
+uv run python -m unittest discover -s tests     # ~3,100 tests, ~90 s, no mic needed
 uv run python scripts/selfdrive.py              # the end-to-end harness
 ```
 

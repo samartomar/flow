@@ -482,6 +482,7 @@ could not close without blocks to close it — and green means "capturing speech
 | `drop` | a rejected segment with its evidence | shown as a note — P2 is that a rejection is never *silent* |
 | `conversation` | — | the card clears; the note that follows lands on the cleared card |
 | `send` | `""` or `enter` | the same button the Send chip presses, arrived at by a spoken trigger |
+| `retype` | what the change will be said as | a correction to the last Type paste, decided: the compact pill takes it (`take_paste_fix`) once the hand is off the keys, makes it through `on_send(…, remove=)`, and reports back (`paste_fixed`), which emits the `edit` the strip says. See §7, "Correcting a Type paste" |
 | `disarm` | why | `Pill.armed` goes false, exactly as if the pill had been clicked off. The only way a session that has stopped capturing can stop a surface claiming otherwise — `armed` belongs to the UI thread. Emitted once, after the `error` that names the reason, when the input device did not come back |
 
 ## 5. Decoding
@@ -873,6 +874,38 @@ Three things now hold, and they are independent on purpose:
    ambiguous target would refuse every ordinary editor paste, and telling the two apart
    means identifying the focused child through UI Automation — a dependency-shaped
    decision against R16. It is in NEEDS_YOU with both shapes, and it is the owner's.
+
+### Correcting a Type paste
+
+Type pastes on the release and `send()` clears the draft, so the next hold's correction
+arrives at an empty draft ([decisions.md](decisions.md), 2026-09-23, "Correcting a Type
+paste"). Three parts, split where the knowledge is:
+
+- **The session routes.** `Session.delivered(…, window=)` is the compact pill saying "I
+  pasted this into that window with Type and can watch it"; `_track_paste` keeps it as the
+  top of a `PasteRun` — the changeable pastes in one window, newest last, at most four,
+  each with its own undo stack and its History entry id. `_route` hands an empty-draft
+  utterance to `_route_paste` before appending it: the draft's own `plan()` with the
+  newest paste as the draft, undo only as the whole utterance (`edits.whole_undo`), and a
+  change only where its target is. A decision becomes a `PasteFix` — the tail of the paste
+  to take back and what replaces it, only after what the two versions share — and a
+  `retype` event. `paste_run` expires at `CORRECT_WINDOW_SEC`; `paste_unfit` is why a
+  paste is never changeable (over `CORRECT_MAX_CHARS`, more than one line break, a
+  trailing break a terminal would strip).
+- **The surface watches and types.** `CompactPill._watch_paste_run` ends the run on the
+  frame that sees a key Flow did not send (`Hotkeys.hook.touched`), a mouse button down
+  off the pill, or another non-Flow window in front. `_pump_retype` waits out the hold and
+  the modifiers — a Backspace under a held Ctrl deletes a word — checks the hook and the
+  foreground once more, and calls `on_send(insert, window, remove=)`. `touched` is cleared
+  *before* each Type paste's Ctrl-V, so a key pressed during the paste counts against it.
+- **`inject.paste(…, remove=)` sends it.** `backspaces()` counts one per character and
+  one per line break, and refuses what no count fits (emoji, combining marks, joiners,
+  tabs); the Backspaces ride in front of the Ctrl-V in **one** `SendInput`, whose events
+  are never interleaved with anyone else's. Every key Flow sends carries `INPUT_MARK`
+  in `dwExtraInfo`, which is how the hook tells Flow's keystrokes from a person's.
+
+A change that did not go in ends the run — Windows reports how many keys it took, never
+which — and one that did revises the History entry and what Paste last pastes.
 
 ### Lite
 

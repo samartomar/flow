@@ -6,6 +6,88 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — Correcting a Type paste
+
+The second half of step 5. Type pastes on the release and clears the draft, so a
+correction said in the next hold found nothing to act on and was pasted as words —
+"scratch that" typed into somebody's message. The Classic pill kept its draft on screen
+until Send, where a correction had something to act on; compact Type never did.
+
+**A Type paste stays changeable for as long as Flow can know its words are where it put
+them**: the same window in front, **nothing typed** — the chord's hook keeps one more
+boolean, `Chord.touched`, "a key Flow did not send went down", and Flow signs its own
+keystrokes (`inject.INPUT_MARK` in `dwExtraInfo`) so an on-screen keyboard's count as much
+as a hand's — **nothing clicked** off the pill, polled a frame at a time, and **a
+minute** at most. Inside that, the next hold's correction is routed against the newest
+paste with the draft's own grammar, and made the one way a program can change another
+program's text without its help: Flow's own characters taken back with Backspace and the
+corrected ones pasted after them, in **one `SendInput`**, so no keystroke can land between
+them — and only the tail after what the two versions share, so the fewest keys go in. It
+waits for the hand to leave the keys first: a Backspace sent under a held Ctrl deletes a
+word. Without a chord there is no hook, and nothing is changeable.
+
+**Stricter than the draft in two places, because the change lands in another program.**
+Undo only as the whole utterance: "never mind the weather" is dictation here, where in a
+draft it costs one undo of words still on screen. And a change only where its words are in
+the newest paste: "change the oil to synthetic" with no oil in it is pasted as the
+sentence it probably is, and "scratch that" takes it back. "Scratch that" walks back
+through the changes, then the paste, then up to three pastes before it in that window.
+"That was a command" takes the pasted command back out; reading it again against the paste
+before would route it exactly as the first time, so saying it differently is what is left.
+"New paragraph" goes in with the next words — it used to be pasted as the two words. With
+nothing changeable, the bare verbs are refused out loud with the reason ("nothing to take
+back - you typed after it was pasted") rather than pasted.
+
+**The count has to stay honest.** A Backspace takes a character, and a line break however
+the window stored it. An emoji, a combining mark, a joiner or a tab has no count every
+program agrees on, so a change over one is refused. Claude Code folds a paste of more than
+800 characters or more than two lines into a "[Pasted text]" placeholder (wmedia.es,
+"Expand pasted text in Claude Code"), and no count sees into that — so no paste past either
+bound is changeable, and no change may push one past them. Known and not guarded: a
+program that rewrites pasted text as it lands — Word's smart spacing, an editor that turns
+pasted Markdown into formatting — throws the count off by what it rewrote.
+
+**The records follow the window.** The History entry is revised to the words as they now
+stand ("pasted, then changed"); a paste taken back is kept, marked "taken back", and is
+still what Paste last pastes — the way back from a "scratch that" said by mistake. A change
+teaches its confusion pair, as a spoken correction in a draft does. The compact pill only:
+the Classic pill's draft is on screen, and its corrections happen there.
+
+**Reopens if** a take-back ever removes a character Flow did not paste — the guards are then
+missing a way the caret moves — or if people correct a paste older than the newest often
+enough that a change has to reach it.
+
+### 2026-09-23 — Ask's own hold
+
+Step 5 of the Flow Home plan, building decision 4 of 2026-09-22: **ctrl+alt+win holds a
+question, whatever the pill is on** — Wispr Flow's keys for its Command Mode on Windows
+("Ctrl + Win + Alt", pressed and held, released to run; Wispr Flow's help centre). The talk
+keys dictate whatever the tint: from Ask they take the pill back to the side the Ask keys
+took it from, Type or Refine, and to Type when it was tapped to Ask by hand. The pill's tap
+and its own hold are unchanged, and still follow the tint.
+
+**One hook, not two.** A chord of modifiers alone needs `WH_KEYBOARD_LL`, the narrowing of
+R16 that `flow/hotkey.py` records. The Ask chord rides the talk chord's hook
+(`Chord.riders`): one callback compares each virtual key against both shapes, so the input
+path of every keystroke carries what it carried before. It installs a hook of its own only
+when the talk chord is off. Always a hold, whatever the talk keys' gesture: a question is a
+sentence.
+
+**The overlap is the design problem.** ctrl+win is inside ctrl+alt+win, and the bottom row
+reads Ctrl, Win, Alt — pressed in that order, the talk chord forms first. Its hold breaks on
+the Alt, a third key, so nothing is pasted (the `ctrl+win+d` rule), and the Ask hold starts
+on the same keystroke. From Ask, the talk keys wait 150 ms before leaving it
+(`SIDE_SETTLE_SEC`), so a hold on its way to the Ask keys neither flickers the pill to Type
+nor clears the answer on screen; capture starts at the press either way.
+
+**Off stays off.** `"chord": ""` was read back as the shipped chord at the next launch — the
+loader took the empty string for absent — so Flow Home's "empty turns it off" lasted one
+launch. Both chords keep "" now. The Ask keys are refused when they are the talk keys, at
+launch and in Flow Home: one press would start both holds.
+
+**Reopens if** a program people use every day binds ctrl+alt+win, or people go on tapping
+to Ask rather than hold three keys.
+
 ### 2026-09-23 — A ctrl+alt shortcut must not take an AltGr character
 
 Found while moving Paste last (below): **Windows sends AltGr as left Ctrl plus right
