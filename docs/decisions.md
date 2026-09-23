@@ -6,6 +6,76 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-09-23 — History: kept only when chosen, one file, and Paste last waits for the hand
+
+Step 3 of the Flow Home plan: History, Paste last and Conversations. What it decided.
+
+**Nothing is kept until somebody chooses, and one choice covers everything.** The
+2026-08-03 bar ("an opt-in on-disk history, never a default one") and decision 3 above,
+kept exactly: `Profile.history` is None until a person presses one of two equal buttons —
+on the History page now, at first run from step 4 — and None keeps nothing, as "off" does.
+None rather than False because "never asked" and "said no" are different facts, and only
+the first is asked. One file, `~/.flow/history.jsonl`, holds five kinds: what a Send
+handed over (dictated, or refined by the CLI, with the program it went to), what the
+speech filter set aside, and both halves of an Ask. One file because one choice governs
+it, and "everything Flow keeps is in history.jsonl" is a sentence a person can check in
+Notepad. Kept 7, 30 or 90 days, bounded at 20 000 entries; **choosing "off" deletes the
+file**, because "don't keep it" is a promise about the disk and not only about tomorrow.
+Pause stops keeping for the rest of a launch without changing the choice. The file is
+written on a thread of its own — a Send ends in a paste on the UI thread — and Flow Home's
+reads go through the same queue, so a page told "deleted" cannot show the entry again.
+What stays as it was: Recent is memory only, the trace holds no words, and item 65's test
+still finds the settings folder untouched, because unchosen is where every profile starts.
+
+**The words are recorded where they leave.** `send()` hands text back and cannot tell a
+paste from a refusal, and in Refine the words that go are the panel's, sent by a button
+`send()` never sees. So both surfaces call `Session.delivered(text, problem, copied)` after
+every handover, and the session adds what only it knows: text that is the last refine's
+result is kept as refined, beside the words it was made from. The compact pill now names
+the program in front on the window's edge, as the Classic one always did — which also
+gives the per-app Refine notes a surface they were missing. The taskbar is never tracked
+as a paste target (`inject.SHELL_CLASSES`): a tray click holds it for a moment.
+
+**Set aside can be had back.** A final's rejection is kept with its reason, and the same
+words again within two minutes fold into the one kept — Whisper's "Thank you." at the end
+of a hold is the commonest catch, and a page of it would be a page nobody reads.
+
+**A word fixed in History can stay fixed.** Select the words in an entry and say what
+they should have been: *Fix it here* changes the entry; *Always fix it* first appends the
+correction to the dictionary through `lexicon.append_pair` — the Voice page's own door,
+with its rules — so a correction the file refuses leaves the entry as it was.
+
+**Paste last.** The newest handover — this launch's from memory, after a restart the
+newest kept entry, so it survives a quit exactly when history is kept — pasted again into
+the window in front, from the compact menu (quoting the words it will paste), the tray,
+and `ctrl+alt+V`, with `ctrl+alt+shift+V` behind it and never `ctrl+shift+V`, which is
+paste-as-plain-text in most programs. A shortcut fires with its keys down, and a Ctrl-V
+sent then arrives as Ctrl-Alt-V — Paste Special in Word and Excel, AltGr-V on many
+layouts — so the paste waits up to 3 s for the hand to leave the keys and says so rather
+than paste through them. The tray's menu leaves one of Flow's windows in front, which
+`inject.paste` rightly refuses, so that path hands the foreground back first. A Paste last
+is never kept again: it is already kept.
+
+**Conversations move between the pill and the page.** The conversation on screen lives in
+the session whatever the choice (`Session.exchanges`, under an id that changes wherever
+the thread is cleared as a topic switch). Flow Home draws it and takes typed questions
+(`Session.ask`): the same thread, framing and workspace as a spoken one, but the answer
+arrives as an `answer` event rather than a `reply`, is not read aloud, and neither raises
+the pill's panel nor changes its mode. A kept conversation opens read-only and can be
+carried on (`Session.resume` rebuilds the thread the CLI is told; the workspace is left
+alone and the page says which one the next answer will stand on). Keep note, Read aloud,
+Copy and Wrap up work from the page. The compact Ask panel's footer gains **Continue in
+Flow**, in the slot where Refine has Send.
+
+**Not built from the canvas:** *Use as draft* on the page, and "Flow heard cube control —
+what did you say?". The first needs a draft the page can see, the second per-word
+confidence; the session has neither yet.
+
+**Reopens if** somebody who keeps history finds set-aside entries noise rather than
+recovery — then only the "unconfident" rejections, the ones a person may have meant, are
+kept — or if `ctrl+alt+V`'s cost to Office users is reported, in which case the default
+moves to its alternative.
+
 ### 2026-09-23 — Flow Home's Voice page: Remove joins Add, and the microphone is lent, not shared
 
 Step 2 of the Flow Home plan: tuning, the accuracy check, and the dictionary, on one page.
@@ -86,7 +156,8 @@ Four decisions, all the owner's, taken together:
    was the alternative and the reason against it is cost, not taste: every list, text box
    and scroll view would be hand-drawn, and the pill and its panel alone took weeks.
 3. **History is opt-in, chosen at first run with nothing preselected** — the 2026-08-03
-   bar ("an opt-in on-disk history, never a default one") kept exactly. Step 3 builds it.
+   bar ("an opt-in on-disk history, never a default one") kept exactly. Step 3 built it
+   (2026-09-23, "History").
 4. **Ask gets its own hold, Ctrl+Alt+Win** — the keys Wispr Flow users already know from
    its command mode. The hand picks the side; the tint no longer has to be read before a
    hold. Step 5 builds it.

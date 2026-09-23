@@ -104,8 +104,13 @@ Right-click the pill ▸ **Open Flow** (or start with `flow --home`) for one win
 everything that isn't talking: which speech model hears you — downloaded with progress
 and swapped without a restart, each shown with the error rate measured for it — which
 microphone, the shortcuts, the send word, your workspaces, the agent CLI and the voice
-that reads answers. The pill never grows a setting. [The guide](docs/guide.md#flow-home)
-has the pages.
+that reads answers. **Voice** tunes Flow to you and fixes the words it gets wrong.
+**History** shows what you dictated and where it went, if you choose to keep one.
+**Conversations** is Ask in a window: type or talk, and carry a conversation on later.
+The pill never grows a setting. [The guide](docs/guide.md#flow-home) has the pages.
+
+Pasted into the wrong window? **Paste last** (`ctrl+alt+V`, or the pill's menu) pastes it
+again into the one in front.
 
 ## Who it is for
 
@@ -117,7 +122,9 @@ what the correction grammar, the calibration pass and the personal lexicon are f
 ## What leaves your machine
 
 **No API key is read, stored or passed anywhere in this codebase.** Audio, the utterance
-buffers, the lexicon, the profile and every local edit stay put.
+buffers, the lexicon, the profile and every local edit stay put. Your words are written to
+disk only if you choose to keep a history — Flow asks, with neither answer picked for you
+— and then only to `~/.flow/history.jsonl`, which "Stop keeping" deletes.
 
 What leaves is what you hand to an agent CLI, which is cloud-backed: the draft tail on a
 rewrite, and the question plus the workshop preamble on an Ask. **That preamble names

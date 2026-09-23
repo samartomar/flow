@@ -364,6 +364,7 @@ answer, and the retry budget is spent afterwards exactly as it would have been.
 | clear the draft | `ctrl+alt+esc` | `ctrl+shift+esc` |
 | dictate ⇄ converse | `ctrl+alt+M` | `ctrl+shift+M` |
 | quit | `ctrl+alt+Q` | `ctrl+shift+Q` |
+| paste the last thing Flow pasted, again ([Paste last](#history-and-paste-last)) | `ctrl+alt+V` | `ctrl+alt+shift+V` |
 
 Combos already owned by another app fall back automatically, in that order. The startup
 log prints which one actually registered, so a dead shortcut is never a silent mystery;
@@ -405,8 +406,8 @@ is the quickest way to it; the file is written the first time Flow saves anythin
 }
 ```
 
-The five action names are `toggle`, `send`, `cancel`, `mode` and `quit` — the rows of the
-table above, in that order. They are also what the startup block prints beside each combo
+The six action names are `toggle`, `send`, `cancel`, `mode`, `quit` and `paste_last` —
+the rows of the table above, in that order. They are also what the startup block prints beside each combo
 (`hotkey  toggle   ctrl+alt+space`), so you never have to look them up. List only the ones
 you want to move; anything absent keeps its shipped combo.
 
@@ -866,9 +867,10 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
 | **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The two models that invent words in silence are marked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; and the voice that reads answers aloud |
-| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the other five shortcuts; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
+| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
 | **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
-| History, Conversations | Arriving next: a history of what you dictated (only if you choose to keep one), and conversations you can type into as well as speak |
+| **History** | Only if you choose to keep one: what you dictated, the program it went to, whether it pasted, what the agent CLI made of a Refine and what it was made from, and anything the speech filter set aside — by day, searchable, each with Copy, Fix a word and Delete ([History and Paste last](#history-and-paste-last)) |
+| **Conversations** | The Ask conversation on screen, with a box to type the next question into; answers with their code blocks, Copy, Keep note and Read aloud; Wrap up for the kept notes; and, if you keep a history, earlier conversations by workspace, which you can open and carry on ([Conversations in Flow Home](#conversations-in-flow-home)) |
 
 A setting made here is remembered in `profile.json`, and a flag given at launch still wins
 for that launch — `--final-model` over the Models page, `--device` over the microphone.
@@ -882,6 +884,33 @@ opens in your default browser instead.
 Flow quits. It answers only the window Flow opened: every request carries a token made
 fresh at launch, and a request from another host name or from another web page is
 refused before it reaches anything. Nothing it serves leaves your machine.
+
+### History and Paste last
+
+**History keeps nothing until you choose.** The History page asks once, with neither
+answer picked for you: *Keep what I dictate and ask for 30 days*, or *Don't keep it*. Not
+choosing keeps nothing, exactly like choosing not to ([decisions.md](decisions.md),
+2026-09-23, "History"). Kept means one plain file, `~/.flow/history.jsonl`, on this PC
+only: every Send — the words, the program they went to, and whether they pasted — every
+Refine with the words it was made from, what the speech filter set aside, and every Ask
+and its answer. It keeps 7, 30 or 90 days, and **Pause** stops keeping until you resume or
+Flow restarts — for the minute you are about to say something you would rather not have
+in a file. **Stop keeping** deletes the file: "don't keep it" means the disk too.
+
+**Fix a word.** Select the words Flow got wrong in an entry and press the pencil. *Fix it
+here* corrects that entry; *Always fix it* also adds the correction to your dictionary
+([Vocabulary](#vocabulary-p4)), so it stops coming out wrong.
+
+**Set aside.** Whisper writes "Thank you." and "you" into silence, and Flow's filter drops
+them ([clean.py](../flow/clean.py)). With a history kept, what it dropped is listed under
+**Set aside** with the reason, so if it was really you, Copy has it back.
+
+**Paste last** pastes the newest thing a Send handed over, again, into the window in
+front: from the compact pill's right-click menu (which quotes the words), from the tray
+icon's menu, and with `ctrl+alt+V`. Pasted into the wrong window? Click the right one and
+press it. It waits for you to let go of the keys first — a paste sent while Alt is still
+held arrives as Ctrl+Alt+V, which Word reads as Paste Special. It remembers this launch's
+last Send; after a restart it remembers only if you keep a history.
 
 ## Dictate mode
 
@@ -1268,6 +1297,26 @@ CLI's reading of it, ask for one; that is an ordinary question in converse mode.
 **Nothing is written until you have said so twice.** Keeping a note is one act and wrapping
 up is a second, and a session that keeps a dozen notes and is never told to wrap up leaves
 your disk exactly as it found it. Flow's own settings folder is never where notes go.
+
+### Conversations in Flow Home
+
+The same conversation, in a window: Flow Home ▸ **Conversations**, or **Continue in Flow**
+in the Ask panel's footer. Every turn is there, answers keep their code blocks, and under
+each answer are **Copy**, **Keep note** and **Read aloud**; **Wrap up** appears once a note
+is kept.
+
+**Type the next question** into the box under the conversation and press Enter
+(Shift+Enter for a new line) — or hold the talk keys and dictate into it, since the box is
+a window like any other. A typed question joins the same thread a spoken one does, so the
+pill and the page can take turns in one conversation; its answer stays on the page — it is
+not read aloud and does not raise the pill's panel — and the pill stays in whatever mode it
+was in.
+
+With a [history kept](#history-and-paste-last), earlier conversations are listed by the
+workspace they were asked in. Opening one shows it as it was; **Carry on this
+conversation** makes it the thread the next question — from the page or the pill — is
+asked into. It is answered from the workspace set now, and the page says which that is.
+Without a history, a conversation lasts until Flow quits, as it always has.
 
 ### Hearing the reply
 
@@ -1692,15 +1741,18 @@ figure — along with everything else in there.
 | Path | Written by | Contents |
 |---|---|---|
 | `~/.flow/lexicon.txt` | you, by hand — and by Flow only when you act: creating it from a template of comments when it is missing, appending one line when you tap an offered correction or press Add on Flow Home's Voice page, and taking out one entry's lines when you press Remove there | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders or reformats a line — everything you did not ask to change comes back byte for byte |
-| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the five global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
+| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the six global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup, and whether to keep a history and for how long (`history`, `history_days`: absent means not chosen, which keeps nothing) — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
 | `~/.cache/huggingface/hub/` | first decode, and Flow Home's Models page | the models. `base.en` 141 MiB, `small.en` 464 MiB, `large-v3` 2.9 GiB; Models lists them with their sizes and deletes the ones you do not use |
+| `~/.flow/history.jsonl` | **only if you chose to keep a history** on Flow Home's History page: every Send, every Ask and its answer, and what the speech filter set aside | one JSON line per entry, the words included — which is why it exists only by your choice ([History and Paste last](#history-and-paste-last)). Kept 7, 30 or 90 days and at most 20 000 entries, then trimmed; **Stop keeping** deletes it. A line broken by hand costs that line only |
 | `~/.flow/home/` | Microsoft Edge, for the Flow Home window | the window's own browser profile — its size and position, and Edge's cache. Nothing Flow writes; deleting it resets the window |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call and device event, unless `--no-profile` | a content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, error *categories*, on each route a `confidence` — how well the decoder heard the utterance being routed, or `null` when that is unknown — and on each utterance that reached the draft, how many words it was and how long it took to say ([The numbers](#the-numbers)). **No words.** A count of words is a number; the words are never written Field names are an allow-list checked against a deny-list at import, so a draft cannot get in by being short. Bounded with one rotation: two files, a known ceiling. Startup names the path out loud |
 | `.bench/` | `scripts/` | benchmark audio, results and manifests. **Tracked**, except the downloadable corpora and the volunteer recordings — a recording is a person, so those live outside the repo and out of its history; `.bench/README.md` says where. Every result file carries an `identity` block naming the date, the `faster-whisper`/`ctranslate2` versions and the model revisions that run loaded |
 
 Deleting `~/.flow/profile.json` forgets every inference and nothing else. None of these
 files is ever uploaded — the one value in them that can leave the machine is the
-`workspace` path, which the workshop preamble names when you ask a question.
+`workspace` path, which the workshop preamble names when you ask a question. Carrying on a
+kept conversation sends its earlier turns to the agent CLI as context, exactly as the same
+conversation would have sent them had Flow never quit.
 
 [development.md](development.md#why-bench-is-in-the-repository) says why `.bench/` is
 tracked at all, and which parts of it are deliberately not.
@@ -1716,6 +1768,13 @@ tracked at all, and which parts of it are deliberately not.
   the R4 gate in [docs/roadmap.md](roadmap.md) for why one model cannot do both.
 - **Elevated windows reject the paste** (Windows UIPI). The draft is put on the
   clipboard first, so `Ctrl+V` by hand still works.
+- **Paste last takes `ctrl+alt+V` from Word, Excel and PowerPoint**, where it is Paste
+  Special, for as long as Flow runs — a global shortcut belongs to whoever registered it.
+  Move it in `profile.json` ([Changing them](#changing-them)) or on Flow Home ▸ Settings
+  if you use Paste Special from the keyboard.
+- **A kept history is plain text.** `~/.flow/history.jsonl` is readable by anything that
+  can read your user folder, the same as `lexicon.txt` and `profile.json`. It is kept only
+  if you chose to keep it, and deleted when you stop.
 - **Semantic rewrites take ~6 s**, and a converse-mode answer ~8-10 s — the cost of
   starting an agent CLI. This is why only genuine rewrites and questions use one.
 - **The published accuracy numbers are other people's.** The per-accent numbers in
