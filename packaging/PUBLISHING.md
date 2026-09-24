@@ -97,8 +97,8 @@ main bucket already has a `flow`, Facebook's JavaScript type checker, so Extras 
 need another name; that is also why the install above says `flow/flow`. And Extras takes a
 pull request only after its maintainers have approved a request issue. An own bucket
 ships the moment it is pushed. The price is that nobody finds it without the `scoop bucket
-add` line, which the guide and the bucket's README carry, and the `scoop-bucket` topic,
-which lets scoop.sh index it.
+add` line, which Flow's README, the guide and the bucket's README carry, and the
+`scoop-bucket` topic, which lets scoop.sh index it.
 
 The bucket keeps itself current. Its Excavator workflow runs every four hours: `checkver`
 watches this repository's releases, and `autoupdate` rewrites the URL for the new version

@@ -21,7 +21,15 @@ flow
 ```
 
 You need [`uv`](https://docs.astral.sh/uv/), which fetches Python and the three
-dependencies itself, and a microphone. No Python? Download
+dependencies itself, and a microphone. No Python? On Windows, [Scoop](https://scoop.sh)
+installs the release build:
+
+```powershell
+scoop bucket add flow https://github.com/samartomar/scoop-flow
+scoop install flow/flow    # flow/ matters: Scoop's main bucket has a different "flow"
+```
+
+Or download
 [`flow-windows-x64.zip`](https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip),
 unzip it and run `flow.exe`. It is unsigned, so the first launch shows SmartScreen:
 **More info → Run anyway**.
