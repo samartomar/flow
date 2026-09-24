@@ -419,8 +419,8 @@
       <div class="hotkey"><label class="what" for="ask-chord-keys">Ask keys</label><input id="ask-chord-keys" class="input mono grow" value="${esc(sh.ask_chord.keys)}" placeholder="ctrl+alt+win - empty turns it off"><button type="button" class="btn sm" data-act="ask-chord">Save</button></div>
       ${sh.hotkeys.map((h) => `
       <div class="hotkey"><span class="what">${esc(h.label)}</span>${h.combo ? keys(h.combo) : '<span class="note">not registered</span>'}<span class="grow"></span>
-        <input class="input mono" data-hotkey="${esc(h.action)}" value="${esc(h.override)}" placeholder="ctrl+alt+..." aria-label="New keys for ${esc(h.label)}">
-        <button type="button" class="btn sm" data-act="hotkey" data-action="${esc(h.action)}">Save</button></div>`).join("")}
+        <span class="rebind"><input class="input mono" data-hotkey="${esc(h.action)}" value="${esc(h.override)}" placeholder="ctrl+alt+..." aria-label="New keys for ${esc(h.label)}">
+        <button type="button" class="btn sm" data-act="hotkey" data-action="${esc(h.action)}">Save</button></span></div>`).join("")}
       <p class="fine">Hold and Toggle change now. New keys take effect the next time Flow starts.</p>`
       : `<p class="note">${sh.lite ? "No global shortcuts in Lite: hold the pill to talk. Nothing to grant but the microphone." : "Global shortcuts are off for this launch."}</p>`;
     const ws = d.workspaces;
