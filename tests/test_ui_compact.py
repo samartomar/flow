@@ -253,15 +253,19 @@ def meter_bars(p, colour) -> list:
 
     Rounded above their own cap diameter and squared below it (`_draw_face`,
     ui.py:5056's rule), so a bar is a polygon at some levels and a rectangle
-    at others — the bbox is the thing the geometry assertions are about."""
+    at others — the bbox is the thing the geometry assertions are about.
+    `BAR_W` wide, which is also what tells a bar from the pin's body, the one
+    other fill on the face that can wear the same grey."""
     out = [tuple(r[:4]) for r in p.canvas.rects if r[4] == colour]
     for coords, fill, _outline in p.canvas.polys:
         if fill != colour:
             continue
         # `create_polygon(pts, **kw)` — the fake keeps `*a`, so the flat point
-        # list arrives wrapped in a one-tuple.
+        # list arrives wrapped in a one-tuple, or loose when a glyph passes it.
         pts = coords[0] if len(coords) == 1 else coords
         xs, ys = pts[0::2], pts[1::2]
+        if max(xs) - min(xs) > uc.BAR_W + 1e-6:
+            continue
         out.append((min(xs), min(ys), max(xs), max(ys)))
     return sorted(out)
 
@@ -2057,27 +2061,43 @@ class TestThePinHoldsThePaste(unittest.TestCase):
 
     # -- the drawing ---------------------------------------------------------
 
-    def test_the_pin_is_grey_until_it_holds_a_window(self):
+    @staticmethod
+    def kinds(items) -> list:
+        return sorted(kind for kind, _c, _f in items)
+
+    def test_unpinned_the_pin_is_grey_and_slashed(self):
+        # Samar's pair (2026-09-24): a solid pushpin, and the same pin slashed
+        # for "not pinned" — cut into two pieces around its slash.
         p = pill()
         p._draw()
         items = pin_items(p)
-        self.assertTrue(items, "no pin was drawn")
         self.assertEqual({colour for _k, colour, _f in items}, {uc.DIM})
-        # Stroked, like every glyph: pinned is a colour, never a fill.
-        self.assertFalse(any(filled for _k, _c, filled in items))
+        self.assertEqual(self.kinds(items), ["line", "line", "poly", "poly"])
 
-    def test_pinned_it_wears_the_mics_tint(self):
+    def test_pinned_it_is_whole_and_wears_the_mics_tint(self):
         for mode, tint in ((DICTATE, uc.TEXT), (REFINE, uc.REFINE_GOLD),
                            (CONVERSE, uc.CARD_ACCENT)):
             with self.subTest(mode=mode):
                 p = pill(mode=mode, pinned=NOTEPAD)
                 p._draw()
-                self.assertEqual({c for _k, c, _f in pin_items(p)}, {tint})
+                items = pin_items(p)
+                self.assertEqual({c for _k, c, _f in items}, {tint})
+                # One solid body and its needle: no slash, and filled.
+                self.assertEqual(self.kinds(items), ["line", "poly"])
+                self.assertTrue(any(filled for _k, _c, filled in items))
 
     def test_the_pin_sits_clear_of_the_meter_and_inside_the_capsule(self):
         last_bar = uc.METER_X + (uc.BARS - 1) * (uc.BAR_W + uc.BAR_GAP) + uc.BAR_W
-        self.assertGreater(uc.PIN_X, last_bar)
-        self.assertLessEqual(uc.PIN_X + uc.PIN_SIZE, uc.PILL_W - uc.PILL_H // 3)
+        # The needle's tip is the box's bottom-left corner; photographed at 94 it
+        # touched the last bar.
+        self.assertGreaterEqual(uc.PIN_X - last_bar, 3)
+        # The head is the box's right side, and the capsule's end is a half
+        # circle: both right-hand corners stay 3 px inside it, clear of the ring.
+        cx = cy = r = uc.PILL_H / 2
+        cx = uc.PILL_W - r
+        for y in (uc.PIN_Y, uc.PIN_Y + uc.PIN_SIZE):
+            with self.subTest(y=y):
+                self.assertLessEqual(math.hypot(uc.PIN_X + uc.PIN_SIZE - cx, y - cy), r - 3)
         self.assertLess(uc.PILL_W - uc.PIN_HIT, uc.PIN_X)  # the target covers the glyph
 
     def test_lite_draws_no_pin_and_its_end_still_cycles_the_mode(self):
@@ -2087,6 +2107,39 @@ class TestThePinHoldsThePaste(unittest.TestCase):
         self.assertEqual(pin_items(p), [])
         self.tap(p, uc.PILL_W - 6)
         p.session.toggle_mode.assert_called_once_with()
+
+    # -- the strip ------------------------------------------------------------
+
+    def test_pinned_the_line_stays_under_the_pill(self):
+        # Asked for 2026-09-24: the strip's three seconds were too short for
+        # "where are my words going", which the pill cannot say by colour.
+        self.run_with(Desk(BROWSER))
+        p = panel_pill(mode=DICTATE, pinned=NOTEPAD, pinned_name="Notepad",
+                       _notice=1, _notice_text="pinned to Notepad - words go there "
+                                               "wherever you are")
+        for _ in range(uc.COPIED_FRAMES * 2):
+            p._frame()
+        self.assertTrue(p._notice)
+        self.assertEqual(p._notice_text,
+                         "pinned to Notepad - words go there wherever you are")
+
+    def test_and_comes_back_after_any_other_line_has_had_its_turn(self):
+        self.run_with(Desk(BROWSER))
+        p = panel_pill(mode=DICTATE, pinned=NOTEPAD, pinned_name="Notepad")
+        p._say("not pasted: the target window changed before Send")
+        for _ in range(uc.COPIED_FRAMES):
+            p._frame()
+        self.assertEqual(p._notice_text,
+                         "pinned to Notepad - words go there wherever you are")
+
+    def test_unpinned_the_strip_goes_as_it_always_did(self):
+        self.run_with(Desk(BROWSER))
+        p = panel_pill(mode=DICTATE, pinned=NOTEPAD, pinned_name="Notepad")
+        p._unpin("unpinned - words go where you are again")
+        for _ in range(uc.COPIED_FRAMES):
+            p._frame()
+        self.assertEqual(p._notice, 0)
+        self.assertEqual((p._shell_w, p._shell_h), (uc.PILL_W, uc.PILL_H))
 
     def test_pinning_repaints_the_pill(self):
         # A frame redraws only when `_draw_key` moves, so the pin's colour has to

@@ -211,19 +211,111 @@ def mic(c, x: float, y: float, colour: str, *, size: float = MIC_UNIT_W,
         _line(c, b, (1.6, 1.8, 12.4, 16.4), colour, width, tags)
 
 
-def pin(c, x: float, y: float, colour: str, *, size: float = UNIT,
-        width: float = STROKE, tags=()) -> None:
-    """A pushpin: a round head on a needle, the plainest shape that still reads as one
-    at the 12 px the compact pill draws it (`ui_compact.PIN_SIZE`).
+#: The compact pill's pin (2026-09-24), and the one filled mark in this module that
+#: is bigger than a dot. The shape is Samar's choice: a solid pushpin lying the way
+#: pins lie on a board, head up and right, and the same pin cut by a slash for "not
+#: pinned". It is filled because a solid silhouette is what that picture is, and at
+#: the size the pill gives it a stroked pushpin read as a lollipop.
+#:
+#: Drawn upright in its own units, with the needle down and the cap's top at y = 0,
+#: and turned `_PIN_TURN` on the way into the box, so the numbers below are the pin
+#: a person would sketch rather than a list of rotated coordinates. The slash crosses
+#: at `_PIN_CUT`, the foot of the barrel, and runs `_PIN_SLASH` either side of it.
+_PIN_TURN = math.radians(45)
+_PIN_CUT = 6.2
+_PIN_SLASH = 6.4
+_PIN_NEEDLE = ((0.0, 9.8), (0.0, 15.6))
 
-    Stroked like everything here, so pinned and not pinned are told apart by colour
-    rather than by a fill. The head is a circle, drawn as `_rrect`'s capsule with no
-    straight run, which is exactly the case its docstring keeps from being two stray
-    caps.
+
+def _pin_outline() -> list:
+    """The body's silhouette, upright: a cap with round ends, a barrel, a flange."""
+    r, cx, cy = 1.3, 2.3, 1.3
+    right = [(cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a)))
+             for a in range(-90, 91, 30)]
+    left = [(-cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a)))
+            for a in range(90, 271, 30)]
+    return right + [(1.9, 2.6), (2.2, 7.0), (4.6, 8.8), (4.6, 9.3), (4.1, 9.8),
+                    (-4.1, 9.8), (-4.6, 9.3), (-4.6, 8.8), (-2.2, 7.0),
+                    (-1.9, 2.6)] + left
+
+
+_PIN_BODY = _pin_outline()
+
+
+def _pin_turn(p) -> tuple:
+    c, s = math.cos(_PIN_TURN), math.sin(_PIN_TURN)
+    return p[0] * c - p[1] * s, p[0] * s + p[1] * c
+
+
+def _pin_fit() -> tuple:
+    """The scale and offset that put the turned pin in the middle of the unit box,
+    half a unit clear of its edges. The slash is measured too, so both variants are
+    the same size: a pin that grew when it was pinned would read as another mark."""
+    pts = [_pin_turn(p) for p in (*_PIN_BODY, *_PIN_NEEDLE,
+                                  (-_PIN_SLASH, _PIN_CUT), (_PIN_SLASH, _PIN_CUT))]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    k = (UNIT - 1.0) / max(max(xs) - min(xs), max(ys) - min(ys))
+    return (k, UNIT / 2 - k * (max(xs) + min(xs)) / 2,
+            UNIT / 2 - k * (max(ys) + min(ys)) / 2)
+
+
+_PIN_K, _PIN_DX, _PIN_DY = _pin_fit()
+
+
+def _pin_units(points) -> list:
+    """Upright pin coordinates, turned and fitted, as a flat run of box units."""
+    out = []
+    for p in points:
+        x, y = _pin_turn(p)
+        out += [_PIN_DX + _PIN_K * x, _PIN_DY + _PIN_K * y]
+    return out
+
+
+def _pin_half(points, upper: bool, at: float) -> list:
+    """The part of the upright silhouette above `at` (`upper`) or below it: one pass
+    of Sutherland-Hodgman against a horizontal edge, which is all the slash needs,
+    because upright it is horizontal."""
+    def inside(p):
+        return p[1] <= at if upper else p[1] >= at
+
+    def cross(a, b):
+        t = (at - a[1]) / (b[1] - a[1])
+        return a[0] + t * (b[0] - a[0]), at
+
+    out = []
+    for i, cur in enumerate(points):
+        prev = points[i - 1]
+        if inside(cur):
+            if not inside(prev):
+                out.append(cross(prev, cur))
+            out.append(cur)
+        elif inside(prev):
+            out.append(cross(prev, cur))
+    return out
+
+
+def pin(c, x: float, y: float, colour: str, *, slash: bool = False,
+        size: float = UNIT, width: float = STROKE, tags=()) -> None:
+    """A pushpin, head up and right, and with `slash` the same pin cut in two.
+
+    The slash is `mic`'s idea, "off" legible without remembering "on", with one
+    difference the fill forces: a line laid over a solid shape in its own colour
+    disappears into it. So the pin is cut apart around the line instead, and the cut
+    is sized by the stroke, in pixels, so it stays open at every size.
     """
     b = _Box(x, y, size)
-    _rrect(c, b, 4.5, 1.5, 11.5, 8.5, 3.5, colour, width, tags)
-    _line(c, b, (8, 8.5, 8, 14.5), colour, width, tags)
+    pieces = [_PIN_BODY]
+    if slash:
+        gap = 1.05 * width / (b.s * _PIN_K)
+        pieces = [_pin_half(_PIN_BODY, True, _PIN_CUT - gap),
+                  _pin_half(_PIN_BODY, False, _PIN_CUT + gap)]
+    for piece in pieces:
+        if len(piece) >= 3:  # a cut wider than the body leaves nothing to fill
+            c.create_polygon(*b(*_pin_units(piece)), fill=colour, outline="", tags=tags)
+    _line(c, b, _pin_units(_PIN_NEEDLE), colour, width, tags)
+    if slash:
+        _line(c, b, _pin_units(((-_PIN_SLASH, _PIN_CUT), (_PIN_SLASH, _PIN_CUT))),
+              colour, width, tags)
 
 
 def folder(c, x: float, y: float, colour: str, *, size: float = UNIT,

@@ -246,12 +246,14 @@ BAR_MAX_HALF = 7.0  # half-height at full level — 14 px of travel inside 34
 #: The pin (2026-09-24): a pushpin in the room the meter leaves at the capsule's right
 #: end. A tap on it pins the paste to the window you were in, and while it is pinned
 #: every paste goes to that window wherever you are, with the foreground handed back
-#: after. Grey while words go where you are; the mic's tint while they go to one
-#: window. `PIN_X` puts the head's right edge as far in from the capsule's end as the
-#: mic's body is from the other end. `PIN_HIT` is how much of that end a tap counts as
-#: the pin rather than the mode; a hold there still talks.
-PIN_SIZE = 12
-PIN_X = PILL_W - 12 - PIN_SIZE
+#: after. Slashed and grey while words go where you are; whole, in the mic's tint,
+#: while they go to one window (`glyphs.pin`, the shape Samar picked). 14 px, because
+#: at 12 the pushpin read as a smudge; `PIN_X` then sits it 9 px from the end, which
+#: keeps the needle's tip clear of the last meter bar and the head well inside the
+#: capsule's round end. `PIN_HIT` is how much of that end a tap counts as the pin
+#: rather than the mode; a hold there still talks.
+PIN_SIZE = 14
+PIN_X = PILL_W - 9 - PIN_SIZE
 PIN_Y = (PILL_H - PIN_SIZE) // 2
 PIN_HIT = 26
 #: How long a pinned window gets to take the paste's keystrokes before the foreground
@@ -1312,9 +1314,14 @@ class CompactPill(tk.Tk):
             self._recover -= 1
         if self._notice:
             self._notice -= 1
-            if not self._notice:
+            if not self._notice and not self.pinned:
                 # The notice strip's time is up; the window is 120×34 again.
                 self._sync_shell()
+        if self.pinned and not self._notice:
+            # Pinned, the strip is never empty (asked for 2026-09-24): where the
+            # words are going is the one thing the pill cannot show by colour, so
+            # its line stays, and comes back whenever another has had its turn.
+            self._say(self._pin_line())
         # Only when the picture has changed. `_draw` rebuilds every item and
         # composites a whole bitmap, and an idle pill asked it to draw the
         # same pill thirty times a second — see `_draw_key` for the numbers
@@ -2460,7 +2467,11 @@ class CompactPill(tk.Tk):
         self.pinned, self.pinned_pid = hwnd, window_pid(hwnd)
         self.pinned_name = (app.rsplit(".", 1)[0] if isinstance(app, str) and app
                             else "that window")
-        self._say(f"pinned to {self.pinned_name} - words go there wherever you are")
+        self._say(self._pin_line())
+
+    def _pin_line(self) -> str:
+        """What the strip says for as long as the pin holds a window."""
+        return f"pinned to {self.pinned_name} - words go there wherever you are"
 
     def _unpin(self, why: str = "") -> None:
         """Let the pin go, and say why when there is something to say."""
@@ -3495,11 +3506,12 @@ class CompactPill(tk.Tk):
         if not self.lite:
             # Last, so the mic stays the face's first drawing (test_glyphs holds
             # the two surfaces' mics to one). Not in Lite: with no windows to tell
-            # apart there is nothing to pin to. Grey claims nothing, as the
-            # resting meter's grey does not; the tint says the paste is going
-            # somewhere you are not.
+            # apart there is nothing to pin to. Unpinned, the pin is slashed and
+            # grey, a state that claims nothing; pinned, it is whole and wears
+            # the mic's tint, because the paste is going somewhere you are not.
             glyphs.pin(c, w - PILL_W + PIN_X, y0 + PIN_Y,
-                       tint if self.pinned else DIM, size=PIN_SIZE)
+                       tint if self.pinned else DIM, slash=not self.pinned,
+                       size=PIN_SIZE)
 
     def _draw_panel(self, c, layout: _Layout) -> None:
         """The band above the foot: strip, heard, result, footer.

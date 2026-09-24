@@ -100,7 +100,14 @@ GLYPHS = (
     ("agent", {}),
     ("terminal", {}),
     ("into_baseline", {}),
+    ("pin", {}),
+    ("pin-slashed", {"slash": True}),
 )
+
+#: The one mark drawn solid, and why it may be: Samar chose the compact pill's pin
+#: as a filled pushpin (2026-09-24, `glyphs.pin`). It is the only exception to the
+#: fill rule; every other rule below still holds for it.
+FILLED = ("pin", "pin-slashed")
 
 #: A box that is not at the origin and not the default size, so an anchor the
 #: drawing forgot to add and a scale it forgot to apply both show up as points
@@ -140,9 +147,12 @@ class TestEveryGlyphObeysTheLanguage(unittest.TestCase):
         A line's colour is Tk's `fill`, so the rule is about the shapes that
         enclose an area: a polygon, a rectangle or an oval may only be filled
         if it is no bigger than the stroke, which is the eye and the antenna
-        tip in `agent` and nothing else in the set.
+        tip in `agent` and nothing else in the set. The pin is `FILLED`'s
+        exception, and named there rather than let through by a looser rule.
         """
         for name, c, _box in self.each():
+            if name in FILLED:
+                continue
             for kind, coords, kw in c.items:
                 if kind in ("line", "arc") or not kw.get("fill"):
                     continue
@@ -257,6 +267,30 @@ class TestTheVariantsAddRatherThanReplace(unittest.TestCase):
         self.assertEqual(quiet["line"], loud["line"] + 1)
         self.assertEqual(loud.get("arc"), 2)
         self.assertEqual(quiet.get("arc", 0), 0)
+
+    def test_the_pins_slash_cuts_the_same_pin_in_two(self):
+        # A line over a solid shape in its own colour would vanish into it, so
+        # the slash parts the body around itself: one piece becomes two, and
+        # the slash is the one line added beside the needle.
+        whole, cut = self.count("pin"), self.count("pin", slash=True)
+        self.assertEqual((whole["poly"], whole["line"]), (1, 1))
+        self.assertEqual((cut["poly"], cut["line"]), (2, 2))
+
+    def test_and_the_cut_stays_open_between_the_pieces(self):
+        # Sized by the stroke in pixels, so at the pill's 14 px the two pieces
+        # still stand apart by more than the slash that runs between them.
+        c = Recording()
+        glyphs.pin(c, 0.0, 0.0, "#ABCDEF", slash=True, size=14.0)
+        upper, lower = [coords for kind, coords, _kw in c.items if kind == "poly"]
+
+        def along_the_pin(coords):
+            # The pin runs from its head, up and right, to its needle, down and
+            # left, and the cut crosses it square: measured along that axis the
+            # two pieces are two intervals with the cut between them.
+            return [(y - x) / 2 ** 0.5 for x, y in zip(coords[0::2], coords[1::2])]
+
+        head, foot = along_the_pin(upper), along_the_pin(lower)
+        self.assertGreater(min(foot) - max(head), glyphs.STROKE)
 
 
 class TestTheModeGlyphReadsTheName(unittest.TestCase):
