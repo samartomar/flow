@@ -148,6 +148,16 @@ class TestTheInstallSection(unittest.TestCase):
         self.assertIn("SmartScreen", self.readme)
         self.assertIn("Run anyway", self.readme)
 
+    def test_the_scoop_line_keeps_the_bucket_in_front(self):
+        # Scoop's main bucket has its own `flow`, Facebook's JavaScript type checker, so a
+        # bare `scoop install flow` installs somebody else's program. The README and the
+        # guide both give the line, and a tidy-up of either must not drop the `flow/`.
+        for name, text in (("README", self.readme), ("guide", GUIDE.read_text(encoding="utf-8"))):
+            self.assertIn("scoop bucket add flow https://github.com/samartomar/scoop-flow",
+                          text, name)
+            self.assertIn("scoop install flow/flow", text, name)
+            self.assertNotRegex(text, r"scoop install flow\b(?!/)", name)
+
     def test_which_platforms_get_what_is_stated_before_the_feature_tour(self):
         # This asked for "Windows" and "macOS" inside the install section, which was the
         # right shape while the answer was "Windows, and nothing else runs". It is not:
