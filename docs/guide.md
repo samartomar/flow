@@ -231,7 +231,7 @@ in, and which hotkeys actually registered. Those lines are the first thing to re
 something is not working:
 
 ```
-version: 0.6.0 (nothing checks for updates on its own; --check-update asks GitHub)
+version: 0.6.1 (nothing checks for updates on its own; --check-update asks GitHub)
 refine CLI: codex
   (falls back to claude if it fails)
 CLI timeout: 20s per call
