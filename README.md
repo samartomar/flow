@@ -11,6 +11,7 @@
 <p align="center">
   <a href="https://github.com/samartomar/flow/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/samartomar/flow"></a>
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4">
+  <a href="#macos-and-linux"><img alt="macOS and Linux: Lite, in progress" src="https://img.shields.io/badge/macOS%20%7C%20Linux-Lite%2C%20in%20progress-e8a33d"></a>
   <a href="https://github.com/samartomar/flow/actions/workflows/ci.yml"><img alt="Tests" src="https://github.com/samartomar/flow/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/samartomar/flow"></a>
 </p>
@@ -69,11 +70,11 @@ you the progress.
 
 ### macOS and Linux
 
-Install with uv, as above. Off Windows, Flow runs as **Flow Lite**: the same recognition,
-corrections and agent features, but it can't paste into other apps or listen for global
-hotkeys. You hold the pill to talk, and Send copies the text for you to paste. The
-microphone is the only permission it needs. There's no Mac or Linux download yet.
-[More about Lite](docs/product.md#flow-lite--the-portable-body).
+Flow Lite, the version for macOS and Linux, is still in progress. Install it with uv, as
+above. It has the same recognition, corrections and agent features, but it can't paste into
+other apps or listen for global hotkeys. You hold the pill to talk, and Send copies the
+text for you to paste. The microphone is the only permission it needs. There's no Mac or
+Linux download yet. [More about Lite](docs/product.md#flow-lite--the-portable-body).
 
 ### The agent CLI (optional)
 
