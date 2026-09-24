@@ -21,7 +21,7 @@
 # expected: this file is the prepared submission, and packaging/PUBLISHING.md carries the
 # one-liner that fills it before anything is sent.
 PackageIdentifier: SamarTomar.Flow
-PackageVersion: 0.6.0
+PackageVersion: 0.6.1
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
@@ -29,7 +29,7 @@ NestedInstallerFiles:
     PortableCommandAlias: flow
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/samartomar/flow/releases/download/v0.6.0/flow-windows-x64.zip
-    InstallerSha256: e6719983ceb956ca8e06f653b08c794c143714c4fb1674cf6033bffce3bf3978
+    InstallerUrl: https://github.com/samartomar/flow/releases/download/v0.6.1/flow-windows-x64.zip
+    InstallerSha256: FILL-ME-SHA256
 ManifestType: installer
 ManifestVersion: 1.6.0
