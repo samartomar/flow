@@ -679,6 +679,9 @@ class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
         self.assertIn("gh release upload", run)
         self.assertIn("gh release create", run)
         self.assertEqual(run.count(f"{ASSET}.sha256"), 2, run)
+        # And a draft that a failed upload left behind is published once it is whole:
+        # `create` publishes only after its uploads, so a re-run has to finish the job.
+        self.assertIn("--draft=false", run)
 
     def test_a_release_whose_checksum_is_out_is_not_rebuilt(self):
         # Scoop's and winget's manifests pin the published checksum, and no rebuild is
@@ -690,6 +693,8 @@ class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
         self.assertIn(f"{ASSET}.sha256", run)
         self.assertIn("throw", run)
         self.assertIn("exit 0", run)  # a pwsh step ends with the last native exit code
+        # A draft is not out: with immutability on, a failed upload leaves one behind.
+        self.assertIn("select(.isDraft | not)", run)
         self.assertLess(guard, self.step_running("unittest discover"))
         self.assertLess(guard, self.step_running("pyinstaller --noconfirm"))
 

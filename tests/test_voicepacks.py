@@ -378,6 +378,17 @@ class TestITheDownloadShipsBothEngines(unittest.TestCase):
         self.assertIn('for _pkg in ("piper", "edge_tts"):', spec)
         self.assertIn("collect_all(_pkg)", spec)
 
+    def test_but_not_the_hebrew_model_no_voice_here_opens(self):
+        # Piper opens `nakdimon.onnx` only for a voice whose phonemes are Hebrew, and every
+        # voice Flow offers is English: 18.9 MB of v0.6.0's zip carried nothing Flow could
+        # say. Pinned both ways, so a Hebrew voice joining the catalogue fails here first.
+        from flow.home.voicepacks import CATALOG
+
+        self.assertTrue(all(v.key.startswith("en_") for v in CATALOG))
+        spec = (ROOT / "packaging" / "flow.spec").read_text(encoding="utf-8")
+        self.assertIn('UNUSED_DATA = {"nakdimon.onnx"}', spec)
+        self.assertIn("os.path.basename(src) not in UNUSED_DATA", spec)
+
 
 if __name__ == "__main__":
     unittest.main()

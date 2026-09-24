@@ -2216,7 +2216,10 @@ See NEEDS_YOU.md.
 tag only, and in this order. The tag's number must equal `pyproject.toml`'s or the run
 stops. A release whose `.sha256` is already out stops it too, because the Scoop and winget
 manifests pin that checksum and no rebuild is byte-identical. That applies from the release
-after v0.6.0 on, because v0.6.0's own job predates the check. Then comes the full unit
+after v0.6.0 on, because v0.6.0's own job predates the check. GitHub enforces the same
+thing on its side: release immutability has been on for this repository since 2026-09-23,
+so a release published after that cannot have its files replaced or its tag moved. It does
+not reach back, and v0.6.0 still reports itself mutable. Then comes the full unit
 suite, then the PyInstaller build from `packaging/flow.spec`, then `flow.exe --help`
 against the bundle it just made, then the zip is attached to the release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
 every commit passes, and a bundle that builds but cannot start does not reach a Releases
@@ -2226,10 +2229,15 @@ entry (2026-09-23): **388,394,953 B unpacked across 1,683 files, 169,013,698 B z
 unpacked across 1,196 files and 132,539,952 B zipped on 2026-08-08, v0.2.0 was within 0.1 MB
 of that, and v0.5.1's zip was 132,563,945 B. **Nearly all of the 35 MB is Piper**, which the
 release has bundled since Better voices (decisions.md 2026-09-23): 422 files, 43.9 MB
-unpacked and 32.6 MB zipped. The Microsoft voices' `edge_tts` is 0.1 MB, and onnxruntime was already there for
-faster-whisper. Of Piper's share, 20.3 MB unpacked and 18.9 MB zipped is one Hebrew
-diacritization model (`piper/hebrew/nakdimon.onnx`) that no English voice uses. Models are
-excluded; they download to the HF cache on first decode, exactly as a dev install does.
+unpacked and 32.6 MB zipped. The Microsoft voices' `edge_tts` is 0.1 MB, and onnxruntime
+was already there for faster-whisper. Of Piper's share, 20.3 MB unpacked and 18.9 MB
+zipped was one Hebrew diacritization model (`piper/hebrew/nakdimon.onnx`) that Piper opens
+only for a Hebrew voice. Every voice Flow offers is English, so from the release after
+v0.6.0 on the build leaves it out (`UNUSED_DATA` in `packaging/flow.spec`). The next zip
+should come to about 142 MB: v0.6.0's, less the model's 19,796,474 B. A local build without
+it ran `flow.exe --help`, and Piper spoke English with the file deleted and its Hebrew
+modules never imported. Models are excluded; they download to the HF cache on first decode,
+exactly as a dev install does.
 Re-taken from the published asset rather than from a local build, because a build's numbers
 stop being true the moment another build exists, and the zip a stranger receives is the one
 the guide's figures are about.
