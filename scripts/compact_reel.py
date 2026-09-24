@@ -1,4 +1,7 @@
-"""Record the compact pill in motion, as the README's GIF.
+"""Record the compact pill in motion, against a drawn terminal.
+
+This was the README's GIF until `home_reel.py`, which records Flow Home with the pill over
+it, took the place and borrows `Tap` and `STEP_MS` from here.
 
 `compact_shots.py` photographs each state the compact pill can draw. This records the
 motion between them, which no still can show: the ring and the meter answering a
@@ -17,7 +20,7 @@ monitor under the pointer while this runs, for about twenty seconds.
 The window the words land in is drawn here rather than opened: Type pastes into another
 program, and the reel has to show one. Its text follows the timeline, not a real paste.
 
-    uv run --with pillow python scripts/compact_reel.py            # -> docs/flow.gif
+    uv run --with pillow python scripts/compact_reel.py            # -> docs/pill.gif
     uv run --with pillow python scripts/compact_reel.py --frames out/  # and every frame
 """
 
@@ -389,7 +392,7 @@ def write_gif(frames, durations, path: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--out", type=Path, default=REPO / "docs" / "flow.gif")
+    ap.add_argument("--out", type=Path, default=REPO / "docs" / "pill.gif")
     # 1.25, because the band's labels are 11 px in the design and a README shows the
     # GIF at its own size: at 1.0 the note under the pill is a grey smudge.
     ap.add_argument("--scale", type=float, default=1.25,
