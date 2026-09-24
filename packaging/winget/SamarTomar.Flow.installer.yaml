@@ -15,9 +15,11 @@
 # directory and the exe `flow`. So `flow\flow.exe`, not `flow.exe`. It is quoted nowhere on
 # purpose: a double-quoted YAML scalar would read `\f` as a form feed.
 #
-# `InstallerSha256` is a placeholder. winget's validation will reject it, which is correct
-# and expected: this file is the prepared submission, and packaging/PUBLISHING.md carries
-# the one-liner that fills it from the release's `.sha256` asset before anything is sent.
+# `InstallerSha256` is the checksum the release published in its `.sha256` asset for the
+# version above, or the placeholder `FILL-ME-SHA256` between a version bump and that
+# version's zip. winget's validation rejects the placeholder, which is correct and
+# expected: this file is the prepared submission, and packaging/PUBLISHING.md carries the
+# one-liner that fills it before anything is sent.
 PackageIdentifier: SamarTomar.Flow
 PackageVersion: 0.6.0
 InstallerType: zip
@@ -28,6 +30,6 @@ NestedInstallerFiles:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/samartomar/flow/releases/download/v0.6.0/flow-windows-x64.zip
-    InstallerSha256: FILL-ME-SHA256
+    InstallerSha256: e6719983ceb956ca8e06f653b08c794c143714c4fb1674cf6033bffce3bf3978
 ManifestType: installer
 ManifestVersion: 1.6.0

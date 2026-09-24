@@ -49,6 +49,14 @@ ASSET = "flow-windows-x64.zip"
 #: than `dist/flow/*`, so the directory itself is the archive's root entry.
 IN_ZIP_EXE = "flow\\flow.exe"
 
+#: Each release's checksum, as its workflow published it in the `.sha256` beside the zip.
+#: A manifest that states a hash has to state the one for the version it names. After a
+#: bump the old number would pair the new zip's URL with the last zip's checksum, and
+#: PUBLISHING.md's one-liner replaces only the placeholder, so it would keep that number.
+PUBLISHED_SHA256 = {
+    "0.6.0": "e6719983ceb956ca8e06f653b08c794c143714c4fb1674cf6033bffce3bf3978",
+}
+
 
 def pyproject() -> dict:
     return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
@@ -489,7 +497,7 @@ class TestTheScoopManifest(unittest.TestCase):
         self.assertIn("$version", url)
         self.assertNotIn(pyproject()["project"]["version"], url)
         # And the hash comes from the `.sha256` the workflow now uploads, so a version
-        # bump costs one small request instead of re-downloading 126 MB to learn a number.
+        # bump costs one small request instead of re-downloading 161 MB to learn a number.
         self.assertEqual(auto["hash"]["url"], "$url.sha256")
 
 
@@ -604,6 +612,16 @@ class TestBothManifestsPointAtTheSameFileInTheSameZip(unittest.TestCase):
         if stated != "FILL-ME-SHA256":
             self.assertRegex(stated, r"^[A-Fa-f0-9]{64}$")
 
+    def test_and_a_stated_checksum_is_the_one_published_for_that_version(self):
+        stated = scoop()["architecture"]["64bit"]["hash"]
+        version = pyproject()["project"]["version"]
+        if stated != "FILL-ME-SHA256":
+            self.assertEqual(
+                stated.lower(), PUBLISHED_SHA256.get(version),
+                f"the manifests state a checksum that is not v{version}'s - a version bump "
+                "puts FILL-ME-SHA256 back, and filling it adds that release to "
+                "PUBLISHED_SHA256 (packaging/PUBLISHING.md, steps 1 and 5)")
+
 
 class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
     """A package manifest has to state a SHA-256, so the release has to publish one.
@@ -639,7 +657,7 @@ class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
         # the build: a checksum computed at the wrong moment is a checksum of nothing.
         zipped = self.step_running("Compress-Archive")
         hashed = self.step_running("Get-FileHash")
-        attached = self.step_running("gh release")
+        attached = self.step_running("gh release create")
         self.assertLess(zipped, hashed)
         self.assertLess(hashed, attached)
 
@@ -657,10 +675,28 @@ class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
         # Two branches, because a re-run of a failed release uploads to a release that
         # already exists. A checksum attached in only one of them is the branch nobody
         # tests until the day it runs.
-        run = self.runs[self.step_running("gh release")]
+        run = self.runs[self.step_running("gh release create")]
         self.assertIn("gh release upload", run)
         self.assertIn("gh release create", run)
         self.assertEqual(run.count(f"{ASSET}.sha256"), 2, run)
+        # And a draft that a failed upload left behind is published once it is whole:
+        # `create` publishes only after its uploads, so a re-run has to finish the job.
+        self.assertIn("--draft=false", run)
+
+    def test_a_release_whose_checksum_is_out_is_not_rebuilt(self):
+        # Scoop's and winget's manifests pin the published checksum, and no rebuild is
+        # byte-identical, so a re-run that `--clobber`ed the zip would break every install
+        # from them. A release with its `.sha256` out stops the run, before the gate and
+        # the build; one without (a failed run) still reaches the upload and is made whole.
+        guard = self.step_running("--json assets")
+        run = self.runs[guard]
+        self.assertIn(f"{ASSET}.sha256", run)
+        self.assertIn("throw", run)
+        self.assertIn("exit 0", run)  # a pwsh step ends with the last native exit code
+        # A draft is not out: with immutability on, a failed upload leaves one behind.
+        self.assertIn("select(.isDraft | not)", run)
+        self.assertLess(guard, self.step_running("unittest discover"))
+        self.assertLess(guard, self.step_running("pyinstaller --noconfirm"))
 
     def test_and_no_third_party_action_was_added_to_do_it(self):
         # The workflow's own argument, unchanged: the runner already has `gh` and

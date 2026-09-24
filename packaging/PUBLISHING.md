@@ -13,10 +13,13 @@ The files are written and committed:
 | `packaging/winget/SamarTomar.Flow.installer.yaml` | winget installer manifest |
 | `packaging/winget/SamarTomar.Flow.locale.en-US.yaml` | winget en-US description |
 
-Nothing here has been submitted, and neither manifest works yet, because both carry the
-literal string `FILL-ME-SHA256` where the checksum goes. Filling that is step one and it
-is the only step that cannot be done from inside the repository, because it is a fact
-about a file on a Releases page rather than a fact about this tree.
+Nothing here has been submitted yet. **The manifests are ready to send whenever they carry
+a real checksum** rather than the literal string `FILL-ME-SHA256`, which holds the place
+between a version bump and that version's release (step 5). The first was v0.6.0's,
+filled on 2026-09-23 from the `.sha256` the release published and checked against a
+download of the zip. The checksum is the one step that cannot be done from inside the
+repository, because it is a fact about a file on a Releases page rather than a fact about
+this tree.
 
 Everything below runs on the owner's machine. None of it is automated on purpose: a
 submission is a pull request to somebody else's repository under the owner's name, which
@@ -38,7 +41,7 @@ a future spec renames the bundle, both files move with it.
 ## 1. Fill the checksum
 
 **For a release built after this change**, the workflow uploads `flow-windows-x64.zip.sha256`
-beside the zip, and the number can be read without downloading 126 MB:
+beside the zip, and the number can be read without downloading 161 MB:
 
 ```powershell
 (Invoke-RestMethod https://github.com/samartomar/flow/releases/download/v0.6.0/flow-windows-x64.zip.sha256).Split(" ")[0]
@@ -64,8 +67,16 @@ repository root:
 $h = (Get-FileHash .\flow-windows-x64.zip -Algorithm SHA256).Hash.ToLower(); Get-ChildItem packaging\scoop\flow.json, packaging\winget\*.yaml | ForEach-Object { (Get-Content $_ -Raw).Replace("FILL-ME-SHA256", $h) | Set-Content $_ -NoNewline }
 ```
 
-Check that it took before submitting anything: `git diff` should show two changed lines
-and no remaining `FILL-ME-SHA256`.
+Then add the release's line to `PUBLISHED_SHA256` in `tests/test_packaging.py`, which is
+what the suite checks the two manifests against. The number stays true because the release
+workflow refuses to rebuild a release whose `.sha256` is out ("A published release is not
+rebuilt"), and because GitHub's release immutability, on for this repository since
+2026-09-23, refuses to replace a published release's files. The one exception is v0.6.0.
+Its own job predates that step, and it was published before immutability was on, which
+does not reach back. So re-running its job from the Actions page would still replace its
+zip. Don't re-run it. Check that it took before submitting
+anything: `git diff` should show those three changed lines and no remaining
+`FILL-ME-SHA256`.
 
 ## 2. Scoop: where the manifest lives
 
@@ -157,10 +168,16 @@ repeat it and none of them can read it, so all four are moved by hand at release
   in `InstallerUrl`
 - `packaging/winget/SamarTomar.Flow.locale.en-US.yaml` - `PackageVersion`
 
-And the checksum changes with every build, so step 1 runs again for every version.
+The checksum changes with every build, so **a version bump also puts `FILL-ME-SHA256` back**
+in both hash fields, and step 1 runs again once that version's zip exists. Keeping the old
+number would pair the new zip's URL with the last zip's checksum. The one-liner in step 1
+replaces only the placeholder, so it would silently leave that stale number in place.
 
 This is not left to memory. `tests/test_packaging.py` reads the version out of
 `pyproject.toml` and fails if either manifest disagrees with it, in the same way the
 release workflow already fails when a tag disagrees with it. A version bump that forgets
 these files turns the suite red on the next run, before a tag exists and long before a
-manifest pointing at a release that was never built reaches a stranger.
+manifest pointing at a release that was never built reaches a stranger. The same file
+keeps each release's published checksum (`PUBLISHED_SHA256`) and refuses a stated hash
+that is not the one for the version the manifests name. Filling step 1 therefore means
+adding that release's line there too.

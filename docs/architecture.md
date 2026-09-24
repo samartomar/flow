@@ -2213,19 +2213,34 @@ is the point — measured: of the four names the benchmarks actually use, `base.
 See NEEDS_YOU.md.
 
 **Where a release comes from.** `.github/workflows/release.yml` runs on a pushed `v*`
-tag only, and in this order: the tag's number must equal `pyproject.toml`'s or the run
-stops, then the full unit suite, then the PyInstaller build from `packaging/flow.spec`,
-then `flow.exe --help` against the bundle it just made, then the zip is attached to the
-release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
+tag only, and in this order. The tag's number must equal `pyproject.toml`'s or the run
+stops. A release whose `.sha256` is already out stops it too, because the Scoop and winget
+manifests pin that checksum and no rebuild is byte-identical. That applies from the release
+after v0.6.0 on, because v0.6.0's own job predates the check. GitHub enforces the same
+thing on its side: release immutability has been on for this repository since 2026-09-23,
+so a release published after that cannot have its files replaced or its tag moved. It does
+not reach back, and v0.6.0 still reports itself mutable. Then comes the full unit
+suite, then the PyInstaller build from `packaging/flow.spec`, then `flow.exe --help`
+against the bundle it just made, then the zip is attached to the release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
 every commit passes, and a bundle that builds but cannot start does not reach a Releases
-page. Re-measured on the **v0.3.0** asset, downloaded from
-`releases/latest/download/flow-windows-x64.zip` and unzipped (2026-08-08): **338,927,052 B
-unpacked across 1,196 files, 132,539,952 B zipped** — 323 MB and 126 MB, unchanged at MB
-scale from v0.2.0's 338,857,704 B / 132,471,792 B on 2026-08-03, against the first build's
-323 MB and 125 MB on 2026-08-01. Models excluded; they download to the HF cache on
-first decode exactly as a dev install does. Re-taken from the published asset rather than
-from a local build, because the first-build numbers stop being true the moment a second
-build exists, and the zip a stranger receives is the one the README's figures are about.
+page. Re-measured on the **v0.6.0** asset, downloaded from its release and read entry by
+entry (2026-09-23): **388,394,953 B unpacked across 1,683 files, 169,013,698 B zipped** —
+370 MB and 161 MB. Until then the zip had held at 126 MB: v0.3.0 measured 338,927,052 B
+unpacked across 1,196 files and 132,539,952 B zipped on 2026-08-08, v0.2.0 was within 0.1 MB
+of that, and v0.5.1's zip was 132,563,945 B. **Nearly all of the 35 MB is Piper**, which the
+release has bundled since Better voices (decisions.md 2026-09-23): 422 files, 43.9 MB
+unpacked and 32.6 MB zipped. The Microsoft voices' `edge_tts` is 0.1 MB, and onnxruntime
+was already there for faster-whisper. Of Piper's share, 20.3 MB unpacked and 18.9 MB
+zipped was one Hebrew diacritization model (`piper/hebrew/nakdimon.onnx`) that Piper opens
+only for a Hebrew voice. Every voice Flow offers is English, so from the release after
+v0.6.0 on the build leaves it out (`UNUSED_DATA` in `packaging/flow.spec`). The next zip
+should come to about 142 MB: v0.6.0's, less the model's 19,796,474 B. A local build without
+it ran `flow.exe --help`, and Piper spoke English with the file deleted and its Hebrew
+modules never imported. Models are excluded; they download to the HF cache on first decode,
+exactly as a dev install does.
+Re-taken from the published asset rather than from a local build, because a build's numbers
+stop being true the moment another build exists, and the zip a stranger receives is the one
+the guide's figures are about.
 
 **And the suite is machine-independent, which it was not until CI said so.** The first
 release run failed the gate with 14 tests that had never failed on the development

@@ -74,10 +74,18 @@ hiddenimports += _sd_hidden
 # — and says on its Models page that this download cannot add them.
 import importlib.util as _util  # noqa: E402
 
+#: Data files `collect_all` would take that no voice Flow offers ever opens. Piper's Hebrew
+#: diacritization model is loaded only by a voice whose `phoneme_type` is Hebrew
+#: (`PiperVoice.phonemize`, piper-tts 1.6), and Flow's voices are English. It was 18.9 MB
+#: of v0.6.0's 161 MB zip (docs/architecture.md, "Where a release comes from"). Its modules
+#: stay, so nothing that imports them breaks; only a Hebrew voice would miss the file.
+UNUSED_DATA = {"nakdimon.onnx"}
+
 for _pkg in ("piper", "edge_tts"):
     if _util.find_spec(_pkg) is not None:
         _d, _b, _h = collect_all(_pkg)
-        datas += _d
+        datas += [(src, dest) for src, dest in _d
+                  if os.path.basename(src) not in UNUSED_DATA]
         binaries += _b
         hiddenimports += _h
 

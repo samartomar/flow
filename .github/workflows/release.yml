@@ -41,6 +41,26 @@ jobs:
             exit 1
           fi
 
+      # A release whose checksum is out is finished. Scoop's and winget's manifests pin that
+      # number (packaging/PUBLISHING.md), and no rebuild is byte-identical, so a re-run that
+      # replaced the zip would break every install from them without a word. Stopped here,
+      # before the gate and the build rather than after them: what a published version holds
+      # changes by cutting a new version. GitHub's release immutability (on since 2026-09-23)
+      # refuses the same replacement on its side; this step is what says why, and does so
+      # before a build is spent. A release with no checksum yet — a run that failed
+      # before or during its upload — gets past this and is made whole below. The explicit
+      # exit is because `pwsh` steps end with the last native command's code, and "release
+      # not found" is the answer every first run gets here.
+      - name: A published release is not rebuilt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $have = gh release view $env:GITHUB_REF_NAME --json assets,isDraft --jq 'select(.isDraft | not) | .assets[].name' 2>$null
+          if ($LASTEXITCODE -eq 0 -and ($have -contains "flow-windows-x64.zip.sha256")) {
+            throw "$env:GITHUB_REF_NAME is out with its checksum, which the package manifests pin - cut a new version, or delete this release first if replacing it is really meant"
+          }
+          exit 0
+
       # Before the build, not after. The suite is the same one the loop gates every
       # commit on, run the same way.
       - name: The gate
@@ -81,7 +101,11 @@ jobs:
 
       # Uploaded with the CLI the runner already has rather than a third-party action,
       # for the same reason the app has three dependencies. `--clobber` so a re-run of a
-      # failed release replaces the artifact instead of erroring on it.
+      # failed release replaces the artifact instead of erroring on it — and only a failed
+      # one gets this far, since a release with its checksum out stopped before the gate.
+      # `create` makes a draft, uploads, then publishes, so with immutability on a failed
+      # upload leaves a draft; once it is whole, the re-run publishes it
+      # (`--draft=false` is a no-op on a release that is already out).
       - name: Attach it to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -90,6 +114,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:GITHUB_REF_NAME `
               flow-windows-x64.zip flow-windows-x64.zip.sha256 --clobber
+            gh release edit $env:GITHUB_REF_NAME --draft=false
           } else {
             gh release create $env:GITHUB_REF_NAME `
               flow-windows-x64.zip flow-windows-x64.zip.sha256 `
