@@ -72,9 +72,9 @@ Download
 unzip it anywhere, and run `flow.exe`. That URL is version-free on purpose: the asset name
 never changes, so the link serves whatever release is newest and no cached page can hand
 you a stale zip. [Releases](https://github.com/samartomar/flow/releases) is there to browse
-the notes and older builds. Nothing to install and no Python on the machine. **161 MB zipped, 370 MB
-unpacked** (measured on the v0.6.0 asset itself, downloaded from the link above; Piper, the engine
-behind [a better voice](#a-better-voice-if-you-want-one), is 33 MB of the zip). The two speech models are *not* in the zip —
+the notes and older builds. Nothing to install and no Python on the machine. **142 MB zipped, 350 MB
+unpacked** (measured on the v0.6.1 asset itself, downloaded from the link above; Piper, the engine
+behind [a better voice](#a-better-voice-if-you-want-one), is 14 MB of the zip). The two speech models are *not* in the zip —
 they download to your Hugging Face cache on the first decode, exactly as they do for
 every other install, and the startup line names the path. Bundling them would have made
 this a 730 MB download and frozen two files `--model` is meant to swap.

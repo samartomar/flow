@@ -41,7 +41,7 @@ a future spec renames the bundle, both files move with it.
 ## 1. Fill the checksum
 
 **For a release built after this change**, the workflow uploads `flow-windows-x64.zip.sha256`
-beside the zip, and the number can be read without downloading 161 MB:
+beside the zip, and the number can be read without downloading 142 MB:
 
 ```powershell
 (Invoke-RestMethod https://github.com/samartomar/flow/releases/download/v0.6.1/flow-windows-x64.zip.sha256).Split(" ")[0]
