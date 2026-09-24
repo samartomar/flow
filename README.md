@@ -9,7 +9,9 @@ Speech recognition runs on your machine. No API key.
 **English only · three dependencies · Windows in full, macOS and Linux in
 [Lite](#flow-lite-macos-and-linux)**
 
-![Flow: a message dictated word by word, corrected by voice, sent, then a question asked of the agent](docs/flow.gif)
+![Flow: a line dictated into a terminal, one word fixed by voice, a rough instruction refined into a prompt, then a question answered by the agent](docs/flow.gif)
+
+*The real pill against a scripted session, recorded by [`scripts/compact_reel.py`](scripts/compact_reel.py).*
 
 ## Install
 
