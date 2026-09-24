@@ -211,6 +211,21 @@ def mic(c, x: float, y: float, colour: str, *, size: float = MIC_UNIT_W,
         _line(c, b, (1.6, 1.8, 12.4, 16.4), colour, width, tags)
 
 
+def pin(c, x: float, y: float, colour: str, *, size: float = UNIT,
+        width: float = STROKE, tags=()) -> None:
+    """A pushpin: a round head on a needle, the plainest shape that still reads as one
+    at the 12 px the compact pill draws it (`ui_compact.PIN_SIZE`).
+
+    Stroked like everything here, so pinned and not pinned are told apart by colour
+    rather than by a fill. The head is a circle, drawn as `_rrect`'s capsule with no
+    straight run, which is exactly the case its docstring keeps from being two stray
+    caps.
+    """
+    b = _Box(x, y, size)
+    _rrect(c, b, 4.5, 1.5, 11.5, 8.5, 3.5, colour, width, tags)
+    _line(c, b, (8, 8.5, 8, 14.5), colour, width, tags)
+
+
 def folder(c, x: float, y: float, colour: str, *, size: float = UNIT,
            width: float = STROKE, tags=()) -> None:
     """gen.py's `FOLDER`: a body and a tab.

@@ -1247,3 +1247,100 @@ class TestTheSealGuardReadsCodeNotText(unittest.TestCase):
                        "    _CLIPBOARD.start()"):
             with self.subTest(source=source):
                 self.assertFalse(self.sealed(source))
+
+
+class TestAPinnedWindowIsBroughtForward(unittest.TestCase):
+    """`bring_forward` and `window_alive`, for the compact pill's pin (2026-09-24).
+
+    Windows lets only the process with the last input event move the foreground, and
+    after a hotkey that is not Flow. So the order is pinned here: ask plainly, and only
+    when that is refused borrow the front thread's input for one call, and always give
+    it back.
+    """
+
+    PINNED, FRONT = 0x42, 0x99
+
+    def desk(self, *, refuse_plain=False, stuck=False, iconic=False, alive=True,
+             front=None):
+        state = {"front": self.FRONT if front is None else front, "attached": False}
+        calls = []
+
+        def set_foreground(hwnd):
+            calls.append(("SetForegroundWindow", hwnd, state["attached"]))
+            if stuck or (refuse_plain and not state["attached"]):
+                return 0
+            state["front"] = hwnd
+            return 1
+
+        def attach(ours, theirs, on):
+            calls.append(("AttachThreadInput", ours, theirs, bool(on)))
+            state["attached"] = bool(on)
+            return 1
+
+        def show(hwnd, how):
+            calls.append(("ShowWindow", hwnd, how))
+            return 1
+
+        stack = contextlib.ExitStack()
+        for patch in (
+            mock.patch("flow.inject.foreground_hwnd", side_effect=lambda: state["front"]),
+            mock.patch.object(inject.user32, "IsWindow", return_value=alive),
+            mock.patch.object(inject.user32, "IsIconic", return_value=iconic),
+            mock.patch.object(inject.user32, "ShowWindow", side_effect=show),
+            mock.patch.object(inject.user32, "SetForegroundWindow",
+                              side_effect=set_foreground),
+            mock.patch.object(inject.user32, "BringWindowToTop", return_value=1),
+            mock.patch.object(inject.user32, "AttachThreadInput", side_effect=attach),
+            mock.patch.object(inject.user32, "GetWindowThreadProcessId", return_value=222),
+            mock.patch.object(inject.kernel32, "GetCurrentThreadId", return_value=111),
+        ):
+            stack.enter_context(patch)
+        self.addCleanup(stack.close)
+        return state, calls
+
+    def test_a_window_already_in_front_is_left_alone(self):
+        _state, calls = self.desk(front=self.PINNED)
+        self.assertTrue(inject.bring_forward(self.PINNED))
+        self.assertEqual(calls, [])
+
+    def test_when_windows_allows_it_the_plain_call_is_all(self):
+        state, calls = self.desk()
+        self.assertTrue(inject.bring_forward(self.PINNED))
+        self.assertEqual(calls, [("SetForegroundWindow", self.PINNED, False)])
+        self.assertEqual(state["front"], self.PINNED)
+
+    def test_refused_it_borrows_the_front_threads_input_for_one_call(self):
+        _state, calls = self.desk(refuse_plain=True)
+        self.assertTrue(inject.bring_forward(self.PINNED))
+        self.assertEqual(calls, [
+            ("SetForegroundWindow", self.PINNED, False),
+            ("AttachThreadInput", 111, 222, True),
+            ("SetForegroundWindow", self.PINNED, True),
+            ("AttachThreadInput", 111, 222, False),
+        ])
+
+    def test_the_borrow_is_given_back_when_windows_still_says_no(self):
+        # A thread left attached to one that stops responding stops with it.
+        state, calls = self.desk(stuck=True)
+        self.assertFalse(inject.bring_forward(self.PINNED, wait=0.05))
+        self.assertEqual(calls[-1], ("AttachThreadInput", 111, 222, False))
+        self.assertEqual(state["front"], self.FRONT)
+
+    def test_a_minimised_window_is_restored_before_it_is_asked_for(self):
+        _state, calls = self.desk(iconic=True)
+        self.assertTrue(inject.bring_forward(self.PINNED))
+        self.assertEqual(calls[0], ("ShowWindow", self.PINNED, inject.SW_RESTORE))
+
+    def test_a_closed_window_is_not_asked_for_at_all(self):
+        _state, calls = self.desk(alive=False)
+        self.assertFalse(inject.bring_forward(self.PINNED))
+        self.assertEqual(calls, [])
+
+    def test_a_reused_handle_is_not_the_window_that_was_pinned(self):
+        # Windows hands a closed window's handle out again, so the pid is the check.
+        with mock.patch.object(inject.user32, "IsWindow", return_value=True), \
+                mock.patch("flow.inject._pid_of", return_value=5):
+            self.assertTrue(inject.window_alive(self.PINNED, 5))
+            self.assertFalse(inject.window_alive(self.PINNED, 6))
+            self.assertTrue(inject.window_alive(self.PINNED))
+        self.assertFalse(inject.window_alive(0))
