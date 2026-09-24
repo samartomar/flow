@@ -28,7 +28,8 @@ file rather than the demo's temporary folder, which has the user name in it.
     uv run --no-sync --with pillow --with playwright python scripts/home_reel.py --frames out/
 
 Playwright drives the Edge that Windows ships (`channel="msedge"`), so it downloads no
-browser of its own.
+browser of its own. After a new take, `scripts/social_card.py` rebuilds the repo's social
+preview from it.
 """
 
 from __future__ import annotations
@@ -335,7 +336,11 @@ class Director:
         self.dictate(QUESTION, 2.8)                   # hold ctrl+win, talk, let go
         self.wait(1.2)
         self.press("Enter")                           # and Enter asks it
-        self.wait(ANSWER_SEC + 2.8)
+        # The composer drops below the answer once the question posts, so a hand left
+        # where it clicked would sit on the answer. It rests under the conversation list.
+        box = self.page.locator(".convo-list").bounding_box()
+        self.move((box["x"] + box["width"] / 2, box["y"] + box["height"] + 110), 0.6)
+        self.wait(ANSWER_SEC + 2.2)
         self.session._recent += [(RECENT_ASKED, QUESTION),
                                  (RECENT_ANSWERED, reel.ANSWER)]
         self.to(NAV.format("models"), 0.7)
