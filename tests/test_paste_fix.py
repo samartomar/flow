@@ -37,9 +37,23 @@ from flow.session import (  # noqa: E402
     CONVERSE, CORRECT_MAX_CHARS, CORRECT_WINDOW_SEC, DICTATE, REFINE, Session, State,
     paste_fits,
 )
+from clipboard_env import sealed_clipboard  # noqa: E402
 from test_inject_target import all_inserted, only  # noqa: E402
 from test_session import FakeMic, FakeTranscriber  # noqa: E402
 from test_ui_compact import pill  # noqa: E402
+
+#: The keys class calls the real `inject.paste()`, which enumerates the machine's
+#: clipboard to warn about an image a paste would destroy. Unsealed, this module went red
+#: on the day an image was on the clipboard (see `clipboard_env.py`).
+_CLIPBOARD = sealed_clipboard()
+
+
+def setUpModule():
+    _CLIPBOARD.start()
+
+
+def tearDownModule():
+    _CLIPBOARD.stop()
 
 WINDOW = 0x51C
 EDITOR = Target("Chrome_WidgetWin_1", "slack.exe")
