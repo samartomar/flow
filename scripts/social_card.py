@@ -60,10 +60,10 @@ LEFT = """<!doctype html><html><head><meta charset="utf-8"><style>
 html, body {{ margin: 0; }}
 body {{ width: {w}px; height: {h}px; background: rgb{bg}; color: #E6E8ED; overflow: hidden;
         font-family: Plex, sans-serif; position: relative; }}
-.left {{ position: absolute; left: 64px; top: 54px; width: 480px; }}
+.left {{ position: absolute; left: 64px; top: 76px; width: 480px; }}
 .icon {{ width: 76px; height: 76px; display: block; }}
 h1 {{ font-size: 80px; line-height: 1; font-weight: 600; margin: 26px 0 18px; letter-spacing: -1px; }}
-p {{ font-size: 27px; line-height: 38px; margin: 0; color: #C7CBD4; }}
+p {{ font-size: 30px; line-height: 42px; margin: 0; color: #C7CBD4; }}
 .keys {{ margin-top: 28px; display: flex; align-items: center; gap: 10px; font-size: 20px;
          color: #A0A6B2; }}
 kbd {{ font: 500 18px Plex, sans-serif; color: #E6E8ED; background: #22262E; border-radius: 8px;
@@ -78,7 +78,7 @@ kbd {{ font: 500 18px Plex, sans-serif; color: #E6E8ED; background: #22262E; bor
 <div class="left">
   <img class="icon" src="{icon}" alt="">
   <h1>Flow</h1>
-  <p>Local voice dictation for Windows, made for developers who speak English with an accent.</p>
+  <p>Local English dictation<br>with a talk-to-it refine loop</p>
   <div class="keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>Win</kbd><span>&nbsp;hold, talk, let go</span></div>
   <div class="os"><span class="chip on">Windows 10 · 11</span><span class="chip soon">macOS · Linux: Lite, in progress</span></div>
 </div>
