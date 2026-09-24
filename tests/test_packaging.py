@@ -167,7 +167,8 @@ class TestTheInstallSection(unittest.TestCase):
         # So the region checked is install through to the feature tour — the part read by
         # someone deciding whether this runs at all — and both halves of the answer have
         # to be in it.
-        deciding = self.readme.split("## Install", 1)[1].split("## The loop", 1)[0]
+        deciding = self.readme.split("## Install", 1)[1].split("## Using it", 1)[0]
+        self.assertIn("## Using it", self.readme, "the tour's heading moved; move this too")
         self.assertIn("Windows", deciding)
         self.assertIn("macOS", deciding)
         self.assertIn("Lite", deciding)

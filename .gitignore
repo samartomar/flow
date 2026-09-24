@@ -40,3 +40,9 @@ __pycache__/
 
 # Seeded design canvases: build products of design/*.dc.html.
 design/build/
+
+# `scripts/social_card.py` output, the repo's social preview. It is uploaded by hand
+# (Settings ▸ General ▸ Social preview), GitHub keeps its own copy, and the script
+# rebuilds it from docs/flow.gif in about half a minute. Ignored here, it also stays out
+# of the sdist, which it alone would put over its size guard.
+docs/social-preview.gif

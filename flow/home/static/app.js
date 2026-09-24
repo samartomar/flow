@@ -360,17 +360,16 @@
       <section class="card tight"><div class="row wrap pc">
         ${icon("chip", onGpu ? C.green : C.muted, 22)}
         <div class="col grow">
-          <div class="row wrap"><b>${esc(gpu ? gpu.name : "No NVIDIA GPU found")}</b>${gpu && gpu.memory_mb ? `<span class="note">${Math.round(gpu.memory_mb / 1024)} GB</span>` : ""}
+          <div class="row wrap"><b>${esc(gpu ? gpu.name : "No NVIDIA GPU found")}</b>${gpu && gpu.memory_mb ? `<span class="note">${Math.round(gpu.memory_mb / 1024)} GB video memory</span>` : ""}
             <span class="badge ${onGpu ? "green" : ""}">${onGpu ? '<span class="dot green"></span>speech runs on the GPU' : "speech runs on the CPU"}</span>
             ${sp.compute_types.includes("int8") && onGpu && !sp.compute_types.includes("float16") ? '<span class="badge">int8</span>' : ""}</div>
           <p class="note">${onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
             : esc(sp.why_cpu || "The CPU runs the smaller models in time; the large ones need a GPU.")}</p>
         </div>
-        <div class="col"><b>${esc(sp.cache.text)}</b><span class="fine">of speech models on disk</span></div>
-        <button type="button" class="btn" data-act="open" data-what="models">${icon("folder", C.text, 15)}Open folder</button>
       </div></section>
       <section class="card">
-        <div class="row"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}</div>
+        <div class="row wrap"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}
+          <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="models">${icon("folder", C.text, 14)}Open folder</button></div>
         <p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>
         ${sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
