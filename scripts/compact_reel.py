@@ -91,6 +91,9 @@ class Frame:
     w: int
     h: int
     px: bytes  # premultiplied BGRA, top-down, device pixels
+    #: The whole window's opacity, which `present` hands Windows separately as
+    #: `SourceConstantAlpha` — `PILL_ALPHA` makes it 240 of 255 for the compact pill.
+    ca: int = 255
 
 
 class Tap:
@@ -114,7 +117,8 @@ class Tap:
                 w, h = canvas.device_size
                 x, y = tap.pill._shell_xy
                 tap.frames.append(Frame(time.perf_counter(), x, y, w, h,
-                                        canvas._buf.raw[: w * h * 4]))
+                                        canvas._buf.raw[: w * h * 4],
+                                        canvas.constant_alpha))
             return ok
 
         paint.GdiCanvas.present = present
@@ -303,10 +307,12 @@ def draw_terminal(size, rect, snap, k: float) -> Image.Image:
 
 
 def overlay(bg: np.ndarray, f: Frame, ox: int, oy: int) -> np.ndarray:
-    """`bg` with the pill's premultiplied BGRA frame over it, where it really was."""
+    """`bg` with the pill's premultiplied BGRA frame over it, where it really was, blended
+    the way `UpdateLayeredWindow` blends it: the constant alpha scales the colour and the
+    per-pixel alpha alike before the source goes over what is under it."""
     src = np.frombuffer(f.px, np.uint8).reshape(f.h, f.w, 4)
-    rgb = src[..., 2::-1].astype(np.uint16)
-    a = src[..., 3:4].astype(np.uint16)
+    rgb = (src[..., 2::-1].astype(np.uint16) * f.ca + 127) // 255
+    a = (src[..., 3:4].astype(np.uint16) * f.ca + 127) // 255
     out = bg.copy()
     y0, x0 = f.y - oy, f.x - ox
     under = out[y0:y0 + f.h, x0:x0 + f.w].astype(np.uint16)
