@@ -49,7 +49,7 @@ asking and Mac hardware to measure on.
 **Off Windows, Flow starts in Lite** rather than refusing. Everything that does not need
 hands is there — both decoder tiers, the correction loop, the lexicon, the profile, the
 polish, the thread, converse mode — and Send copies the draft for you to paste. See
-[README](../README.md#flow-lite-macos-and-linux) for the short version and
+[README](../README.md#macos-and-linux) for the short version and
 [product.md](product.md#flow-lite--the-portable-body) for the definition and the fence.
 `--lite` runs the same code on Windows.
 
