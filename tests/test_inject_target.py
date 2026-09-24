@@ -1122,3 +1122,19 @@ class TestNoTestHereReadsTheMachinesClipboard(unittest.TestCase):
         # an answer that keeps `paste()` quiet, or every test asserting on warnings is
         # still reading something it did not declare.
         self.assertEqual(unrestorable(inject.clipboard_formats()), "")
+
+    def test_and_every_module_that_pastes_installs_it(self):
+        # The seal is per module, so a new module that calls `paste()` is unsealed until
+        # somebody remembers. `test_paste_fix` was, and went red the day an image was on
+        # the clipboard (2026-09-24), which is the failure `clipboard_env.py` exists to
+        # end. Checked by reading every module, so the next one cannot forget.
+        here = Path(__file__).resolve().parent
+        unsealed = []
+        for module in sorted(here.glob("test_*.py")):
+            text = module.read_text(encoding="utf-8")
+            calls = [line for line in text.splitlines()
+                     if "inject.paste(" in line and not line.lstrip().startswith("#")]
+            if calls and "sealed_clipboard()" not in text:
+                unsealed.append(module.name)
+        self.assertEqual(unsealed, [], "these call inject.paste() without sealing the "
+                                       "clipboard - see tests/clipboard_env.py")
