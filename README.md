@@ -5,7 +5,7 @@
 <h1 align="center">Flow</h1>
 
 <p align="center">
-  Local voice dictation for Windows, made for developers who speak English with an accent.
+  Local English dictation with a talk-to-it refine loop
 </p>
 
 <p align="center">
