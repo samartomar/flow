@@ -11,8 +11,10 @@ click that started the Send. The answer was Flow's own window, so P7 was decidin
 a Tk canvas and the guarantee above was never once exercised on the Send chip's path.
 """
 
+import ast
 import contextlib
 import sys
+import textwrap
 import threading
 import unittest
 from pathlib import Path
@@ -1103,6 +1105,66 @@ class TestTheClipboardSurvivesAFailedAllocation(unittest.TestCase):
         self.assertIn("close", calls, "the clipboard was left open for the process")
 
 
+def _dotted(node) -> str:
+    """`flow.inject` for the expression that spells it, "" for anything else."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return f"{base}.{node.attr}" if base else ""
+    return ""
+
+
+def _pastes(tree: ast.AST) -> bool:
+    """Whether a module can reach the real `flow.inject.paste`.
+
+    Through the module (`inject.paste`, `flow.inject.paste`, however it was imported) or
+    through the name imported from it (`from flow.inject import paste`, aliases
+    included), called or handed on as a value. Read as code, not text: a comment, a
+    docstring or a `mock.patch("flow.inject.paste")` string names it without reaching it.
+    """
+    modules, names = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "flow.inject":
+                    modules.add(alias.asname or "flow.inject")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "flow.inject":
+                names.update(a.asname or a.name for a in node.names if a.name == "paste")
+            elif node.module == "flow":
+                modules.update(a.asname or a.name for a in node.names if a.name == "inject")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == "paste" \
+                and _dotted(node.value) in modules:
+            return True
+    return False
+
+
+def _sealed(tree: ast.Module) -> bool:
+    """Whether a module starts `sealed_clipboard()` in `setUpModule` and stops it in
+    `tearDownModule` — the one shape that holds the seal for every test in it. Built and
+    never started, or named in a docstring, is not a seal."""
+    patchers = {target.id for node in tree.body if isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Call)
+                and _dotted(node.value.func).split(".")[-1] == "sealed_clipboard"
+                for target in node.targets if isinstance(target, ast.Name)}
+
+    def calls(function: str, method: str) -> bool:
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == function:
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) \
+                            and inner.func.attr == method \
+                            and _dotted(inner.func.value) in patchers:
+                        return True
+        return False
+
+    return calls("setUpModule", "start") and calls("tearDownModule", "stop")
+
+
 class TestNoTestHereReadsTheMachinesClipboard(unittest.TestCase):
     """The seal `clipboard_env.py` installs, asserted rather than assumed.
 
@@ -1131,10 +1193,57 @@ class TestNoTestHereReadsTheMachinesClipboard(unittest.TestCase):
         here = Path(__file__).resolve().parent
         unsealed = []
         for module in sorted(here.glob("test_*.py")):
-            text = module.read_text(encoding="utf-8")
-            calls = [line for line in text.splitlines()
-                     if "inject.paste(" in line and not line.lstrip().startswith("#")]
-            if calls and "sealed_clipboard()" not in text:
+            tree = ast.parse(module.read_text(encoding="utf-8"))
+            if _pastes(tree) and not _sealed(tree):
                 unsealed.append(module.name)
-        self.assertEqual(unsealed, [], "these call inject.paste() without sealing the "
-                                       "clipboard - see tests/clipboard_env.py")
+        self.assertEqual(unsealed, [], "these reach flow.inject.paste without starting "
+                                       "the clipboard seal - see tests/clipboard_env.py")
+
+
+class TestTheSealGuardReadsCodeNotText(unittest.TestCase):
+    """`_pastes` and `_sealed`, on the shapes a text search got wrong: the first version of
+    the guard grepped for `inject.paste(` and `sealed_clipboard()`, which missed the
+    `from flow.inject import paste` style this very module uses, and passed a seal that
+    was built and never started (the Codex review on #9)."""
+
+    def pastes(self, source: str) -> bool:
+        return _pastes(ast.parse(textwrap.dedent(source)))
+
+    def sealed(self, source: str) -> bool:
+        return _sealed(ast.parse(textwrap.dedent(source)))
+
+    def test_every_way_a_module_reaches_paste(self):
+        for source in ("import flow.inject as inject\ninject.paste('x')",
+                       "import flow.inject\nflow.inject.paste('x')",
+                       "from flow import inject\ninject.paste('x')",
+                       "from flow.inject import paste\npaste('x')",
+                       "from flow.inject import paste as put\nput('x')",
+                       "import flow.inject as inject\nsend = inject.paste",
+                       "def test():\n    from flow.inject import paste\n    paste('x')"):
+            with self.subTest(source=source):
+                self.assertTrue(self.pastes(source))
+
+    def test_and_the_ways_that_only_name_it(self):
+        for source in ('"""inject.paste() reads the clipboard"""',
+                       "# inject.paste('x')",
+                       "from unittest import mock\nmock.patch('flow.inject.paste')",
+                       "session.paste('x')",
+                       "from flow.inject import Target\nTarget('a', 'b')"):
+            with self.subTest(source=source):
+                self.assertFalse(self.pastes(source))
+
+    def test_a_seal_counts_only_started_and_stopped(self):
+        self.assertTrue(self.sealed("""
+            _CLIPBOARD = sealed_clipboard()
+            def setUpModule():
+                _CLIPBOARD.start()
+            def tearDownModule():
+                _CLIPBOARD.stop()
+            """))
+        for source in ('"""sealed_clipboard() is the seal"""',
+                       "_CLIPBOARD = sealed_clipboard()",
+                       "_CLIPBOARD = sealed_clipboard()\ndef setUpModule():\n    pass",
+                       "_CLIPBOARD = sealed_clipboard()\ndef setUpModule():\n"
+                       "    _CLIPBOARD.start()"):
+            with self.subTest(source=source):
+                self.assertFalse(self.sealed(source))
