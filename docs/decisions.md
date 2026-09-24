@@ -42,7 +42,7 @@ button becomes the command to run — or the release's download grows past what 
 engine is worth. Measured on v0.6.0, the first release to carry both engines: the zip went
 from v0.5.1's 132,563,945 B to 169,013,698 B. Piper accounts for 32.6 MB of that, and 18.9
 MB of it was one Hebrew model that no English voice uses. The build leaves that model out
-from the next release on, which should bring the zip to about 142 MB (architecture.md,
+from v0.6.1 on, and v0.6.1's zip measured 149,217,257 B, which is 142 MB (architecture.md,
 "Where a release comes from").
 
 ### 2026-09-23 — Flow gets an icon

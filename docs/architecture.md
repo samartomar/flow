@@ -2233,8 +2233,10 @@ unpacked and 32.6 MB zipped. The Microsoft voices' `edge_tts` is 0.1 MB, and onn
 was already there for faster-whisper. Of Piper's share, 20.3 MB unpacked and 18.9 MB
 zipped was one Hebrew diacritization model (`piper/hebrew/nakdimon.onnx`) that Piper opens
 only for a Hebrew voice. Every voice Flow offers is English, so from the release after
-v0.6.0 on the build leaves it out (`UNUSED_DATA` in `packaging/flow.spec`). The next zip
-should come to about 142 MB: v0.6.0's, less the model's 19,796,474 B. A local build without
+v0.6.0 on the build leaves it out (`UNUSED_DATA` in `packaging/flow.spec`). v0.6.1, the
+first release without it, measured 149,217,257 B zipped and 367,082,201 B unpacked across
+1,682 files: 142 MB and 350 MB, 191 B off the estimate of v0.6.0's zip less the model's
+19,796,474 B. Piper is 13.7 MB of that zip now. Before that release, a local build without
 it ran `flow.exe --help`, and Piper spoke English with the file deleted and its Hebrew
 modules never imported. Models are excluded; they download to the HF cache on first decode,
 exactly as a dev install does.

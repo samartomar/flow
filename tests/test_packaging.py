@@ -55,6 +55,7 @@ IN_ZIP_EXE = "flow\\flow.exe"
 #: PUBLISHING.md's one-liner replaces only the placeholder, so it would keep that number.
 PUBLISHED_SHA256 = {
     "0.6.0": "e6719983ceb956ca8e06f653b08c794c143714c4fb1674cf6033bffce3bf3978",
+    "0.6.1": "d2fa70e54318b8766b721b6465059f1a9d83888d3e35469c46ddf193782713d1",
 }
 
 
@@ -497,7 +498,7 @@ class TestTheScoopManifest(unittest.TestCase):
         self.assertIn("$version", url)
         self.assertNotIn(pyproject()["project"]["version"], url)
         # And the hash comes from the `.sha256` the workflow now uploads, so a version
-        # bump costs one small request instead of re-downloading 161 MB to learn a number.
+        # bump costs one small request instead of re-downloading 142 MB to learn a number.
         self.assertEqual(auto["hash"]["url"], "$url.sha256")
 
 
