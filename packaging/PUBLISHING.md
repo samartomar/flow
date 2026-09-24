@@ -13,7 +13,10 @@ The files are written and committed:
 | `packaging/winget/SamarTomar.Flow.installer.yaml` | winget installer manifest |
 | `packaging/winget/SamarTomar.Flow.locale.en-US.yaml` | winget en-US description |
 
-Nothing here has been submitted yet. **The manifests are ready to send whenever they carry
+**Submitted on 2026-09-24, as v0.6.1:** Scoop through Flow's own bucket,
+[`samartomar/scoop-flow`](https://github.com/samartomar/scoop-flow), and winget as
+[microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220).
+**The manifests are ready to send whenever they carry
 a real checksum** rather than the literal string `FILL-ME-SHA256`, which holds the place
 between a version bump and that version's release (step 5). The first was v0.6.0's,
 filled on 2026-09-23 from the `.sha256` the release published and checked against a
@@ -78,71 +81,62 @@ zip. Don't re-run it. Check that it took before submitting
 anything: `git diff` should show those three changed lines and no remaining
 `FILL-ME-SHA256`.
 
-## 2. Scoop: where the manifest lives
+## 2. Scoop: Flow's own bucket
 
-The manifest is finished; the question is which repository it sits in, and there are two
-answers with a real trade between them.
-
-**Your own bucket.** Create `samartomar/scoop-flow`, put the manifest at `bucket/flow.json`
-(Scoop looks in a `bucket/` subdirectory first, then the repository root), and push. Users
-then run:
+**Flow has its own bucket, [`samartomar/scoop-flow`](https://github.com/samartomar/scoop-flow)**,
+made on 2026-09-24 from Scoop's `BucketTemplate`, with this manifest at `bucket/flow.json`.
+Users run:
 
 ```powershell
 scoop bucket add flow https://github.com/samartomar/scoop-flow
 scoop install flow/flow
 ```
 
-**Or submit it to `ScoopInstaller/Extras`.** Fork it, add `bucket/flow.json`, open a pull
-request. Users then run `scoop install extras/flow` with no bucket to add, because
-`extras` is one of the buckets Scoop ships knowing about.
+`ScoopInstaller/Extras` was not asked, for two reasons found while submitting. Scoop's
+main bucket already has a `flow`, Facebook's JavaScript type checker, so Extras would
+need another name; that is also why the install above says `flow/flow`. And Extras takes a
+pull request only after its maintainers have approved a request issue. An own bucket
+ships the moment it is pushed. The price is that nobody finds it without the `scoop bucket
+add` line, which the guide and the bucket's README carry, and the `scoop-bucket` topic,
+which lets scoop.sh index it.
 
-The trade in one sentence: your own bucket ships the moment you push and nobody can tell
-you no, but nobody finds it either unless you hand them the `scoop bucket add` line, while
-`extras` is already on every Scoop install and costs you a review you do not control plus
-a manifest maintained to somebody else's house rules.
+The bucket keeps itself current. Its Excavator workflow runs every four hours: `checkver`
+watches this repository's releases, and `autoupdate` rewrites the URL for the new version
+and reads the hash from the `.sha256` asset rather than downloading the zip to compute
+it. So a release needs nothing done there. The bucket's own `.\bin\checkver.ps1 flow
+-Update` is the same run by hand.
 
-Either way the `checkver` and `autoupdate` blocks are what keep it current. `checkver`
-watches this repository's releases; `autoupdate` rewrites the URL for the new version and
-reads the hash out of the `.sha256` asset rather than downloading the zip to compute it.
-In your own bucket, that is driven by the Scoop bucket template's
-`.\bin\checkver.ps1 flow -Update`; in `extras`, their automation runs it for you.
+## 3. winget: submitted
 
-## 3. winget: submitting
+**v0.6.1 is [microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220)**,
+opened on 2026-09-24 from a fork under the owner's account, with the three files at
+`manifests/s/SamarTomar/Flow/0.6.1/`. Two things changed on the way in:
+- The moniker is `flow-dictation`. `flow` belongs to MadrasCheck.flow, and monikers are
+  unique. The command on PATH is still `flow`.
+- The manifests moved to schema 1.12.0, which the pull request template asks for.
 
-Both tools below open the pull request against `microsoft/winget-pkgs` for you, where the
-files belong at `manifests/s/SamarTomar/Flow/0.6.1/`. Both need a GitHub token with
-`public_repo`, and both will fork the repository under your account the first time.
+They were sent without this directory's explanatory comments, and `winget validate`
+passed on the exact files sent.
 
-**wingetcreate** takes the prepared directory as it stands:
+Microsoft's bot asks the owner to accept its CLA on the pull request, by replying
+`@microsoft-github-policy-service agree`. Validation then installs the package on a
+clean VM, and a first package from a new publisher is reviewed by a person.
 
-```powershell
-wingetcreate submit --token <github-token> packaging\winget
-```
-
-It validates the three files first, so a `FILL-ME-SHA256` that was not replaced fails here
-rather than in front of a reviewer. That failure is expected and is the whole reason the
-placeholder is a word rather than a plausible-looking string of hex.
-
-For the *next* version, the shorter path is to let it build the manifests from the release:
+**For the next version**, wingetcreate builds the update from the release. It needs a
+GitHub token with `public_repo`:
 
 ```powershell
 wingetcreate update SamarTomar.Flow --version 0.6.2 --urls https://github.com/samartomar/flow/releases/download/v0.6.2/flow-windows-x64.zip --submit --token <github-token>
 ```
 
-**komac** does the same job and computes the checksum itself, from the URL these prepared
-files name, so the placeholder never has to be filled on this path:
+komac does the same job and computes the checksum itself, from the URL:
 
 ```powershell
-komac update SamarTomar.Flow --version 0.6.1 --urls https://github.com/samartomar/flow/releases/download/v0.6.1/flow-windows-x64.zip --submit
+komac update SamarTomar.Flow --version 0.6.2 --urls https://github.com/samartomar/flow/releases/download/v0.6.2/flow-windows-x64.zip --submit
 ```
 
-To send the prepared files verbatim instead of regenerating them, komac takes the
-directory: `komac submit packaging\winget`. Its flags move between major versions more
-than wingetcreate's do, so check `komac --help` if it argues.
-
-After either submission the pull request runs Microsoft's validation, which installs the
-package on a clean VM. A portable zip has little to fail on, but the run is not instant
-and a first submission from a new publisher is reviewed by a person.
+Its flags move between major versions more than wingetcreate's do, so check
+`komac --help` if it argues.
 
 ## 4. The binary is unsigned, and that does not change here
 

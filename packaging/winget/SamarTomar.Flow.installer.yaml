@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 # What winget downloads and what it does with it.
 #
@@ -32,4 +32,4 @@ Installers:
     InstallerUrl: https://github.com/samartomar/flow/releases/download/v0.6.1/flow-windows-x64.zip
     InstallerSha256: d2fa70e54318b8766b721b6465059f1a9d83888d3e35469c46ddf193782713d1
 ManifestType: installer
-ManifestVersion: 1.6.0
+ManifestVersion: 1.12.0

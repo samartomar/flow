@@ -87,6 +87,19 @@ someone who actually needs it; when that happens, this paragraph is what changes
 is built by GitHub Actions from a tagged commit, and the workflow runs the full test
 suite before it builds — a release that skips the gate is not a release.
 
+### With Scoop
+
+```powershell
+scoop bucket add flow https://github.com/samartomar/scoop-flow
+scoop install flow/flow
+```
+
+The same zip, from Flow's own [bucket](https://github.com/samartomar/scoop-flow), checked
+against the SHA-256 each release publishes beside it. `scoop update flow` takes a newer
+one, which the bucket picks up within four hours of a release. Say `flow/flow`, with the
+bucket in front: Scoop's main bucket has a different `flow`, Facebook's JavaScript type
+checker.
+
 ### From a clone — to change it
 
 ```bash
