@@ -2213,10 +2213,12 @@ is the point — measured: of the four names the benchmarks actually use, `base.
 See NEEDS_YOU.md.
 
 **Where a release comes from.** `.github/workflows/release.yml` runs on a pushed `v*`
-tag only, and in this order: the tag's number must equal `pyproject.toml`'s or the run
-stops, then the full unit suite, then the PyInstaller build from `packaging/flow.spec`,
-then `flow.exe --help` against the bundle it just made, then the zip is attached to the
-release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
+tag only, and in this order. The tag's number must equal `pyproject.toml`'s or the run
+stops. A release whose `.sha256` is already out stops it too, because the Scoop and winget
+manifests pin that checksum and no rebuild is byte-identical. That applies from the release
+after v0.6.0 on, because v0.6.0's own job predates the check. Then comes the full unit
+suite, then the PyInstaller build from `packaging/flow.spec`, then `flow.exe --help`
+against the bundle it just made, then the zip is attached to the release with `gh`. So every published `flow-windows-x64.zip` has passed the same gate
 every commit passes, and a bundle that builds but cannot start does not reach a Releases
 page. Re-measured on the **v0.6.0** asset, downloaded from its release and read entry by
 entry (2026-09-23): **388,394,953 B unpacked across 1,683 files, 169,013,698 B zipped** —

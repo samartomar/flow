@@ -657,7 +657,7 @@ class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
         # the build: a checksum computed at the wrong moment is a checksum of nothing.
         zipped = self.step_running("Compress-Archive")
         hashed = self.step_running("Get-FileHash")
-        attached = self.step_running("gh release")
+        attached = self.step_running("gh release create")
         self.assertLess(zipped, hashed)
         self.assertLess(hashed, attached)
 
@@ -675,10 +675,23 @@ class TestTheReleasePublishesAChecksumBesideTheZip(unittest.TestCase):
         # Two branches, because a re-run of a failed release uploads to a release that
         # already exists. A checksum attached in only one of them is the branch nobody
         # tests until the day it runs.
-        run = self.runs[self.step_running("gh release")]
+        run = self.runs[self.step_running("gh release create")]
         self.assertIn("gh release upload", run)
         self.assertIn("gh release create", run)
         self.assertEqual(run.count(f"{ASSET}.sha256"), 2, run)
+
+    def test_a_release_whose_checksum_is_out_is_not_rebuilt(self):
+        # Scoop's and winget's manifests pin the published checksum, and no rebuild is
+        # byte-identical, so a re-run that `--clobber`ed the zip would break every install
+        # from them. A release with its `.sha256` out stops the run, before the gate and
+        # the build; one without (a failed run) still reaches the upload and is made whole.
+        guard = self.step_running("--json assets")
+        run = self.runs[guard]
+        self.assertIn(f"{ASSET}.sha256", run)
+        self.assertIn("throw", run)
+        self.assertIn("exit 0", run)  # a pwsh step ends with the last native exit code
+        self.assertLess(guard, self.step_running("unittest discover"))
+        self.assertLess(guard, self.step_running("pyinstaller --noconfirm"))
 
     def test_and_no_third_party_action_was_added_to_do_it(self):
         # The workflow's own argument, unchanged: the runner already has `gh` and

@@ -68,7 +68,10 @@ $h = (Get-FileHash .\flow-windows-x64.zip -Algorithm SHA256).Hash.ToLower(); Get
 ```
 
 Then add the release's line to `PUBLISHED_SHA256` in `tests/test_packaging.py`, which is
-what the suite checks the two manifests against. Check that it took before submitting
+what the suite checks the two manifests against. The number stays true because the release
+workflow refuses to rebuild a release whose `.sha256` is out ("A published release is not
+rebuilt"). The one exception is v0.6.0: its own job predates that step, so re-running it
+from the Actions page would still replace its zip. Don't re-run it. Check that it took before submitting
 anything: `git diff` should show those three changed lines and no remaining
 `FILL-ME-SHA256`.
 
