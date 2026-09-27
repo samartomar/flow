@@ -812,6 +812,11 @@ class CompactPill(tk.Tk):
     pinned = 0
     pinned_pid = 0
     pinned_name = ""
+    #: While pinned, the last window in front that was neither Flow's nor the
+    #: taskbar — the one you are reading in, which `paste_target` stops
+    #: following once pinned. A tray Paste last hands the foreground back to
+    #: it (`_pump_paste_last`), so `_hand` has somewhere to go back to.
+    _last_front = 0
     #: A Paste last waiting to happen, (text, since, restore), or None — see
     #: `_paste_last`. Class-level so the frame's pump finds a real None on a
     #: `__new__`-built fixture instead of recursing into `self.tk`.
@@ -2072,8 +2077,12 @@ class CompactPill(tk.Tk):
         text, since, restore = wait
         if restore:
             self._paste_last_wait = (text, time.perf_counter(), False)
-            if self.paste_target:
-                _user32.SetForegroundWindow(self.paste_target)
+            # Pinned, `paste_target` is the pinned window: handing it the
+            # foreground here would leave `_hand` nothing to hand back to.
+            back = (self._last_front or self.paste_target) if self.pinned \
+                else self.paste_target
+            if back:
+                _user32.SetForegroundWindow(back)
             return
         held = modifiers_held()
         if held and time.perf_counter() - since < PASTE_LAST_WAIT_SEC:
@@ -2115,6 +2124,7 @@ class CompactPill(tk.Tk):
                 # Pinned: the paste goes there wherever the foreground is, so the
                 # foreground does not get to move it, nor History's name for it.
                 self.paste_target = self.pinned
+                self._note_front()
                 return
             self._unpin(f"unpinned - {self.pinned_name} closed")
         hwnd = foreground_hwnd()
@@ -2131,6 +2141,18 @@ class CompactPill(tk.Tk):
                     return
                 self.session.target_app = target.process
             self.paste_target = hwnd
+
+    def _note_front(self) -> None:
+        """While pinned, keep `_last_front`: the window you are in, which the
+        target no longer follows. `_track_target`'s rules for it — never Flow's
+        own, never the taskbar a tray click leaves in front, and `classify`
+        asked on the edge only."""
+        hwnd = foreground_hwnd()
+        if not hwnd or hwnd == self._last_front or owned_by_flow(hwnd):
+            return
+        if hwnd != self.pinned and getattr(classify(hwnd), "is_shell", False) is True:
+            return
+        self._last_front = hwnd
 
     def _pump_press(self) -> None:
         """Turn a press that has outlived `PILL_HOLD_SEC` into an utterance.
@@ -2465,6 +2487,7 @@ class CompactPill(tk.Tk):
             return
         app = getattr(self.session, "target_app", "") or ""
         self.pinned, self.pinned_pid = hwnd, window_pid(hwnd)
+        self._last_front = hwnd  # the window you were in, not one from an older pin
         self.pinned_name = (app.rsplit(".", 1)[0] if isinstance(app, str) and app
                             else "that window")
         self._say(self._pin_line())
@@ -2496,24 +2519,35 @@ class CompactPill(tk.Tk):
         have had `PIN_SETTLE_SEC` to arrive, the foreground goes back to where
         you were, so you can keep reading while the words land somewhere else.
 
-        When Windows will not switch, nothing is pasted, and the words are
-        still what Paste last pastes.
+        When Windows will not switch, or the pinned window has closed since
+        the last frame, nothing is pasted, and the words are still what Paste
+        last pastes.
         """
         pinned = self.pinned
         if not pinned or window != pinned:
             return self.on_send(text, window, **extra) or ""
+        verb = "not changed" if extra.get("remove") else "not pasted"
+        if not window_alive(pinned, self.pinned_pid):
+            # Closed since the last frame looked, and its handle perhaps
+            # another window's already: the words were never meant for that one.
+            name = self.pinned_name
+            self._unpin()
+            return f"{verb}: {name} closed - the pin let it go"
         back = foreground_hwnd()
         if back != pinned and not bring_forward(pinned):
             if extra.get("remove"):
-                return f"not changed: Windows would not switch to {self.pinned_name}"
-            return (f"not pasted: Windows would not switch to {self.pinned_name}"
+                return f"{verb}: Windows would not switch to {self.pinned_name}"
+            return (f"{verb}: Windows would not switch to {self.pinned_name}"
                     " - click it, then Paste last")
         try:
             return self.on_send(text, window, **extra) or ""
         finally:
             if back and back != pinned and not owned_by_flow(back):
                 time.sleep(PIN_SETTLE_SEC)
-                bring_forward(back)
+                # Only while the pinned window still has it: one you picked
+                # while the keys were landing is newer than where you were.
+                if foreground_hwnd() == pinned:
+                    bring_forward(back)
 
     def _populate_menu(self, m) -> None:
         """The only menu the design allows (Workspace.dc.html), rebuilt on
