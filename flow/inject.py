@@ -825,3 +825,91 @@ def prepare(text: str, target: Target) -> tuple[str, str]:
             "paste is not bracketed here"
         )
     return payload, ""
+
+
+# -- a pinned window: bringing it to the front to paste ---------------------
+
+user32.IsWindow.argtypes = [wintypes.HWND]
+user32.IsWindow.restype = wintypes.BOOL
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.IsIconic.restype = wintypes.BOOL
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.BringWindowToTop.restype = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+user32.AttachThreadInput.restype = wintypes.BOOL
+kernel32.GetCurrentThreadId.argtypes = []
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+SW_RESTORE = 9
+
+#: How long `bring_forward` waits for Windows to finish the switch it asked for. The
+#: call returns before the switch is done, and a paste sent into that gap would land
+#: in the window being left.
+FORWARD_WAIT_SEC = 0.3
+
+
+def window_pid(hwnd) -> int:
+    """The process that owns `hwnd`, or 0. Never raises."""
+    try:
+        return _pid_of(hwnd) if hwnd else 0
+    except OSError:
+        return 0
+
+
+def window_alive(hwnd, pid: int = 0) -> bool:
+    """Whether `hwnd` is still a window, and still `pid`'s when a pid is given.
+
+    The pid is the half that matters for a window kept a long time: Windows hands a
+    closed window's handle out again, so a pinned Notepad closed and a browser tab
+    opened later can share a number. Never raises.
+    """
+    try:
+        return (bool(hwnd) and bool(user32.IsWindow(hwnd))
+                and (not pid or _pid_of(hwnd) == pid))
+    except OSError:
+        return False
+
+
+def bring_forward(hwnd, wait: float = FORWARD_WAIT_SEC) -> bool:
+    """Give `hwnd` the foreground, and say whether it has it once the switch settles.
+
+    Windows lets a process move the foreground only while it has the last input event,
+    and after a hotkey Flow does not: the talk keys went through a keyboard hook to
+    whatever window was in front. So the plain call comes first, for the case where
+    Windows allows it, and then the documented way round it: this thread shares the
+    input state of the thread in front for as long as one `SetForegroundWindow` takes,
+    which makes the call come from the foreground's side. Shared only for that long,
+    because a thread attached to one that stops responding stops with it.
+
+    A minimised window is restored first: one that stays minimised takes the foreground
+    and no keystrokes. Never raises; False means the paste has nowhere safe to go.
+    """
+    if not window_alive(hwnd):
+        return False
+    try:
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        if foreground_hwnd() != hwnd and not user32.SetForegroundWindow(hwnd):
+            front = foreground_hwnd()
+            ours = kernel32.GetCurrentThreadId()
+            theirs = user32.GetWindowThreadProcessId(front, None) if front else 0
+            joined = bool(theirs) and theirs != ours and bool(
+                user32.AttachThreadInput(ours, theirs, True))
+            try:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+            finally:
+                if joined:
+                    user32.AttachThreadInput(ours, theirs, False)
+    except OSError:
+        return False
+    end = time.monotonic() + wait
+    while foreground_hwnd() != hwnd:
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.01)
+    return True

@@ -169,7 +169,15 @@ class _NoHands:
 
 
 if sys.platform == "win32":
-    from .inject import classify, foreground_hwnd, owned_by_flow, take_warnings
+    from .inject import (
+        bring_forward,
+        classify,
+        foreground_hwnd,
+        owned_by_flow,
+        take_warnings,
+        window_alive,
+        window_pid,
+    )
 
     #: Its own handle rather than `ctypes.windll.user32`, which is a process-wide cached
     #: object: declaring `restype` on it would change the signature under `inject.py`
@@ -210,6 +218,17 @@ else:
 
     def take_warnings() -> list[str]:
         return []
+
+    # The compact pill's pin (flow/ui_compact.py) and its three questions, with the
+    # answers a body with no hands has: no window to keep, to find, or to bring forward.
+    def window_alive(_hwnd, _pid: int = 0) -> bool:
+        return False
+
+    def window_pid(_hwnd) -> int:
+        return 0
+
+    def bring_forward(_hwnd, _wait: float = 0.0) -> bool:
+        return False
 
     _user32 = _NoHands()
 

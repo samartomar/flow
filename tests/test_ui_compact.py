@@ -14,6 +14,7 @@ hold, release, draft, paste — and the gestures complete: the Workspace.dc.html
 menu, the palette, the setup box, and the tray the canvas said no to.
 """
 
+import contextlib
 import time
 import math
 import unittest
@@ -252,15 +253,19 @@ def meter_bars(p, colour) -> list:
 
     Rounded above their own cap diameter and squared below it (`_draw_face`,
     ui.py:5056's rule), so a bar is a polygon at some levels and a rectangle
-    at others — the bbox is the thing the geometry assertions are about."""
+    at others — the bbox is the thing the geometry assertions are about.
+    `BAR_W` wide, which is also what tells a bar from the pin's body, the one
+    other fill on the face that can wear the same grey."""
     out = [tuple(r[:4]) for r in p.canvas.rects if r[4] == colour]
     for coords, fill, _outline in p.canvas.polys:
         if fill != colour:
             continue
         # `create_polygon(pts, **kw)` — the fake keeps `*a`, so the flat point
-        # list arrives wrapped in a one-tuple.
+        # list arrives wrapped in a one-tuple, or loose when a glyph passes it.
         pts = coords[0] if len(coords) == 1 else coords
         xs, ys = pts[0::2], pts[1::2]
+        if max(xs) - min(xs) > uc.BAR_W + 1e-6:
+            continue
         out.append((min(xs), min(ys), max(xs), max(ys)))
     return sorted(out)
 
@@ -1979,6 +1984,409 @@ class TestLiteCopiesAndSaysSo(unittest.TestCase):
         p._frame()
         self.assertEqual(p._notice, 0)
         p.geometry.assert_called_with("120x34+100+400")
+
+
+
+def pin_items(p, y0: int = 0, w: int = uc.PILL_W) -> list:
+    """Every item drawn inside the pin's own box, as `(kind, colour, filled)` —
+    `mic_items`'s idea at the other end of the face. Nothing else fits in the
+    box: the meter ends before it, and the capsule, its rings and the highlight
+    all span the whole window."""
+    x1, y1 = w - uc.PILL_W + uc.PIN_X, y0 + uc.PIN_Y
+    x2, y2 = x1 + uc.PIN_SIZE, y1 + uc.PIN_SIZE
+
+    def inside(coords) -> bool:
+        pts = coords[0] if len(coords) == 1 else coords
+        xs, ys = list(pts)[0::2], list(pts)[1::2]
+        return (xs and min(xs) >= x1 - 1 and max(xs) <= x2 + 1
+                and min(ys) >= y1 - 1 and max(ys) <= y2 + 1)
+
+    out = [("arc", outline, bool(fill))
+           for a, fill, outline, _style, _w, *_r in p.canvas.arcs if inside(a)]
+    out += [("line", fill, False) for a, fill, _w in p.canvas.lines if inside(a)]
+    out += [("poly", outline or fill, bool(fill))
+            for coords, fill, outline in p.canvas.polys if inside(coords)]
+    return out
+
+
+class Desk:
+    """The foreground as the pin sees it: which window is in front, and what
+    `bring_forward` did to it. `refuse` is a Windows that will not switch."""
+
+    def __init__(self, front: int, refuse: bool = False) -> None:
+        self.front = front
+        self.refuse = refuse
+        self.forward: list[int] = []
+
+    def bring_forward(self, hwnd, *_a) -> bool:
+        self.forward.append(hwnd)
+        if self.refuse:
+            return False
+        self.front = hwnd
+        return True
+
+    def classify(self, hwnd):
+        # What `inject.classify` would name it, and never the taskbar. Faked
+        # rather than asked: a Mac has no `flow.inject` to ask (CI on #15).
+        return mock.Mock(process={NOTEPAD: "Notepad.exe", BROWSER: "msedge.exe"}.get(hwnd, ""),
+                         is_shell=False)
+
+    def patches(self, alive=True):
+        return (mock.patch.object(uc, "foreground_hwnd", side_effect=lambda: self.front),
+                mock.patch.object(uc, "classify", side_effect=self.classify),
+                mock.patch.object(uc, "bring_forward", side_effect=self.bring_forward),
+                mock.patch.object(uc, "window_alive", return_value=alive),
+                mock.patch.object(uc, "window_pid", return_value=7),
+                mock.patch.object(uc, "owned_by_flow", return_value=False),
+                mock.patch.object(uc.time, "sleep"))
+
+
+NOTEPAD, BROWSER = 0x42, 0x99
+TASKBAR, MAIL = 0x10, 0x77
+
+
+class TestThePinHoldsThePaste(unittest.TestCase):
+    """The pin at the capsule's right end (2026-09-24): tap it and every paste
+    goes to the window you were in, wherever you are, with the foreground
+    handed back after — so notes can go into Notepad while you read a site."""
+
+    def run_with(self, desk, alive=True):
+        stack = contextlib.ExitStack()
+        for patch in desk.patches(alive):
+            stack.enter_context(patch)
+        self.addCleanup(stack.close)
+
+    def tap(self, p, x, y=uc.PILL_H // 2):
+        p._on_press(mock.Mock(x_root=x, y_root=y, x=x, y=y))
+        p._on_release()
+
+    def pinned_pill(self, **attrs):
+        p = pill(**attrs)
+        p._say = mock.Mock()
+        p.paste_target = NOTEPAD
+        p.session.target_app = "Notepad.exe"
+        return p
+
+    # -- the drawing ---------------------------------------------------------
+
+    @staticmethod
+    def kinds(items) -> list:
+        return sorted(kind for kind, _c, _f in items)
+
+    def test_unpinned_the_pin_is_grey_and_slashed(self):
+        # Samar's pair (2026-09-24): a solid pushpin, and the same pin slashed
+        # for "not pinned" — cut into two pieces around its slash.
+        p = pill()
+        p._draw()
+        items = pin_items(p)
+        self.assertEqual({colour for _k, colour, _f in items}, {uc.DIM})
+        self.assertEqual(self.kinds(items), ["line", "line", "poly", "poly"])
+
+    def test_pinned_it_is_whole_and_wears_the_mics_tint(self):
+        for mode, tint in ((DICTATE, uc.TEXT), (REFINE, uc.REFINE_GOLD),
+                           (CONVERSE, uc.CARD_ACCENT)):
+            with self.subTest(mode=mode):
+                p = pill(mode=mode, pinned=NOTEPAD)
+                p._draw()
+                items = pin_items(p)
+                self.assertEqual({c for _k, c, _f in items}, {tint})
+                # One solid body and its needle: no slash, and filled.
+                self.assertEqual(self.kinds(items), ["line", "poly"])
+                self.assertTrue(any(filled for _k, _c, filled in items))
+
+    def test_the_pin_sits_clear_of_the_meter_and_inside_the_capsule(self):
+        last_bar = uc.METER_X + (uc.BARS - 1) * (uc.BAR_W + uc.BAR_GAP) + uc.BAR_W
+        # The needle's tip is the box's bottom-left corner; photographed at 94 it
+        # touched the last bar.
+        self.assertGreaterEqual(uc.PIN_X - last_bar, 3)
+        # The head is the box's right side, and the capsule's end is a half
+        # circle: both right-hand corners stay 3 px inside it, clear of the ring.
+        cx = cy = r = uc.PILL_H / 2
+        cx = uc.PILL_W - r
+        for y in (uc.PIN_Y, uc.PIN_Y + uc.PIN_SIZE):
+            with self.subTest(y=y):
+                self.assertLessEqual(math.hypot(uc.PIN_X + uc.PIN_SIZE - cx, y - cy), r - 3)
+        self.assertLess(uc.PILL_W - uc.PIN_HIT, uc.PIN_X)  # the target covers the glyph
+
+    def test_lite_draws_no_pin_and_its_end_still_cycles_the_mode(self):
+        # Lite has no windows to tell apart, so there is nothing to pin to.
+        p = pill(lite=True)
+        p._draw()
+        self.assertEqual(pin_items(p), [])
+        self.tap(p, uc.PILL_W - 6)
+        p.session.toggle_mode.assert_called_once_with()
+
+    # -- the strip ------------------------------------------------------------
+
+    def test_pinned_the_line_stays_under_the_pill(self):
+        # Asked for 2026-09-24: the strip's three seconds were too short for
+        # "where are my words going", which the pill cannot say by colour.
+        self.run_with(Desk(BROWSER))
+        p = panel_pill(mode=DICTATE, pinned=NOTEPAD, pinned_name="Notepad",
+                       _notice=1, _notice_text="pinned to Notepad - words go there "
+                                               "wherever you are")
+        for _ in range(uc.COPIED_FRAMES * 2):
+            p._frame()
+        self.assertTrue(p._notice)
+        self.assertEqual(p._notice_text,
+                         "pinned to Notepad - words go there wherever you are")
+
+    def test_and_comes_back_after_any_other_line_has_had_its_turn(self):
+        self.run_with(Desk(BROWSER))
+        p = panel_pill(mode=DICTATE, pinned=NOTEPAD, pinned_name="Notepad")
+        p._say("not pasted: the target window changed before Send")
+        for _ in range(uc.COPIED_FRAMES):
+            p._frame()
+        self.assertEqual(p._notice_text,
+                         "pinned to Notepad - words go there wherever you are")
+
+    def test_unpinned_the_strip_goes_as_it_always_did(self):
+        self.run_with(Desk(BROWSER))
+        p = panel_pill(mode=DICTATE, pinned=NOTEPAD, pinned_name="Notepad")
+        p._unpin("unpinned - words go where you are again")
+        for _ in range(uc.COPIED_FRAMES):
+            p._frame()
+        self.assertEqual(p._notice, 0)
+        self.assertEqual((p._shell_w, p._shell_h), (uc.PILL_W, uc.PILL_H))
+
+    def test_pinning_repaints_the_pill(self):
+        # A frame redraws only when `_draw_key` moves, so the pin's colour has to
+        # be in it: photographed without it, a pinned Type pill stayed grey.
+        p = pill()
+        before = p._draw_key()
+        p.pinned = NOTEPAD
+        self.assertNotEqual(p._draw_key(), before)
+
+    def test_the_foot_carries_the_pin_at_its_own_right_end(self):
+        p = pill(pinned=NOTEPAD)
+        p._draw_face(p.canvas, 200, uc.BARS_FOOT, uc.PANEL_W)
+        self.assertEqual({c for _k, c, _f in pin_items(p, 200, uc.PANEL_W)}, {uc.TEXT})
+
+    # -- the tap -------------------------------------------------------------
+
+    def test_a_tap_on_the_pin_pins_the_window_you_were_in(self):
+        self.run_with(Desk(NOTEPAD))
+        p = self.pinned_pill()
+        self.tap(p, uc.PILL_W - 10)
+        self.assertEqual((p.pinned, p.pinned_pid, p.pinned_name), (NOTEPAD, 7, "Notepad"))
+        self.assertEqual(p._last_front, NOTEPAD)  # not a window from an older pin
+        p.session.toggle_mode.assert_not_called()
+        p._say.assert_called_once_with(
+            "pinned to Notepad - words go there wherever you are")
+
+    def test_a_second_tap_lets_it_go(self):
+        self.run_with(Desk(NOTEPAD))
+        p = self.pinned_pill()
+        self.tap(p, uc.PILL_W - 10)
+        self.tap(p, uc.PILL_W - 10)
+        self.assertEqual((p.pinned, p.pinned_pid, p.pinned_name), (0, 0, ""))
+        p._say.assert_called_with("unpinned - words go where you are again")
+
+    def test_a_tap_anywhere_else_still_cycles_the_mode(self):
+        self.run_with(Desk(NOTEPAD))
+        p = self.pinned_pill()
+        self.tap(p, uc.METER_X)
+        p.session.toggle_mode.assert_called_once_with()
+        self.assertEqual(p.pinned, 0)
+
+    def test_with_no_window_yet_it_says_what_to_do(self):
+        self.run_with(Desk(0), alive=False)
+        p = self.pinned_pill()
+        p.paste_target = None
+        self.tap(p, uc.PILL_W - 10)
+        self.assertEqual(p.pinned, 0)
+        p._say.assert_called_once_with("click the window to pin first, then the pin")
+
+    def test_a_hold_on_the_pin_still_talks(self):
+        self.run_with(Desk(NOTEPAD))
+        p = self.pinned_pill()
+        x = uc.PILL_W - 10
+        with mock.patch.object(uc.time, "perf_counter", return_value=100.0):
+            p._on_press(mock.Mock(x_root=x, y_root=17, x=x, y=17))
+        with mock.patch.object(uc.time, "perf_counter",
+                               return_value=100.0 + uc.PILL_HOLD_SEC + 0.01):
+            p._pump_press()
+        p._on_release()
+        p.session.talk_start.assert_called_once_with()
+        self.assertEqual(p.pinned, 0)
+
+    def test_the_pin_is_hit_tested_in_design_pixels(self):
+        # At 200 % the pointer reports twice the design coordinates.
+        self.run_with(Desk(NOTEPAD))
+        p = self.pinned_pill(k=2.0)
+        self.tap(p, 2 * (uc.PILL_W - 10))
+        self.assertEqual(p.pinned, NOTEPAD)
+
+    # -- where the words go --------------------------------------------------
+
+    def test_while_pinned_the_target_stays_put_whatever_is_in_front(self):
+        self.run_with(Desk(BROWSER))
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad")
+        p._track_target()
+        self.assertEqual(p.paste_target, NOTEPAD)
+        self.assertEqual(p.session.target_app, "Notepad.exe")
+
+    def test_a_pinned_window_that_closed_lets_the_pin_go(self):
+        self.run_with(Desk(BROWSER), alive=False)
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad")
+        with mock.patch.object(uc, "classify",
+                               return_value=mock.Mock(process="msedge.exe", is_shell=False)):
+            p._track_target()
+        self.assertEqual(p.pinned, 0)
+        self.assertEqual(p.paste_target, BROWSER)  # back to following you
+        p._say.assert_called_once_with("unpinned - Notepad closed")
+
+    def test_a_pinned_paste_goes_there_and_hands_the_foreground_back(self):
+        desk = Desk(BROWSER)
+        self.run_with(desk)
+        seen = []
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad",
+                             on_send=lambda text, target=None, **kw:
+                             seen.append((text, target, desk.front)) or "")
+        self.assertEqual(p._hand("feedback on the pricing page", NOTEPAD), "")
+        # Pasted while Notepad was in front, which is what `inject.paste` asks.
+        self.assertEqual(seen, [("feedback on the pricing page", NOTEPAD, NOTEPAD)])
+        self.assertEqual(desk.forward, [NOTEPAD, BROWSER])
+        self.assertEqual(desk.front, BROWSER)
+
+    def test_and_waits_for_the_keys_to_land_before_it_leaves(self):
+        desk = Desk(BROWSER)
+        self.run_with(desk)
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad",
+                             on_send=lambda *_a, **_k: "")
+        p._hand("words", NOTEPAD)
+        uc.time.sleep.assert_called_once_with(uc.PIN_SETTLE_SEC)
+
+    def test_when_windows_will_not_switch_nothing_is_pasted(self):
+        desk = Desk(BROWSER, refuse=True)
+        self.run_with(desk)
+        on_send = mock.Mock(return_value="")
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad", on_send=on_send)
+        problem = p._hand("words", NOTEPAD)
+        on_send.assert_not_called()
+        self.assertEqual(problem, "not pasted: Windows would not switch to Notepad"
+                                  " - click it, then Paste last")
+        self.assertEqual(
+            p._hand("", NOTEPAD, remove="old"),
+            "not changed: Windows would not switch to Notepad")
+
+    def test_already_in_the_pinned_window_it_is_an_ordinary_paste(self):
+        desk = Desk(NOTEPAD)
+        self.run_with(desk)
+        on_send = mock.Mock(return_value="")
+        p = self.pinned_pill(pinned=NOTEPAD, on_send=on_send)
+        p._hand("words", NOTEPAD)
+        on_send.assert_called_once_with("words", NOTEPAD)
+        self.assertEqual(desk.forward, [])
+
+    def test_unpinned_nothing_about_a_paste_changes(self):
+        desk = Desk(BROWSER)
+        self.run_with(desk)
+        on_send = mock.Mock(return_value="")
+        p = self.pinned_pill(on_send=on_send)
+        p._hand("words", BROWSER, submit=True)
+        on_send.assert_called_once_with("words", BROWSER, submit=True)
+        self.assertEqual(desk.forward, [])
+
+    def test_a_pinned_window_gone_since_the_last_frame_gets_nothing(self):
+        # Codex on #15: between two frames the window can close and its handle
+        # go to another one, so the pid is asked again at the paste itself.
+        desk = Desk(BROWSER)
+        self.run_with(desk, alive=False)
+        on_send = mock.Mock(return_value="")
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_pid=7, pinned_name="Notepad",
+                             on_send=on_send)
+        self.assertEqual(p._hand("words", NOTEPAD),
+                         "not pasted: Notepad closed - the pin let it go")
+        uc.window_alive.assert_called_once_with(NOTEPAD, 7)
+        on_send.assert_not_called()
+        self.assertEqual(desk.forward, [])
+        self.assertEqual(p.pinned, 0)
+        p.pinned, p.pinned_name = NOTEPAD, "Notepad"
+        self.assertEqual(p._hand("", NOTEPAD, remove="old"),
+                         "not changed: Notepad closed - the pin let it go")
+
+    def test_a_window_you_picked_while_the_keys_landed_stays_in_front(self):
+        # Codex on #15: the hand-back waits PIN_SETTLE_SEC, and a window chosen
+        # in that time is newer than the one the paste started from.
+        desk = Desk(BROWSER)
+        self.run_with(desk)
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad",
+                             on_send=lambda *_a, **_k: "")
+        with mock.patch.object(uc.time, "sleep",
+                               side_effect=lambda _s: setattr(desk, "front", MAIL)):
+            p._hand("words", NOTEPAD)
+        self.assertEqual(desk.forward, [NOTEPAD])
+        self.assertEqual(desk.front, MAIL)
+
+    # -- the tray's Paste last -------------------------------------------------
+
+    def test_while_pinned_the_window_you_are_in_is_kept_apart(self):
+        desk = Desk(BROWSER)
+        self.run_with(desk)
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad")
+        p._track_target()
+        self.assertEqual((p.paste_target, p._last_front), (NOTEPAD, BROWSER))
+        desk.front = TASKBAR  # a tray click holds it
+        with mock.patch.object(uc, "classify",
+                               return_value=mock.Mock(process="explorer.exe", is_shell=True)):
+            p._track_target()
+        self.assertEqual(p._last_front, BROWSER)
+        desk.front = NOTEPAD
+        p._track_target()
+        self.assertEqual(p._last_front, NOTEPAD)
+
+    def test_the_trays_paste_last_hands_back_the_window_you_were_reading(self):
+        # Codex on #15: the tray's restore gave the foreground to `paste_target`,
+        # which pinned is the pinned window, so `_hand` saw nowhere to go back to
+        # and left Notepad in front of the site you were reading.
+        desk = Desk(BROWSER)
+        self.run_with(desk)
+        seen = []
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad",
+                             on_send=lambda text, target=None, **kw:
+                             seen.append((text, target, desk.front)) or "")
+        p.session.last_handed = "the last words"
+        p._track_target()
+        desk.front = TASKBAR  # the tray's menu has just had it
+        with mock.patch.object(uc, "modifiers_held", return_value=False), \
+                mock.patch.object(uc, "_user32") as user32:
+            user32.SetForegroundWindow.side_effect = lambda hwnd: setattr(desk, "front", hwnd)
+            p._paste_last(restore=True)
+            p._pump_paste_last()
+            user32.SetForegroundWindow.assert_called_once_with(BROWSER)
+            p._pump_paste_last()
+        self.assertEqual(seen, [("the last words", NOTEPAD, NOTEPAD)])
+        self.assertEqual(desk.forward, [NOTEPAD, BROWSER])
+        self.assertEqual(desk.front, BROWSER)
+
+    # -- what a spoken correction can still change ----------------------------
+
+    def watched(self, front, touched):
+        self.run_with(Desk(front))
+        p = self.pinned_pill(pinned=NOTEPAD, pinned_name="Notepad")
+        p.session.paste_run = mock.Mock(window=NOTEPAD)
+        p.hotkeys = mock.Mock(hook=mock.Mock(touched=touched))
+        p._clicked_off_pill = mock.Mock(return_value=True)
+        p._watch_paste_run()
+        return p
+
+    def test_typing_and_clicking_elsewhere_leave_a_pinned_paste_changeable(self):
+        # Reading a site: the keys and the clicks went to the browser, and
+        # Notepad's caret is still right after Flow's words.
+        p = self.watched(BROWSER, touched=True)
+        p.session.end_paste_run.assert_not_called()
+
+    def test_but_back_in_that_window_the_usual_rules_apply(self):
+        p = self.watched(NOTEPAD, touched=True)
+        p.session.end_paste_run.assert_called_once_with("you typed after it was pasted")
+
+    def test_the_pins_state_is_on_the_class(self):
+        # The RecursionError guard the other drawn attributes have: `_draw`
+        # reads `pinned` on a `__new__`-built fixture every frame.
+        for name in ("pinned", "pinned_pid", "pinned_name", "_last_front"):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(uc.CompactPill, name), name)
 
 
 if __name__ == "__main__":

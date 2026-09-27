@@ -103,12 +103,15 @@ from .ui import (
     _shell_window,
     _user32,
     _virtual_desktop,
+    bring_forward,
     classify,
     foreground_hwnd,
     modifiers_held,
     owned_by_flow,
     set_icon,
     toplevel_hwnd,
+    window_alive,
+    window_pid,
 )
 from .ui import PANEL_BOTTOM_OFFSET, bottom_centre
 from .ui import RING as SEAM
@@ -239,6 +242,24 @@ BARS = 15
 BAR_W = 2
 BAR_GAP = 2
 BAR_MAX_HALF = 7.0  # half-height at full level — 14 px of travel inside 34
+
+#: The pin (2026-09-24): a pushpin in the room the meter leaves at the capsule's right
+#: end. A tap on it pins the paste to the window you were in, and while it is pinned
+#: every paste goes to that window wherever you are, with the foreground handed back
+#: after. Slashed and grey while words go where you are; whole, in the mic's tint,
+#: while they go to one window (`glyphs.pin`, the shape Samar picked). 14 px, because
+#: at 12 the pushpin read as a smudge; `PIN_X` then sits it 9 px from the end, which
+#: keeps the needle's tip clear of the last meter bar and the head well inside the
+#: capsule's round end. `PIN_HIT` is how much of that end a tap counts as the pin
+#: rather than the mode; a hold there still talks.
+PIN_SIZE = 14
+PIN_X = PILL_W - 9 - PIN_SIZE
+PIN_Y = (PILL_H - PIN_SIZE) // 2
+PIN_HIT = 26
+#: How long a pinned window gets to take the paste's keystrokes before the foreground
+#: goes back. `SendInput` returns once they are queued, not once they have arrived, and
+#: Windows hands queued keys to whichever window is in front when it gets to them.
+PIN_SETTLE_SEC = 0.12
 
 #: The docked panel (Refine.dc.html, Ask.dc.html): 400 px of band *above* the
 #: pill, which becomes its foot — one window, one seam, the foot still
@@ -784,6 +805,18 @@ class CompactPill(tk.Tk):
     #: also the Lite answer: no target-window awareness, and `paste()` asks
     #: the foreground instead.
     paste_target = None
+    #: The window the pin holds every paste to, 0 while nothing is pinned — see
+    #: `_toggle_pin`. Its process id with it, because Windows hands a closed
+    #: window's handle out again, and the name the strip gives it. Class-level
+    #: for `_draw`, which reads `pinned` on every frame.
+    pinned = 0
+    pinned_pid = 0
+    pinned_name = ""
+    #: While pinned, the last window in front that was neither Flow's nor the
+    #: taskbar — the one you are reading in, which `paste_target` stops
+    #: following once pinned. A tray Paste last hands the foreground back to
+    #: it (`_pump_paste_last`), so `_hand` has somewhere to go back to.
+    _last_front = 0
     #: A Paste last waiting to happen, (text, since, restore), or None — see
     #: `_paste_last`. Class-level so the frame's pump finds a real None on a
     #: `__new__`-built fixture instead of recursing into `self.tk`.
@@ -1286,9 +1319,14 @@ class CompactPill(tk.Tk):
             self._recover -= 1
         if self._notice:
             self._notice -= 1
-            if not self._notice:
+            if not self._notice and not self.pinned:
                 # The notice strip's time is up; the window is 120×34 again.
                 self._sync_shell()
+        if self.pinned and not self._notice:
+            # Pinned, the strip is never empty (asked for 2026-09-24): where the
+            # words are going is the one thing the pill cannot show by colour, so
+            # its line stays, and comes back whenever another has had its turn.
+            self._say(self._pin_line())
         # Only when the picture has changed. `_draw` rebuilds every item and
         # composites a whole bitmap, and an idle pill asked it to draw the
         # same pill thirty times a second — see `_draw_key` for the numbers
@@ -1870,7 +1908,7 @@ class CompactPill(tk.Tk):
                 if isinstance(joined, str):
                     text = joined
                 hook.touched = False
-            problem = self.on_send(text, self.paste_target, **extra) or ""
+            problem = self._hand(text, self.paste_target, **extra)
             if problem:
                 self._flash = FLASH_FRAMES
             self._handed_over(text, problem,
@@ -1937,6 +1975,14 @@ class CompactPill(tk.Tk):
         run = getattr(self.session, "paste_run", None)
         if run is None:
             return
+        if self._pinned_away(run.window):
+            # Pinned, the words went to a window you are not in, and nothing typed
+            # or clicked anywhere else reaches its caret: keys go to the window in
+            # front, and a click on it brings it there. So only that window coming
+            # to the front can move it, and then the rules below apply as they do
+            # to any paste. Flow's own switch to paste is not seen here: `_hand`
+            # gives the foreground back before the frame runs again.
+            return
         hook = self._key_hook()
         if hook is None:
             why = "that paste can't be changed"
@@ -1978,16 +2024,20 @@ class CompactPill(tk.Tk):
         if fix is None:
             return
         hook = self._key_hook()
+        # A pinned paste you are away from is not asked the next two questions:
+        # nothing typed elsewhere reached it, and it is not meant to be in front
+        # (`_watch_paste_run`). `_hand` brings it there to make the change.
+        away = self._pinned_away(fix.run.window)
         if held:
             problem = "not changed: the keys stayed down - say it again"
-        elif hook is None or getattr(hook, "touched", True) is not False:
+        elif not away and (hook is None or getattr(hook, "touched", True) is not False):
             problem = "not changed: you typed after Flow pasted"
-        elif foreground_hwnd() != fix.run.window:
+        elif not away and foreground_hwnd() != fix.run.window:
             problem = "not changed: that window is not in front any more"
         elif not self.on_send:
             problem = "not changed: nothing here can type into another window"
         else:
-            problem = self.on_send(fix.insert, fix.run.window, remove=fix.remove) or ""
+            problem = self._hand(fix.insert, fix.run.window, remove=fix.remove)
         # `inject` says "not changed: ..." for a change that did not go in, and a
         # warning for one that did — "your clipboard held an image" — which is said
         # and is not a failure.
@@ -2027,8 +2077,12 @@ class CompactPill(tk.Tk):
         text, since, restore = wait
         if restore:
             self._paste_last_wait = (text, time.perf_counter(), False)
-            if self.paste_target:
-                _user32.SetForegroundWindow(self.paste_target)
+            # Pinned, `paste_target` is the pinned window: handing it the
+            # foreground here would leave `_hand` nothing to hand back to.
+            back = (self._last_front or self.paste_target) if self.pinned \
+                else self.paste_target
+            if back:
+                _user32.SetForegroundWindow(back)
             return
         held = modifiers_held()
         if held and time.perf_counter() - since < PASTE_LAST_WAIT_SEC:
@@ -2038,7 +2092,7 @@ class CompactPill(tk.Tk):
             self._say("Paste last waited for the keys to come up - press it again")
             return
         if self.on_send:
-            problem = self.on_send(text, self.paste_target) or ""
+            problem = self._hand(text, self.paste_target)
         else:
             problem = _copy_to_clipboard(self, text)
             if not problem:
@@ -2065,6 +2119,14 @@ class CompactPill(tk.Tk):
         """
         if self.lite:
             return
+        if self.pinned:
+            if window_alive(self.pinned, self.pinned_pid):
+                # Pinned: the paste goes there wherever the foreground is, so the
+                # foreground does not get to move it, nor History's name for it.
+                self.paste_target = self.pinned
+                self._note_front()
+                return
+            self._unpin(f"unpinned - {self.pinned_name} closed")
         hwnd = foreground_hwnd()
         if hwnd and not owned_by_flow(hwnd):
             if hwnd != self.paste_target:
@@ -2079,6 +2141,18 @@ class CompactPill(tk.Tk):
                     return
                 self.session.target_app = target.process
             self.paste_target = hwnd
+
+    def _note_front(self) -> None:
+        """While pinned, keep `_last_front`: the window you are in, which the
+        target no longer follows. `_track_target`'s rules for it — never Flow's
+        own, never the taskbar a tray click leaves in front, and `classify`
+        asked on the edge only."""
+        hwnd = foreground_hwnd()
+        if not hwnd or hwnd == self._last_front or owned_by_flow(hwnd):
+            return
+        if hwnd != self.pinned and getattr(classify(hwnd), "is_shell", False) is True:
+            return
+        self._last_front = hwnd
 
     def _pump_press(self) -> None:
         """Turn a press that has outlived `PILL_HOLD_SEC` into an utterance.
@@ -2376,7 +2450,104 @@ class CompactPill(tk.Tk):
         if talking:
             self._talk_end(send=True)
         elif not moved:
-            self._cycle_mode()
+            if self._on_pin():
+                self._toggle_pin()
+            else:
+                self._cycle_mode()
+
+    # -- the pin ---------------------------------------------------------------
+
+    def _on_pin(self) -> bool:
+        """Whether the press that just ended was on the pin: the last
+        `PIN_HIT` design pixels of the capsule, or of the foot when the panel
+        is open. From where the press went down, which is where the eye was;
+        a release drifts."""
+        if self.lite:
+            return False
+        x, y = (self.design(v) for v in self._drag)
+        top = self._panel_h() if self._panel_open else 0
+        w = PANEL_W if self._panel_open else PILL_W
+        return w - PIN_HIT <= x < w and top <= y < top + PILL_H
+
+    def _toggle_pin(self) -> None:
+        """Pin the paste to the window you were in, or let it go.
+
+        The window is `paste_target`, the last one in front that was not
+        Flow's: the pill never takes the foreground, so the window you were in
+        when you tapped is still the one the tap means. While pinned, every
+        paste goes there whatever is in front (`_hand`), and the strip says
+        once where that is, because the pill has no words to say it later.
+        """
+        if self.pinned:
+            self._unpin("unpinned - words go where you are again")
+            return
+        hwnd = self.paste_target
+        if not window_alive(hwnd):
+            self._say("click the window to pin first, then the pin")
+            return
+        app = getattr(self.session, "target_app", "") or ""
+        self.pinned, self.pinned_pid = hwnd, window_pid(hwnd)
+        self._last_front = hwnd  # the window you were in, not one from an older pin
+        self.pinned_name = (app.rsplit(".", 1)[0] if isinstance(app, str) and app
+                            else "that window")
+        self._say(self._pin_line())
+
+    def _pin_line(self) -> str:
+        """What the strip says for as long as the pin holds a window."""
+        return f"pinned to {self.pinned_name} - words go there wherever you are"
+
+    def _unpin(self, why: str = "") -> None:
+        """Let the pin go, and say why when there is something to say."""
+        self.pinned, self.pinned_pid, self.pinned_name = 0, 0, ""
+        if why:
+            self._say(why)
+
+    def _pinned_away(self, window) -> bool:
+        """Whether `window` is the pinned one and you are somewhere else, so
+        that what you type and click cannot have reached it."""
+        return (bool(self.pinned) and window == self.pinned
+                and foreground_hwnd() != self.pinned)
+
+    def _hand(self, text: str, window, **extra) -> str:
+        """`on_send`, by way of the pinned window when the paste is aimed at it.
+
+        `inject.paste` refuses when the window in front is not the one it was
+        told about, which is the rule that keeps a paste from landing where
+        nobody meant it. A pinned paste keeps the rule rather than getting
+        round it: the pinned window is brought to the front first, so the
+        paste goes into a window that is in front. Then, after the keystrokes
+        have had `PIN_SETTLE_SEC` to arrive, the foreground goes back to where
+        you were, so you can keep reading while the words land somewhere else.
+
+        When Windows will not switch, or the pinned window has closed since
+        the last frame, nothing is pasted, and the words are still what Paste
+        last pastes.
+        """
+        pinned = self.pinned
+        if not pinned or window != pinned:
+            return self.on_send(text, window, **extra) or ""
+        verb = "not changed" if extra.get("remove") else "not pasted"
+        if not window_alive(pinned, self.pinned_pid):
+            # Closed since the last frame looked, and its handle perhaps
+            # another window's already: the words were never meant for that one.
+            name = self.pinned_name
+            self._unpin()
+            return f"{verb}: {name} closed - the pin let it go"
+        back = foreground_hwnd()
+        if back != pinned and not bring_forward(pinned):
+            if extra.get("remove"):
+                return f"{verb}: Windows would not switch to {self.pinned_name}"
+            return (f"{verb}: Windows would not switch to {self.pinned_name}"
+                    " - click it, then Paste last")
+        try:
+            return self.on_send(text, window, **extra) or ""
+        finally:
+            if back and back != pinned and not owned_by_flow(back):
+                time.sleep(PIN_SETTLE_SEC)
+                # Only while the pinned window still has it: one you picked
+                # while the keys were landing is newer than where you were.
+                if foreground_hwnd() == pinned:
+                    bring_forward(back)
 
     def _populate_menu(self, m) -> None:
         """The only menu the design allows (Workspace.dc.html), rebuilt on
@@ -3139,7 +3310,8 @@ class CompactPill(tk.Tk):
           frame that changes.
 
           `_draw_face` reads the level, rounded to the thousandth here — a
-          thousandth of `BAR_MAX_HALF` is seven thousandths of a pixel of bar.
+          thousandth of `BAR_MAX_HALF` is seven thousandths of a pixel of bar —
+          and whether the pin holds a window, which is its colour.
 
           `_draw_panel` reads `_panel_mode` (through `_spec`), the session's
           `workspace`, both heard fields, the result and `_panel_failed`;
@@ -3156,7 +3328,7 @@ class CompactPill(tk.Tk):
         session = self.session
         return (
             self._ring_colour(), self._glyph_tint(),
-            round(self._meter_level, 3), self._mic_gone,
+            round(self._meter_level, 3), self._mic_gone, bool(self.pinned),
             bool(self._flash), bool(self._recover),
             self._panel_open, self._panel_mode,
             self._panel_heard, self._panel_heard_final,
@@ -3327,11 +3499,13 @@ class CompactPill(tk.Tk):
         _capsule_ring(c, inset, y0 + inset, PANEL_W - inset,
                       y0 + PILL_H - inset, RING_OUTER,
                       square_top=True, top=False)
-        self._draw_face(c, y0, BARS_FOOT)
+        self._draw_face(c, y0, BARS_FOOT, PANEL_W)
 
-    def _draw_face(self, c, y0: int, bars: int) -> None:
-        """The mic and the meter, shared by the capsule (y0=0, 15 bars) and
-        the foot (y0=PANEL_H, 40): one face, two window sizes."""
+    def _draw_face(self, c, y0: int, bars: int, w: int = PILL_W) -> None:
+        """The mic, the meter and the pin, shared by the capsule (y0=0, 15
+        bars, 120 wide) and the foot (y0=PANEL_H, 40 bars, 400 wide): one
+        face, two window sizes. The pin keeps its place at the right end of
+        either."""
         tint = self._glyph_tint()
         # The mic, stroked not filled — gen.py's `mic()`: a capsule, an arc
         # cradle, a stem, in a 14×18 viewBox with round caps, and the slashed
@@ -3363,6 +3537,15 @@ class CompactPill(tk.Tk):
             else:
                 c.create_rectangle(x, mid - h, x + BAR_W, mid + h,
                                    fill=shade, outline="")
+        if not self.lite:
+            # Last, so the mic stays the face's first drawing (test_glyphs holds
+            # the two surfaces' mics to one). Not in Lite: with no windows to tell
+            # apart there is nothing to pin to. Unpinned, the pin is slashed and
+            # grey, a state that claims nothing; pinned, it is whole and wears
+            # the mic's tint, because the paste is going somewhere you are not.
+            glyphs.pin(c, w - PILL_W + PIN_X, y0 + PIN_Y,
+                       tint if self.pinned else DIM, slash=not self.pinned,
+                       size=PIN_SIZE)
 
     def _draw_panel(self, c, layout: _Layout) -> None:
         """The band above the foot: strip, heard, result, footer.
