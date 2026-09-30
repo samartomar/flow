@@ -553,18 +553,32 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         # *Everything else* is compared, which is what makes this a trap rather than a
         # restatement: a field added tomorrow to hold a virtual key would be compared by
         # default and would fail here.
-        identity = {"presses", "_proc", "_thread", "_ready", "_hook", "_tid"}
+        #
+        # `_hold` is the state machine `Chord` delegates to (`flow/hold.py`), and it is
+        # the *second* object whose fields could in principle carry a keystroke — which
+        # is exactly the case this test exists to catch, so it is not excused with the
+        # rest. The second loop below compares its fields instead.
+        identity = {"presses", "_proc", "_thread", "_ready", "_hook", "_tid", "_hold"}
         states = []
+        machines = []
         for vk in (VK_A, VK_D, VK_LEFT):
             chord, _presses = _chord()
             keys = _Keyboard(chord).down(VK_LCONTROL, VK_LWIN)
             keys.down(vk).up(vk)
             states.append(vars(chord).copy())
+            machines.append(vars(chord._hold).copy())
         for other in states[1:]:
             for name, value in states[0].items():
                 if name in identity:
                     continue
                 with self.subTest(field=name):
+                    self.assertEqual(value, other[name])
+        # The machine's own fields, every one of them, because "Flow cannot tell `a`
+        # from `d`" is now a claim about *this* object and not only about the one it
+        # sits in. A key recorded inside the machine would fail here.
+        for other in machines[1:]:
+            for name, value in machines[0].items():
+                with self.subTest(machine_field=name):
                     self.assertEqual(value, other[name])
 
     def test_what_it_keeps_about_a_rejected_key_is_one_boolean(self):
@@ -584,14 +598,21 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         # rather than a second one — and `touched` is one boolean of `_other`'s shape,
         # "a key Flow did not send went down since the surface last looked", which a
         # correction after a Type paste needs and which cannot say which key.
+        #
+        # Argued again for `_hold`, the extracted chord state machine. It holds the five
+        # fields above and adds none of its own: `down` and `extra` are keyed by
+        # *modifier name*, and a modifier's identity is already the key `_CHORD_VKS`
+        # was looked up by, so naming one says nothing that was not already said. Every
+        # other key on the board is still the single boolean `other`, which the test
+        # above now proves about the machine as well as about this object.
         chord, _presses = _chord()
         _Keyboard(chord).down(VK_LCONTROL, VK_LWIN, VK_A).up(VK_A, VK_LWIN, VK_LCONTROL)
         self.assertEqual(
             set(vars(chord)),
             {"presses", "mods", "action", "warm_action", "end_action", "break_action",
              "toggle_action", "gesture", "installed", "_down", "_other", "_extra",
-             "_armed", "_talking", "riders", "touched", "_hook", "_tid", "_ready",
-             "_proc", "_thread"},
+             "_armed", "_talking", "_hold", "riders", "touched", "_hook", "_tid",
+             "_ready", "_proc", "_thread"},
         )
 
 

@@ -16,6 +16,18 @@ import queue
 import threading
 from ctypes import wintypes
 
+from .hold import (
+    BREAK,
+    IDLE,
+    MOD_DOWN,
+    MOD_UP,
+    OTHER_DOWN,
+    OTHER_UP,
+    START,
+    STOP,
+    TOGGLE,
+    Hold,
+)
 from .inject import INPUT_MARK
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -810,6 +822,23 @@ class Chord:
         #: has to know whether there is anything to end. Nothing about it is a keystroke:
         #: it is the same single boolean `_other` is, and for the same reason.
         self._talking = False
+        #: The extracted state machine, and the reason this `_feed` below is short.
+        #:
+        #: **`Chord` keeps its own booleans and `Hold` keeps its own, deliberately.**
+        #: `test_chord.py` asserts the exact field set of this object
+        #: (`test_the_only_fields_it_has_are_the_ones_the_state_machine_needs`) and
+        #: pokes `_down`, `_armed` and `_talking` directly from three modules, so
+        #: making those properties over a `Hold` would have meant rewriting the suite
+        #: that is holding the extraction honest. Instead `Hold` is fed and its *verdict*
+        #: is read, and the booleans here are written to agree — `_sync` is the one
+        #: place that does it, so there is no second copy of a rule anywhere.
+        #:
+        #: What this buys is the thing `hold.py` exists for: every decision below now
+        #: has a copy that runs on the macOS leg, and this equivalence test is what says
+        #: the two agree. What it costs is one attribute per chord and one dict copy per
+        #: key event on the input path, which is why `_sync` writes only the three
+        #: fields that changed rather than re-deriving them.
+        self._hold = Hold(self.mods, gesture=self.gesture)
         #: Chords fed by *this* chord's hook rather than one of their own — Ask's
         #: ctrl+alt+win riding the talk chord's ctrl+win. One hook on the input path of
         #: every keystroke is the cost R16 was narrowed to accept; two would be twice the
@@ -858,22 +887,6 @@ class Chord:
     def describe(self) -> str:
         return describe_chord(self.mods)
 
-    def _break(self) -> None:
-        """A third key landed mid-hold, so Windows meant something else. Stop capturing.
-
-        Under the old toggle gesture this needed no code at all: nothing had started, so
-        refusing to fire was the whole behaviour. Push-to-talk opens the microphone on
-        the press-down, which means `ctrl+win+d` now has something to undo — and it must
-        be undone here, on the keystroke, rather than left for the release. Holding
-        `ctrl+win` through three desktop switches would otherwise record all of them.
-
-        Once per hold. `_talking` is cleared first, so the arrow key that follows the
-        first arrow key does not put a second break on the queue.
-        """
-        if self._talking:
-            self._talking = False
-            self.presses.put(self.break_action)
-
     def _on_key(self, code, wparam, lparam):
         # Negative `code` means "pass it on without looking", and it is not advice.
         if code >= 0:
@@ -887,60 +900,79 @@ class Chord:
                 self.touched = True
         return user32.CallNextHookEx(self._hook, code, wparam, lparam)
 
+    #: The effect words `hold.Hold` answers with, and what this chord puts for each.
+    #:
+    #: `START` is the only one that is not one put: the warm and then the capture, in
+    #: that order, and the order is the feature — a model load must never land inside the
+    #: first sentence. `LATCH` and `DOUBLE_TAP` are absent because this chord registers
+    #: no callback for them, so `Hold` cannot emit either: a machine with no
+    #: `on_latch` has nothing to latch *into*. The tap machinery is `hold.py`'s and it
+    #: is tested there; putting a word on this queue that nothing drains would be the
+    #: kind of promise the rest of this file refuses to make.
+    _EFFECTS = {START: None, STOP: "end_action", BREAK: "break_action",
+                TOGGLE: "toggle_action", IDLE: None}
+
     def _feed(self, wparam, vk) -> None:
-        """One key event, against this chord's shape. The whole state machine.
+        """One key event, against this chord's shape.
 
         Split from `_on_key` so a rider can be fed by its host's hook: the hook is the
         OS's business and there is one of it; the shape is each chord's own.
+
+        **This is a translation, not a state machine.** Every decision below used to be
+        spelled out here, and every one of them is now `hold.Hold`'s, which is a module
+        that imports nothing but the standard library — so the part of Flow that is
+        genuinely hard to get right is finally the part the macOS leg can run. What is
+        left is the part that genuinely is Win32: which virtual key is which modifier,
+        and what the words on the queue are called.
         """
+        # Mirrored rather than read from the machine, because `self.gesture` is a plain
+        # attribute precisely so that switching it at runtime is one assignment that
+        # cannot fail — `Chord`'s own docstring argues for it. A property over
+        # `Hold.gesture` would put a setter on the input path of every keystroke, and
+        # would move `gesture` out of `vars(self)`, which is a field this file's own
+        # suite holds to an exact list.
+        self._hold.gesture = self.gesture
+
         name = _CHORD_VKS.get(vk)
         if wparam == WM_KEYDOWN or wparam == WM_SYSKEYDOWN:
-            if name is not None and name in self._down:
-                self._down[name] = True
-                if not self._armed and all(self._down.values()):
-                    # A fresh hold starts a fresh verdict: whatever was *pressed*
-                    # before the chord formed is not this chord's business. What is
-                    # still *held* is — see `_extra`.
-                    self._armed = True
-                    self._other = any(self._extra.values())
-                    if not self._other and self.gesture == "hold":
-                        # The hold has begun. Two puts and no other work — the rule
-                        # about what this callback may do on the input path of every
-                        # keystroke on the machine is unchanged.
-                        #
-                        # Nothing at all in the toggle gesture: it has no press-down
-                        # half, and warming on one would load the models every time
-                        # somebody reached for `ctrl+win+arrow`.
-                        self._talking = True
-                        self.presses.put(self.warm_action)
-                        self.presses.put(self.action)
-            elif name is not None:
-                # A modifier this chord does not want. Held state, not history.
-                self._extra[name] = True
-                self._other = True
-                self._break()
-            else:
-                # Every other key on the keyboard. One boolean, and nothing else
-                # about it is read, kept or compared.
-                self._other = True
-                self._break()
+            # A modifier this chord wants, one it does not, and every other key on the
+            # board, are three different events. `Hold` decides which is which from the
+            # name alone — it is given the same `_CHORD_VKS` answer Win32 gave — so this
+            # side does not have to know which of the three it is looking at.
+            event = OTHER_DOWN if name is None else MOD_DOWN
+            effects = self._hold.feed(event, name)
         elif wparam == WM_KEYUP or wparam == WM_SYSKEYUP:
-            if name is not None and name in self._down:
-                self._down[name] = False
-                if self._armed:
-                    self._armed = False
-                    if self._talking:
-                        self._talking = False
-                        self.presses.put(self.end_action)
-                    elif self.gesture == "toggle" and not self._other:
-                        # The original gesture, unchanged: a clean release — both
-                        # held, nothing else touched — flips hands-free listening.
-                        # `_other` is the same rule doing the same job it always
-                        # did, which is why `ctrl+win+d` still makes a desktop and
-                        # starts nothing.
-                        self.presses.put(self.toggle_action)
-            elif name is not None:
-                self._extra[name] = False
+            event = OTHER_UP if name is None else MOD_UP
+            effects = self._hold.feed(event, name)
+        else:
+            effects = ()
+
+        self._sync()
+        for effect in effects:
+            if effect == START:
+                self.presses.put(self.warm_action)
+                self.presses.put(self.action)
+                continue
+            action = self._EFFECTS.get(effect, "")
+            if action:
+                self.presses.put(getattr(self, action))
+
+    def _sync(self) -> None:
+        """Copy the machine's verdict into the fields this file and its suite read.
+
+        The three booleans and the two dicts, in place, every event. `Chord` holds them
+        because the suite, `test_talk.py` and `test_ask_chord.py` all read `_down`,
+        `_armed` and `_talking` directly, and a property over the machine would have
+        meant rewriting the tests that hold the extraction honest. The duplication is
+        deliberate and it is confined to this one function: `Hold` decides, this copies,
+        and there is no third place where a rule is written down.
+        """
+        machine = self._hold
+        self._down = machine.down
+        self._extra = machine.extra
+        self._armed = machine.armed
+        self._other = machine.other
+        self._talking = machine.talking
 
     def _run(self) -> None:
         self._tid = kernel_thread_id()
