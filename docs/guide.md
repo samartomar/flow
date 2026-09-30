@@ -522,6 +522,22 @@ The toggle is the only one of the two that survives a long thought with pauses i
 phone call you are transcribing, or hands that would rather not hold two keys down for a
 minute. It is remembered in `profile.json` as `"gesture": "toggle"`.
 
+**A quick tap now starts hands-free listening too.** Under the push-to-talk gesture, a
+press shorter than **400 ms** is a tap rather than a hold, and it flips hands-free
+listening instead of sending a sentence — so reaching for Flow without saying anything is
+one short press, and a second one stops it. A longer press is still a sentence and is
+still sent on the release, so nothing about dictating changed.
+
+Two taps within 500 ms are read as one gesture rather than two, so a double tap is not a
+toggle and an immediate untoggle. Those numbers were measured on real hardware and are
+not this machine's: they come from [Fireflies Talk](https://fireflies.ai/talk), which
+ships the same gesture. If a tap does not feel like a tap to you, the simplest answer is
+the toggle gesture above, whose press may take as long as you like.
+
+A tap is still shorter than the audio takes to be recognised, so it opens and closes the
+microphone, and the silence it catches is discarded rather than pasted — measured against
+real recordings, where a tap produced no draft at all in 8 of 8 cases.
+
 The rest of this section describes the hold, which is the default.
 
 The press-down does two things at once: it opens the microphone, and it starts loading

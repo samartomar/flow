@@ -51,7 +51,24 @@ def _pair(gesture="hold"):
     talk = Chord(presses, frozenset({"ctrl", "win"}), gesture=gesture)
     ask = Chord(presses, frozenset({"ctrl", "alt", "win"}), gesture="hold", **ASK_ACTIONS)
     talk.riders.append(ask)
+    # A rider is a second chord with its own machine and its own clock, and `_Keyboard`
+    # only stubs the one it was handed. Without this the ask chord asked a real
+    # `time.monotonic()` while the talk chord was being driven from a fixed clock — two
+    # sides of one gesture on two different clocks, which is precisely the confusion
+    # the chord extraction exists to remove.
+    ask.clock = talk.clock = _fixed_clock()
     return talk, ask, presses
+
+
+def _fixed_clock(t=1000.0):
+    """A clock that stands still, so a press is a hold and not a tap.
+
+    These tests are about *which* chord answers a given set of keys, not about how long
+    a hand rested on them. Standing still is therefore the right clock here: it makes
+    every press a sentence, which is what each of these assertions means, and it keeps
+    the two chords in agreement because they are handed the same one.
+    """
+    return lambda: t
 
 
 class TestAOneHookFeedsBothChords(unittest.TestCase):

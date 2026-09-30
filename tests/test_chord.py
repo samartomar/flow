@@ -33,6 +33,7 @@ machine that is actually hard, and asks nothing of the developer's keyboard.
 
 import ctypes
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -48,6 +49,7 @@ if sys.platform != "win32":  # pragma: no cover - the CI legs that are not Windo
 
 import queue  # noqa: E402
 
+import flow.hold as hold  # noqa: E402
 import flow.hotkey as hotkey  # noqa: E402
 from flow.hotkey import (  # noqa: E402
     CHORD_NAMES,
@@ -79,14 +81,34 @@ class _Keyboard:
     convenience: the callback runs with `self._hook` still None, because nothing here
     installs a hook, and a NULL hook handle is exactly the argument a stub should not
     have to care about.
+
+    **`hold_ms` is how long a press lasts, and it defaults to a sentence.** A tap is
+    now a real gesture — under `hold.TAP_MAX_MS` it latches hands-free listening rather
+    than dictating — so a harness that fed every event at the same instant was making
+    every press in this file a 0 ms tap. The default is therefore a hold long enough to
+    be one, which is what nearly every test here means by "a hold", and a test that is
+    *about* the tap says so with `hold_ms=`.
     """
 
-    def __init__(self, chord, extra=0):
+    #: Long enough to be a sentence on any clock, and short enough that a test
+    #: exercising many of them does not care.
+    DEFAULT_HOLD_MS = 900
+
+    def __init__(self, chord, extra=0, hold_ms=None, gap_ms=0):
         self.chord = chord
         self.passed = []
         #: What each event carries in `dwExtraInfo`: 0 is a person's key, and
         #: `inject.INPUT_MARK` is one Flow sent itself.
         self.extra = extra
+        self.hold_ms = self.DEFAULT_HOLD_MS if hold_ms is None else hold_ms
+        #: The quiet between one release and the next press, for the double-tap
+        #: questions. Non-zero only when a test is about timing.
+        self.gap_ms = gap_ms
+        #: Advances by `hold_ms` across each down and back by the gap on each up, so a
+        #: press genuinely spans time rather than sharing one reading. This is the part
+        #: a stub gets wrong by default: a clock that returns a constant makes every
+        #: hold zero-length, and a zero-length hold is a tap.
+        self._t = 1000.0
 
     def _event(self, message, vk):
         # The real `KBDLLHOOKSTRUCT`, by address, because `_on_key` casts the LPARAM and
@@ -97,10 +119,25 @@ class _Keyboard:
         # Held for the duration of the call: a struct that went out of scope here would
         # be freed under the pointer the callback is about to read.
         self._block = block
+        if message in (WM_KEYDOWN, WM_SYSKEYDOWN):
+            reading = self._t
+        else:
+            self._t += self.hold_ms / 1000.0
+            reading = self._t
+        # **Every chord this hook feeds gets the same reading.** A rider is a second
+        # chord with its own machine and its own clock, and one host gesture is one
+        # moment in time — handing the rider a real `time.monotonic()` while the host
+        # ran on a stub made a two-key press look like a hold to one and a tap to the
+        # other. Assigned per event rather than once, so the riders built after this
+        # harness was made still share the clock.
+        for chord in [self.chord, *self.chord.riders]:
+            chord.clock = lambda reading=reading: reading
         with mock.patch.object(hotkey, "user32") as fake:
             fake.CallNextHookEx.return_value = 0
             self.chord._on_key(0, message, ctypes.addressof(block))
             self.passed.append((message, vk, fake.CallNextHookEx.called))
+        if message in (WM_KEYUP, WM_SYSKEYUP):
+            self._t += self.gap_ms / 1000.0
 
     def down(self, *vks):
         for vk in vks:
@@ -425,6 +462,122 @@ class TestBBBothGesturesShipAndNeitherReplacesTheOther(unittest.TestCase):
         self.assertEqual(tuple(ui.GESTURE_LABELS), hotkey.GESTURES)
 
 
+class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
+    """Design 1: the tap, from Fireflies Talk, made reachable.
+
+    A tap under `hold.TAP_MAX_MS` latches hands-free listening; anything longer is still
+    a sentence that is sent on the release. The numbers are Fireflies' — 400 ms tap,
+    500 ms double-tap window — measured on real hardware, which is what `flow/hold.py`
+    says they are, and the boundary is what this class exists to pin.
+
+    **The `hold_ms` argument is the whole test.** Before the tap existed, every press in
+    this file was fed at the same instant, and a clock that stands still makes each one
+    exactly that — so `_Keyboard` now takes the press length and the tests below say
+    which side of the boundary they mean.
+    """
+
+    @staticmethod
+    def _one_tap(presses, hold_ms, gap_ms=0):
+        """One press of the chord, held for `hold_ms`, on a fresh chord."""
+        chord = Chord(presses, frozenset({"ctrl", "win"}))
+        keys = _Keyboard(chord, hold_ms=hold_ms, gap_ms=gap_ms)
+        keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
+        return chord, keys
+
+    def test_a_tap_under_the_window_latches_hands_free(self):
+        _chord_obj, presses = _chord()
+        self._one_tap(presses, hold.TAP_MAX_MS - 50)
+        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end", "toggle"])
+
+    def test_a_press_past_the_window_is_still_just_a_sentence(self):
+        # The half that has to keep working. A tap is an addition; a person dictating
+        # three seconds of sentence has not asked for hands-free listening.
+        _chord_obj, presses = _chord()
+        self._one_tap(presses, hold.TAP_MAX_MS + 500)
+        self.assertEqual(_fired(presses), HOLD)
+
+    def test_the_boundary_is_the_number_and_not_the_intent(self):
+        # Either side of `TAP_MAX_MS`, from a machine, is the only honest place to say
+        # where the line is — an arbitrary pair of durations would pass whether or not
+        # the constant were the one in use.
+        for ms, is_tap in ((hold.TAP_MAX_MS - 1, True),
+                           (hold.TAP_MAX_MS, True),
+                           (hold.TAP_MAX_MS + 1, False)):
+            with self.subTest(ms=ms):
+                _chord_obj, presses = _chord()
+                self._one_tap(presses, ms)
+                self.assertEqual("toggle" in _fired(presses), is_tap)
+
+    def test_the_tap_puts_its_word_after_the_draft_is_closed(self):
+        # Ordering, and it is not incidental. The callback `Hold` offers runs *inside*
+        # `feed`, so dispatching the tap through it put `toggle` on the queue between
+        # `talk` and `talk-end` — the draft closed by the wrong word. The returned
+        # effect is dispatched instead, and this is the test that says so.
+        _chord_obj, presses = _chord()
+        self._one_tap(presses, 100)
+        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end", "toggle"])
+    def test_a_double_tap_is_one_gesture_and_not_a_toggle_and_an_untoggle(self):
+        # Fireflies' second gesture. `Hold` swallows the first tap of a pair and reports
+        # the second as the double tap, so wiring both would flip hands-free on and
+        # straight back off — the gesture would be a no-op, which is worse than absent
+        # because it looks like it worked.
+        _chord_obj, presses = _chord()
+        _chord_obj, keys = self._one_tap(presses, 100, gap_ms=120)
+        first = _fired(presses)
+        keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
+        second = _fired(presses)
+        self.assertEqual(first.count("toggle") + second.count("toggle"), 1)
+
+    def test_two_taps_further_apart_than_the_window_are_two_gestures(self):
+        # Outside `DOUBLE_TAP_WINDOW_MS` there is no pair, so the second tap is its own
+        # latch: hands-free on, and the next one off.
+        _chord_obj, presses = _chord()
+        _chord_obj, keys = self._one_tap(presses, 100,
+                                         gap_ms=hold.DOUBLE_TAP_WINDOW_MS + 200)
+        keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
+        self.assertEqual(_fired(presses).count("toggle"), 2)
+
+    def test_three_quick_taps_are_three_utterances(self):
+        # `test_holding_it_three_times_is_three_utterances` says three presses are three
+        # utterances. That must still hold when the presses are taps: the point of the
+        # tap is what it *adds*, not that it replaces the capture.
+        _chord_obj, presses = _chord()
+        _chord_obj, keys = self._one_tap(presses, 100, gap_ms=200)
+        for _ in range(2):
+            keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
+        self.assertEqual(_fired(presses).count("talk-end"), 3)
+
+    def test_a_toggle_gesture_is_untouched_by_the_tap(self):
+        # The other gesture has no press-down half and never had a duration question.
+        # A short press already emits its one word; the tap must not add a second.
+        presses = queue.Queue()
+        chord = Chord(presses, frozenset({"ctrl", "win"}), gesture="toggle")
+        _Keyboard(chord, hold_ms=100).down(VK_LCONTROL, VK_LWIN).up(
+            VK_LWIN, VK_LCONTROL)
+        self.assertEqual(_fired(presses), ["toggle"])
+
+    def test_a_tap_that_catches_a_third_key_is_a_break_and_latches_nothing(self):
+        # `ctrl+win+d` makes a desktop. It must not also turn hands-free listening on,
+        # or every desktop switch would be an arming gesture.
+        presses = queue.Queue()
+        keys = _Keyboard(Chord(presses, frozenset({"ctrl", "win"})), hold_ms=100)
+        keys.down(VK_LCONTROL, VK_LWIN)
+        keys.down(VK_D)
+        keys.up(VK_D).up(VK_LWIN, VK_LCONTROL)
+        self.assertNotIn("toggle", _fired(presses))
+
+    def test_the_default_clock_is_a_real_one(self):
+        # Stated on its own so the property cannot be lost by accident, and because it is
+        # the bug that shipped green: `Hold` timestamps the *press*, so a clock read
+        # only on the release left `armed_at` at 0.0 and a real 150 ms tap computed as
+        # four hours. Every test in this file stubs the clock, so none of them could see
+        # that. A chord built in production has to be asking a clock that moves.
+        chord = Chord(queue.Queue(), frozenset({"ctrl", "win"}))
+        self.assertIs(chord.clock, time.monotonic)
+
+
+
+
 class TestCWindowsOwnsCtrlWinToo(unittest.TestCase):
     """`ctrl+win` is a Windows prefix, and push-to-talk changed what that costs.
 
@@ -558,7 +711,8 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         # the *second* object whose fields could in principle carry a keystroke — which
         # is exactly the case this test exists to catch, so it is not excused with the
         # rest. The second loop below compares its fields instead.
-        identity = {"presses", "_proc", "_thread", "_ready", "_hook", "_tid", "_hold"}
+        identity = {"presses", "_proc", "_thread", "_ready", "_hook", "_tid", "_hold",
+                    "clock"}
         states = []
         machines = []
         for vk in (VK_A, VK_D, VK_LEFT):
@@ -610,9 +764,9 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         self.assertEqual(
             set(vars(chord)),
             {"presses", "mods", "action", "warm_action", "end_action", "break_action",
-             "toggle_action", "gesture", "installed", "_down", "_other", "_extra",
-             "_armed", "_talking", "_hold", "riders", "touched", "_hook", "_tid",
-             "_ready", "_proc", "_thread"},
+             "toggle_action", "gesture", "clock", "installed", "_down", "_other",
+             "_extra", "_armed", "_talking", "_hold", "riders", "touched", "_hook",
+             "_tid", "_ready", "_proc", "_thread"},
         )
 
 

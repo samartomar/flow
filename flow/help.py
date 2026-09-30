@@ -97,8 +97,11 @@ _ACTIONS = {
     "toggle": "start and stop listening",
     # The chord's word, and the one row here that describes a *hold* rather than a
     # press. Spelled out to the end — release and all — because the half people get
-    # wrong is that there is no second shortcut to send.
-    "talk": "hold to talk, release to send",
+    # wrong is that there is no second shortcut to send. A press shorter than
+    # `hold.TAP_MAX_MS` is a tap and flips hands-free listening instead, which is
+    # `flow/hold.py`'s half of the same chord and is not a second row: it is the same
+    # two keys, and the gesture sheet's job is to name the shortcut, not its timing.
+    "talk": "hold to talk, release to send; tap to start hands-free",
     # Ask's own chord (decisions.md 2026-09-23, "Ask's own hold"): a question
     # whatever mode the pill is in, which is the whole of what it adds.
     "ask": "hold to ask, whatever the mode; release to send it",

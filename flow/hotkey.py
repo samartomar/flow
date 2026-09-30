@@ -14,11 +14,13 @@ from __future__ import annotations
 import ctypes
 import queue
 import threading
+import time
 from ctypes import wintypes
 
 from .hold import (
     BREAK,
     IDLE,
+    LATCH,
     MOD_DOWN,
     MOD_UP,
     OTHER_DOWN,
@@ -651,6 +653,19 @@ CHORD_NAMES = ("ctrl", "alt", "shift", "win")
 #: that cannot hold two keys down for a minute. Shipping only the hold, which is what
 #: this did first, took the second case away from everybody who had it.
 GESTURES = ("hold", "toggle")
+
+#: **A no-op, and its being a function is the whole point.**
+#:
+#: `hold.Hold` skips its entire tap path when neither callback is set — measured at
+#: `hold.py:348`, which returns early rather than doing the arithmetic. The callbacks are
+#: therefore the switch: setting one is what turns the tap question on.
+#:
+#: So this function does nothing at all, on purpose. The word the tap puts on the queue is
+#: dispatched from the effect `Hold` *returns*, not from here — because the callback runs
+#: inside `feed`, before the caller has dispatched anything, and wiring it here put
+#: `toggle` between `talk` and `talk-end`. The function exists to be not-`None`.
+def _tap_enabled() -> None:
+    """Present so `Hold` will do the tap arithmetic. Deliberately does nothing."""
 GESTURE_DEFAULT = "hold"
 
 #: Said when the hook cannot be installed. Shaped like the `hotkey` lines beside it,
@@ -790,6 +805,14 @@ class Chord:
         #: starts capture and a toggle flips it, and calling both "talk" would make the
         #: dispatch table lie about one of them.
         self.toggle_action = toggle_action
+        #: Read on every feed, because a tap is a *duration* and a duration is a clock.
+        #:
+        #: `hold.Hold` is handed this rather than reading `time` itself, for the reason
+        #: its own `feed` documents: a test drives the timing rules without sleeping.
+        #: One function attribute rather than a `time.monotonic()` call on the input
+        #: path of every keystroke on the machine, which is the rule the rest of this
+        #: file is written around — a swap here is what makes that possible.
+        self.clock = time.monotonic
         self.installed = False
         #: Which of `mods` are down right now. A set is the honest shape and the wrong
         #: one here — this is touched on the input path of every keystroke on the
@@ -838,7 +861,8 @@ class Chord:
         #: the two agree. What it costs is one attribute per chord and one dict copy per
         #: key event on the input path, which is why `_sync` writes only the three
         #: fields that changed rather than re-deriving them.
-        self._hold = Hold(self.mods, gesture=self.gesture)
+        self._hold = Hold(self.mods, gesture=self.gesture,
+                          on_latch=_tap_enabled)
         #: Chords fed by *this* chord's hook rather than one of their own — Ask's
         #: ctrl+alt+win riding the talk chord's ctrl+win. One hook on the input path of
         #: every keystroke is the cost R16 was narrowed to accept; two would be twice the
@@ -904,13 +928,28 @@ class Chord:
     #:
     #: `START` is the only one that is not one put: the warm and then the capture, in
     #: that order, and the order is the feature — a model load must never land inside the
-    #: first sentence. `LATCH` and `DOUBLE_TAP` are absent because this chord registers
-    #: no callback for them, so `Hold` cannot emit either: a machine with no
-    #: `on_latch` has nothing to latch *into*. The tap machinery is `hold.py`'s and it
-    #: is tested there; putting a word on this queue that nothing drains would be the
-    #: kind of promise the rest of this file refuses to make.
+    #: first sentence.
+    #:
+    #: **`LATCH` is `toggle_action`, and that is the whole of design 1.** A tap under
+    #: `TAP_MAX_MS` is the fast way into hands-free listening, and a longer press is
+    #: still a sentence that is sent on the release. Both put the same word, because both
+    #: mean the same thing to the session; what separates them is the duration, and the
+    #: duration is `Hold`'s business rather than this table's.
+    #:
+    #: **`DOUBLE_TAP` is deliberately absent, though Fireflies ships it.** Two taps
+    #: inside the window are *one* gesture there — the pair is the double tap and the
+    #: first tap is swallowed, which is what `Hold` already does, since its
+    #: `on_double_tap` path returns rather than also latching. Wiring it here as a second
+    #: `toggle_action` would flip hands-free listening on at the first tap and off at the
+    #: second, making a double tap a no-op: the exact failure this table must not have.
+    #: One gesture, one word, one put.
+    #:
+    #: **Dispatched from the effect, not from `on_latch`.** Measured, not assumed: the
+    #: callback runs *inside* `Hold.feed`, so wiring tap through it put `toggle` on the
+    #: queue between `talk` and `talk-end` — the draft closed by the wrong word. The
+    #: returned effect is the only ordering that can be right, and `Hold` returns it.
     _EFFECTS = {START: None, STOP: "end_action", BREAK: "break_action",
-                TOGGLE: "toggle_action", IDLE: None}
+                TOGGLE: "toggle_action", LATCH: "toggle_action", IDLE: None}
 
     def _feed(self, wparam, vk) -> None:
         """One key event, against this chord's shape.
@@ -932,18 +971,34 @@ class Chord:
         # would move `gesture` out of `vars(self)`, which is a field this file's own
         # suite holds to an exact list.
         self._hold.gesture = self.gesture
-
         name = _CHORD_VKS.get(vk)
+        #: **A reading for every event except the release of an ordinary key.**
+        #:
+        #: The bug this replaces is worth recording, because it was green in every test
+        #: and dead on every machine: `Hold` timestamps the *press* (`armed_at`), and a
+        #: clock read only on the release left `armed_at` at 0.0, so a real 150 ms tap
+        #: computed as `time.monotonic()` — about four hours — and no tap could ever
+        #: latch. A test whose fake clock also starts at zero cannot see it, which is
+        #: the whole argument for handing `Hold` the clock rather than letting it read
+        #: one: the seam is where a test has to be honest about where time starts.
+        #:
+        #: `OTHER_UP` is the one event that provably needs no reading — `Hold` answers it
+        #: `(IDLE,)` without writing a timestamp or comparing one — so ordinary typing,
+        #: which is most of the input path, skips the call. Everything else is read,
+        #: because everything else can stamp a time or judge one.
+        up = wparam == WM_KEYUP or wparam == WM_SYSKEYUP
+        now = 0.0 if (up and name is None) else self.clock()
+
         if wparam == WM_KEYDOWN or wparam == WM_SYSKEYDOWN:
             # A modifier this chord wants, one it does not, and every other key on the
             # board, are three different events. `Hold` decides which is which from the
             # name alone — it is given the same `_CHORD_VKS` answer Win32 gave — so this
             # side does not have to know which of the three it is looking at.
             event = OTHER_DOWN if name is None else MOD_DOWN
-            effects = self._hold.feed(event, name)
-        elif wparam == WM_KEYUP or wparam == WM_SYSKEYUP:
+            effects = self._hold.feed(event, name, now)
+        elif up:
             event = OTHER_UP if name is None else MOD_UP
-            effects = self._hold.feed(event, name)
+            effects = self._hold.feed(event, name, now)
         else:
             effects = ()
 

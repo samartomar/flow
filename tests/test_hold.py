@@ -543,6 +543,16 @@ class TestHItAgreesWithTheChordItWasTakenFrom(unittest.TestCase):
         presses = queue_mod.Queue()
         chord = chord_cls(presses, frozenset({"ctrl", "win"}), gesture=gesture)
 
+        #: **The same readings both sides get, and the reason this comparison is
+        #: still a comparison.** `Chord` now asks a clock for a tap verdict, so a
+        #: harness that gave it none made every press zero-length — every press a tap —
+        #: and the two sides would have been compared on different questions. A fixed
+        #: clock is the honest minimum here: the sequences below are about *which*
+        #: modifiers went down in which order, not how long a hand rested on them, and
+        #: `test_chord.py` covers duration with a clock that moves.
+        tick = iter([1000.0] * (len(down) + len(up)))
+        chord.clock = lambda: next(tick)
+
         def event(message, vk):
             block = hotkey._KBDLLHOOKSTRUCT(vkCode=vk, scanCode=0, flags=0,
                                             time=0, dwExtraInfo=0)
@@ -564,25 +574,36 @@ class TestHItAgreesWithTheChordItWasTakenFrom(unittest.TestCase):
         that matters. Handing Shift over as an ordinary key would make the machine
         treat ctrl+shift+win as ctrl+win-plus-a-stray, and the two sides would then
         disagree about a case where they in fact agree.
+
+        **Configured exactly as `Chord` configures its own machine**, because the
+        comparison is only worth anything if the two are the same machine. `on_latch` is
+        set for the same reason `Chord` sets it — it is the switch that turns the tap
+        arithmetic on — and the same fixed clock is passed to every event, so neither
+        side sees a hold the other calls a tap. Left unset, the bare `Hold` returned
+        early from `_ended` and the two disagreed about a case where they agree.
         """
-        m = Hold(gesture=gesture)
+        m = Hold(gesture=gesture, on_latch=lambda: None)
         words: list = []
 
         #: `Chord` puts the warm before the capture; `START` is that one moment, and
         #: the machine says it once rather than inventing a word for the pair.
+        #: `LATCH` is in this table because design 1 maps it to `toggle_action` — a tap
+        #: is the fast way into hands-free listening, and `Chord` sends it there.
         expand = {START: ("warm", "talk"), STOP: ("talk-end",), BREAK: ("talk-break",),
-                  TOGGLE: ("toggle",)}
+                  TOGGLE: ("toggle",), LATCH: ("toggle",)}
 
         def put(effects):
             for effect in effects:
                 if effect != IDLE:
                     words.extend(expand.get(effect, (effect,)))
 
+        #: The same standing clock `_through_chord` hands the real `Chord`.
+        now = 1000.0
         for vk in down:
             name = names.get(vk)
-            put(m.feed(MOD_DOWN if name else OTHER_DOWN, name))
+            put(m.feed(MOD_DOWN if name else OTHER_DOWN, name, now))
         for vk in up:
             name = names.get(vk)
-            put(m.feed(MOD_UP if name else OTHER_UP, name))
+            put(m.feed(MOD_UP if name else OTHER_UP, name, now))
         return words
 
