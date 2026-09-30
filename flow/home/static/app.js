@@ -294,12 +294,12 @@
     const partialNow = (now.find((m) => m.in_use.includes("partial")) || {}).name || sp.automatic.partial;
     const rows = sp.models.map((m) => {
       const tags = [];
-      if (m.in_use.includes("final")) tags.push('<span class="badge green">your words</span>');
-      if (m.in_use.includes("partial")) tags.push('<span class="badge green">live preview</span>');
+      if (m.in_use.includes("final")) tags.push('<span class="badge green"><span class="dot green"></span>in use: pasted words</span>');
+      if (m.in_use.includes("partial")) tags.push('<span class="badge green"><span class="dot green"></span>in use: live preview</span>');
       if (m.name === sp.automatic.final && !m.in_use.includes("final")) tags.push('<span class="badge">recommended here</span>');
       if (m.blind) tags.push(`<span class="badge amber">${icon("warn", C.amber, 12)}invents words in silence</span>`);
       return `<div class="tr ${m.in_use.length ? "using" : ""}" role="row">
-        <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
+        <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.maker ? `<span class="fine">Whisper, by ${esc(m.maker)}</span>` : ""}${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
         <div role="cell" class="note">${esc(m.size_text)}</div>
         <div role="cell">${m.errors != null ? `<span class="${m.name === "large-v3" ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
         <div role="cell" class="note">${m.speed != null ? m.speed + "&times;" : "&ndash;"}</div>
@@ -370,6 +370,7 @@
       <section class="card">
         <div class="row wrap"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}
           <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="models">${icon("folder", C.text, 14)}Open folder</button></div>
+        <p class="note">These are Whisper models from OpenAI, and smaller distil- copies of them from Hugging Face. They run on this PC; nothing you say is sent to either.</p>
         <p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>
         ${sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>

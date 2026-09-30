@@ -57,6 +57,11 @@ class Spec:
     #: No usable `no_speech_prob`, so it invents words in silence.
     blind: bool = False
 
+    @property
+    def maker(self) -> str:
+        """Who made the weights: Whisper is OpenAI's, the distil- copies are Hugging Face's."""
+        return "Hugging Face" if self.name.startswith("distil-") else "OpenAI"
+
 
 _MB = 1024 * 1024
 
@@ -371,6 +376,7 @@ class ModelManager:
                 "errors": spec.errors,
                 "speed": round(1 / spec.rtf, 1) if spec.rtf else None,
                 "note": spec.note,
+                "maker": spec.maker,
                 "blind": spec.blind,
                 "in_use": using.get(spec.name, []),
                 "download": job.public() if job is not None and
@@ -382,7 +388,7 @@ class ModelManager:
             if name not in BY_NAME:
                 rows.append({"name": name, "catalog": False, "size": None, "size_text": "",
                              "installed": True,
-                             "errors": None, "speed": None, "note": "chosen outside Flow Home",
+                             "errors": None, "speed": None, "note": "chosen outside Flow Home", "maker": "",
                              "blind": False, "in_use": roles, "download": None})
         from ..asr import default_models
 
