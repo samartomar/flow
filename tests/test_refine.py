@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flow.__main__ as main_mod  # noqa: E402
-from cli_env import fake_exe, no_off_path_installs  # noqa: E402
+from cli_env import cli_on_path, fake_exe, no_off_path_installs  # noqa: E402
 from flow.refine import MAX_CHARS, Cli, _split_tail, refine  # noqa: E402
 from flow.session import Session  # noqa: E402
 
@@ -82,8 +82,18 @@ class TestAFailingCliSaysWhyInItsOwnWords(unittest.TestCase):
     """
 
     def run_with(self, stdout="", stderr=""):
+        # **`cli_on_path` is what makes this test mean anything.** `_invoke` resolves
+        # the executable as `resolve(cli) or cli.argv[0]`, so with nothing declared on
+        # PATH `resolve` found the *developer's* real CLI — on this machine
+        # `codex.CMD`, an npm shim — and the shim guard at `refine.py:785` refused it
+        # before the mocked `Popen` was ever asked for anything. 12 tests red, none of
+        # them about shims, every one of them the machine answering a question the test
+        # meant to declare. Declaring the fake is the same lesson `cli_env`'s docstring
+        # records twice already, and it is why `fake_exe` ends in `.exe`: `SHIM_SUFFIXES`
+        # reads the suffix, so the fake is not a launcher.
         proc = fake_proc(stdout=stdout, returncode=1, stderr=stderr)
-        with mock.patch.object(refine_mod.subprocess, "Popen", return_value=proc):
+        with mock.patch.object(refine_mod.subprocess, "Popen", return_value=proc), \
+                cli_on_path("codex"):
             out, why = refine_mod._invoke(CLI, "a prompt", timeout=5)
         self.assertIsNone(out)
         return why
@@ -116,8 +126,14 @@ class TestAFailingCliSaysWhyInItsOwnWords(unittest.TestCase):
         self.assertTrue(why.endswith(ELLIPSIS))
 
     def test_a_clean_exit_is_untouched(self):
+        # Declares PATH itself rather than going through `run_with`, because this is the
+        # one case here where the exit is 0 — so it is about what a *success* must not
+        # be turned into by the guards, which is why it was written apart. The same leak
+        # applies: without a declaration, `resolve` found the real `codex.CMD` on this
+        # machine and the shim guard refused before `Popen` was asked anything.
         proc = fake_proc(stdout="the answer", returncode=0, stderr="banner noise")
-        with mock.patch.object(refine_mod.subprocess, "Popen", return_value=proc):
+        with mock.patch.object(refine_mod.subprocess, "Popen", return_value=proc), \
+                cli_on_path("codex"):
             out, why = refine_mod._invoke(CLI, "a prompt", timeout=5)
         self.assertEqual((out, why), ("the answer", ""))
 
@@ -141,6 +157,21 @@ class TestTailSplit(unittest.TestCase):
 
 
 class TestGuards(unittest.TestCase):
+    # **Every test here declares one CLI and mocks the process layer; neither says what
+    # is on PATH.** `refine` resolves the executable as `resolve(cli) or cli.argv[0]`,
+    # so with nothing declared it found the *developer's* real CLI — `codex.CMD` here,
+    # an npm shim — and the guard at `refine.py:785` refused it before the mocked
+    # `Popen` was asked for anything. Seven failures, none of them about guards.
+    #
+    # Declared once here rather than per test, because the class has one subject and
+    # seven ways of testing it; a `setUp` that names the machine once is the honest
+    # shape. `test_missing_cli_is_reported_not_raised` patches `available` itself and is
+    # unaffected — it is about the absence, not about which CLI is found.
+    def setUp(self):
+        self._path = cli_on_path("codex")
+        self._path.__enter__()
+        self.addCleanup(self._path.__exit__, None, None, None)
+
     def test_head_is_preserved_and_tail_replaced(self):
         text = "Old sentence. " * 300
         head, tail = _split_tail(text)

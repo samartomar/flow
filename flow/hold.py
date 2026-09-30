@@ -338,9 +338,13 @@ class Hold:
         machine. The tap paths below are therefore additive: they report what the release
         also looked like, and never replace the send.
 
-        They only run when a caller has passed a callback for them, which nothing does
-        yet. The machinery is here and tested because the macOS side will need it, and
-        shipping it unused is how it gets tested rather than how it gets trusted.
+        They only run when a caller has passed a callback for them. `Chord` does, and
+        what it does with the answer is on that side: `hotkey._tap_enabled` is a
+        deliberate no-op whose only job is to be set, because the *word* is dispatched
+        from the effect this method returns rather than from the callback — the callback
+        runs inside `feed`, which is too early for the queue to be in the right order.
+        A machine with neither callback is a machine nobody asked to latch, and it says
+        so by doing nothing.
         """
         effects = [STOP]
         if held_for > TAP_MAX_SEC:
@@ -352,10 +356,26 @@ class Hold:
         # now" — the sentinel has to be further away than any window, or the first tap
         # of a session would read as a double tap of nothing.
         since = now - previous_tap if previous_tap else DOUBLE_TAP_WINDOW_SEC + 1.0
-        if self.on_double_tap is not None and previous_tap and (
-                MIN_DOUBLE_TAP_GAP_SEC <= since <= DOUBLE_TAP_WINDOW_SEC):
+        paired = (self.on_double_tap is not None and previous_tap
+                  and MIN_DOUBLE_TAP_GAP_SEC <= since <= DOUBLE_TAP_WINDOW_SEC)
+        if paired:
             self.on_double_tap()
-            return tuple(effects + [DOUBLE_TAP])
+            effects.append(DOUBLE_TAP)
+            # **The pair is spent, so the window closes.** Left set, `last_tap_at` is the
+            # *second* tap of the pair, and a third tap 120 ms later reads as another
+            # pair and latches nothing: measured, three quick taps gave one latch and
+            # hands-free could not be switched off without a half-second pause nobody
+            # had been told about.
+            self.last_tap_at = 0.0
+            return tuple(effects)
+        # …and the same clearing for the *other* caller, which is the one that ships.
+        # A chord that registered `on_latch` alone never enters the branch above, so a
+        # clear written only there fixes the test harness and leaves the product stuck —
+        # which is exactly what the first attempt at this did, green in `test_hold.py`
+        # and broken through `Chord`. The condition is "a pair was just consumed", which
+        # is the same sentence whether or not anybody wanted to be told about it.
+        if previous_tap and MIN_DOUBLE_TAP_GAP_SEC <= since <= DOUBLE_TAP_WINDOW_SEC:
+            self.last_tap_at = 0.0
 
         if self.on_latch is not None and since > DOUBLE_TAP_WINDOW_SEC and (
                 now - self.stopped_at) >= POST_STOP_COOLDOWN_SEC:

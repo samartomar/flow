@@ -384,6 +384,68 @@ class TestETheTimingRulesThatChordNeverHad(unittest.TestCase):
         hold_chord(m, t=0.0, length=0.05)
         self.assertEqual(latched, [1])
 
+    def test_three_quick_taps_are_two_latches_and_not_one(self):
+        # **The bug this pins.** A double tap used to leave `last_tap_at` pointing at its
+        # own second tap, so a third tap 120 ms later read as another double tap and
+        # latched nothing. A person trying to switch hands-free listening off does
+        # exactly that — tap, tap, tap — and got one latch and no way out of it without
+        # a half-second pause nobody had been told about.
+        #
+        # **Run for both callbacks, because the two callers were not the same bug.**
+        # The first attempt cleared the window inside the `on_double_tap` branch, which
+        # is only entered when that callback exists — so this passed with it set and
+        # the product stayed stuck, because `hotkey.Chord` registers `on_latch` alone.
+        # Both halves now clear; this asserts both, so neither can regress alone.
+        for callbacks in ({"on_latch": lambda: None},
+                          {"on_latch": lambda: None, "on_double_tap": lambda: None}):
+            with self.subTest(double_tap=("on_double_tap" in callbacks)):
+                latched = []
+                m = machine(**{**callbacks,
+                              "on_latch": lambda: latched.append(1)})
+                gap = hold.MIN_DOUBLE_TAP_GAP_SEC + 0.1
+                first = hold_chord(m, t=0.0, length=0.05)
+                second = hold_chord(m, t=0.05 + gap, length=0.05)
+                third = hold_chord(m, t=0.10 + gap * 2, length=0.05)
+                # The pair is consumed either way; `DOUBLE_TAP` only when someone is
+                # listening for it.
+                self.assertEqual(first, (START, STOP, LATCH))
+                self.assertEqual(third, (START, STOP, LATCH))
+                self.assertEqual(second[:2], (START, STOP))
+                if "on_double_tap" in callbacks:
+                    self.assertEqual(second, (START, STOP, DOUBLE_TAP))
+                else:
+                    self.assertEqual(second, (START, STOP))
+                # Two latches: hands-free on, then off.
+                self.assertEqual(latched, [1, 1])
+
+    def test_a_double_tap_does_not_leave_the_window_armed_for_the_next_one(self):
+        # The same defect stated as the property it breaks, because it is the property
+        # that matters rather than the count: a *pair* is two taps, and after it the
+        # machine owes nobody another gesture until somebody presses again. Both
+        # callers again — `Chord` registers `on_latch` only.
+        for callbacks in ({"on_latch": lambda: None},
+                          {"on_latch": lambda: None, "on_double_tap": lambda: None}):
+            with self.subTest(double_tap=("on_double_tap" in callbacks)):
+                m = machine(**callbacks)
+                gap = hold.MIN_DOUBLE_TAP_GAP_SEC + 0.1
+                hold_chord(m, t=0.0, length=0.05)
+                hold_chord(m, t=0.05 + gap, length=0.05)
+                self.assertEqual(m.last_tap_at, 0.0)
+
+    def test_the_window_still_reopens_for_a_genuine_second_pair(self):
+        # Closing the window must not close it for good: two double taps, one after the
+        # other, are two gestures. This is the test that keeps the fix from becoming a
+        # machine that latches exactly once per session.
+        doubled = []
+        m = machine(on_latch=lambda: None, on_double_tap=lambda: doubled.append(1))
+        gap = hold.MIN_DOUBLE_TAP_GAP_SEC + 0.1
+        hold_chord(m, t=0.0, length=0.05)
+        hold_chord(m, t=0.05 + gap, length=0.05)
+        after = 1.0  # past the window, so this is a fresh first tap of a second pair
+        hold_chord(m, t=after, length=0.05)
+        hold_chord(m, t=after + 0.05 + gap, length=0.05)
+        self.assertEqual(doubled, [1, 1])
+
 
 
 class TestFTheEchoGuardIsOffUntilSomebodySaysItsSourceBounces(unittest.TestCase):
