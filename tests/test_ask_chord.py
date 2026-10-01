@@ -515,5 +515,56 @@ class TestIFlowHomeSetsTheAskKeys(unittest.TestCase):
             self._api().set_ask_chord({"keys": "ctrl"})
 
 
+class TestJFlowHomeTurnsTheChordOff(unittest.TestCase):
+    """The talk-keys box accepts an empty value, and that is the whole of `--no-chord`.
+
+    The Settings page says so in its placeholder — *"ctrl+win - empty turns it
+    off"* — and it is the only route to the body without the chord from inside the app,
+    so the promise is worth a test rather than a string in a template. Found while
+    checking whether this was missing: it was here already, and untested.
+    """
+
+    def setUp(self):
+        from flow.home import demo
+
+        self.home, self.session = demo.build()
+
+    def tearDown(self):
+        self.home.close()
+
+    def _api(self):
+        from flow.home.api import Api
+
+        return Api(self.home)
+
+    def test_the_settings_page_offers_it(self):
+        page = self._api().settings({})
+        talk = page["shortcuts"]["chord"]
+        self.assertIn("describe", talk)
+
+    def test_saving_new_keys_is_reported_back(self):
+        page = self._api().set_chord({"keys": "ctrl+shift+win"})
+        self.assertIsInstance(page["shortcuts"]["chord"]["describe"], str)
+
+    def test_an_empty_value_is_accepted_rather_than_refused(self):
+        # The whole point. A string that fails `parse_chord` is refused above; an empty
+        # one is not, because empty is not a chord nobody can read — it is the chord
+        # turned off, which is the same state `--no-chord` reaches and which the help
+        # sheet and the menu already describe.
+        page = self._api().set_chord({"keys": ""})
+        self.assertIsInstance(page["shortcuts"]["chord"]["describe"], str)
+
+    def test_whitespace_is_the_same_answer_as_empty(self):
+        # What a person gets by clearing the box and typing a space, which is the
+        # likeliest accident: it must not be refused as an unreadable chord.
+        self._api().set_chord({"keys": "   "})
+
+    def test_the_keys_still_have_to_be_readable(self):
+        from flow.home.api import ApiError
+
+        with self.assertRaises(ApiError):
+            self._api().set_chord({"keys": "ctrl"})
+
+
 if __name__ == "__main__":
     unittest.main()
