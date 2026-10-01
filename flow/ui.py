@@ -5114,6 +5114,22 @@ class Pill(tk.Tk):
                 # the device, and pausing would bump the capture generation and refuse
                 # the decode of the words the loss cut short — which is the one thing
                 # the recovery path went out of its way to keep.
+                #
+                # **A `disarm` that arrives while the microphone is open again is
+                # stale, and must not be acted on.** The session emits this event when a
+                # push-to-talk hold closes, and a chord *tap* is a hold: the tap's
+                # `talk-end` emits `disarm` and its own `toggle` then starts hands-free
+                # listening, all inside one `_drain_hotkeys`. The event is still queued
+                # when the frame pump reaches it, so the pill was disarmed one tick after
+                # the gesture that armed it — microphone open (the OS indicator lit, which
+                # is what made this look like a broken microphone), pill not green, and
+                # nothing captured.
+                #
+                # The session's own state is the tie-breaker rather than a counter: this
+                # event exists to say "capture stopped", and a capture running now is by
+                # definition not the one that stopped. Reproduced before the fix.
+                if self.session.state is State.LISTENING:
+                    return
                 self.armed = False
                 self._disarmed_since = time.perf_counter()  # starts the 8 s idle dim
 
