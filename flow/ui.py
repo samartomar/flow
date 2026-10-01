@@ -5146,10 +5146,23 @@ class Pill(tk.Tk):
                 # The session's own state is the tie-breaker rather than a counter: this
                 # event exists to say "capture stopped", and a capture running now is by
                 # definition not the one that stopped. Reproduced before the fix.
-                if self.session.state is State.LISTENING:
-                    return
-                self.armed = False
-                self._disarmed_since = time.perf_counter()  # starts the 8 s idle dim
+                #
+                # **Only a release is ever stale, and only a release is guarded.** The
+                # session emits `disarm` for a closing hold ("push-to-talk"), for a
+                # microphone lent to someone else ("lent"), and for a device that went
+                # away ("microphone"). The first two are superseded by whatever is
+                # capturing now; the last is not, and the session is still LISTENING
+                # when it happens because the state follows the event. Guarding all
+                # three left a dead microphone wearing a green ring — the exact lie
+                # this branch exists to prevent. ui_compact's twin branch got this
+                # right and this one did not; its own test caught it there.
+                #
+                # Also not `return`: this is inside the frame pump's loop, and
+                # returning would drop every event queued behind this one.
+                if ev.text not in ("push-to-talk", "lent") or \
+                        self.session.state is not State.LISTENING:
+                    self.armed = False
+                    self._disarmed_since = time.perf_counter()  # starts the 8 s idle dim
 
     def _pump_warnings(self) -> None:
         """Surface inject warnings that arrived since the last frame.

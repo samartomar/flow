@@ -1606,7 +1606,12 @@ class TestAStaleDisarmCannotUndoTheTapThatArmedPill(unittest.TestCase):
 
         def talk_end(_self, *, send):
             _self._ptt_since = None
-            self.pending.append(_ev("disarm"))
+            # `"push-to-talk"`, which is what the session emits when a hold closes
+            # (session.py's `_settle_state` path). The first version of this test
+            # queued a bare `disarm`, and once the guard was narrowed to releases that
+            # bare event became a *device loss* — so this test was passing for the wrong
+            # reason, and the real trace had been saying "push-to-talk" all along.
+            self.pending.append(_ev("disarm", "push-to-talk"))
 
         with mock.patch.object(ui.Pill, "_talk_start", talk_start), \
              mock.patch.object(ui.Pill, "_talk_end", talk_end):
@@ -1629,6 +1634,42 @@ class TestAStaleDisarmCannotUndoTheTapThatArmedPill(unittest.TestCase):
         self.p._pump_events()
         self.assertFalse(self.p.armed,
                          "a device that stopped must still take the pill down with it")
+
+    def test_a_device_lost_while_listening_still_disarms(self):
+        """**The guard is narrower than it first looked, and this is why.**
+
+        The session emits `disarm` for three reasons: a hold closing ("push-to-talk"),
+        a microphone lent to another app ("lent"), and a device that went away. Only
+        the first two can be stale — a release says *this hold* ended, and a capture
+        running now is not that one. A device loss is never stale, **and the session is
+        still LISTENING when it arrives**, because the state follows the event rather
+        than leading it.
+
+        Gating on the state alone therefore left a dead microphone wearing a green
+        ring, which is the precise failure the branch exists to prevent. ui_compact's
+        own test caught this there first; it is the same bug in the same shape.
+        """
+        self._push_events_through_the_pump()
+        self.p.armed = True
+        self.p.session.state = State.LISTENING  # the state has not caught up yet
+        self.pending.append(_ev("disarm", "microphone"))
+        self.p._pump_events()
+        self.assertFalse(self.p.armed, "a dead device must never show a green ring")
+
+    def test_a_stale_disarm_does_not_swallow_the_events_behind_it(self):
+        """It was a `return` once, inside the frame pump's loop.
+
+        Every event queued after the stale one was thrown away with it — including a
+        device loss arriving behind it, which is the one event that must never be.
+        """
+        self._push_events_through_the_pump()
+        self.p.armed = True
+        self.p.session.state = State.LISTENING
+        self.pending.extend([_ev("disarm", "push-to-talk"),
+                             _ev("disarm", "microphone")])
+        self.p._pump_events()
+        self.assertFalse(self.p.armed,
+                         "the real device loss queued behind the stale one was dropped")
 
 
 def _ev(kind, text=""):

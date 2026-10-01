@@ -697,6 +697,12 @@ class CompactPill(tk.Tk):
     #: `build`, which is the only place that knows both designs.
     trace = None
     armed = False
+    #: **Whether hands-free is on, as opposed to whether the ring is green.** Separate
+    #: from `armed` because a push-to-talk hold borrows `armed` for the length of the
+    #: hold, and `_toggle` used to read that borrow as "hands-free is already running" —
+    #: so the double tap stopped hands-free instead of starting it. Class-level for
+    #: `lite`'s reason: a fixture built with `__new__` must not recurse into `self.tk`.
+    _handsfree = False
     hotkeys = None
     on_send = None
     settings_path = None
@@ -1721,12 +1727,36 @@ class CompactPill(tk.Tk):
                     self._panel_failed = True
                     self._panel_result = ev.text
             elif ev.kind == "disarm":
-                self.armed = False
-                if ev.text not in ("push-to-talk", "lent"):
+                # **Only a *release* can be stale, and only a release is guarded.**
+                #
+                # A chord tap is a hold, so its release queues a `disarm` while the
+                # double tap that followed it has already started hands-free
+                # listening. Hotkeys drain on the frame; events drain on the *next*
+                # one — so the release lands after the tap armed this pill and took
+                # it straight back down. The microphone never closed the whole time,
+                # which is why it read as a dead one: ring off, mic light on, nothing
+                # captured. A release says *this hold* ended, and a capture running
+                # now is by definition not that one.
+                #
+                # **A device that went away is not that, and is never guarded.** The
+                # session is still LISTENING when the device dies — the state follows
+                # the event, not the other way round — so gating on it alone let a
+                # dead microphone keep a green ring, which is the one failure this
+                # whole branch exists to prevent. `test_a_disarm_that_is_not_a_
+                # release_means_the_device_died` is what caught that.
+                if ev.text in ("push-to-talk", "lent"):
+                    if self.session.state is not State.LISTENING:
+                        self.armed = False
+                else:
                     # Not a release — the device itself went away and did not
                     # come back (ui.py:4526-4532's case, the same words). The
                     # slash and the red ring persist until a capture answers.
+                    self.armed = False
                     self._mic_gone = True
+                    # Hands-free is over with it: the flag claims a capture is
+                    # running, and a device that left cannot answer the next
+                    # double tap correctly if the flag still says it is up.
+                    self._handsfree = False
             elif ev.kind == "send":
                 # The spoken trigger — "boom", or "enter boom" for a paste
                 # that presses Enter after itself (`edits.enter_word`). It
@@ -2331,8 +2361,26 @@ class CompactPill(tk.Tk):
             self._close_panel()
 
     def _toggle(self) -> None:
-        """The arm/disarm click's logic, shared by the hotkey of the same name."""
-        if self.armed:
+        """The arm/disarm click's logic, shared by the hotkey of the same name.
+
+        **Gated on `_handsfree`, not on `armed`** — and that is the whole of why the
+        double tap never started hands-free.
+
+        The words one tap puts on the queue are `warm`, `talk`, `talk-end`, `toggle`,
+        and they are drained together. By the time `toggle` is read, `talk` has already
+        set `armed = True` for this very tap and `talk-end` has not cleared it (it never
+        does — the queued `disarm` does, on a *later* frame). So a gate on `armed` saw a
+        pill that was mid-tap and read the gesture backwards: hands-free **stopped** on
+        the way up and never once started. The machine had the double tap right — the
+        trace recorded `stop.double_tap` and put `toggle` on the queue — and this line
+        undid it four milliseconds later.
+
+        `armed` is a *surface* state: it is what the ring draws, and a hold borrows it
+        for the length of the hold. Hands-free is a *session* state, and a tap that is
+        on its way to becoming one must not be mistaken for one that already is.
+        """
+        if self._handsfree:
+            self._handsfree = False
             self.armed = False
             self.session.pause()
         else:
@@ -2343,6 +2391,7 @@ class CompactPill(tk.Tk):
                 self._mic_gone = True
                 return
             self._mic_gone = False
+            self._handsfree = True
             self.armed = True
 
     def _on_press(self, e=None) -> None:

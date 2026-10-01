@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flow.ui_compact as uc  # noqa: E402
 from flow.session import (  # noqa: E402
-    CONVERSE, DICTATE, REFINE, Event, Session,
+    CONVERSE, DICTATE, REFINE, Event, Session, State,
 )
 from test_ui_compact import Canvas, panel_pill, pill  # noqa: E402
 from test_menu import FakeMenu, FakeVar  # noqa: E402
@@ -529,6 +529,86 @@ class TestTheStripIsTheChannelForAllOfIt(unittest.TestCase):
         fills = {t[2] for t in p.canvas.texts}
         self.assertIn(uc.DIM, fills)
         self.assertNotIn(uc.ERROR, fills)
+
+
+class TestTheDoubleTapStartsHandsFree(unittest.TestCase):
+    """The double tap never once started hands-free, on the surface actually shipped.
+
+    Found by reading a real trace rather than by reasoning, and the trace said the
+    machine was *right*: it recorded `stop.double_tap` and put `toggle` on the queue.
+    Two lines in this surface then threw that away —
+
+    * `_toggle` was gated on `armed`, which the tap's own `talk` had just set, so
+      hands-free was **stopped** on the way up and never started;
+    * `_pump_events` took a stale `disarm` at face value and dropped the ring while
+      the microphone stayed open — the same guard `ui.py` got in 8aaabd0 and this
+      surface never did.
+
+    Between them they are the whole report: mic light on, ring off, nothing captured,
+    four rounds of fixes to the other file changing nothing.
+    """
+
+    def surface(self):
+        p = uc.CompactPill.__new__(uc.CompactPill)
+        p.session = mock.Mock()
+        p.session.mode = DICTATE
+        p.session.state = State.IDLE
+        p.session.start.side_effect = (
+            lambda: setattr(p.session, "state", State.LISTENING))
+        p.session.pause.side_effect = (
+            lambda: setattr(p.session, "state", State.IDLE))
+        p._flash, p._mic_gone = 0, False
+        p._side_since = p._ask_hold = None
+        p.armed = p._handsfree = False
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = ["warm", "talk", "talk-end", "toggle"]
+        # The words one tap queues, and what the hold does to the surface on the way
+        # through: `_talk_start` borrows `armed`, `_talk_end` stops the capture and
+        # leaves `armed` exactly as it found it.
+        p._talk_start = lambda *a, **k: (
+            setattr(p, "armed", True),
+            setattr(p.session, "state", State.LISTENING))
+        p._talk_end = lambda send=True: setattr(p.session, "state", State.IDLE)
+        p._settle_side = lambda: None
+        return p
+
+    def tap(self, p):
+        p.hotkeys.drain.return_value = ["warm", "talk", "talk-end", "toggle"]
+        p._drain_hotkeys()
+
+    def test_one_double_tap_starts_hands_free(self):
+        p = self.surface()
+        self.tap(p)
+        self.assertTrue(p._handsfree, "the double tap must open a capture that is its own")
+        self.assertIs(p.session.state, State.LISTENING)
+
+    def test_the_second_double_tap_stops_it(self):
+        p = self.surface()
+        self.tap(p)
+        self.tap(p)
+        self.assertFalse(p._handsfree)
+        self.assertIs(p.session.state, State.IDLE)
+
+    def test_the_taps_own_disarm_keeps_the_ring_green(self):
+        """The stale event arrives on the frame *after* hands-free opened."""
+        p = self.surface()
+        self.tap(p)
+        p.armed = True  # as the tap's own `talk` left it
+        p.session.events.side_effect = lambda: [Event("disarm", "push-to-talk")]
+        p._pump_events()
+        self.assertTrue(p.armed,
+                        "a capture that is running is not the one that stopped")
+
+    def test_a_device_that_really_went_away_still_disarms(self):
+        p = self.surface()
+        self.tap(p)
+        p.session.state = State.IDLE
+        p.session.events.side_effect = lambda: [Event("disarm", "device")]
+        p._pump_events()
+        self.assertFalse(p.armed)
+        self.assertFalse(p._handsfree,
+                         "a flag claiming a capture is running must not outlive it")
+        self.assertTrue(p._mic_gone)
 
 
 if __name__ == "__main__":
