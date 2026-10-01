@@ -205,5 +205,80 @@ class TestInventedReason(unittest.TestCase):
                 )
 
 
+class TestTheSignOffHallucinationInFrontOfRealSpeech(unittest.TestCase):
+    """Whisper's YouTube sign-off, prefixed to words that were actually said.
+
+    Reported from this machine: *"So when this works"* came back as
+    *"Thank you for watching. So when this works"*. Two separate gaps let it through,
+    and fixing either alone would have left the report standing.
+
+    **The whole-utterance list was never consulted.** `_FILLER_ONLY` is only asked about
+    the entire output, so a hallucination with real dictation behind it sails past by
+    construction — which is why the second half of this file matters as much as the
+    first.
+
+    **And the string was not on the list anyway.** It holds *"thanks for watching"* and
+    *"thank you."* as two entries; the model emits *"thank you for watching"* as a third,
+    which was in neither.
+    """
+
+    #: The reported case, and the stacked form the model actually produced.
+    def test_the_reported_case(self):
+        self.assertEqual(
+            normalise("Thank you for watching. So when this works"), "So when this works")
+
+    def test_it_stacks_and_one_pass_would_leave_the_second(self):
+        # "Thanks for watching. Thank you for watching." measured on the same recording,
+        # so a single substitution removes the first and leaves the second in front of
+        # the user's sentence.
+        self.assertEqual(
+            normalise("Thanks for watching. Thank you for watching. So when this works"),
+            "So when this works")
+
+    def test_it_covers_both_spellings(self):
+        # `thanks?` matches "thanks", not "thank you" — the first attempt at this
+        # pattern handled the wrong half of the pair and the reported phrase sailed
+        # through. Measured, not reasoned: the regex was tried against both.
+        for lead in ("Thanks for watching.", "Thank you for watching."):
+            with self.subTest(lead=lead):
+                self.assertEqual(normalise(f"{lead} Run the tests"), "Run the tests")
+
+    def test_the_trailing_punctuation_goes_with_it(self):
+        # Leaving ". So when this works" would put a full stop at the head of every
+        # dictated sentence, which reads as a sentence break the user never made.
+        self.assertFalse(normalise("Thanks for watching. Hello").startswith("."))
+
+    # -- the half that matters more: nothing real may be lost --------------------
+
+    def test_thanks_inside_a_real_sentence_survives(self):
+        for text in ("Thanks for the detailed report",
+                     "Thank you for the fix, it works",
+                     "I will thank you for watching the demo later"):
+            with self.subTest(text=text):
+                self.assertEqual(normalise(text), text)
+
+    def test_bye_is_only_a_sign_off_at_the_end_and_never_in_front(self):
+        # The one place this got it wrong twice: `bye` is an ordinary English word, and
+        # a bare `^bye` cut "Bye then, I will call back" down to "then, I will call
+        # back". A trailing-only anchor is the difference between a sign-off and a word.
+        self.assertEqual(normalise("Bye then, I will call back"), "Bye then, I will call back")
+        self.assertEqual(normalise("By the way the tests pass"), "By the way the tests pass")
+
+    def test_the_ordinary_fillers_are_untouched(self):
+        # `okay`, `so` and `yeah` are in `_FILLER_ONLY` for the *whole-utterance* check,
+        # which is the right place for them. None of them may be cut from a sentence.
+        for text in ("Okay so the build passes now", "Yeah I think that works"):
+            with self.subTest(text=text):
+                self.assertEqual(normalise(text), text)
+
+    def test_a_whole_utterance_sign_off_is_still_rejected(self):
+        # The list fix, which is a different mechanism and has to hold on its own: these
+        # now name the spelling the model actually produced.
+        for text in ("Thank you for watching", "Thank you for watching.",
+                     "Thank you for watching!", "Thanks for listening"):
+            with self.subTest(text=text):
+                self.assertIsNotNone(invented_reason(text, None))
+
+
 if __name__ == "__main__":
     unittest.main()

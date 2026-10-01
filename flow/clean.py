@@ -65,8 +65,9 @@ def confidence_floor(baseline: float | None) -> float:
 #: spoken corrections.
 _FILLER_ONLY = {
     "you", "thank you", "thanks", "thank you.", "thanks for watching",
-    "thanks for watching!", "please subscribe", "subscribe", "bye", "bye.",
-    "okay", "ok", "hmm", "mm", "uh", "um", "so", "yeah",
+    "thanks for watching!", "thank you for watching", "thank you for watching.",
+    "thank you for watching!", "thanks for listening", "please subscribe",
+    "subscribe", "bye", "bye.", "okay", "ok", "hmm", "mm", "uh", "um", "so", "yeah",
 }
 
 #: Non-speech markers Whisper emits verbatim.
@@ -159,15 +160,75 @@ def collapse_phrase_repeats(text: str, limit: int = 2, max_phrase: int = 12) -> 
     return " ".join(out)
 
 
+#: Whisper's sign-off hallucination, which arrives **in front of real speech** rather
+#: than in place of it. Observed 2026-09-30 on this machine: "So when this works" came
+#: back as *"Thank you for watching. So when this works"* — the words, prefixed.
+#:
+#: **This is a different defect from the whole-utterance list above, and the two are not
+#: substitutes.** `_FILLER_ONLY` is only ever consulted on the entire output, so a
+#: hallucination with real dictation behind it sails past it by construction. And the
+#: string that turned up was *"thank you for watching"*, which the list did not hold
+#: anyway — it holds *"thanks for watching"* and *"thank you."* separately, and the
+#: model emits all four spellings.
+#:
+#: **Only a leading fragment, and only these.** Every one of these is a YouTube sign-off
+#: and not a thing a developer says into a dictation app and then keeps talking through, so
+#: the risk of cutting real speech is far below the cost of pasting this in front of it
+#: every time the room goes quiet. Bare `"thank you"`, `"so"` and `"okay"` are *not*
+#: here: those are ordinary words inside real sentences, and removing them would be the
+#: defect this list exists to avoid.
+_SIGNOFF_PREFIX = re.compile(
+    # "thank you for" and "thanks for" are two different strings and the model emits
+    # both. `thanks?` alone matches only the second, which is why the reported phrase
+    # sailed through on the first attempt at this.
+    r"^(?:thanks?\s+(?:you\s+)?for\s+(?:watching|listening|subscribing)"
+    r"|please\s+subscribe"
+    # `bye` is a real English word a person says, so it is only a sign-off at the very
+    # end of the output — never as a prefix in front of real speech. "Bye then, I will
+    # call back" is somebody's sentence and was being cut to "then, I will call back".
+    # The trailing punctuation is its own here because the shared `[\s,.!]*` below would
+    # otherwise run past the anchor and eat the rest of the sentence with it.
+    r"|bye[\s,.!]*\Z"
+    r"|subtitles?\s+by\s+\S+"
+    r"|amara\.org"
+    r"|www\.\S+)"
+    # The punctuation and spaces that followed the phrase, so "…watching. So when this
+    # works" becomes "So when this works" rather than ". So when this works". The
+    # sign-offs only — `bye` below carries its own anchor and must not be eaten.
+    r"[\s,.!]*",
+    re.I,
+)
+
+
+def strip_signoff_prefix(text: str) -> str:
+    """One leading sign-off hallucination, if that is what this is.
+
+    **A loop, not a single pass.** Whisper stacks them — "Thanks for watching. Thank you
+    for watching." was measured on the same recording — and one substitution would leave
+    the second behind, which is the half the bug report did not mention. Bounded at
+    three, because past that it is not a sign-off any more and something in the room is
+    being dictated.
+    """
+    out = text
+    for _ in range(3):
+        stripped = _SIGNOFF_PREFIX.sub("", out, count=1)
+        if stripped == out:
+            break
+        out = stripped
+    return out
+
+
 def normalise(text: str) -> str:
-    """Whitespace and marker tidy-up, plus the two degenerate-repetition guards.
+    """Whitespace and marker tidy-up, plus the three degenerate-repetition guards.
 
     Removes words only where they are a decode artefact — a token or a phrase looping
-    beyond what speech does — never ordinary content.
+    beyond what speech does, or a sign-off hallucination in front of it — never ordinary
+    content.
     """
     text = strip_markers(text)
     text = collapse_repeats(text)
     text = collapse_phrase_repeats(text)
+    text = strip_signoff_prefix(text)
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
