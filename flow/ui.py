@@ -4836,13 +4836,34 @@ class Pill(tk.Tk):
         """
         if self.hotkeys is None:
             return True
+        #: **A tap arrives as four words in one drain** — `warm`, `talk`, `talk-end`,
+        #: `toggle` — and the fourth is not a request to stop listening, it is the
+        #: request that started it. `armed` cannot tell them apart: `_talk_start` sets it
+        #: True and the `disarm` that clears it is an *event*, drained by the frame pump
+        #: rather than here, so a tap arrives still saying "already listening" and
+        #: `_toggle` calls `pause()`. Hands-free was being switched **off** by the
+        #: gesture meant to switch it on. Reproduced before the fix: one tap produced
+        #: `pause`, never `start`.
+        #:
+        #: What distinguishes them is not any flag but the shape of the queue — a
+        #: `toggle` that closed its own hold is a tap, and one that arrives alone is the
+        #: toggle hotkey, which keeps its meaning exactly as it had. Decided here rather
+        #: than inside `_toggle` because `_toggle` is also the pill's click handler, and
+        #: asking it to distrust `armed` there would change what a click does.
+        tapped = False
         for name in self.hotkeys.drain():
             if name == "toggle":
+                if tapped:
+                    # The hold this tap opened is already closed; `armed` is stale.
+                    # Clear it so `_toggle` takes the start path rather than the stop one.
+                    self.armed = False
                 self._toggle()
+                tapped = False
             elif name == "warm":
                 # The chord's press-down, one put ahead of `talk`, so the models load
                 # during the hold instead of inside the first sentence.
                 self.session.warm()
+                tapped = True
             elif name == "talk":
                 # The talk keys dictate whatever the mode, as on the compact pill
                 # (`CompactPill._drain_hotkeys`): from Ask the pill leaves Ask

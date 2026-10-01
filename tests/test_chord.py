@@ -576,6 +576,61 @@ class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
         self.assertIs(chord.clock, time.monotonic)
 
 
+class TestCTheTapReachesHandsFreeAndNotOnlyTheQueue(unittest.TestCase):
+    """The test whose absence let a dead feature ship, and the end of that absence.
+
+    Every other test here asserts on **words**: this tap put `toggle` on the queue, and
+    that was true, and it was enough to call the feature working. It was not enough,
+    because nothing had asked what `Pill` *does* with the word — and the answer was
+    `session.pause()`. A tap switched hands-free listening **off**. Reproduced, then
+    fixed in `Pill._drain_hotkeys`, which now clears the stale `armed` when a `toggle`
+    follows the hold that same tap opened.
+
+    So this class drives the real `Pill._drain_hotkeys` with the words a tap produces and
+    asserts on the session's own methods. The distinction is the whole point: `toggle` on
+    a queue is a claim, `session.start()` is a fact.
+    """
+
+    @staticmethod
+    def _pill(words):
+        from test_pill import pill as make_pill
+        from flow.session import State
+
+        p = make_pill(state=State.IDLE, armed=False)
+        p.hotkeys = mock.Mock()
+        p.hotkeys.drain.return_value = list(words)
+        p._ptt_since = None
+        p._side_since = None
+        p._ask_hold = False
+        p._flash = 0
+        p._disarmed_since = None
+        p._quicken = lambda: None
+        p._draw = lambda: None
+        p.bubble = mock.Mock()
+        # A tap says nothing into its own hold, so `talk_end` reports no pending decode
+        # — the same answer the real gate gives for 150 ms of room.
+        p.session.talk_end.return_value = False
+        return p
+
+    def test_a_tap_starts_hands_free_rather_than_stopping_it(self):
+        p = self._pill(["warm", "talk", "talk-end", "toggle"])
+        p._drain_hotkeys()
+        p.session.start.assert_called_once()
+        p.session.pause.assert_not_called()
+
+    def test_the_toggle_hotkey_on_its_own_still_starts(self):
+        # The fix must not have cost the original gesture its meaning.
+        p = self._pill(["toggle"])
+        p._drain_hotkeys()
+        p.session.start.assert_called_once()
+
+    def test_a_plain_hold_still_toggles_nothing(self):
+        p = self._pill(["warm", "talk", "talk-end"])
+        p._drain_hotkeys()
+        p.session.start.assert_not_called()
+        p.session.pause.assert_not_called()
+
+
 
 
 class TestCWindowsOwnsCtrlWinToo(unittest.TestCase):
