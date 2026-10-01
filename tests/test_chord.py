@@ -478,19 +478,38 @@ class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
 
     @staticmethod
     def _one_tap(presses, hold_ms, gap_ms=0):
-        """One press of the chord, held for `hold_ms`, on a fresh chord."""
+        """One press of the chord, held for `hold_ms`, on a fresh chord.
+
+        **`hold_ms` is the hold itself, not half of it**, which is worth saying because
+        the obvious reading of "advance the clock on each key-up" is that a two-modifier
+        press spans twice as long. It does not: both key-*downs* read the same reading,
+        and `Hold` timestamps the chord when it *forms*, so `held_for` is measured from
+        that shared down to the first up — one `hold_ms`. A boundary test written on the
+        doubled reading was wrong on both sides of the line.
+        """
         chord = Chord(presses, frozenset({"ctrl", "win"}))
         keys = _Keyboard(chord, hold_ms=hold_ms, gap_ms=gap_ms)
         keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
         return chord, keys
 
-    def test_a_tap_under_the_window_latches_hands_free(self):
+    def _pair(self, presses, hold_ms, gap_ms=120):
+        """Two presses of the chord, the second `gap_ms` after the first."""
+        chord, keys = self._one_tap(presses, hold_ms, gap_ms=gap_ms)
+        keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
+        return chord
+
+    def test_a_single_tap_does_nothing_at_all(self):
+        # **The consolidated gesture: two taps are the gesture, and one is not.** A single
+        # tap used to latch, which made the fast way into hands-free listening and the
+        # deliberate way into it the same thing wearing two names — and somebody reaching
+        # for a double tap got a toggle that had fired before they finished the first tap.
+        # So a lone tap reports nothing, and says so here rather than by omission.
         _chord_obj, presses = _chord()
         self._one_tap(presses, hold.TAP_MAX_MS - 50)
-        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end", "toggle"])
+        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end"])
 
     def test_a_press_past_the_window_is_still_just_a_sentence(self):
-        # The half that has to keep working. A tap is an addition; a person dictating
+        # The half that has to keep working. The tap is an addition; a person dictating
         # three seconds of sentence has not asked for hands-free listening.
         _chord_obj, presses = _chord()
         self._one_tap(presses, hold.TAP_MAX_MS + 500)
@@ -499,43 +518,65 @@ class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
     def test_the_boundary_is_the_number_and_not_the_intent(self):
         # Either side of `TAP_MAX_MS`, from a machine, is the only honest place to say
         # where the line is — an arbitrary pair of durations would pass whether or not
-        # the constant were the one in use.
-        for ms, is_tap in ((hold.TAP_MAX_MS - 1, True),
-                           (hold.TAP_MAX_MS, True),
-                           (hold.TAP_MAX_MS + 1, False)):
-            with self.subTest(ms=ms):
+        # the constant were the one in use. The question changed with the gesture: a long
+        # press is a sentence, and a *pair* of short ones is the hands-free gesture.
+        #
+        # **Two numbers have to fit, not one**, and the second is the one that bites:
+        # each press must be a tap (under `TAP_MAX_MS`), *and* the two of them together
+        # must land inside `DOUBLE_TAP_WINDOW_MS`, which `Hold` measures **release to
+        # release**. At `gap_ms=0` that distance is two holds, so the edge is 250 ms
+        # rather than 400 — a 300 ms "tap" is short enough on its own and still out of
+        # the window as a pair. Measured across 50–400 ms before this was written.
+        # `DOUBLE_TAP_WINDOW_SEC` is already in seconds (the `_MS` name is the constant it is
+        # derived from), so it is halved and converted once here rather than at each use.
+        edge = hold.DOUBLE_TAP_WINDOW_SEC * 500  # seconds -> half -> milliseconds
+        for hold_ms, is_tap in ((edge - 1, True), (edge, True), (edge + 1, False)):
+            with self.subTest(hold_ms=hold_ms):
                 _chord_obj, presses = _chord()
-                self._one_tap(presses, ms)
+                self._pair(presses, hold_ms, gap_ms=0)
                 self.assertEqual("toggle" in _fired(presses), is_tap)
 
-    def test_the_tap_puts_its_word_after_the_draft_is_closed(self):
+    def test_a_press_under_the_tap_window_that_is_too_slow_to_pair_is_two_sentences(self):
+        # The other half of the same boundary, and the one a person actually hits: a
+        # 300 ms press is a tap on its own, but two of them are 600 ms release to release
+        # and out of the window. So it is two sentences, not a hands-free toggle — and
+        # silently, which is why it is stated in the guide rather than left to be felt.
+        _chord_obj, presses = _chord()
+        self._pair(presses, 300, gap_ms=0)
+        self.assertNotIn("toggle", _fired(presses))
+        self.assertLess(hold.TAP_MAX_SEC * 1000,
+                        hold.DOUBLE_TAP_WINDOW_MS * 1000 / 2)
+
+    def test_a_double_tap_puts_its_word_after_the_draft_is_closed(self):
         # Ordering, and it is not incidental. The callback `Hold` offers runs *inside*
         # `feed`, so dispatching the tap through it put `toggle` on the queue between
         # `talk` and `talk-end` — the draft closed by the wrong word. The returned
         # effect is dispatched instead, and this is the test that says so.
         _chord_obj, presses = _chord()
-        self._one_tap(presses, 100)
-        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end", "toggle"])
+        self._pair(presses, 100, gap_ms=120)
+        words = _fired(presses)
+        # Two closed holds, then the toggle — the word lands last, never between them.
+        self.assertEqual(words[-3:], ["talk", "talk-end", "toggle"])
+
     def test_a_double_tap_is_one_gesture_and_not_a_toggle_and_an_untoggle(self):
-        # Fireflies' second gesture. `Hold` swallows the first tap of a pair and reports
-        # the second as the double tap, so wiring both would flip hands-free on and
-        # straight back off — the gesture would be a no-op, which is worse than absent
-        # because it looks like it worked.
+        # `Hold` swallows the first tap of a pair and reports the second, so the pair is
+        # worth exactly one toggle. Wiring both words would flip hands-free on and
+        # straight back off — a no-op that looks like it worked.
         _chord_obj, presses = _chord()
-        _chord_obj, keys = self._one_tap(presses, 100, gap_ms=120)
+        chord, keys = self._one_tap(presses, 100, gap_ms=120)
         first = _fired(presses)
         keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
         second = _fired(presses)
-        self.assertEqual(first.count("toggle") + second.count("toggle"), 1)
+        self.assertEqual(first, ["warm", "talk", "talk-end"])
+        self.assertEqual(second.count("toggle"), 1)
 
-    def test_two_taps_further_apart_than_the_window_are_two_gestures(self):
-        # Outside `DOUBLE_TAP_WINDOW_MS` there is no pair, so the second tap is its own
-        # latch: hands-free on, and the next one off.
+    def test_two_taps_further_apart_than_the_window_are_not_a_gesture(self):
+        # Past `DOUBLE_TAP_WINDOW_MS` — release to release — there is no pair, so neither
+        # tap means anything. This is the number a user feels, and it is why the window is
+        # stated in the guide rather than left as a tap that "sometimes works".
         _chord_obj, presses = _chord()
-        _chord_obj, keys = self._one_tap(presses, 100,
-                                         gap_ms=hold.DOUBLE_TAP_WINDOW_MS + 200)
-        keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
-        self.assertEqual(_fired(presses).count("toggle"), 2)
+        self._pair(presses, 50, gap_ms=hold.DOUBLE_TAP_WINDOW_MS * 1000)
+        self.assertNotIn("toggle", _fired(presses))
 
     def test_three_quick_taps_are_three_utterances(self):
         # `test_holding_it_three_times_is_three_utterances` says three presses are three

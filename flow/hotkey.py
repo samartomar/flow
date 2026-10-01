@@ -19,8 +19,8 @@ from ctypes import wintypes
 
 from .hold import (
     BREAK,
+    DOUBLE_TAP,
     IDLE,
-    LATCH,
     MOD_DOWN,
     MOD_UP,
     OTHER_DOWN,
@@ -660,10 +660,16 @@ GESTURES = ("hold", "toggle")
 #: `hold.py:348`, which returns early rather than doing the arithmetic. The callbacks are
 #: therefore the switch: setting one is what turns the tap question on.
 #:
-#: So this function does nothing at all, on purpose. The word the tap puts on the queue is
-#: dispatched from the effect `Hold` *returns*, not from here — because the callback runs
-#: inside `feed`, before the caller has dispatched anything, and wiring it here put
-#: `toggle` between `talk` and `talk-end`. The function exists to be not-`None`.
+#: It is `on_double_tap` and not `on_latch`, because the shipped gesture is two taps.
+#: Setting `on_latch` instead is what made a *single* tap toggle, which read as one
+#: gesture wearing two names: the fast way in and the deliberate way in were the same
+#: thing, and someone reaching for a double tap got a toggle that had already fired
+#: before they finished. With only `on_double_tap` set, a lone tap reports nothing.
+#:
+#: So this function does nothing at all, on purpose. The word the double tap puts on the
+#: queue is dispatched from the effect `Hold` *returns*, not from here — because the
+#: callback runs inside `feed`, before the caller has dispatched anything, and wiring it
+#: here put `toggle` between `talk` and `talk-end`. The function exists to be not-`None`.
 def _tap_enabled() -> None:
     """Present so `Hold` will do the tap arithmetic. Deliberately does nothing."""
 GESTURE_DEFAULT = "hold"
@@ -862,7 +868,7 @@ class Chord:
         #: key event on the input path, which is why `_sync` writes only the three
         #: fields that changed rather than re-deriving them.
         self._hold = Hold(self.mods, gesture=self.gesture,
-                          on_latch=_tap_enabled)
+                          on_double_tap=_tap_enabled)
         #: Chords fed by *this* chord's hook rather than one of their own — Ask's
         #: ctrl+alt+win riding the talk chord's ctrl+win. One hook on the input path of
         #: every keystroke is the cost R16 was narrowed to accept; two would be twice the
@@ -930,26 +936,21 @@ class Chord:
     #: that order, and the order is the feature — a model load must never land inside the
     #: first sentence.
     #:
-    #: **`LATCH` is `toggle_action`, and that is the whole of design 1.** A tap under
-    #: `TAP_MAX_MS` is the fast way into hands-free listening, and a longer press is
-    #: still a sentence that is sent on the release. Both put the same word, because both
-    #: mean the same thing to the session; what separates them is the duration, and the
-    #: duration is `Hold`'s business rather than this table's.
+    #: **`DOUBLE_TAP` is `toggle_action`, and a single tap is deliberately nothing.**
+    #: Two taps are the gesture: hold for a sentence, double-tap for hands-free, one
+    #: chord either way — which is the whole of what `fireflt` ships and the reason this
+    #: is simpler than the pair of gestures it replaced. `LATCH` is not mapped, and its
+    #: absence is not an oversight: the machine is built with `on_double_tap` and no
+    #: `on_latch`, so a lone tap never reports anything at all. Without that, a single
+    #: tap toggled and the second of a pair was swallowed — so the fast way in and the
+    #: deliberate way in were the same gesture wearing two names, and a user reaching for
+    #: a double tap got one toggle that had already fired before they finished.
     #:
-    #: **`DOUBLE_TAP` is deliberately absent, though Fireflies ships it.** Two taps
-    #: inside the window are *one* gesture there — the pair is the double tap and the
-    #: first tap is swallowed, which is what `Hold` already does, since its
-    #: `on_double_tap` path returns rather than also latching. Wiring it here as a second
-    #: `toggle_action` would flip hands-free listening on at the first tap and off at the
-    #: second, making a double tap a no-op: the exact failure this table must not have.
-    #: One gesture, one word, one put.
-    #:
-    #: **Dispatched from the effect, not from `on_latch`.** Measured, not assumed: the
-    #: callback runs *inside* `Hold.feed`, so wiring tap through it put `toggle` on the
-    #: queue between `talk` and `talk-end` — the draft closed by the wrong word. The
-    #: returned effect is the only ordering that can be right, and `Hold` returns it.
+    #: Dispatched from the effect, not from the callback. Measured, not assumed: the
+    #: callback runs *inside* `Hold.feed`, so wiring it put `toggle` on the queue between
+    #: `talk` and `talk-end` — the draft closed by the wrong word.
     _EFFECTS = {START: None, STOP: "end_action", BREAK: "break_action",
-                TOGGLE: "toggle_action", LATCH: "toggle_action", IDLE: None}
+                TOGGLE: "toggle_action", DOUBLE_TAP: "toggle_action", IDLE: None}
 
     def _feed(self, wparam, vk) -> None:
         """One key event, against this chord's shape.

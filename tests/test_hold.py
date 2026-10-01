@@ -644,15 +644,15 @@ class TestHItAgreesWithTheChordItWasTakenFrom(unittest.TestCase):
         side sees a hold the other calls a tap. Left unset, the bare `Hold` returned
         early from `_ended` and the two disagreed about a case where they agree.
         """
-        m = Hold(gesture=gesture, on_latch=lambda: None)
+        m = Hold(gesture=gesture, on_double_tap=lambda: None)
         words: list = []
 
         #: `Chord` puts the warm before the capture; `START` is that one moment, and
         #: the machine says it once rather than inventing a word for the pair.
-        #: `LATCH` is in this table because design 1 maps it to `toggle_action` — a tap
-        #: is the fast way into hands-free listening, and `Chord` sends it there.
+        #: `DOUBLE_TAP` is in this table because the shipped gesture is two taps:
+        #: `Chord` sends it to `toggle_action`, and a single tap reports nothing at all.
         expand = {START: ("warm", "talk"), STOP: ("talk-end",), BREAK: ("talk-break",),
-                  TOGGLE: ("toggle",), LATCH: ("toggle",)}
+                  TOGGLE: ("toggle",), DOUBLE_TAP: ("toggle",)}
 
         def put(effects):
             for effect in effects:

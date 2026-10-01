@@ -146,19 +146,38 @@ class _Handler(BaseHTTPRequestHandler):
     # -- the answers ---------------------------------------------------------
 
     def _send(self, status: int, body: bytes, ctype: str) -> None:
-        self.send_response(status)
-        for key, value in HEADERS.items():
-            self.send_header(key, value)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        if status >= 400:
-            # A refusal may not have read the body it refused, and on a kept-alive
-            # connection those unread bytes would be parsed as the next request.
-            self.send_header("Connection", "close")
+        # **A client is allowed to disconnect before it reads its reply**, and Flow Home's
+        # client does exactly that whenever the tab closes, the page navigates, or a poll
+        # is superseded by the next one. Windows reports that as WinError 10053,
+        # `ConnectionAbortedError`, out of the `sendall` below — a whole traceback on the
+        # console for an ordinary event, on a request that had already been answered
+        # correctly. So the write is guarded, and the answer is dropped rather than
+        # retried: there is nobody left to receive it.
+        #
+        # `ConnectionResetError` and `BrokenPipeError` are the same event on the other two
+        # paths — a peer that resets, and a socket closed between `end_headers` and
+        # `write` — and all three are here because Flow Home is a local server that real
+        # browsers talk to, not a test fixture.
+        try:
+            self.send_response(status)
+            for key, value in HEADERS.items():
+                self.send_header(key, value)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            if status >= 400:
+                # A refusal may not have read the body it refused, and on a kept-alive
+                # connection those unread bytes would be parsed as the next request.
+                self.send_header("Connection", "close")
+                self.close_connection = True
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            # The socket is gone, so the keep-alive state is a lie and the next request
+            # has nowhere to go. Said by setting the flag rather than by logging: this is
+            # a browser closing a tab, not a fault, and `log_message` is silent for the
+            # same reason a line per poll would bury the startup diagnostics.
             self.close_connection = True
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
 
     def _json(self, status: int, payload: dict) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"),
