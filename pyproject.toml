@@ -107,6 +107,15 @@ packages = ["flow"]
 exclude = [
     ".bench/",
     ".claude/",
+    # A code index, and the largest single thing in the artifact by an order of
+    # magnitude: `.serena/cache/python/` is two pickled symbol dumps, **15,786,618 B of
+    # 20,935,157 B uncompressed** measured on 2026-09-30 — 75% of the sdist. Same
+    # category as `.claude/` above: a tool's cache of *this* tree, for a tool that is
+    # not installed by it, with nothing an installing machine could use. Untracked by
+    # git and never intended to ship; it got in because hatchling's sdist default is
+    # the working tree, not the index. This is the exclusion that took the artifact
+    # from 4,822,431 B to under the 2 MB guard.
+    ".serena/",
     "tests/",
     "LOOP_PLAN.md",
     "NEEDS_YOU.md",

@@ -361,6 +361,19 @@ class TestTheSdistCarriesOnlyWhatAnInstallNeeds(unittest.TestCase):
         # audit, which is why it is named here rather than inferred from a pattern.
         self.assertEqual(self.carried("/.claude/"), [])
 
+    def test_nor_is_a_tool_s_code_index(self):
+        # `.serena/cache/python/` is two pickled symbol dumps of this tree — 15,786,618 B
+        # of the 20,935,157 B the artifact held uncompressed, 75% of it — for a tool the
+        # install does not have and cannot use. It got in the same way `.claude/` did:
+        # hatchling's sdist default is the working tree, and a tool cache is untracked
+        # rather than ignored, so nothing in git ever said no.
+        #
+        # Named here for the same reason as the two above: it is a fact about a directory
+        # that existed, not a pattern that happens to match. A pattern would have caught
+        # this one *and* every future cache, and would also have caught `flow/` — which is
+        # why the list is explicit and this test is the thing that keeps it honest.
+        self.assertEqual(self.carried("/.serena/"), [])
+
     def test_nor_the_two_files_that_are_this_round_talking_to_itself(self):
         for name in ("LOOP_PLAN.md", "NEEDS_YOU.md"):
             with self.subTest(name=name):
@@ -392,7 +405,7 @@ class TestThePyprojectSaysSoOutLoud(unittest.TestCase):
         return sdist["exclude"]
 
     def test_every_directory_the_item_named_is_excluded(self):
-        for path in (".bench/", ".claude/", "tests/", "LOOP_PLAN.md",
+        for path in (".bench/", ".claude/", ".serena/", "tests/", "LOOP_PLAN.md",
                      "NEEDS_YOU.md", "docs/decisions.md", "docs/history/"):
             with self.subTest(path=path):
                 self.assertIn(path, self.excluded())
