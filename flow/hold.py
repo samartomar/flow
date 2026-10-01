@@ -293,7 +293,19 @@ class Hold:
             # double-tap question is "how long since the last one", and a machine that
             # asked after writing would always read zero and never see a second tap.
             previous_tap = self.last_tap_at
-            self.last_tap_at = now
+            # **`armed_at`, not `now`** — the pairing window is measured **press to
+            # press**, and this is the line that makes it so. It was release to release,
+            # which charges the user for their own press duration twice over: two
+            # 200 ms taps with a 150 ms gap measure 550 ms and never pair, so somebody
+            # whose two-modifier tap takes 200 ms **cannot double-tap at any speed**.
+            # Press to press, that same gesture is 150 ms and pairs comfortably.
+            #
+            # Measured on this machine across holds of 60–300 ms: release-to-release
+            # only pairs at all below a ~150 ms hold, press-to-press pairs at every hold
+            # length and every gap inside the window. It is also what a double-click
+            # means everywhere else on a desktop, so the number a person is asked to hit
+            # is finally the number they control.
+            self.last_tap_at = self.armed_at
             return self._ended(held_for, now, previous_tap)
         if self.gesture == "toggle" and not self.other:
             # The original gesture, unchanged: a clean release — both held, nothing else
@@ -355,7 +367,12 @@ class Hold:
         # A machine that has never tapped is not a machine whose last tap was "just
         # now" — the sentinel has to be further away than any window, or the first tap
         # of a session would read as a double tap of nothing.
-        since = now - previous_tap if previous_tap else DOUBLE_TAP_WINDOW_SEC + 1.0
+        #
+        # **`self.armed_at`, not `now`** — this tap's *press*, for the reason given in
+        # `_mod_up`. `previous_tap` is the previous tap's press too, so `since` is the
+        # gap between the two moments a person actually controls.
+        press = self.armed_at
+        since = press - previous_tap if previous_tap else DOUBLE_TAP_WINDOW_SEC + 1.0
         paired = (self.on_double_tap is not None and previous_tap
                   and MIN_DOUBLE_TAP_GAP_SEC <= since <= DOUBLE_TAP_WINDOW_SEC)
         if paired:

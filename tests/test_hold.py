@@ -355,10 +355,11 @@ class TestETheTimingRulesThatChordNeverHad(unittest.TestCase):
         latched, doubled = [], []
         m = machine(on_latch=lambda: latched.append(1),
                     on_double_tap=lambda: doubled.append(1))
-        first = hold_chord(m, t=0.0, length=0.05)
-        # Half a window later, which is inside `DOUBLE_TAP_WINDOW_SEC` (already in
-        # seconds â€” dividing again here was a unit bug this test caught).
-        second = hold_chord(m, t=hold.DOUBLE_TAP_WINDOW_SEC / 2, length=0.05)
+        first = hold_chord(m, t=100.0, length=0.05)
+        # Half a window later. The window is press to press, so the gap is between
+        # the two `armed_at` values and nothing here depends on how long each tap is
+        # held -- see `_mod_up` for why that changed.
+        second = hold_chord(m, t=100.0 + hold.DOUBLE_TAP_WINDOW_SEC / 2, length=0.05)
         self.assertEqual(first, (START, STOP, LATCH))
         self.assertEqual(second, (START, STOP, DOUBLE_TAP))
         self.assertEqual(doubled, [1])
@@ -403,9 +404,15 @@ class TestETheTimingRulesThatChordNeverHad(unittest.TestCase):
                 m = machine(**{**callbacks,
                               "on_latch": lambda: latched.append(1)})
                 gap = hold.MIN_DOUBLE_TAP_GAP_SEC + 0.1
-                first = hold_chord(m, t=0.0, length=0.05)
-                second = hold_chord(m, t=0.05 + gap, length=0.05)
-                third = hold_chord(m, t=0.10 + gap * 2, length=0.05)
+                # **From a non-zero base, deliberately.** `last_tap_at` is 0.0 to mean
+                # "never tapped", and a press at exactly t=0.0 is indistinguishable
+                # from that sentinel. `time.monotonic()` is never zero in production, so
+                # this is not a bug — but a test that starts at zero asserts that a
+                # coincidence the machine can never hit.
+                base = 100.0
+                first = hold_chord(m, t=base, length=0.05)
+                second = hold_chord(m, t=base + 0.05 + gap, length=0.05)
+                third = hold_chord(m, t=base + 0.10 + gap * 2, length=0.05)
                 # The pair is consumed either way; `DOUBLE_TAP` only when someone is
                 # listening for it.
                 self.assertEqual(first, (START, STOP, LATCH))
@@ -428,8 +435,9 @@ class TestETheTimingRulesThatChordNeverHad(unittest.TestCase):
             with self.subTest(double_tap=("on_double_tap" in callbacks)):
                 m = machine(**callbacks)
                 gap = hold.MIN_DOUBLE_TAP_GAP_SEC + 0.1
-                hold_chord(m, t=0.0, length=0.05)
-                hold_chord(m, t=0.05 + gap, length=0.05)
+                base = 100.0  # non-zero: 0.0 is the "never tapped" sentinel — see above
+                hold_chord(m, t=base, length=0.05)
+                hold_chord(m, t=base + 0.05 + gap, length=0.05)
                 self.assertEqual(m.last_tap_at, 0.0)
 
     def test_the_window_still_reopens_for_a_genuine_second_pair(self):
@@ -439,9 +447,10 @@ class TestETheTimingRulesThatChordNeverHad(unittest.TestCase):
         doubled = []
         m = machine(on_latch=lambda: None, on_double_tap=lambda: doubled.append(1))
         gap = hold.MIN_DOUBLE_TAP_GAP_SEC + 0.1
-        hold_chord(m, t=0.0, length=0.05)
-        hold_chord(m, t=0.05 + gap, length=0.05)
-        after = 1.0  # past the window, so this is a fresh first tap of a second pair
+        base = 100.0
+        hold_chord(m, t=base, length=0.05)
+        hold_chord(m, t=base + 0.05 + gap, length=0.05)
+        after = base + 1.0  # past the window, so this is a fresh first tap of a second pair
         hold_chord(m, t=after, length=0.05)
         hold_chord(m, t=after + 0.05 + gap, length=0.05)
         self.assertEqual(doubled, [1, 1])

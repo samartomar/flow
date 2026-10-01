@@ -528,9 +528,11 @@ listening on or off. That is the whole of the shortcut.
 
 A single tap does nothing at all — it is not a shortcut on its own, so reaching for the
 chord and brushing it changes nothing. Both presses have to be short (**under 400 ms**)
-*and* land close together: the pair is measured **release to release**, within **500 ms**,
-so two deliberate presses are two sentences rather than a toggle. Those numbers were
-measured on real hardware and are not this machine's: they come from
+*and* the second one has to start within **500 ms** of the first. That window is measured
+**press to press**, which is what a double-click means everywhere else and — the reason it
+is worth saying — it does not get shorter when you hold the keys longer. Two deliberate
+presses are two sentences rather than a toggle. Those numbers were measured on real
+hardware and are not this machine's: they come from
 [Fireflies Talk](https://fireflies.ai/talk), which ships the same gesture.
 
 If two taps do not feel like two taps to you, the **Toggle** gesture above is the answer:

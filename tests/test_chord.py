@@ -537,15 +537,39 @@ class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
                 self.assertEqual("toggle" in _fired(presses), is_tap)
 
     def test_a_press_under_the_tap_window_that_is_too_slow_to_pair_is_two_sentences(self):
-        # The other half of the same boundary, and the one a person actually hits: a
-        # 300 ms press is a tap on its own, but two of them are 600 ms release to release
-        # and out of the window. So it is two sentences, not a hands-free toggle — and
-        # silently, which is why it is stated in the guide rather than left to be felt.
-        _chord_obj, presses = _chord()
-        self._pair(presses, 300, gap_ms=0)
+        # The other half of the tap boundary. With `gap_ms=0` the press-to-press
+        # distance is twice the hold, so the edge sits at a 250 ms hold: under it pairs,
+        # over it the two presses are two sentences. Measured across 60–400 ms below
+        # rather than reasoned from the constants.
+        for hold_ms, pairs in ((60, True), (200, True), (250, True), (300, False),
+                               (400, False)):
+            with self.subTest(hold_ms=hold_ms):
+                _c, presses = _chord()
+                self._pair(presses, hold_ms, gap_ms=0)
+                self.assertEqual("toggle" in _fired(presses), pairs)
+
+    def test_the_pairing_window_does_not_shrink_when_the_keys_are_held_longer(self):
+        # **The defect this pins**, and the reason the gesture did not work on a real
+        # machine. The window was measured release to release, which charges the user
+        # for their own press duration twice over: two 200 ms taps with a 150 ms gap
+        # measure 550 ms and never pair, so anybody whose two-modifier tap takes
+        # 200 ms *could not double-tap at any speed*.
+        #
+        # Press to press, the same gesture is 150 ms and pairs comfortably. Note the
+        # numbers below are `hold_ms`, and `_Keyboard` adds its gap after *each* key-up,
+        # so the real press-to-press distance is twice the hold — measured, and the reason
+        # this test is written in halves rather than in the window it is about.
+        for hold_ms in (60, 100, 150, 200):
+            with self.subTest(hold_ms=hold_ms):
+                _c, presses = _chord()
+                self._pair(presses, hold_ms, gap_ms=0)
+                self.assertIn("toggle", _fired(presses))
+
+    def test_a_gap_past_the_window_is_still_two_sentences(self):
+        # Widening the window by measuring presses must not have removed the bound.
+        _c, presses = _chord()
+        self._pair(presses, 60, gap_ms=hold.DOUBLE_TAP_WINDOW_SEC * 1000)
         self.assertNotIn("toggle", _fired(presses))
-        self.assertLess(hold.TAP_MAX_SEC * 1000,
-                        hold.DOUBLE_TAP_WINDOW_MS * 1000 / 2)
 
     def test_a_double_tap_puts_its_word_after_the_draft_is_closed(self):
         # Ordering, and it is not incidental. The callback `Hold` offers runs *inside*
