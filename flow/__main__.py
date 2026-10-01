@@ -1148,6 +1148,22 @@ def main(argv: list[str] | None = None) -> int:
             say_gesture(design, False)
             pill = build(design)
     finally:
+        # The session is closed here as well as inside `quit_app`, and the duplicate call
+        # is free because `close` is idempotent — `self._alive` is already False and the
+        # join on an exited thread returns at once.
+        #
+        # **It was not here at all, and that was a real leak.** `mainloop()` returning is
+        # a normal quit: `quit_app` runs `session.close()`, but a window destroyed by any
+        # other route — the OS, a design switch that failed, a surface rebuilt under an
+        # error — returns out of `mainloop` having closed nothing. The decode thread and
+        # the microphone outlived the surface, and on a Windows run that is the difference
+        # between a process that ends and one that lingers holding the capture device.
+        # Same for the hotkeys: `quit_app` stops the `WH_KEYBOARD_LL` hook, and a hook left
+        # installed is the OS calling into a dead interpreter.
+        #
+        # `quit_app` still owns its own calls, because it is reachable from the menu and
+        # the chord and must not depend on this block ever being reached.
+        session.close()
         # The port closes with the process either way; this is so a Home window left
         # open says "Flow has quit" at its next poll instead of waiting on a socket.
         home.close()

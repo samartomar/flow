@@ -662,9 +662,13 @@ def build(pill, sess):
         (300, lambda: pill._open_commands()),
         (900, lambda: shot(pill, "11-help-commands")),
         (0, lambda: pill._help.close()),
-        (200, lambda: (setattr(sess.profile, "welcomed", False), pill._welcome())),
-        (900, lambda: shot(pill, "12-welcome")),
-        (0, lambda: pill._help.close()),
+        # **The welcome card moved to Flow Home and no longer lives on the pill.**
+        # `pill._welcome` was removed when first-run became Home's job
+        # (`flow/home/api.py::start_done` is what sets `welcomed` now), so this step used
+        # to die with `AttributeError` on every run and took the twenty steps after it
+        # with it. Dropped rather than pointed at Home, because `shots.py` photographs
+        # Tk surfaces and Home is an HTTP page in a browser — a different instrument, and
+        # `scripts/home_reel.py` next door is the one that photographs Home.
         # -- menus ------------------------------------------------------------
         (500, menu(["13-menu", "14-menu-mode", "15-menu-draft",
                     "16-menu-settings", "17-menu-help"], lambda: pill)),
