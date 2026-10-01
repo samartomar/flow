@@ -869,6 +869,18 @@ class Chord:
         #: fields that changed rather than re-deriving them.
         self._hold = Hold(self.mods, gesture=self.gesture,
                           on_double_tap=_tap_enabled)
+        #: **Where the machine's verdict goes, when something is listening.** A callable
+        #: taking `Diag.write`'s shape, or None. Set from `__main__` because this object
+        #: is built before the session is, and the trace is a property of the run rather
+        #: than of the chord.
+        #:
+        #: **It records the machine's *decisions*, never a key.** `effect=`, `armed=`,
+        #: `other=` are all derived state; the virtual key code is deliberately not among
+        #: them, because "Flow cannot tell you what you typed" is a property this file
+        #: argues for in `Chord` and it would be odd to break it in its own trace. The
+        #: question a stuck gesture actually needs answered — *did the hook see two taps,
+        #: and what did it decide* — is answerable without one.
+        self.trace = None
         #: Chords fed by *this* chord's hook rather than one of their own — Ask's
         #: ctrl+alt+win riding the talk chord's ctrl+win. One hook on the input path of
         #: every keystroke is the cost R16 was narrowed to accept; two would be twice the
@@ -1004,6 +1016,16 @@ class Chord:
             effects = ()
 
         self._sync()
+        #: The machine's verdict, on every event. Four fields and no key code: what the
+        #: machine decided, what state it is now in, and what went on the queue. That is
+        #: the whole chain for a stuck gesture, in one line per keystroke.
+        if self.trace is not None and effects:
+            # "." and not "," because `Diag._TOKEN` refuses a comma: a value that does not
+            # qualify is written as `<refused>`, which would have turned the one field
+            # this trace exists for into the one field that never says anything.
+            self.trace("chord", effect=".".join(effects), armed=self._armed,
+                       other=self._other, talking=self._talking,
+                       last_tap=round(self._hold.last_tap_at, 3))
         for effect in effects:
             if effect == START:
                 self.presses.put(self.warm_action)

@@ -2528,6 +2528,10 @@ class Pill(tk.Tk):
     #: reason `lite` is: a fixture built with `__new__` must not recurse into `self.tk`.
     _hidden = False
     _tray = None
+    #: Where the chord's trace goes, or None. **Class-level for `lite`'s reason**: the
+    #: frame's pump reads it on the first keystroke, and a fixture built with `__new__`
+    #: would recurse into `self.tk` rather than draw a default.
+    trace = None
     #: A Paste last waiting to happen, (text, since, restore), or None — see
     #: `_paste_last`. Class-level for `lite`'s reason: the frame's pump reads it on
     #: fixtures built with `__new__`.
@@ -4851,7 +4855,21 @@ class Pill(tk.Tk):
         #: than inside `_toggle` because `_toggle` is also the pill's click handler, and
         #: asking it to distrust `armed` there would change what a click does.
         tapped = False
-        for name in self.hotkeys.drain():
+        words = self.hotkeys.drain()
+        #: The other half of the chord's trace, and the half that says whether the
+        #: gesture arrived at all. `chord` records what the machine decided; this records
+        #: what the surface did about it, with the two states that decide the answer. A
+        #: stuck double tap is either a `toggle` that never reached here, or one that did
+        #: and was undone — and those two look identical from the keyboard.
+        if self.trace is not None and words:
+            # `queued` and not `words`: `Diag.FIELDS` already gives `words` a stricter
+            # meaning — how many words an utterance put into a draft — and reusing it here
+            # would have made one name mean a count and a list. Dot-joined for the same
+            # reason as the chord's: `_TOKEN` refuses a comma.
+            self.trace("pill", queued=".".join(words), armed=self.armed,
+                       state=getattr(getattr(self.session, "state", None), "value", ""),
+                       n=len(words))
+        for name in words:
             if name == "toggle":
                 if tapped:
                     # The hold this tap opened is already closed; `armed` is stale.

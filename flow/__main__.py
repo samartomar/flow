@@ -193,6 +193,33 @@ def _ask_chord(profile, hotkeys, Chord, parse_chord, echo, default):
     return chord
 
 
+def _trace_gesture(hotkeys, diag):
+    """Hand the trace to whichever chords got built, so a gesture is explainable.
+
+    A gesture that does not work is invisible from the keyboard: Ctrl+Win either does
+    something nobody asked for or nothing at all, and both look the same from the other
+    side of the desk. Four guesses about this were wrong, which is four more than a
+    symptom that carries its own evidence should cost.
+
+    The trace records **the machine's verdict, not the keystroke** — `effect`, `armed`,
+    the queued words, the session state. That is enough to answer the only question that
+    matters ("did the hook see the tap, and what did it decide?") and it is answerable
+    without writing down which key was pressed, which is a thing this project goes out of
+    its way not to know. See `Chord.trace`.
+
+    Best-effort and silent: a chord that has already refused to start, or a run with
+    `--no-profile`, has nothing to attach to and there is no reason to interrupt startup
+    over either.
+    """
+    write = getattr(diag, "write", None)
+    if write is None:
+        return
+    for attr in ("chord", "ask_chord"):
+        chord = getattr(hotkeys, attr, None)
+        if chord is not None:
+            chord.trace = write
+
+
 def _native_transcriber():
     """Import late, so a Windows launch never touches the macOS-only module."""
     from .native import NativeTranscriber
@@ -922,6 +949,7 @@ def main(argv: list[str] | None = None) -> int:
                        CHORD_IGNORED_LINE, CHORD_UNAVAILABLE, CHORD_DEFAULT)
                 _ask_chord(profile, hotkeys, Chord, parse_chord, _echo,
                            ASK_CHORD_DEFAULT)
+                _trace_gesture(hotkeys, diag)
     # Assigned rather than passed: the session is built before `RegisterHotKey` has been
     # asked for anything, and what the session needs is the answer, not the request. It
     # reads this only to say what still works when voice stops working.
@@ -1072,6 +1100,10 @@ def main(argv: list[str] | None = None) -> int:
         # surface that is on screen — so Home is told which one that is, every time.
         home.surface = surface
         home.design = name
+        # Set here rather than in `__init__` for the reason `_trace_gesture` gives: the
+        # trace belongs to the run, and `build` is the one place that knows what the run
+        # turned out to be. Re-run on a design switch, so both designs trace alike.
+        surface.trace = diag.write if diag is not None else None
         return surface
 
     say_gesture(design, args.arm)

@@ -32,10 +32,12 @@ machine that is actually hard, and asks nothing of the developer's keyboard.
 """
 
 import ctypes
+import json
 import sys
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -879,6 +881,12 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         # was looked up by, so naming one says nothing that was not already said. Every
         # other key on the board is still the single boolean `other`, which the test
         # above now proves about the machine as well as about this object.
+        # Argued again for `trace`, the gesture trace. It holds the trace's writer and
+        # nothing else; what gets written is the machine's verdict — `effect`, `armed`,
+        # the queued words, the session state — and the test above the new field's own
+        # suite proves a keystroke cannot get in there. A sink that could be told *what*
+        # was pressed would be a different field, and this is where that would be argued
+        # about instead.
         chord, _presses = _chord()
         _Keyboard(chord).down(VK_LCONTROL, VK_LWIN, VK_A).up(VK_A, VK_LWIN, VK_LCONTROL)
         self.assertEqual(
@@ -886,7 +894,7 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
             {"presses", "mods", "action", "warm_action", "end_action", "break_action",
              "toggle_action", "gesture", "clock", "installed", "_down", "_other",
              "_extra", "_armed", "_talking", "_hold", "riders", "touched", "_hook",
-             "_tid", "_ready", "_proc", "_thread"},
+             "_tid", "_ready", "_proc", "_thread", "trace"},
         )
 
 
@@ -979,6 +987,118 @@ class TestFTheHookIsTornDownByWhoeverOwnsGlobalKeyInput(unittest.TestCase):
         self.assertIsNotNone(chord._proc)
         self.assertIn("_proc", vars(chord))
 
+
+
+class TestTheGestureLeavesATrace(unittest.TestCase):
+    """A gesture that does nothing and a gesture that does the wrong thing look identical.
+
+    From the other side of the desk, Ctrl+Win either works or it does not, and four
+    guesses about which were wrong before anybody wrote down what the machine decided.
+    So it is written down — the machine's verdict, per keystroke, in the trace.
+
+    **And deliberately not the keystroke.** `Chord` exists to not learn what was typed
+    (`TestDItLearnsNothingAboutTheKeysItRejects`), and a trace full of virtual key codes
+    would undo that in the one file a person is invited to send in. Every field below is
+    derived state, and that is enough: "did the hook see the tap, and what did it decide"
+    needs no key to answer.
+    """
+
+    def setUp(self):
+        self.lines = []
+
+        def trace(kind, /, **fields):
+            self.lines.append((kind, fields))
+
+        self.c = Chord(queue.Queue(), frozenset({"ctrl", "win"}), gesture="hold")
+        self.c.trace = trace
+        self.clock = 0.0
+
+        def tick():
+            self.clock += 0.12
+            return self.clock
+
+        self.c.clock = tick
+
+    def tap(self):
+        for wparam, vk in ((WM_KEYDOWN, 0x11), (WM_KEYDOWN, 0x5B),
+                           (WM_KEYUP, 0x11), (WM_KEYUP, 0x5B)):
+            self.c._feed(wparam, vk)
+
+    def test_a_double_tap_is_recorded_as_the_double_tap(self):
+        self.tap()
+        self.tap()
+        recorded = [f for _, f in self.lines if "double_tap" in f["effect"]]
+        self.assertEqual(len(recorded), 1, f"the trace missed it: {self.lines}")
+        self.assertFalse(recorded[0]["armed"])
+
+    def test_the_record_carries_no_key(self):
+        self.tap()
+        self.tap()
+        for _, fields in self.lines:
+            for name in fields:
+                self.assertNotIn("vk", name, "the trace must not record a keystroke")
+                self.assertNotIn("key", name, "the trace must not record a keystroke")
+            # A virtual key code is a small int; the trace's numbers are a clock and a
+            # count, both of which are floats or obviously a length.
+            json.dumps(fields)  # a non-serialisable value would raise here
+
+    def test_no_trace_is_not_an_error(self):
+        """The default matters more than the feature: `None` must stay silent."""
+        self.assertIsNone(Chord(queue.Queue()).trace)
+
+    def test_the_real_trace_refuses_none_of_it(self):
+        """Through a real `Diag`, not a lambda — and this test exists because of how it went.
+
+        The first version of this called a list-appending function and passed. Against
+        the real writer every single field was **silently dropped**: `Diag` vets field
+        names against an allow-list and counts what it refuses rather than raising, and
+        it sanitises values to a token that has no comma in it. The trace was writing
+        lines and saying nothing, which is the one failure a log cannot be allowed to
+        have — it looks exactly like a bug it was added to diagnose.
+
+        So this asserts the two things that are invisible from a stub: no field refused,
+        and no value rewritten to `<refused>`.
+        """
+        import tempfile
+
+        from flow.diag import REFUSED, Diag
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "diag.jsonl"
+            diag = Diag(path=path, background=False)
+            self.c.trace = diag.write
+            self.tap()
+            self.tap()
+            diag.close()
+            self.assertEqual(diag.rejected, 0,
+                             "the trace is writing fields Diag does not know")
+            written = path.read_text(encoding="utf-8")
+        self.assertNotIn(REFUSED, written,
+                         "a value did not survive Diag's token and reads as absent")
+        self.assertIn("double_tap", written,
+                      "the whole point of the trace, and it did not get through")
+
+
+class TestTheChordsAreHandedTheTrace(unittest.TestCase):
+    def test_both_chords_are_wired_and_none_is_survivable(self):
+        from flow.__main__ import _trace_gesture
+
+        talk, ask = Chord(queue.Queue()), Chord(queue.Queue())
+        hotkeys = SimpleNamespace(chord=talk, ask_chord=ask, chat_chord=None)
+        diag = SimpleNamespace(write=lambda kind, /, **f: None)
+        _trace_gesture(hotkeys, diag)
+        self.assertIs(talk.trace, diag.write)
+        self.assertIs(ask.trace, diag.write)
+        # `--no-profile` builds no diag, and a chord that refused to start is absent.
+        _trace_gesture(SimpleNamespace(chord=None), None)
+
+    def test_a_pill_fixture_can_never_reach_for_tk(self):
+        """`Pill.trace` is class-level for `lite`'s reason; prove it is there."""
+        from flow.ui import Pill
+        from flow.ui_compact import CompactPill
+
+        self.assertIsNone(Pill.trace)
+        self.assertIsNone(CompactPill.trace)
 
 
 if __name__ == "__main__":  # pragma: no cover

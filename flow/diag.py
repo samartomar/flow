@@ -81,6 +81,16 @@ FIELDS = frozenset({
     "kept",       # a count: notes held (P9)
     "exchange",   # whether a kept note carried the question that produced it
     "wrote",      # whether a wrap-up reached a file, never where it went
+    # --- the gesture trace. `Chord` and the surfaces, arguing about a chord that does
+    # not do what it was asked to. Every one is a machine verdict or a state flag, and
+    # none is a key: `effect`/`queued` are the queue's own vocabulary joined with ".",
+    # because `_TOKEN` refuses a comma and a refused value reads as an absence.
+    "effect",     # what the chord decided: start | stop | double_tap | break | idle
+    "queued",     # the words that reached the surface, dot-joined. Names, never text
+    "armed",      # whether the chord considers itself held right now
+    "other",      # whether an outside key has gone down since it last looked
+    "talking",    # whether it believes it is capturing
+    "last_tap",   # the clock reading of the tap it last latched, for the pairing window
 })
 
 #: Named so that adding one to FIELDS fails loudly. These are the words themselves —

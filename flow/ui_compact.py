@@ -692,6 +692,10 @@ class CompactPill(tk.Tk):
     #: through the full Pill). A class attribute is a real lookup that never
     #: reaches `__getattr__`; `__init__` overrides it per instance.
     lite = False
+    #: Where the chord's trace goes, or None — the same declaration, and the same
+    #: `__getattr__`-recursion reason, as `Pill.trace` in ui.py. Set by `__main__` in
+    #: `build`, which is the only place that knows both designs.
+    trace = None
     armed = False
     hotkeys = None
     on_send = None
