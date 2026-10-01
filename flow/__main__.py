@@ -145,7 +145,12 @@ def _chord(profile, hotkeys, Chord, parse_chord, echo, ignored_line,
     # of them would be the one place a user could check, describing a gesture half of
     # them do not have.
     if chord.gesture == "hold":
-        say(f"chord   {'hold':8s} {chord.describe()}  (hold to talk, release to send)")
+        # **The double tap is named here or it does not exist.** It is a gesture with no
+        # key of its own, so the one line that says what the chord does is the only place
+        # a person can find out it is there — and this line was still describing the
+        # single-tap behaviour after the gesture changed, twice.
+        say(f"chord   {'hold':8s} {chord.describe()}  "
+            "(hold to talk, release to send; double-tap for hands-free)")
     else:
         say(f"chord   {'toggle':8s} {chord.describe()}  (press to start, again to stop)")
     return chord
@@ -1002,7 +1007,13 @@ def main(argv: list[str] | None = None) -> int:
                 else "the pill"
             ask = getattr(hotkeys, "ask_chord", None)
             asks = f" | hold {ask.describe()} to ask" if ask is not None else ""
-            say(f"hold {held} to talk{asks} | tap the pill to cycle "
+            # **The double tap goes here too**, for the same reason it goes on the chord
+            # line: it shares those keys, so this is the only place a person is told that
+            # pressing them twice is a different thing from pressing and holding them.
+            # A compact user has no other route to it.
+            hands_free = (f" | double-tap {chord.describe()} for hands-free"
+                          if chord is not None and chord.gesture == "hold" else "")
+            say(f"hold {held} to talk{asks}{hands_free} | tap the pill to cycle "
                 f"Type / Refine / Ask | right-click for the menu | {quits}")
         else:
             say(
