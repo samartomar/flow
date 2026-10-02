@@ -17,7 +17,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
-from flow.help import AUTO_ASK_OFF_LABEL  # noqa: E402
+from flow.help import (  # noqa: E402
+    AUTO_ASK_OFF_LABEL,
+    AUTO_ASK_ON_LABEL,
+    auto_ask_notice,
+)
 from flow.profile import Profile  # noqa: E402
 from flow.session import (  # noqa: E402
     AUTO_ASK_SEC,
@@ -281,18 +285,18 @@ class TestTheFirstConverseEntrySaysAPauseSends(unittest.TestCase):
     def test_the_first_entry_names_the_pause_and_the_setting(self):
         said = self.entered(self.profile())
         self.assertIn(f"{AUTO_ASK_SEC:.0f}s", said)
-        self.assertIn(AUTO_ASK_OFF_LABEL, said)
+        self.assertIn(AUTO_ASK_ON_LABEL, said)
         self.assertIn("Settings", said)
 
     def test_and_the_second_entry_does_not(self):
         p = self.profile()
         self.entered(p)
-        self.assertNotIn(AUTO_ASK_OFF_LABEL, self.entered(p))
+        self.assertNotIn(AUTO_ASK_ON_LABEL, self.entered(p))
 
     def test_it_survives_a_reload_so_a_new_launch_is_still_quiet(self):
         p = self.profile()
         self.entered(p)
-        self.assertNotIn(AUTO_ASK_OFF_LABEL, self.entered(Profile(p.path)))
+        self.assertNotIn(AUTO_ASK_ON_LABEL, self.entered(Profile(p.path)))
 
     def test_an_older_profile_is_told_once(self):
         # Absent means "has not been told", the opposite way round from `auto_ask`: an
@@ -300,20 +304,34 @@ class TestTheFirstConverseEntrySaysAPauseSends(unittest.TestCase):
         p = self.profile()
         p.path.write_text('{"schema": 1}', encoding="utf-8")
         self.assertTrue(Profile(p.path).converse_seen is False)
-        self.assertIn(AUTO_ASK_OFF_LABEL, self.entered(Profile(p.path)))
+        self.assertIn(AUTO_ASK_ON_LABEL, self.entered(Profile(p.path)))
 
     def test_no_profile_is_told_every_time_rather_than_never(self):
         # `--no-profile` has nothing to remember it in, and a warning a user never
         # receives is worse than one they receive twice.
-        self.assertIn(AUTO_ASK_OFF_LABEL, self.entered(None))
-        self.assertIn(AUTO_ASK_OFF_LABEL, self.entered(None))
+        self.assertIn(AUTO_ASK_ON_LABEL, self.entered(None))
+        self.assertIn(AUTO_ASK_ON_LABEL, self.entered(None))
 
-    def test_the_label_is_the_menu_s_own_and_not_a_restatement(self):
+    def test_the_label_is_a_control_that_exists_and_not_a_restatement(self):
         # A notice naming a control that has since been reworded points at nothing, and
         # costs the reader a hunt through a menu for a line that is not there.
-        import flow.ui as ui
+        #
+        # It used to be checked against `ui.AUTO_ASK_OFF_LABEL`, because the toggle was
+        # a row in the pill's own Settings menu and the notice had to name that row.
+        # **The row is gone from the pill** — it lives in Flow Home, which draws it as
+        # "Ask after a pause" — so what has to hold now is that the notice names a
+        # control that exists somewhere, and that the pill's old wording is not it.
+        notice = auto_ask_notice(6.0)
+        self.assertIn(AUTO_ASK_ON_LABEL, notice)
+        self.assertNotIn(AUTO_ASK_OFF_LABEL, notice)
 
-        self.assertIs(ui.AUTO_ASK_OFF_LABEL, AUTO_ASK_OFF_LABEL)
+    def test_the_notice_says_which_window_the_setting_is_in(self):
+        # The path is part of the sentence. "Settings ▸ Ask after a pause" without the
+        # window named reads as the pill's menu, which no longer has it — and this
+        # notice is the only place a first-time converse user is told any of this.
+        notice = auto_ask_notice(6.0)
+        self.assertIn("Flow Home", notice)
+        self.assertNotIn("right-click", notice)
 
     def test_going_back_to_dictate_says_nothing_about_it(self):
         p = self.profile()

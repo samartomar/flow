@@ -86,9 +86,18 @@ def auto_ask_notice(seconds: float) -> str:
     surprise send*. A report like that can only come from somebody who was never told,
     so being told has to happen somewhere they will see it. It printed to a console
     before this, which is a surface no GUI user has open.
+
+    **It names Flow Home, and Home's own wording.** This line used to say
+    `right-click ▸ Settings ▸ “Ask only when I press it”`, which was true while the
+    toggle was a row in the pill's settings menu. That row moved to Flow Home on
+    2026-09-22 and came out of the pill's menu on 2026-10-01, and a notice pointing at a
+    control that is not there costs the reader a hunt through a menu for a line that was
+    never going to appear. The label is `AUTO_ASK_ON_LABEL` — "Ask after a pause" —
+    because that is the row Flow Home actually draws (`static/app.js`), not the pill's
+    old wording for the same switch.
     """
     return (f"a pause of {seconds:.0f}s sends the question on its own — "
-            f"right-click ▸ Settings ▸ “{AUTO_ASK_OFF_LABEL}” turns that off")
+            f"Flow Home ▸ Settings ▸ “{AUTO_ASK_ON_LABEL}” turns that off")
 
 #: What each hotkey does, in the words of the thing it does. An action with no entry
 #: renders as its own name rather than being dropped: a combo somebody can press and

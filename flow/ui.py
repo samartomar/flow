@@ -24,12 +24,10 @@ import traceback
 from collections import deque
 from pathlib import Path
 
-from .edits import SEND_WORD, SEND_WORD_PRESETS, enter_word
+from .edits import enter_word
 from . import glyphs
 from .help import (
-    AUTO_ASK_OFF_LABEL,
     fit,
-    AUTO_ASK_ON_LABEL,
     TITLE as TITLE_DEFAULT,
     open_guide,
     open_path,
@@ -3183,9 +3181,12 @@ class Pill(tk.Tk):
         )
         self._mode_menu(m)
         self._draft_menu(m)
-        # Flow Home is where every setting lives now (decisions.md 2026-09-22). The
-        # Settings cascade stays beside it while this design does: it is the design being
-        # retired, and taking its cascade away first would make its last release worse.
+        # Flow Home is where every setting lives (decisions.md 2026-09-22), and as of
+        # 2026-10-01 this cascade carries only the three Home cannot express — the
+        # ones about *this window*. It used to sit beside Open Flow duplicating nine
+        # settings, on the argument that taking it away first would make this design's
+        # last release worse; it was left beside it long enough to be seen being wrong,
+        # and the Open Flow row above is the way to everything it used to list.
         m.add_command(label="Open Flow", command=self._open_home)
         self._settings_menu(m)
         self._help_menu(m)
@@ -3268,128 +3269,6 @@ class Pill(tk.Tk):
         sub.add_command(label="Clear", command=self._clear)
         parent.add_cascade(label="Draft", menu=sub)
 
-    def _panel_menu(self, parent: tk.Menu) -> None:
-        """How wide the draft panel draws, chosen from the widths that have been drawn.
-
-        **Applied immediately rather than at next launch.** Every part of both windows
-        reads `BUBBLE_W` and `CARD_W` while drawing a frame rather than caching them at
-        construction, so rebinding them and forcing a redraw is a complete change — and
-        a size you cannot see until you restart is one nobody can choose between.
-
-        Saved on the way through, because this is the kind of setting somebody sets once
-        and would be annoyed to set again. A save that fails is said out loud rather than
-        swallowed: the width is still applied, so the session honours the choice and the
-        note explains why the next one will not.
-        """
-        sub = _dark_menu(parent)
-        here = BUBBLE_W
-
-        def choose(name: str) -> None:
-            apply_panel_width(panel_width(name))
-            # Both windows, because they are one window at two moments and only one of
-            # them is on screen to notice the change. `_frame` re-reads the width and
-            # re-lays every item it draws, so re-anchoring is the whole of the update.
-            for window in (self.bubble, self.card):
-                window.reposition()
-            profile = getattr(self.session, "profile", None)
-            if profile is None:
-                # `--no-profile`. The size is applied and lasts the session, which is
-                # exactly what that flag asks for, so there is nothing to report.
-                return
-            profile.panel = name
-            # The same shape `_set_trigger` uses, and for the same reason: this is a
-            # setting somebody chooses once, so a save that failed has to be visible now
-            # rather than discovered at the next launch.
-            if profile.save():
-                self.bubble.note(f"panel size: {name}")
-            else:
-                self._flash = FLASH_FRAMES
-                self.bubble.note(f"could not save {profile.path}")
-
-        for name, width in PANEL_WIDTHS.items():
-            sub.add_command(
-                label=name.capitalize() + ("   (current)" if width == here else ""),
-                command=lambda n=name: choose(n),
-            )
-        parent.add_cascade(label="Panel size", menu=sub)
-
-    def _design_menu(self, parent: tk.Menu) -> None:
-        """Which surface is on screen — changed here, and now.
-
-        It used to write the name and promise it for the next launch, because a
-        design's whole window tree is built in its constructor and a live swap was a
-        rebuild-the-world pattern nothing here had. `switch_design` is that pattern,
-        at the one seam that already existed: `__main__` speaks to a surface through a
-        constructor, `mainloop()` and a teardown, so a surface that tears its *window*
-        down and names its successor gets rebuilt around the session it was already
-        driving. The words survive the switch, and so does the microphone's state.
-
-        The `(current)` marker comes off `DESIGN` rather than off `profile.design`: the
-        question the row answers is "which surface am I looking at", and under
-        `--no-profile` the stored field is not that.
-        """
-        sub = _dark_menu(parent)
-        for name in DESIGNS:
-            sub.add_command(
-                label=name.capitalize() + ("   (current)" if name == self.DESIGN
-                                           else ""),
-                command=lambda n=name: self.switch_design(n),
-            )
-        parent.add_cascade(label="Design", menu=sub)
-
-    def _gesture_menu(self, parent: tk.Menu) -> None:
-        """What the chord does, switchable while Flow is running.
-
-        This is here because shipping push-to-talk *instead of* the toggle took a
-        working gesture away from everybody who had it, with no way back short of
-        editing a file — and the two are not a preference between equals, they are good
-        at different things. A hold needs no decision about when you are finished and
-        cannot leave a microphone running; a toggle is the only one of the two that
-        survives a paragraph, a long thought with pauses in it, or hands that cannot
-        hold two keys down for a minute.
-
-        **Applied to the live hook rather than at next launch**, and that is the whole
-        reason `Chord.gesture` is a plain attribute the callback reads. Switching by
-        rebuilding the chord would mean unhooking and re-installing a `WH_KEYBOARD_LL`
-        hook, which is the one call in that file the OS is entitled to refuse — and
-        being refused *while changing a setting* would leave somebody with no chord at
-        all and no obvious way back. One string assignment cannot fail.
-
-        Absent when there is no chord to describe: `--no-chord`, `"chord": ""`, or a
-        hook the OS refused. Same rule the help sheet follows — the menu says what works
-        on this machine this launch.
-        """
-        chord = getattr(self.hotkeys, "chord", None) if self.hotkeys else None
-        if chord is None:
-            return
-        sub = _dark_menu(parent)
-
-        def choose(name: str) -> None:
-            chord.gesture = name
-            # A gesture change mid-hold would leave the release with nothing to end:
-            # `_talking` is latched inside the hook and the pill is holding a `_ptt_since`
-            # for a capture the new gesture has no word for. Ending it here is the same
-            # tidy-up `_toggle` does, and for the same reason — the words are kept.
-            if self._ptt_since is not None:
-                self._talk_end(send=False)
-            profile = getattr(self.session, "profile", None)
-            if profile is None:
-                return  # `--no-profile`: applied for this session, which is what it asks
-            profile.gesture = name
-            if profile.save():
-                self.front.note(f"chord: {GESTURE_LABELS[name]}")
-            else:
-                self._flash = FLASH_FRAMES
-                self.front.note(f"could not save {profile.path}")
-
-        for name in GESTURE_LABELS:
-            sub.add_command(
-                label=(GESTURE_LABELS[name]
-                       + ("   (current)" if name == chord.gesture else "")),
-                command=lambda n=name: choose(n),
-            )
-        parent.add_cascade(label=f"Chord ({chord.describe()})", menu=sub)
-
     def _mic_item(self, parent: tk.Menu) -> None:
         """The mic view's one control: a checkbox, under the chord it belongs to.
 
@@ -3432,196 +3311,59 @@ class Pill(tk.Tk):
             variable=self._mic_var, onvalue=True, offvalue=False, command=choose,
         )
 
-    def _effort_menu(self, parent: tk.Menu) -> None:
-        """How hard the agent CLI may think, where it offers the choice.
-
-        Lowest by default, and that is a judgement rather than a saving: these calls are
-        a *rewrite* — take what was dictated and make it read like a written prompt — and
-        effort buys deliberation the task has no use for, paid for in the one currency
-        that counts here, which is the user watching a spinner between finishing a
-        sentence and having their words.
-
-        Offered anyway, per level, because "make it think harder about my prompt" is a
-        reasonable thing to want from a model you know.
-        """
-        current = getattr(self.session, "cli_effort", EFFORT_DEFAULT)
-        sub = _dark_menu(parent)
-        for level in EFFORTS:
-            sub.add_command(
-                label=level + ("   (current)" if level == current else ""),
-                command=lambda v=level: self.session.set_cli_effort(v),
-            )
-        parent.add_cascade(label=f"Effort ({current})", menu=sub)
-
-    def _model_menu(self, parent: tk.Menu) -> None:
-        """Which model to ask the CLI for, from the names that have been used before.
-
-        **The menu is a list of what somebody has already typed, and cannot be anything
-        else.** No CLI will enumerate its models — `codex exec --help` says `-m, --model
-        <MODEL>` and stops — so the names cannot be discovered, and Flow has no text
-        field anywhere to type one into. Settings is a menu, not a dialog, and the
-        docstring above refuses a page for exactly this reason.
-
-        So `--cli-model` is how a name arrives, once, and it is remembered; from then on
-        it is a click. The menu hides itself entirely until there is a second thing to
-        choose between, the same rule the CLI picker follows.
-        """
-        known = tuple(getattr(getattr(self.session, "profile", None), "cli_models", ()))
-        current = getattr(self.session, "cli_model", "")
-        if not known:
-            return
-        sub = _dark_menu(parent)
-
-        def choice(label: str, value: str) -> None:
-            sub.add_command(
-                label=label + ("   (current)" if value == current else ""),
-                command=lambda v=value: self.session.set_cli_model(v),
-            )
-
-        choice("The CLI's own default", "")
-        for name in known:
-            choice(name, name)
-        parent.add_cascade(label=f"Model ({current or 'default'})", menu=sub)
-
     def _settings_menu(self, parent: tk.Menu) -> None:
-        """Everything somebody sets once, in one place they can find it twice.
+        """What the pill can still change about itself — three rows.
 
-        Still not a settings dialog: every entry here writes to `profile.json` or
-        `lexicon.txt`, the two files that were always the settings, and the menu is the
-        way to reach them without an editor. What is refused is a *page* — a surface that
-        invites options to be added to it.
+        Not a settings dialog and not the place settings live: since 2026-10-01 that is
+        Flow Home, one hover up, which owns the other nine. What is refused here is a
+        *page* — a surface that invites options to be added to it — and what is left is
+        the three that are about this window rather than about a preference. See
+        `_settings_items`.
         """
         sub = _dark_menu(parent)
         self._settings_items(sub)
         parent.add_cascade(label="Settings", menu=sub)
 
     def _settings_items(self, sub: tk.Menu) -> None:
-        """Everything under Settings, filled into a menu somebody else owns.
+        """**The three settings Flow Home cannot make, and nothing else.**
 
-        Split out from `_settings_menu` so the gear on the row can post *this* rather
-        than a menu whose only entry is a `Settings` cascade — which is what it did, and
-        what the owner saw: "Remove the layer settings as clicking on icon it can open
-        directly". A shortcut that costs an extra hover is not a shortcut.
+        Nine entries left here on 2026-10-01: chord, trigger word, panel size, design,
+        agent CLI, effort, model, workspace, and speak/mute (with the voice list beside
+        it). Flow Home has owned every one of them since 2026-09-22 — its Settings page
+        posts to `/api/settings/design`, `/api/settings/auto_ask`, and the rest, and
+        the Open Flow row sits one hover above this menu. Twelve rows of settings
+        across two places is how a setting ends up in one and not the other.
 
-        The right-click still gets the cascade, because there it sits among Mode, Draft
-        and Help and has to be one of them.
+        What is left is what Home has no way to express, because all three are about
+        *this window* rather than about a preference:
+
+        * **Mic view** — a different face of this pill, and it is the chord's own
+          control, so it belongs under the chord rather than in a settings page.
+        * **Hide to tray** — behaviour of this window, and it is only offered where
+          there is a notification area to hide into (`tray.available()`).
+        * **Open settings folder** — the escape hatch. `profile.json` and
+          `lexicon.txt` are still the settings, and this is how you reach them without
+          an editor when the browser tab is not an option.
+
+        The builders that used to fill the other nine are gone rather than left
+        unreached. `Chord.gesture` stays a plain attribute the live hook reads, so
+        Flow Home's gesture switch still applies to a running chord with no rebuild.
+
+        **`self._clis = available()` stays, and it is not a leftover.** It used to sit
+        above the Agent CLI picker and looked like part of building one. It is not: it
+        is the *only* thing that re-walks PATH, and this menu open is the moment it
+        happens, because a press is already paying for it. Drop it and a CLI installed
+        while Flow runs stays invisible until the next launch —
+        `test_opening_the_menu_re_resolves_what_is_installed` exists for exactly that,
+        and caught it when this line was cut with the picker above it.
         """
-        self._gesture_menu(sub)
+        self._clis = available()
         self._mic_item(sub)
-        self._trigger_menu(sub)
-        self._panel_menu(sub)
-        self._design_menu(sub)
-        # Also the CLI marker's refresh point: a CLI installed mid-session shows up here,
-        # where a press is already paying for the PATH walk `_resolved` will not repeat.
-        clis = self._clis = available()
-        if len(clis) > 1:
-            # Offered only when there is a choice to make. Automatic tries them in order,
-            # but a fallback only runs after the first one has failed — which for a
-            # timeout means paying the whole wait first. Anyone who already knows which
-            # CLI is answering today should be able to say so without restarting.
-            picker = _dark_menu(sub)
-            current = getattr(self.session, "cli", None)
-            here = current.name if current is not None else None
-
-            # Plain commands and a text marker rather than radiobuttons: a Tk variable
-            # needs a master and a lifetime, and this menu is rebuilt on every press.
-            def choice(label: str, cli) -> None:
-                name = cli.name if cli is not None else None
-                picker.add_command(
-                    label=label + ("   (current)" if name == here else ""),
-                    command=lambda c=cli: self.session.set_cli(c),
-                )
-
-            choice("Automatic", None)
-            for candidate in clis:
-                choice(candidate.name, candidate)
-            sub.add_cascade(label="Agent CLI", menu=picker)
-        self._effort_menu(sub)
-        self._model_menu(sub)
         if tray.available():
-            # Offered where the other once-and-forget settings are, and only where there
-            # is a notification area to hide into. `hide_to_tray` refuses rather than
-            # hides if the icon does not take, so this cannot strand anybody.
+            # `hide_to_tray` refuses rather than hides if the icon does not take, so
+            # this cannot strand anybody.
             sub.add_command(label="Hide to tray", command=self.hide_to_tray)
-        self._workspace_menu(sub)
-        if getattr(self.session, "speaker", None) is not None:
-            sub.add_command(
-                label="Mute replies" if not self.session.muted else "Speak replies",
-                command=self.session.toggle_speech,
-            )
-            self._voice_menu(sub)
-        if self.session.mode == CONVERSE:
-            # Auto-ask is converse's countdown; Refine settles nothing on a
-            # pause, and a toggle for it there would switch a feature that
-            # mode does not have.
-            sub.add_command(
-                label=AUTO_ASK_OFF_LABEL if self.session.auto_ask
-                else AUTO_ASK_ON_LABEL,
-                command=self.session.toggle_auto_ask,
-            )
         sub.add_command(label="Open settings folder", command=self._open_settings)
-
-    def _trigger_menu(self, parent: tk.Menu) -> None:
-        """The word that presses Send, as a list rather than a text box.
-
-        A curated list is the whole design, argued and chosen over the two alternatives:
-        free text cannot be measured before it is live, and a spoken setting would write
-        config through the accented decoder this product exists to work around. Every
-        word here has passed the gate in `tests/test_triggers.py` — 0 hits across 580
-        real utterances, `command_bench` unmoved, and no meaning of its own in the
-        grammar.
-
-        The enter-variant is derived on every tap, in the safe order, with no special
-        case for a word that was already current. One rule is worth more than a clever
-        one here, and the note says what was written, so a hand-set `send_enter_word`
-        that this replaces is replaced *visibly*.
-
-        `--no-profile` gets no submenu at all: there is nothing to store into, and an
-        entry that silently forgets is worse than one that is not there.
-        """
-        profile = getattr(self.session, "profile", None)
-        if profile is None:
-            return
-        current = getattr(profile, "send_word", SEND_WORD)
-        sub = _dark_menu(parent)
-        # Held on self for the reason `_voice_var` is: a Tk variable that goes out of
-        # scope stops driving the indicator, and the tick is the answer to "which one am
-        # I using".
-        self._trigger_var = tk.StringVar(value=current)
-        # A word set by hand in profile.json is listed first rather than dropped, so the
-        # menu never opens with nothing selected — which would read as no word being set.
-        words = list(SEND_WORD_PRESETS)
-        if current not in words:
-            words.insert(0, current)
-        for word in words:
-            sub.add_radiobutton(
-                label=word, value=word, variable=self._trigger_var,
-                command=lambda w=word: self._set_trigger(w),
-            )
-        parent.add_cascade(label="Trigger word", menu=sub)
-
-    def _set_trigger(self, word: str) -> None:
-        """Store the pair, and say what was stored.
-
-        Saved now rather than at the next Send, for the reason `set_voice` gives: a
-        choice made just before closing the app is still a choice. Echoed because the
-        alternative is a setting that only exists inside a JSON file the owner has said
-        they will not open.
-        """
-        profile = getattr(self.session, "profile", None)
-        if profile is None:
-            return
-        profile.send_word = word
-        profile.send_enter_word = enter_word(word)
-        # Stored in both bodies and echoed in only one. The enter-variant is derived
-        # unconditionally so a profile written in Lite is a full-Flow profile too — but
-        # offering it here would be advertising an Enter Lite does not press.
-        if profile.save():
-            self.bubble.note(f'send: say "{word}"' if self.lite
-                             else f'send: say "{word}", or "{enter_word(word)}" to submit')
-        else:
-            self._flash = FLASH_FRAMES
-            self.bubble.note(f"could not save {profile.path}")
 
     #: What fits in a menu row. A path is the one label here the user's filesystem
     #: wrote, so it is cut like `edits.removed_text` cuts — and from the *left*,
@@ -3663,57 +3405,6 @@ class Pill(tk.Tk):
         finally:
             parent.grab_release()
 
-    def _workspace_menu(self, parent: tk.Menu) -> None:
-        """Where questions are asked from, as a list of places already chosen.
-
-        Recents rather than a browse dialog or a text field: a path typed into a
-        dialog is free text with separators, and the no-settings-dialog stance stands.
-        New paths enter once, via `--cwd`; after that they are a tap. "(not set)" is a
-        real entry because running without a project is a real choice, and the switch
-        itself — thread cleared, note saying so — is the session's
-        (`Session.set_workspace`), so the menu stays a dispatcher like the CLI picker.
-
-        A current workspace missing from the list is shown at the top rather than
-        dropped — the hand-set trigger word's rule, for the same reason: the menu must
-        never open with nothing ticked. A folder that is gone is shown and marked
-        rather than hidden (a project on a detached drive is still a place the user
-        knows); the tap on it is refused with the reason, one layer down.
-
-        No profile, or nothing to offer, means no submenu: there is nothing to switch
-        between, and an entry that silently forgets is worse than one that is absent.
-        """
-        profile = getattr(self.session, "profile", None)
-        if profile is None:
-            return
-        current = getattr(self.session, "workspace", None)
-        recents = list(getattr(profile, "workspaces", ()) or ())
-        if current and all(path_key(w) != path_key(current) for w in recents):
-            recents.insert(0, current)
-        if not recents:
-            return
-        sub = _dark_menu(parent)
-        # Held on self for the reason `_voice_var` is: a Tk variable that goes out of
-        # scope stops driving the tick, and the tick is the answer to "which one".
-        # The no-workspace value is the label itself, never "": measured on real Tk,
-        # an empty radiobutton -value is read as *unset* and falls back to the label,
-        # so a var holding "" matches no row and the tick silently never draws.
-        self._workspace_var = tk.StringVar(value=current or self.WORKSPACE_NOT_SET)
-        for w in recents:
-            label = (w if len(w) <= self.WORKSPACE_LABEL_MAX
-                     else "…" + w[-(self.WORKSPACE_LABEL_MAX - 1):])
-            if not Path(w).is_dir():
-                label += "  (missing)"
-            sub.add_radiobutton(
-                label=label, value=w, variable=self._workspace_var,
-                command=lambda p=w: self.session.set_workspace(p),
-            )
-        sub.add_radiobutton(
-            label=self.WORKSPACE_NOT_SET, value=self.WORKSPACE_NOT_SET,
-            variable=self._workspace_var,
-            command=lambda: self.session.set_workspace(None),
-        )
-        parent.add_cascade(label="Workspace", menu=sub)
-
     #: The "Engine default" row's label *and* its radio value, the workspace sentinel's
     #: shape for the workspace sentinel's reason: never "", because on real Tk an empty
     #: radiobutton -value reads back as the *label* — Tk treats it as unset and falls
@@ -3721,91 +3412,6 @@ class Pill(tk.Tk):
     #: voice name cannot equal it: every named row's value is an engine's installed
     #: voice name, and those name a person, not a fallback.
     VOICE_ENGINE_DEFAULT = "Engine default"
-
-    #: Engine key to the heading it is listed under, in the order the sections appear.
-    #: The order matches `speak._legacy`, so what the menu puts at the top is what
-    #: `--voice female` would have chosen — the list and the resolver agree, which is the
-    #: same discipline `speak.host` keeps between enumerating and speaking. Piper leads
-    #: for the reason `_legacy` gives: it is the engine nothing leaves the machine for.
-    VOICE_SECTIONS = (
-        ("piper", "Piper"),
-        ("edge", "Microsoft Natural"),
-        ("sapi", "Windows"),
-    )
-
-    #: Above this many voices an engine is nested behind gender cascades instead of
-    #: listed inline. The natural voices are 47 rows; listed flat they filled the screen,
-    #: pushed Piper's two off the bottom, and made the *shorter and better* list the one
-    #: you had to scroll for. Piper and the Windows nine stay inline — nesting a list you
-    #: can already see costs a click and buys nothing.
-    VOICE_INLINE_MAX = 12
-
-    #: Gender values a cascade is built for, in order, with the label to put on it.
-    #: Anything else — Piper's `NotSet`, mostly — collects under the last one, so a voice
-    #: can never be dropped from the menu by failing to declare something.
-    VOICE_GENDER_GROUPS = (("female", "Female"), ("male", "Male"), (None, "Other"))
-
-    def _voice_menu(self, parent: tk.Menu) -> None:
-        """A submenu of the voices this machine actually has, grouped by engine.
-
-        Listed rather than cycled: "next voice" is unusable when the good one is fourth
-        of nine, and the whole reason this exists is that the engine's default is the
-        oldest voice on the box and nobody had ever chosen it. A tick marks the one in
-        use, so the answer to "which am I hearing" is on screen and not in a log line
-        that scrolled away at startup.
-
-        Grouped once there was more than one engine to group. A flat list mixed three
-        kinds of voice that differ in ways the name does not show — one is local and
-        instant, one is local and needs a model downloaded, one goes over the network —
-        and "Piper en_GB-cori-high" next to "Microsoft Zira" told nobody which was which.
-
-        **Short sections inline, long ones nested, and that split came from a screenshot.**
-        Grouping alone was not enough: the natural voices are 47 rows, so the menu opened
-        past the bottom of the screen with arrows at both ends, and Piper's two — the
-        engine you would usually want — were somewhere below the fold. Headings stay
-        disabled rows for the short sections, because nesting a list you can already read
-        costs a click and buys nothing; anything over `VOICE_INLINE_MAX` becomes cascades
-        instead, split by gender because that is the cut people make first and the service
-        states it for every voice. So the natural voices cost two rows rather than
-        forty-seven, and no section can push another off the screen.
-
-        Sections with nothing in them are skipped entirely, which is the normal case:
-        with no extras installed there is one section, and it looks like the old flat
-        list with a heading on top.
-        """
-        voices = self.session.voices()
-        if not voices:
-            return
-        sub = _dark_menu(parent)
-        # Read from the engine and rebuilt on every open, so it cannot drift from a
-        # voice set by --voice or by a profile written in another session. Held on self
-        # because a Tk variable that goes out of scope stops driving the indicator.
-        self._voice_var = tk.StringVar(
-            value=getattr(self.session.speaker, "voice", None)
-            or self.VOICE_ENGINE_DEFAULT
-        )
-        sub.add_radiobutton(
-            label=self.VOICE_ENGINE_DEFAULT, value=self.VOICE_ENGINE_DEFAULT,
-            variable=self._voice_var,
-            command=lambda: self.session.set_voice(None),
-        )
-        known = {key for key, _ in self.VOICE_SECTIONS}
-        for key, heading in self.VOICE_SECTIONS:
-            # An engine added later and not listed here still reaches the menu, under the
-            # last heading, rather than vanishing from it. A voice nobody can select is
-            # the one failure this menu must not have.
-            group = [v for v in voices
-                     if v.engine == key or (key == "sapi" and v.engine not in known)]
-            if not group:
-                continue
-            sub.add_separator()
-            if len(group) > self.VOICE_INLINE_MAX:
-                self._voice_cascades(sub, heading, group)
-            else:
-                sub.add_command(label=heading, state="disabled")
-                for v in group:
-                    self._voice_row(sub, v)
-        parent.add_cascade(label="Voice", menu=sub)
 
     def _ask_is_new(self) -> bool:
         """True once per ask — the first empty draft that lands while one is in flight.
@@ -3830,44 +3436,6 @@ class Pill(tk.Tk):
             return False
         self._asked = True
         return True
-
-    def _voice_row(self, menu: tk.Menu, v) -> None:
-        """One selectable voice. Every row in every section goes through here.
-
-        The radio variable is shared across the cascades as well as the inline rows, so
-        the tick lands on the chosen voice wherever it lives — and `value=v.name` is why
-        nothing else in Flow had to learn there are three engines.
-        """
-        menu.add_radiobutton(
-            label=v.describe(), value=v.name, variable=self._voice_var,
-            command=lambda name=v.name: self.session.set_voice(name),
-        )
-
-    def _voice_cascades(self, parent: tk.Menu, heading: str, group: list) -> None:
-        """A long engine as `Heading — Female` / `Heading — Male` submenus.
-
-        Flattened one level on purpose: the obvious shape is a single "Microsoft Natural"
-        cascade holding Male and Female cascades, which puts three hops between the pill
-        and a voice. Hanging the gender submenus straight off the Voice menu costs the
-        same two rows and one hop fewer.
-
-        A gender with nobody in it is not rendered, so this cannot produce an empty
-        submenu — and `VOICE_GENDER_GROUPS` ends in a catch-all, so a voice that declares
-        no gender still appears rather than falling out of the menu.
-        """
-        seen: set[str] = set()
-        for want, label in self.VOICE_GENDER_GROUPS:
-            if want is None:
-                members = [v for v in group if v.name not in seen]
-            else:
-                members = [v for v in group if v.gender.lower() == want]
-            if not members:
-                continue
-            seen.update(v.name for v in members)
-            inner = _dark_menu(parent)
-            for v in members:
-                self._voice_row(inner, v)
-            parent.add_cascade(label=f"{heading} — {label}", menu=inner)
 
     def _notes_menu(self, parent: tk.Menu) -> None:
         """P9's two note verbs, as taps. The floor under the spoken forms.
