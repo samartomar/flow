@@ -409,5 +409,135 @@ class TestHandsFreeIsSaidWhereTheKeysAlreadyAre(unittest.TestCase):
         self.assertEqual(Api._send_word(Custom()), "goose")
 
 
+class TestTheColdStartHarnessCannotFlatterItself(unittest.TestCase):
+    """Item 5. The stages must account for the total, and both failure modes are pinned.
+
+    The harness's first run reported a total 2.7 s larger than the sum of its own stages.
+    Two things could explain that, and the wrong one was reached for first — a missing
+    stage — which is exactly the order a measurement goes wrong in when nobody checks the
+    arithmetic. These tests check it on every run instead.
+    """
+
+    @staticmethod
+    def module(name):
+        return __import__(name, fromlist=["*"])
+
+    def test_the_stage_names_are_the_ones_the_bench_measures(self):
+        from flow import coldstart
+
+        # A stage that exists here and not in `STAGES` is a stage nothing can report, and
+        # one in `STAGES` that nothing sets is a column of `n/a` in the output forever.
+        marks = {"import": 0.1, "device-resolve": 0.2, "model-load": 2.5, "ready": 2.8}
+        self.assertEqual(set(coldstart.STAGES), set(marks))
+
+    def test_ready_is_last_because_it_is_the_moment_the_first_word_can_come_out(self):
+        from flow import coldstart
+
+        self.assertEqual(coldstart.STAGES[-1], coldstart.STAGE_READY)
+
+    def test_a_staged_run_adds_up_to_its_total(self):
+        # The check that catches a double-count. 0.35 s of slack covers the gap between
+        # one stage's stopwatch and the next one's start, which is real but small; the
+        # double-count this exists to catch was 2.5 s.
+        import time
+
+        from flow import coldstart
+
+        t0 = time.monotonic()
+        marks = {coldstart.STAGE_IMPORT: coldstart.origin()}
+        time.sleep(0.02)
+        marks[coldstart.STAGE_RESOLVE] = time.monotonic() - t0
+        time.sleep(0.02)
+        before = time.monotonic()
+        time.sleep(0.02)
+        marks[coldstart.STAGE_MODEL] = time.monotonic() - before
+        marks[coldstart.STAGE_READY] = coldstart.origin()
+
+        parts = [marks[s] for s in coldstart.STAGES[:-1]]
+        self.assertLess(abs(sum(parts) - marks[coldstart.STAGE_READY]), 0.35)
+
+    def test_origin_is_a_real_number_on_this_platform(self):
+        # It was None on Windows until the kernel32 signatures were declared — a 64-bit
+        # HANDLE truncated into a signed 32-bit int. That failure was invisible: the
+        # harness printed `n/a` for two of its three columns and carried on. So the
+        # platform branch is asserted here rather than left to be discovered by a person
+        # reading output on the one platform Flow ships on.
+        from flow import coldstart
+
+        got = coldstart.origin()
+
+        if got is None:
+            self.skipTest("this platform does not expose a process start time")
+        self.assertGreater(got, 0.0)
+        #: Not seconds since the epoch. 1.7e9 would sail past `assertGreater(got, 0)` and
+        #: be a start time of 1970 read as elapsed.
+        self.assertLess(got, 86_400.0, "that is a timestamp, not an elapsed time")
+
+    def test_a_zero_start_time_is_refused_rather_than_reported_as_elapsed(self):
+        # `GetProcessTimes` answers 0 for a process it cannot describe, and 0 minus the
+        # 1601 epoch is a date in 1601 — about 1.3e11 seconds of nonsense that looks like
+        # a plausible measurement. The sanity check is what stops it being published.
+        from flow import coldstart
+
+        k32 = mock.Mock()
+        k32.GetProcessTimes.return_value = 0
+        with mock.patch.object(coldstart, "_init_k32", return_value=k32), \
+                mock.patch("sys.platform", "win32"):
+            self.assertIsNone(coldstart._windows_start())
+
+    def test_and_a_real_one_is_not_refused(self):
+        # The other half of the same check, because refusing everything is also a bug —
+        # and it is the half that fails loudly. A guard that only ever refuses would leave
+        # the harness printing `n/a` on every machine forever, which is the invisible
+        # failure this whole module exists to prevent.
+        import time
+
+        from flow import coldstart
+
+        self.assertIsNone(coldstart.from_filetime(0),
+                          "a failed API call is not a start time in the year 1601")
+        #: Also refused: a start in the future, which a clock set backwards produces.
+        future = int((time.time() + 3600.0 + 11644473600.0) * 1e7)
+        self.assertIsNone(coldstart.from_filetime(future))
+
+    def test_and_a_real_one_converts_rather_than_being_refused(self):
+        # The other half of the same check, because refusing everything is also a bug —
+        # and it is the half that fails loudly. A guard that only ever refuses would leave
+        # the harness printing `n/a` on every machine forever, which is the invisible
+        # failure this whole module exists to prevent.
+        from flow import coldstart
+
+        five_ago = int((time.time() - 5.0 + 11644473600.0) * 1e7)
+        got = coldstart.from_filetime(five_ago)
+
+        self.assertIsNotNone(got)
+        self.assertLess(abs(got - time.time()), 30.0, "five seconds ago, give or take")
+
+    def test_the_bench_prints_warm_as_warm_never_as_cold(self):
+        # A warm number published as a cold one is how a 4 s first run becomes a 1.4 s
+        # claim. The label is the whole defence, so it is asserted on the source rather
+        # than trusted.
+        source = (Path(__file__).resolve().parent.parent / "scripts" / "cold_start.py"
+                  ).read_text(encoding="utf-8")
+
+        self.assertIn("NOT the number a reboot gives", source)
+        self.assertIn("warm", source)
+
+    def test_and_the_guide_no_longer_quotes_the_unmeasured_number(self):
+        # The old "~1.4 s" came from a run nobody could repeat, and it did not add up to
+        # its own breakdown. It is replaced by a measured warm figure plus an explicit
+        # "not yet measured" for the cold one, rather than being quietly deleted.
+        guide = (Path(__file__).resolve().parent.parent / "docs" / "guide.md"
+                 ).read_text(encoding="utf-8")
+
+        # The old number is quoted inside the replacement row, because a reader who
+        # remembers "~1.4 s" and finds it gone has no way to know it was wrong rather
+        # than merely moved. Asserted absent as a *claim*, which is what "not yet
+        # measured" makes it.
+        self.assertNotIn("| Cold start ", guide)
+        self.assertIn("not yet measured", guide)
+        self.assertIn("cold_start.py", guide)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2037,7 +2037,10 @@ Recorded in [PROGRESS.md](history/PROGRESS.md) from earlier runs, not re-measure
 
 |                                                     |                                                               |
 | --------------------------------------------------- | ------------------------------------------------------------- |
-| Cold start                                          | ~1.4 s (0.40 s import + 0.98 s model load)                    |
+| | | |
+|---|---|---|
+| Time to first word, warm (restart, no reboot) | **2.97 s** — 0.21 s import + 0.22 s CUDA probe + 2.55 s model load (RTX-class CUDA, warm page cache; `results-warm3.json`) |
+| Time to first word, after a reboot | **not yet measured on this machine.** An earlier version of this table said "~1.4 s (0.40 s import + 0.98 s model load)", which was typed from a run nobody in the repo could repeat — and whose two parts did not add up to its own total. `uv run python scripts/cold_start.py` after a restart is the number to quote; run warm it understates a cold boot by seconds, which is why the script labels its own output |
 | Decode, 1 s of audio                                | 0.75 s                                                        |
 | Decode, 8 s of audio                                | 0.91 s — nearly flat, because Whisper pads to one 30 s window |
 | Partial decode, worst of 6 accents, 1-8 s of speech | 0.79-1.07 s (R4 budget 1.5 s)                                 |

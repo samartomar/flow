@@ -1,0 +1,22 @@
+{
+ "import": 0.2086191177368164,
+ "import_worst": 0.2939918041229248,
+ "device-resolve": 0.21900000001187436,
+ "device-resolve_worst": 0.29699999999138527,
+ "model-load": 2.5469999999913853,
+ "model-load_worst": 2.937000000005355,
+ "ready": 2.968043565750122,
+ "ready_worst": 3.5296218395233154,
+ "runs": 3,
+ "identity": {
+  "date": "2026-10-02",
+  "faster-whisper": "1.2.1",
+  "ctranslate2": "4.8.1",
+  "device": "cuda",
+  "models": {
+   "base.en": "3d3d5dee26484f91867d81cb899cfcf72b96be6c",
+   "small.en": "d1d751a5f8271d482d14ca55d9e2deeebbae577f"
+  }
+ },
+ "warm": true
+}

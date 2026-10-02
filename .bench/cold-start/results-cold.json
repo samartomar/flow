@@ -1,0 +1,16 @@
+{
+ "import": null,
+ "model-load": 2.6089999999967404,
+ "ready": null,
+ "identity": {
+  "date": "2026-10-02",
+  "faster-whisper": "1.2.1",
+  "ctranslate2": "4.8.1",
+  "device": "cuda",
+  "models": {
+   "base.en": "3d3d5dee26484f91867d81cb899cfcf72b96be6c",
+   "small.en": "d1d751a5f8271d482d14ca55d9e2deeebbae577f"
+  }
+ },
+ "warm": false
+}

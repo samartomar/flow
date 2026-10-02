@@ -91,6 +91,7 @@ anywhere, and Send reporting success. After: 18 of 18.
 | `soak.py` | does a long session drift in memory or latency (R8) |
 | `accent_bench.py` | per-accent WER and false-reject rate (P1/P2) |
 | `accent_report.py` | print those numbers from the results files, so a published table is regenerated rather than retyped |
+| `cold_start.py` | time to first word in a fresh interpreter, split by stage; run it after a reboot, since a warm page cache understates it |
 | `asr_bench.py` | decode latency, and the R4 partial-latency gate |
 | `command_bench.py` | does the hardened grammar catch more commands without eating dictation (P3) |
 | `rescue_bench.py` | does a biased second decode recover a mis-heard command |
