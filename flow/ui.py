@@ -4644,6 +4644,15 @@ class Pill(tk.Tk):
                 self.front.note(ev.text)
             elif ev.kind == "note":
                 self.front.note(ev.text)
+            elif ev.kind == "kept":
+                # Ignored on this surface, deliberately, and the reason is what it costs
+                # to handle. This surface already says the whole sentence — the `note`
+                # beside this one names the count and the file — so showing `kept` here
+                # too would put two notices about one act on screen at once, and this is
+                # the surface with a card stack where both would sit. The compact strip
+                # needed its own event because it has one line and no card; this one has
+                # somewhere to put the sentence already.
+                pass
             elif ev.kind == "edit":
                 # A note that came from an edit Flow made to the draft, which is the one
                 # kind with a way back to offer. Its own event rather than a flag on

@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # for test_menu's fakes
 
 import flow.ui_compact as uc  # noqa: E402
-from flow.session import CONVERSE, DICTATE, REFINE, State  # noqa: E402
+from flow.session import CONVERSE, DICTATE, REFINE, Event, State  # noqa: E402
 from test_menu import FakeMenu, FakeVar  # noqa: E402
 
 
@@ -2543,6 +2543,145 @@ class TestTheHandEditorLivesOnTheCompactPanel(unittest.TestCase):
         for name in ("pinned", "pinned_pid", "pinned_name", "_last_front"):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(uc.CompactPill, name), name)
+
+
+class TestTheNotesLoopHasAHomeOnTheStrip(unittest.TestCase):
+    """one-surface.md step 4: "keep note" and "wrap up" work, and now say so.
+
+    Both verbs already worked — they are session commands. What was missing is the
+    surface acknowledging them: on a strip with no panel behind it, a note filed into a
+    file the user cannot see was an act with no feedback at all.
+    """
+
+    def kept_line(self, kind, text=""):
+        """The strip text a `kept` event produces, or None if the surface ignores it."""
+        from flow.session import Event
+
+        p = pill()
+        out = []
+        p._say = lambda s, frames=0: out.append(s)
+        p.session.events.return_value = [Event(kind, text)]
+        p._pump_events()
+        return out[0] if out else None
+
+    def test_keeping_a_note_says_kept(self):
+        self.assertEqual(self.kept_line("kept"), "kept")
+
+    def test_wrapping_to_a_file_says_the_files_name(self):
+        # The leaf, not the path. The strip is 400 px and a full path is a sentence
+        # nobody can read at a glance; the leaf is what they recognise when they go
+        # looking for the file they asked for.
+        self.assertEqual(self.kept_line("kept", "notes-2026-10-02.md"),
+                         "kept notes-2026-10-02.md")
+
+    def test_and_the_session_sends_the_leaf_rather_than_the_whole_path(self):
+        # Asserted on the session, because this is where the truncation happens — a
+        # surface that trimmed it would be two surfaces trimming it.
+        source = (Path(__file__).resolve().parent.parent / "flow" / "session.py"
+                  ).read_text(encoding="utf-8")
+
+        self.assertIn('self._emit("kept", path.name)', source)
+
+    def test_a_shipped_surface_ignores_it_because_it_already_said_more(self):
+        # Two notices about one act would sit in that surface's card stack together.
+        # Asserted as source because what is pinned here is a decision *not* to draw.
+        source = (Path(__file__).resolve().parent.parent / "flow" / "ui.py"
+                  ).read_text(encoding="utf-8")
+
+        self.assertIn('elif ev.kind == "kept":', source)
+
+    def test_the_long_note_is_not_strip_material_either(self):
+        # Nothing was taken away: the strip is the short form, not the only form. A note
+        # carrying a full Windows path is the same sentence-length problem the `kept`
+        # event was added to solve, so it stays off the strip.
+        self.assertIsNone(self.kept_line("note", "3 notes written to C:\\p\\notes.md"))
+
+
+class TestSayMoreMeansSayMore(unittest.TestCase):
+    """one-surface.md step 5: the foot says "hold the mic to say more".
+
+    It did not. `send()` cleared the draft on the way into a Refine, so the second hold
+    refined its own words with no memory of the first — the hint was describing a gesture
+    that did not exist. Two halves, and they have to agree: the session has to give the
+    CLI the previous result as context, and the surface has to keep that result on screen
+    while the next one runs. Either alone is a lie in the other direction.
+    """
+
+    def refine_following_up(self, *, result="the refined prompt", failed=False):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = result
+        p._panel_failed = failed
+        p._hold_fresh = True
+        p.session.following_up = True
+        p.session.events.return_value = [Event("partial", "make it shorter")]
+        return p
+
+    def test_a_second_hold_appends_to_what_was_already_said(self):
+        # The result stays on screen *and* the heard block grows — both halves of the
+        # same hold, which is why this uses a real result rather than an empty one.
+        p = self.refine_following_up()
+        p._panel_heard = "write me a function that"
+        p._pump_events()
+
+        self.assertEqual(p._panel_heard, "write me a function that. make it shorter")
+
+    def test_and_the_first_result_stays_on_screen_while_the_next_one_runs(self):
+        # Wiping it would leave the user holding the mic to add a sentence to something
+        # they can no longer see — the opposite of a continuation.
+        p = self.refine_following_up()
+        p._pump_events()
+
+        self.assertEqual(p._panel_result, "the refined prompt")
+
+    def test_the_first_hold_of_a_session_is_unchanged_by_all_of_this(self):
+        # No result means nothing to extend. The very first Refine of a session must
+        # behave exactly as it did before the feature, or this is a regression wearing a
+        # feature's clothes.
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = ""
+        p._hold_fresh = True
+        p.session.following_up = False
+        p.session.events.return_value = [Event("partial", "write me a function")]
+        p._pump_events()
+
+        self.assertEqual(p._panel_heard, "write me a function")
+
+    def test_a_failed_refine_is_not_extended(self):
+        # The CLI's last line stands in the same slot a result does, so the slot cannot
+        # tell them apart — and there is nothing there worth extending. Send is already
+        # falling back to the raw dictation while it stands.
+        p = self.refine_following_up(result="refine failed (timed out)", failed=True)
+        p._pump_events()
+
+        self.assertEqual(p._panel_result, "")
+
+    def test_ask_still_replies_rather_than_continuing_a_refine(self):
+        p = panel_pill(mode=CONVERSE)
+        p._panel_open = True
+        p._panel_mode = CONVERSE
+        p._panel_result = "the answer"
+        p._hold_fresh = True
+        p.session.following_up = True
+        p.session.events.return_value = [Event("partial", "and then?")]
+        p._pump_events()
+
+        self.assertEqual(p._panel_result, "", "Ask's next hold is a new turn, not a follow-up")
+        self.assertEqual(p._panel_heard, "and then?")
+
+    def test_and_the_session_arms_the_flag_the_surface_reads(self):
+        # The two halves are one mechanism. The session owns `following_up` because it
+        # is what decides whether `context` reaches the CLI; the surface reads the same
+        # flag rather than keeping a copy that could say "extending" while the CLI was
+        # asked cold.
+        source = (Path(__file__).resolve().parent.parent / "flow" / "session.py"
+                  ).read_text(encoding="utf-8")
+
+        self.assertIn('self._emit("reply", revised)', source)
+        self.assertIn("self.following_up = True", source)
 
 
 if __name__ == "__main__":

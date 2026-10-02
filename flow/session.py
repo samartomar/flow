@@ -492,6 +492,11 @@ class Event(NamedTuple):
     #:                | conversation - the thread and the reply were cleared (item 64)
     #:                | disarm - capture has stopped and cannot restart itself, so the
     #:                  surface that owns "armed" has to stop claiming it
+    #:                | kept - a note was filed, or the notes were wrapped to a file.
+    #:                  Distinct from `note` because the compact surface's strip wants a
+    #:                  word for this ("kept", the file's name) and the pill's bubble
+    #:                  wants the whole sentence; one event, two renderings, rather than
+    #:                  two sentences parsed apart by a surface.
     text: str
 
 
@@ -3078,6 +3083,13 @@ class Session:
         self.diag.write("note", kept=n, chars=len(text), exchange=bool(question))
         self._emit("note", f"kept - {n} note" + ("" if n == 1 else "s")
                    + " so far, say \"wrap up\" for the file")
+        #: The compact surface's half of the notes loop (one-surface.md step 4). It says
+        #: "kept" on the strip where this surface says the whole sentence above, because a
+        #: wordless strip has no room for a sentence and this is the only proof the user
+        #: gets that a file was written somewhere. `dropped` is deliberately not repeated
+        #: here — it has its own `note` below, and two events for one fact is how a
+        #: surface ends up showing it twice.
+        self._emit("kept", "")
         if dropped:
             # P2's rule, extended from dropped speech to dropped notes: it may happen,
             # it may not happen unexplained. Said second so the confirmation lands first.
@@ -3124,6 +3136,11 @@ class Session:
             self.wrapped_to = str(path)
             self._emit("note", f"{len(held)} note"
                        + ("" if len(held) == 1 else "s") + f" written to {path}")
+            #: The file's leaf name and nothing else (one-surface.md step 4). The strip is
+            #: 400 px and the full path is a sentence; the leaf is the part a person
+            #: recognises when they go looking for the file, and the `note` above carries
+            #: the whole thing for anybody who needs to read it.
+            self._emit("kept", path.name)
         else:
             self._emit("reply" if pill else "answer", doc)
             self.reply = doc
@@ -3131,6 +3148,10 @@ class Session:
             self._emit("note", f"{len(held)} note"
                        + ("" if len(held) == 1 else "s")
                        + " on screen - Copy takes them (no workspace set, so no file)")
+            #: No workspace means no file, and the strip says the same thing in the same
+            #: word rather than inventing a name — "kept" with no leaf is honest here in a
+            #: way that a made-up one would not be.
+            self._emit("kept", "")
         self.diag.write("wrap", ok=True, kept=len(held), wrote=bool(where))
         self.notes.clear()
         return True
@@ -3960,6 +3981,18 @@ class Session:
             # result block shows it.
             self._emit("reply", revised)
             self._emit("note", done)
+            #: Refine-as-mode, step 5 (one-surface.md). The foot says "hold the mic to
+            #: say more", and until now it did not: `send()` cleared the draft on the way
+            #: in, so the next hold refined its own words with no memory of the first.
+            #: Arming `following_up` here is what makes the *next* refine read the
+            #: previous one as thread context — `context` above is drawn from the thread
+            #: only when this is set, so without it the CLI is asked to extend a prompt it
+            #: has never seen.
+            #:
+            #: Armed here and not in `send()`, because this is the reply-delivered case
+            #: and only that one: a refine run as an *instruction* rewrites a draft that
+            #: stays put, and there the draft is already the context.
+            self.following_up = True
         elif revision != self.draft.revision:
             # A rewrite of text that no longer exists. Applying it would delete
             # whatever was said while the CLI was thinking, and would do it invisibly,

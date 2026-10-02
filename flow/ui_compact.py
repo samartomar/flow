@@ -1738,8 +1738,29 @@ class CompactPill(tk.Tk):
                         # hold and clears nothing — see there for the answer
                         # this used to wipe off the screen at the press.
                         self._hold_fresh = False
-                        self._panel_result = ""
+                        #: Captured *before* the flag is cleared below. `_say_more` reads
+                        #: it to tell a real result from a CLI failure standing in the
+                        #: same slot, and asking after the clear answers the wrong
+                        #: question — which is why this is a local, not an argument.
+                        was_failed = self._panel_failed
                         self._panel_failed = False
+                        if self._say_more(was_failed):
+                            # Refine's second hold says more rather than starting
+                            # over (one-surface.md step 5). The first result stays
+                            # on screen as what is being extended — wiping it would
+                            # leave the user holding the mic to add a sentence to
+                            # something they can no longer see.
+                            #
+                            # The heard block appends, so "what you said" is both
+                            # holds. Only the first partial appends; the ones after
+                            # it replace, because a growing live preview is what this
+                            # block has always drawn and a string that grew on every
+                            # partial would repeat itself once per frame.
+                            self._panel_heard = (
+                                f"{self._panel_heard}. {ev.text}" if self._panel_heard
+                                else ev.text)
+                            return
+                        self._panel_result = ""
                     # The heard block's live text — italic until the release's
                     # draft makes it final.
                     self._panel_heard = ev.text
@@ -1843,6 +1864,15 @@ class CompactPill(tk.Tk):
                 # `SAID_NOTES`, which is also the list of what stays silent
                 # and why.
                 self._say(ev.text)
+            elif ev.kind == "kept":
+                # The notes loop (one-surface.md step 4). A word, or the file's name
+                # when the notes were written to one — the user asked for a file and
+                # this is the only place that says a file exists. The session sends the
+                # leaf rather than the whole path because this strip is 400 px and a
+                # path is a sentence; `Session.notes`'s own `note` event carries the
+                # full thing for anybody who reads it.
+                self._say(f"kept {ev.text}".strip() if ev.text else "kept")
+                self._quicken()
 
     def _pump_send(self) -> None:
         """Fire the release's armed send, once there is something to send it.
@@ -3236,6 +3266,32 @@ class CompactPill(tk.Tk):
         resize = getattr(self.paint, "resize", None)
         if resize is not None:
             resize(w, h)
+
+    def _say_more(self, was_failed: bool = False) -> bool:
+        """Is this hold continuing a Refine rather than starting one (step 5)?
+
+        Four conditions, all necessary. **Refine**, because Ask's second hold is a
+        reply and Type never opens a panel. **A result already on screen**, because
+        without one there is nothing to say more *about* — the first hold of a session
+        must behave exactly as it always has. **Not a failed refine**, taken as an
+        argument because a failure leaves the CLI's last line standing in the same slot
+        and there is nothing there worth extending. And **`session.following_up`**, which
+        the session arms when it delivers a refine as a result rather than as a rewrite.
+
+        That last one is why this asks the session instead of tracking its own flag: the
+        flag the session owns is the one that also decides whether the CLI gets the
+        previous result as thread context. A surface that kept its own copy would be able
+        to say "extending" while the CLI was asked cold, which is the exact mismatch
+        step 5 exists to close.
+
+        `was_failed` is passed in rather than read because the caller clears the flag on
+        the line before asking — read it here and the answer would always be "no".
+        """
+        if self._panel_mode != REFINE or not self._panel_result:
+            return False
+        if was_failed:
+            return False
+        return bool(getattr(self.session, "following_up", False))
 
     def _panel_click(self, e) -> None:
         """A press in the band: the only live things there are the strip's
