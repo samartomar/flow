@@ -101,9 +101,11 @@ from .ui import (
     _pointer_monitor,
     _round_rect as _tk_round_rect,
     _shell_window,
+    _bare_window,
     _user32,
     _virtual_desktop,
     bring_forward,
+    scaled_font,
     classify,
     foreground_hwnd,
     modifiers_held,
@@ -337,6 +339,49 @@ def _chip_rects(footer_y: int) -> tuple:
 #: `FONT_CHIP`, which measures about 106 px.
 CONTINUE_LABEL = "Continue in Flow"
 CONTINUE_W = 132
+
+#: The hand editor's chip (one-surface.md step 3), on the Refine panel only.
+#:
+#: **Refine only, and Type does not get one.** Paste-on-release is the whole point of
+#: Type; an editor there would let somebody hold a draft the mode has already sent. Ask
+#: does not get one either — its panel holds a conversation rather than one prompt, and
+#: `Session.begin_edit` already refuses outside a held draft with a note saying so rather
+#: than opening a box over text that is not one prompt to correct.
+#:
+#: Placed between Copy and Send so the footer reads left to right as the three jobs it
+#: offers: read the result, change it, commit it. Send stays alone at the right edge,
+#: where the one irreversible chip has always been.
+EDIT_LABEL = "Edit"
+EDIT_W = 62
+
+#: The editor's own window, in design px — the same width as the palette's standalone
+#: box. Spelled here rather than set to `BOX_W` because `BOX_W` is defined further down
+#: with the palette's own constants, and a forward reference that happens to work today
+#: is a NameError waiting for the day somebody moves one of them.
+EDITOR_W = 360
+#: Tall enough for a prompt's worth of text and no taller. It floats over the panel
+#: rather than replacing it, and a box that covered the result would hide the thing being
+#: corrected.
+EDITOR_H = 220
+#: The button row under the text. Escape and Ctrl+Enter both work — ui.py's editor binds
+#: both — but the buttons are the discoverable way out, and a shortcut nobody can find is
+#: not a way out.
+EDITOR_BTN_H = 30
+
+
+def _edit_rect(footer_y: int) -> tuple:
+    """Where the Edit chip sits in a footer whose chips start at `footer_y`.
+
+    Off `_chip_rects` rather than beside it, because the footer is one row of three now
+    and one piece of arithmetic should own it.
+
+    **`//2` and not `/2`**, matching `_chip_rects` and every other centring on this
+    surface. `_round_rect` takes the radius as a float and forwards it to GDI+, which is
+    happier with a whole number; the one place that divided gave the pill a 0.5 px seam
+    along its own capsule that only showed at 300 %.
+    """
+    return (PANEL_W - 74 - CHIP_H - 8 - EDIT_W, footer_y,
+            PANEL_W - 74 - CHIP_H - 8, footer_y + CHIP_H)
 
 
 def _continue_rect(footer_y: int) -> tuple:
@@ -637,6 +682,11 @@ class _Layout(NamedTuple):
     footer_y: int
     copy: tuple
     send: tuple
+    #: The Refine panel's hand-editor chip, or None on a mode without one. Optional
+    #: because it is genuinely optional — Copy and Send exist on both modes' footers and
+    #: Edit exists on Refine's alone — rather than a rect parked off-screen that
+    #: `_panel_click` would have to test and be careful about.
+    edit: tuple | None = None
     close: tuple = CLOSE_RECT
 
 
@@ -3072,7 +3122,7 @@ class CompactPill(tk.Tk):
             copy, send = _chip_rects(footer_y)
             return _Layout(band, line_h, heard, heard_tag_y, heard_y,
                            result, result_tag_y, result_y, footer_y,
-                           copy, send)
+                           copy, send, edit=_edit_rect(footer_y))
 
         out = lay(RESULT_LINES_MAX)
         if out.band_h > room and _lines(out.result) > 1:
@@ -3202,11 +3252,145 @@ class CompactPill(tk.Tk):
             self._close_panel()
         elif _hit(layout.copy, x, y):
             self._copy_result()
+        elif self._can_edit() and layout.edit and _hit(layout.edit, x, y):
+            self._open_editor()
         elif self._spec()["send"] and _hit(layout.send, x, y):
             self._panel_send()
         elif (self._spec().get("continue")
               and _hit(_continue_rect(layout.footer_y), x, y)):
             self._continue_in_flow()
+
+    def _can_edit(self) -> bool:
+        """Whether this panel's footer draws an Edit chip at all.
+
+        Refine only, and it asks the panel's spec rather than `session.mode` — for the
+        reason `_spec` gives: a mode switch closes the band, and an answer arriving after
+        one still draws as the mode the panel was raised for. Testing the live mode
+        instead would put an Edit chip on a panel that is really an Ask's, drawn over
+        somebody else's conversation.
+
+        Keyed off `send` so "the modes holding one prompt worth correcting" stays a
+        single fact rather than a mode list that can drift from `PANEL_SPEC`.
+        """
+        return bool(self._spec()["send"])
+
+    def _draw_edit_chip(self, layout: _Layout) -> None:
+        """The Edit chip, in the same chip paint Send and Copy get.
+
+        Drawn from `_can_edit` rather than from the layout's own `edit` field so the draw
+        and the click cannot disagree: the rect exists on every layout — the footer
+        travels with the band, so its geometry is known before the mode is consulted —
+        and what varies is whether a chip is drawn there at all.
+        """
+        if not self._can_edit() or layout.edit is None:
+            return
+        x1, y1, x2, y2 = layout.edit
+        c = self.canvas
+        _round_rect(c, x1, y1, x2, y2, (y2 - y1) / 2, fill=CHIP, outline=SEAM)
+        c.create_text(
+            (x1 + x2) // 2, (y1 + y2) // 2, text=EDIT_LABEL, fill=TEXT,
+            font=FONT_CHIP)
+
+    def _open_editor(self) -> None:
+        """The hand editor as its own window over the panel (one-surface.md step 3).
+
+        `Session.begin_edit` / `commit_edit` / `cancel_edit` are the seam and already do
+        the P4 learning — a typed correction is learned exactly as a spoken one is. All
+        this adds is the box, which is why the port is small: the shipped editor's logic
+        is not being moved, only its window.
+
+        **A Toplevel and not a widget in this one, and that is forced.** This window is a
+        layered, GDI+-composited surface: it shows the bitmap Windows was handed and
+        nothing else, so a `tk.Text` inside it would simply not be on screen. A window of
+        its own is drawn by Tk, in front. The shipped surface hit the same wall and the
+        same answer — decisions.md, "the shipped surface cannot be composited: it contains
+        a text editor".
+
+        Deliberately **not** `_no_activate`, unlike every other window this surface
+        opens. This is the one that has to take the keyboard; that is its entire reason
+        for existing.
+
+        Nothing is drawn on a canvas here and no chip is composited. The box is opaque
+        Tk, styled with the same palette, and it is up for a handful of seconds a year —
+        which is exactly the trade the shipped surface made, and the reason that surface
+        kept a seam it could have done without.
+        """
+        text = self.session.begin_edit()
+        if text is None:
+            return  # refused, and the session said why in a note
+
+        shell = self._editor_win = tk.Toplevel(self)
+        _bare_window(shell)
+        shell.attributes("-topmost", True)
+        shell.configure(bg=SHELL)
+        #: The font the panel's own text uses. A `tk.Text` left at the system default
+        #: would be a second type size inside a surface that has exactly one.
+        box = self._editor = tk.Text(
+            shell, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
+            highlightthickness=dev(self, 1), highlightbackground=RING_OUTER,
+            highlightcolor=RING_OUTER, wrap="word",
+            font=scaled_font(FONT_BODY), undo=True,
+            padx=dev(self, 8), pady=dev(self, 8), width=dev(self, 44),
+            height=dev(self, 9),
+        )
+        box.pack(fill="both", expand=True)
+        box.insert("1.0", text)
+        # Escape cancels, Ctrl+Enter commits. A bare Enter stays a newline: a prompt is
+        # not one line, and the buttons below are the discoverable way out.
+        box.bind("<Escape>", lambda _e: (self._close_editor(commit=False), "break")[1])
+        box.bind("<Control-Return>", lambda _e: (self._close_editor(commit=True), "break")[1])
+        #: Focus goes in at the end, not the start: the correction a person is making is
+        #: almost always at the end of the text, and dropping a caret at offset 0 means
+        #: they press End first on every single correction.
+        box.focus_set()
+        box.mark_set("insert", "end-1c")
+        bring_forward()
+        self._editor_note("Esc leaves it as it was  ·  Ctrl+Enter keeps your edits")
+
+    def _editor_note(self, message: str) -> None:
+        """The row under the box: Cancel, the message, and Done.
+
+        Three things on one row and no more. The message is why Escape and Ctrl+Enter are
+        worth knowing at all — but the buttons are the way out, because a shortcut a
+        person has to already know is not a way out.
+        """
+        row = tk.Frame(self._editor_win, bg=SHELL)
+        row.pack(fill="x", padx=dev(self, 8), pady=(0, dev(self, 8)))
+        tk.Label(row, text=message, bg=SHELL, fg=MUTED, anchor="w",
+                 font=scaled_font(FONT_TAG)).pack(side="left")
+        tk.Button(
+            row, text="Cancel", bg=CHIP, fg=CODE, relief="flat", bd=0,
+            font=scaled_font(FONT_CHIP), cursor="hand2", takefocus=0,
+            command=lambda: self._close_editor(commit=False),
+        ).pack(side="right", ipadx=dev(self, 10), ipady=dev(self, 3))
+        tk.Button(
+            row, text="Done", bg=PRIMARY_FILL, fg=PRIMARY_TEXT, relief="flat", bd=0,
+            font=scaled_font(FONT_CHIP_PRIMARY), cursor="hand2", takefocus=0,
+            command=lambda: self._close_editor(commit=True),
+        ).pack(side="right", padx=(0, dev(self, 6)), ipadx=dev(self, 10), ipady=dev(self, 3))
+
+    def _close_editor(self, commit: bool) -> None:
+        """Close the box, committing or discarding, and take the edit seam back.
+
+        The window is destroyed before the session is told, not after: `commit_edit`
+        emits a note and a trace line, and a caller that ran them while a Toplevel was
+        still up would have the panel redraw under a window that is about to vanish.
+        Either order works visually; this one cannot leave an orphaned Toplevel if the
+        session raises.
+        """
+        box, win = getattr(self, "_editor", None), getattr(self, "_editor_win", None)
+        text = box.get("1.0", "end-1c") if box is not None else ""
+        self._editor = self._editor_win = None
+        if win is not None:
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
+        if commit:
+            self.session.commit_edit(text)
+        else:
+            self.session.cancel_edit()
+        self._sync_shell()
 
     def _panel_text(self) -> str:
         """What Copy copies and Refine's Send pastes: the result, unless the
@@ -3709,6 +3893,10 @@ class CompactPill(tk.Tk):
             _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
             c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=CONTINUE_LABEL,
                           font=FONT_CHIP, fill=CODE)
+        # Edit last, so it draws over the hint's tail if the two ever collide rather than
+        # being clipped by it — the footer is one row of three and Copy's hint label is
+        # the only loose text on it.
+        self._draw_edit_chip(layout)
 
     def _draw_folder(self, c, x: int, cy: int, colour: str = DIM) -> None:
         """The strip's folder glyph, stroked like the mic: gen.py's `FOLDER`,
