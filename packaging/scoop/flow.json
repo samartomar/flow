@@ -19,7 +19,7 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/samartomar/flow/releases/download/v0.7.0/flow-windows-x64.zip",
-            "hash": "FILL-ME-SHA256"
+            "hash": "e1c14e3a3b627235b264889538ea78af88eb460f4ec05c1b2dd990c789183123"
         }
     },
     "bin": "flow\\flow.exe",
