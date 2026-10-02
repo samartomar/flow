@@ -29,9 +29,9 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 #: json writers rather than by trusting a list: `gate_bench`, `rescue_bench`, `asr_bench`
 #: and `polish_check` are all here and were all missing from the first list drawn up.
 WRITERS = (
-    "accent_bench.py", "asr_bench.py", "command_bench.py", "gate_bench.py",
-    "guardrail_bench.py", "lexicon_bench.py", "live_check.py", "polish_check.py",
-    "rescue_bench.py", "trigger_bias_bench.py",
+    "accent_bench.py", "asr_bench.py", "cold_start.py", "command_bench.py",
+    "gate_bench.py", "guardrail_bench.py", "lexicon_bench.py", "live_check.py",
+    "polish_check.py", "rescue_bench.py", "trigger_bias_bench.py",
 )
 
 #: Deliberately not on that list. These write a manifest of the *data* a benchmark reads
