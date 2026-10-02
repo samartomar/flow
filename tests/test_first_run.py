@@ -329,5 +329,85 @@ class TestTheLaunchOpensIt(unittest.TestCase):
         self.assertNotIn(400, self.scheduled(compact.return_value))
 
 
+class TestHandsFreeIsSaidWhereTheKeysAlreadyAre(unittest.TestCase):
+    """Item 4: the tap, and why it is onboarding's problem rather than a feature page's.
+
+    Hands-free is the one thing Flow does that the thing it is compared against does not,
+    and it was a footnote in the guide. These assertions are about the *page*, because
+    discoverability is a property of where a sentence sits: a gesture described on the
+    screen where somebody is already pressing its key is one variation on something their
+    hands know, and the same sentence on its own page is a fifth skippable step nobody
+    reads. The placement is the feature.
+    """
+
+    @staticmethod
+    def page() -> str:
+        return (Path(__file__).resolve().parent.parent / "flow" / "home" / "static"
+                / "app.js").read_text(encoding="utf-8")
+
+    def test_step_five_names_the_tap(self):
+        page = self.page()
+        self.assertIn("Prefer not to hold anything?", page)
+        self.assertIn("keeps listening after you let go", page)
+
+    def test_and_it_says_the_same_keys_dictate_when_held_longer(self):
+        # The one chord, two depths. Describing the tap without saying what the hold still
+        # does is how somebody ends up learning press-to-press and never learning that a
+        # long press is how they always dictated - and silently losing a mode they used
+        # every day. Both halves, or the sentence is misleading rather than incomplete.
+        page = self.page()
+        self.assertIn("`tap ${chord}`", page)
+        self.assertIn("held a beat longer, dictate", page)
+
+    def test_and_the_send_word_is_read_rather_than_assumed(self):
+        # `send_word` is a profile setting with a tested preset list behind it. Onboarding
+        # that hardcodes "send" teaches the wrong word to anyone who changed it.
+        self.assertIn("(d.send && d.send.word) || \"send\"", self.page())
+
+    def test_lite_is_told_to_tap_the_pill_because_it_has_no_hotkeys(self):
+        # Under Lite there is no chord to name, so naming one would be a sentence about a
+        # key this person does not have.
+        self.assertIn('d.lite ? "tap the pill"', self.page())
+
+    def test_the_api_sends_the_word_the_session_will_actually_hear(self):
+        # The page reads `d.send.word`, so the payload has to carry it or the sentence
+        # silently falls back to the shipped default - which is the bug this half exists
+        # to prevent.
+        api = (Path(__file__).resolve().parent.parent / "flow" / "home" / "api.py"
+               ).read_text(encoding="utf-8")
+        self.assertIn('"send": {"word": self._send_word()}', api)
+        self.assertIn("def _send_word", api)
+
+    def test_and_a_session_carrying_nothing_still_gets_the_shipped_word(self):
+        # `--no-profile` and the demo both hand this a session without `send_words`. An
+        # empty string in the sentence would read as "say nothing", so the fallback is the
+        # word that is actually going to work - which is `boom`, not "send". Asserted
+        # against the constant rather than a literal for the reason the rest of this file
+        # asserts against constants: the shipped word is a decision that has changed once
+        # already, and a test pinning the string would fail the next time it did.
+        from flow.edits import SEND_WORD
+
+        import flow.home.api as api_mod
+
+        class Bare:
+            session = object()
+            home = type("H", (), {"lite": False})()
+            profile = None
+
+        self.assertEqual(api_mod.Api._send_word(Bare()), SEND_WORD)
+
+    def test_and_a_session_that_does_carry_one_is_asked_not_assumed(self):
+        # The reason the helper exists at all. A session built from a profile whose send
+        # word was changed must have that word on the page, not the shipped default.
+        from flow.home.api import Api
+
+        class Custom:
+            session = type("S", (), {"send_words": ("goose", "enter goose")})()
+            home = type("H", (), {"lite": False})()
+            profile = None
+
+        self.assertEqual(Api._send_word(Custom()), "goose")
+
+
 if __name__ == "__main__":
     unittest.main()
