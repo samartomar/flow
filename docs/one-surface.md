@@ -24,6 +24,23 @@ document is still a plan: `flow/ui.py` is ~7 000 lines and the majority of the s
 exercises it directly, so retiring it is staged with the suite green at each step rather
 than done in one commit.
 
+**Update 2026-10-02 (steps 4 and 5).** Both are done. **Step 4**: `Session` emits a new
+`kept` event — the compact strip says "kept", or "kept <file>" when the notes were
+written to one. `ui.py` deliberately ignores it; that surface already says the whole
+sentence and has a card stack to say it in. **Step 5**: the foot's "hold the mic to say
+more" now means it. `Session` arms `following_up` when it delivers a refine as a result,
+which is what puts the previous result into the CLI's `context`; the compact panel keeps
+that result on screen and appends the new hold's words to the heard block rather than
+replacing them. A failed refine is not extended — its CLI line stands in the same slot and
+there is nothing there worth adding to.
+
+**Step 5 is what `ui.py` gets retired for.** With these, the compact surface has the hand
+editor, the notes loop and "say more", and the shipped surface has nothing left that the
+compact one has not absorbed. `flow/ui.py` (~7 000 lines) is still on disk and still the
+`"current"` design choice — deleting it means dropping ~13 test files that exercise it
+directly (`test_pill.py` alone has 48 references to it), and that is a separate, staged
+commit rather than something to bury under this one. The suite is green either way.
+
 **Update 2026-09-22.** Flow Home ([decisions.md](decisions.md), "Flow Home") took two of
 the five gaps below off the compact surface's list: **Settings** is Home's Models and
 Settings pages rather than live rows in a setup box (the box is deleted), and **Help**
