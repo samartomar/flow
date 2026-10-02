@@ -8,6 +8,22 @@ the product, what the compact surface still has to absorb before it can be the *
 surface, and the order to do it in. It is a recommendation for the owner's decision
 ([NEEDS_YOU.md](../NEEDS_YOU.md) carries the open entry); nothing here is decided yet.
 
+**Update 2026-10-02.** Step 3 is **done**: the compact Refine panel carries an Edit chip
+between Copy and Send, opening a `tk.Text` in its own Toplevel over the panel, with
+Escape, Ctrl+Enter, and Cancel/Done buttons. Ask gets none — its panel holds a
+conversation, not one prompt — and Type gets none, because paste-on-release is the point
+of Type. The session seam (`begin_edit` / `commit_edit` / `cancel_edit`, and the P4
+learning behind it) was already there and is used unchanged; the port added a box and a
+chip. The editor is still its own window rather than a widget on the composited surface,
+which is forced rather than chosen — a layered GDI+ window shows the bitmap Windows was
+handed and nothing else.
+
+**Still to do before `ui.py` goes:** steps 4 and 5 (the notes-loop strip lines, Refine's
+"say more" meaning say more), then the deletion itself. That deletion is the reason this
+document is still a plan: `flow/ui.py` is ~7 000 lines and the majority of the suite
+exercises it directly, so retiring it is staged with the suite green at each step rather
+than done in one commit.
+
 **Update 2026-09-22.** Flow Home ([decisions.md](decisions.md), "Flow Home") took two of
 the five gaps below off the compact surface's list: **Settings** is Home's Models and
 Settings pages rather than live rows in a setup box (the box is deleted), and **Help**

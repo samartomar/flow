@@ -2045,7 +2045,163 @@ NOTEPAD, BROWSER = 0x42, 0x99
 TASKBAR, MAIL = 0x10, 0x77
 
 
-class TestThePinHoldsThePaste(unittest.TestCase):
+class TestTheHandEditorLivesOnTheCompactPanel(unittest.TestCase):
+    """one-surface.md step 3: the hand editor, ported off the shipped surface.
+
+    The port is small because the logic was never the hard part — `Session.begin_edit` /
+    `commit_edit` / `cancel_edit` already do the work and the P4 learning. What is new is
+    a box on a panel that had none, so these tests are about *where the chip is* and
+    *which modes get one*, which is where a port like this actually goes wrong.
+    """
+
+    def test_refine_offers_it_and_ask_does_not(self):
+        # Ask's panel holds a conversation, not one prompt. An editor over it would be a
+        # way to correct somebody else's turn, which is not what the mode is for.
+        refine = panel_pill(mode=REFINE)
+        refine._panel_open = True
+        refine._panel_mode = REFINE
+        ask = panel_pill(mode=CONVERSE)
+        ask._panel_open = True
+        ask._panel_mode = CONVERSE
+
+        self.assertTrue(refine._can_edit())
+        self.assertFalse(ask._can_edit())
+
+    def test_and_it_follows_the_panel_not_the_live_mode(self):
+        # `_spec` is keyed on `_panel_mode` because a mode switch closes the band and an
+        # answer arriving after one still draws as the Ask it is. An Edit chip that asked
+        # `session.mode` instead would appear on a panel that is really a conversation.
+        p = panel_pill(mode=CONVERSE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p.session.mode = CONVERSE
+
+        self.assertTrue(p._can_edit())
+
+    def test_the_chip_sits_between_copy_and_send(self):
+        # Copy . Edit . Send, left to right: read the result, change it, commit it. Send
+        # stays alone at the right edge where the irreversible one has always been.
+        copy, send = uc._chip_rects(160)
+        edit = uc._edit_rect(160)
+
+        self.assertGreater(edit[0], copy[2], "Edit must be right of Copy")
+        self.assertLess(edit[2], send[0], "Edit must be left of Send")
+        self.assertEqual((edit[1], edit[3]), (160, 186), "and on the same row as them")
+
+    def test_the_footer_is_three_chips_and_they_do_not_overlap(self):
+        copy, send = uc._chip_rects(160)
+        edit = uc._edit_rect(160)
+        rects = [copy, edit, send]
+
+        for a, b in zip(rects, rects[1:]):
+            self.assertLessEqual(a[2], b[0], "chips overlap")
+        for x1, _y1, x2, _y2 in rects:
+            self.assertGreater(x2, x1)
+
+    def test_a_press_on_it_opens_the_editor(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = "the refined prompt"
+        edit = p._panel_layout().edit
+
+        with mock.patch.object(p, "_open_editor") as open_editor:
+            p._panel_click(mock.Mock(x=edit[0] + 4, y=edit[1] + 4))
+
+        open_editor.assert_called_once_with()
+
+    def test_and_ask_has_nothing_to_press(self):
+        # The rect exists on Ask's layout — the footer travels with the band, so its
+        # geometry is known before the mode is asked. What must not happen is a press
+        # there doing something, so the click path is asserted rather than the rect.
+        p = panel_pill(mode=CONVERSE)
+        p._panel_open = True
+        p._panel_result = "the answer"
+        edit = p._panel_layout().edit
+
+        with mock.patch.object(p, "_open_editor") as open_editor, \
+                mock.patch.object(p, "_copy_result") as copy_result:
+            p._panel_click(mock.Mock(x=edit[0] + 4, y=edit[1] + 4))
+
+        open_editor.assert_not_called()
+        copy_result.assert_not_called()
+
+    def test_it_is_its_own_window_rather_than_a_widget_on_the_composited_one(self):
+        # The forced part. This window is layered and GDI+-composited: it shows the
+        # bitmap Windows was handed, so a tk.Text inside it would not be on screen at
+        # all. Asserted on the source rather than by running a window, because the reason
+        # is architectural and a test that built a Toplevel would test only tkinter.
+        source = (Path(__file__).resolve().parent.parent / "flow" / "ui_compact.py"
+                  ).read_text(encoding="utf-8")
+
+        self.assertIn("self._editor_win = tk.Toplevel(self)", source)
+        self.assertIn("self._editor = tk.Text(", source)
+
+    def test_commit_and_cancel_both_reach_the_session_seam(self):
+        # Whichever way the box closes, the session has to be told — a discarded edit
+        # that never calls `cancel_edit` leaves `editing` True, and the next hold is then
+        # routed as a follow-up to a draft nobody is looking at.
+        for commit in (True, False):
+            with self.subTest(commit=commit):
+                p = panel_pill(mode=REFINE)
+                p._editor = mock.Mock()
+                p._editor.get.return_value = "the corrected text"
+                p._editor_win = mock.Mock()
+
+                p._close_editor(commit=commit)
+
+                if commit:
+                    p.session.commit_edit.assert_called_once_with("the corrected text")
+                    p.session.cancel_edit.assert_not_called()
+                else:
+                    p.session.cancel_edit.assert_called_once_with()
+                    p.session.commit_edit.assert_not_called()
+
+    def test_the_window_goes_before_the_session_is_told(self):
+        # `commit_edit` emits a note, which repaints the panel. Doing that with the box
+        # still up means a repaint under a window that is about to vanish — harmless
+        # visually, and the reason this asserts on *order* rather than on both happening.
+        p = panel_pill(mode=REFINE)
+        order = []
+        p._editor = mock.Mock()
+        p._editor.get.return_value = "x"
+        p._editor_win = mock.Mock()
+        p._editor_win.destroy.side_effect = lambda: order.append("destroy")
+        p.session.commit_edit.side_effect = lambda _t: order.append("commit")
+
+        p._close_editor(commit=True)
+
+        self.assertEqual(order, ["destroy", "commit"])
+
+    def test_a_close_with_no_box_open_is_not_a_crash(self):
+        # The key binding outlives the window it was bound to — a panel redraw, a mode
+        # switch, a surface swap. A `_close_editor` reaching for attributes that were
+        # never set raises out of a lambda inside a Tk callback, where the traceback
+        # goes nowhere visible.
+        p = panel_pill(mode=REFINE)
+        p._editor = p._editor_win = None
+
+        p._close_editor(commit=False)
+
+        p.session.cancel_edit.assert_called_once_with()
+
+    def test_the_chips_it_landed_beside_still_work(self):
+        # The retirement condition, stated as a test. A port that broke the chips it was
+        # inserted between would pass every test above in this class.
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = "the refined prompt"
+        send = p._panel_layout().send
+
+        with mock.patch.object(p, "_panel_send") as do_send:
+            p._panel_click(mock.Mock(x=send[0] + 4, y=send[1] + 4))
+        do_send.assert_called_once_with()
+
+        copy = p._panel_layout().copy
+        with mock.patch.object(p, "_copy_result") as do_copy:
+            p._panel_click(mock.Mock(x=copy[0] + 4, y=copy[1] + 4))
+        do_copy.assert_called_once_with()
     """The pin at the capsule's right end (2026-09-24): tap it and every paste
     goes to the window you were in, wherever you are, with the foreground
     handed back after — so notes can go into Notepad while you read a site."""
