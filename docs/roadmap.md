@@ -92,6 +92,12 @@ false-reject counts for both filters, and decode latency. The command-phrase ben
 (P3) needs recorded accented speakers and is deferred until there are users to record —
 the script inventory in [edits.py](../flow/edits.py) is the source of its prompt set.
 
+**Regenerate this table rather than editing it.** `uv run python scripts/accent_report.py
+--markdown` prints it from `.bench/accent/results-*.json`, so a re-run of
+`accent_bench.py` and a re-run of the report keep these figures honest. The table below
+is the **first run** and is kept as the record of what that run found; where a later run
+disagrees, the run is the fact and this is the history.
+
 **First run (2026-07-31, dev CPU, int8, 60 EdAcc clips/group, 31 min audio):**
 
 | group | base.en | small.en | small | medium | small.en vs base.en |
