@@ -968,6 +968,33 @@
         : `<p class="note">${icon("download", C.soft, 14)} Tuning listens through the speech model, which is still ${d.model.downloading ? "downloading" : "not on this PC"}. Skip it for now - Voice in Flow Home does it any time.</p>`}`;
   }
 
+  // Hands-free, said where the person is already holding the keys down.
+  //
+  // This is the one Flow does better than the thing it is compared to, and until now it
+  // was a footnote in the guide. The argument for putting it here rather than on its own
+  // page: by step 5 this person has already held the chord once, so the sentence is one
+  // variation on something their hands know, and that is the whole difference between a
+  // gesture being described and being tried. A feature page would be a fifth step
+  // skippable, which is the exact thing nobody reads.
+  //
+  // Named in the same breath as the hold, because the two share a key and reading only
+  // one of them is how somebody ends up with a press-to-press gesture they never learn.
+  // Under `hold.TAP_MAX_MS` the same chord latches hands-free listening; over it, it
+  // dictates. No separate shortcut, which is the point: one chord, two depths.
+  function handsFreeLine(k, d) {
+    const chord = holdKeys(k);
+    if (!chord) return "";
+    const verb = d.lite ? "tap the pill" : `tap ${chord}`;
+    // The send word is read rather than hardcoded: it is a profile setting with a tested
+    // list behind it, and onboarding that says "say send" to somebody who changed it to
+    // "goose" teaches them the wrong word on their first evening.
+    const word = (d.send && d.send.word) || "send";
+    return `<p class="note"><b>Prefer not to hold anything?</b> ${verb} quickly instead, and Flow
+      keeps listening after you let go - talk for as long as you like, then say
+      <b>${esc(word)}</b> to paste. The same keys, held a beat longer, dictate as they
+      always have.</p>`;
+  }
+
   function stepFinish(d) {
     const h = d.history;
     const k = d.keys || {};
@@ -992,6 +1019,7 @@
         ? `Click in the box, hold the pill, say &ldquo;Flow is ready&rdquo;, let go - then press Ctrl+V in the box: Lite copies instead of pasting.`
         : `Click in the box, hold ${holdKeys(k)}, say &ldquo;Flow is ready&rdquo;, let go.`}</p>
       ${blocked}
+      ${handsFreeLine(k, d)}
       <textarea id="fr-try" class="input fr-try" rows="2" placeholder="Try it here" aria-label="Try it here">${esc(tryText)}</textarea>
       ${tryText.trim() ? `<p class="note good">${icon("circlecheck", C.green, 15)} It works. That is all there is to it.</p>` : ""}`;
   }

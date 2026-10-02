@@ -1215,7 +1215,28 @@ class Api:
             "tune": {**self.home.voice.tune.public(), "last": live["last"],
                      "profile": profile is not None},
             "history": {**self._history_state(), "path": str(self._history().path or "")},
+            # The send word, so step 5 can name the word this profile actually uses. The
+            # onboarding sentence reads it rather than hardcoding "send": it is a setting
+            # with a tested preset list behind it, and telling somebody to say a word they
+            # changed teaches them the wrong one on their first evening. Read through
+            # getattr off the live session for the same reason `settings()` does - the
+            # session carries the resolved pair, the profile only the stored half.
+            "send": {"word": self._send_word()},
         }
+
+    def _send_word(self) -> str:
+        """The word that ends a hands-free utterance, defaulting to the shipped one.
+
+        `SEND_WORD` is the fallback rather than a display of it: a first run with no
+        profile still has to tell the truth, and the shipped default is the word that is
+        actually going to work.
+        """
+        from ..edits import SEND_WORD
+
+        words = getattr(self.session, "send_words", None)
+        if isinstance(words, (tuple, list)) and words and isinstance(words[0], str):
+            return words[0]
+        return SEND_WORD
 
     def start_listen(self, body: dict) -> dict:
         """The microphone test: start listening, or stop."""
