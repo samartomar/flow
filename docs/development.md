@@ -90,6 +90,7 @@ anywhere, and Send reporting success. After: 18 of 18.
 | `selfdrive.py` | does the whole app work, driven by synthesised speech |
 | `soak.py` | does a long session drift in memory or latency (R8) |
 | `accent_bench.py` | per-accent WER and false-reject rate (P1/P2) |
+| `accent_report.py` | print those numbers from the results files, so a published table is regenerated rather than retyped |
 | `asr_bench.py` | decode latency, and the R4 partial-latency gate |
 | `command_bench.py` | does the hardened grammar catch more commands without eating dictation (P3) |
 | `rescue_bench.py` | does a biased second decode recover a mis-heard command |

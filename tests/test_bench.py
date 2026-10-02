@@ -20,6 +20,7 @@ from accent_bench import (  # noqa: E402
     norm_words,
     wer_counts,
 )
+from accent_report import rate_for, table_for  # noqa: E402
 from asr_bench import median, summarise_gate, wer  # noqa: E402
 from ingest_recordings import (  # noqa: E402
     find_boundaries,
@@ -360,3 +361,114 @@ class TestTheKitTeachesTheTriggerWords(unittest.TestCase):
                 self.assertIn(f'"{word}"', page)
         self.assertIn("eighteen", page)
         self.assertNotIn('Say &ldquo;twelve&rdquo;', page)
+
+
+class TestTheAccentReportCannotLie(unittest.TestCase):
+    """`accent_report.py` publishes the numbers in `docs/roadmap.md` from the results
+    files, so its arithmetic is a claim about the product and gets pinned like one.
+
+    Every case here is a way a report could print something true-looking and wrong. The
+    three that matter most are the zero-denominator ones: a group whose `ref_words` is 0,
+    and a run with no clips at all. Both divide by zero somewhere in a naive version, and
+    the naive version's failure is a `ZeroDivisionError` in a script nobody runs in CI -
+    so the report is simply absent on the day somebody reaches for it.
+    """
+
+    @staticmethod
+    def group(edits=100, words=1000, n=60, **extra):
+        """One group row shaped like the ones `accent_bench.py` writes."""
+        row = {"n": n, "ref_words": words, "model_edits": edits, "segments": 90,
+               "false_reject": 0, "model_empty": 0, "app_empty": 0}
+        row.update(extra)
+        return row
+
+    def test_wer_is_edits_over_reference_words_not_clips(self):
+        # The denominator is words. Scoring against the clip count would make a group of
+        # long clips look better than a group of short ones at identical accuracy.
+        from accent_report import wer
+
+        self.assertAlmostEqual(wer(self.group(edits=100, words=1000)), 0.1)
+        self.assertAlmostEqual(wer(self.group(edits=100, words=2000)), 0.05)
+
+    def test_and_a_group_with_no_reference_words_is_unknown_rather_than_zero(self):
+        from accent_report import wer
+
+        self.assertIsNone(wer(self.group(words=0)))
+        self.assertIsNone(wer({}))
+
+    def test_the_table_prints_unknown_as_na_and_never_as_a_zero(self):
+        # 0.000 in a published WER table is a claim that a group was transcribed
+        # perfectly. "n/a" is a claim that we do not know, which is what an empty
+        # denominator actually means, and the two must not look alike.
+        from accent_report import table_for
+
+        rows = table_for([("m", {"groups": {"indian": self.group(edits=0, words=0)}})])
+
+        self.assertEqual(rows[0], ("indian", ["n/a"]))
+        self.assertTrue(all(cells == ["n/a"] for _g, cells in rows),
+                        "an absent group is unknown for every column, not just the first")
+
+    def test_the_group_order_is_the_published_one_with_the_control_last(self):
+        # `us-control` is the comparison rather than a population, and a table that
+        # buries it mid-column is a table somebody reads as an accent result.
+        from accent_report import GROUPS, table_for
+
+        self.assertEqual(GROUPS[-1], "us-control")
+        self.assertEqual([g for g, _c in table_for([])], list(GROUPS))
+
+    def test_the_false_reject_rate_comes_back_with_its_denominator(self):
+        # P2 is stated as a rate and a rate hides what it was measured over. 0% over 3
+        # clips is not the same claim as 0% over 300, so the counts are part of the
+        # return value rather than something the caller recomputes.
+        from accent_report import rate_for
+
+        groups = {"indian": self.group(n=2, false_reject=1), "japanese": self.group(n=3)}
+
+        hits, clips, rate = rate_for(groups, "false_reject")
+
+        self.assertEqual((hits, clips), (1, 5))
+        self.assertAlmostEqual(rate, 0.2)
+
+    def test_and_a_run_with_no_clips_is_unknown_rather_than_a_perfect_score(self):
+        from accent_report import rate_for
+
+        hits, clips, rate = rate_for({"indian": {"n": 0, "false_reject": 0}}, "false_reject")
+
+        self.assertEqual((hits, clips), (0, 0))
+        self.assertIsNone(rate, "no clips must not report 0%, which reads as the bound holding")
+
+    def test_the_bound_is_the_one_product_md_states(self):
+        # P2's acceptance is < 1%. Hardcoding the comparison in the print loop is how it
+        # became 1.1% and was still printed as fine.
+        from accent_report import P2_BOUND
+
+        self.assertEqual(P2_BOUND, 0.01)
+
+    def test_the_shipped_file_still_yields_the_numbers_it_yielded(self):
+        """A canary, and deliberately a narrow one.
+
+        These three groups have not moved across runs of this corpus. Asserting them
+        means a re-run that shifts even one shows up as a failing test rather than as a
+        quietly different product - which is what `docs/development.md` means by a result
+        being a measurement taken at a moment.
+
+        It does **not** assert the roadmap table. That table is a first-run figure
+        spanning four models and predates the files on disk, so pinning it to these
+        numbers would have looked rigorous while checking nothing anybody had verified.
+        `accent_report.py` is what publishes them now.
+        """
+        from accent_report import table_for
+
+        bench = Path(__file__).resolve().parent.parent / ".bench" / "accent"
+        results = bench / "results-base.en-shipped.json"
+        if not results.exists():
+            self.skipTest("accent results are not on this machine (.bench/accent is a download)")
+
+        import json
+        cells = dict(table_for([("base.en", json.loads(
+            results.read_text(encoding="utf-8")))]))
+        quoted = {"indian": "0.236", "russian": "0.189", "us-control": "0.282"}
+
+        for group, want in quoted.items():
+            with self.subTest(group=group):
+                self.assertAlmostEqual(float(cells[group][0]), float(want), delta=0.001)
