@@ -76,6 +76,34 @@ def say(msg: str) -> None:
     print(msg, flush=True)
 
 
+def _ask_about_updates() -> None:
+    """The one automatic call to `check_update`, on a thread nobody waits for.
+
+    A daemon, once per launch, printing the same line the flag prints. Three things it
+    deliberately is not. Not on the startup path: `version.TIMEOUT_SEC` is 3 s, and 3 s
+    in front of the pill is a launch that appears to hang on a bad network, which is the
+    one failure mode the flag's own docstring says is worth being quick about. Not on a
+    timer: "am I current?" has a shelf life measured in releases, and a poll is a
+    phone-home with extra steps and a power bill. Not retried: a failed check is a line
+    saying so, and the next launch is the retry.
+
+    It swallows everything, on purpose and narrowly: this runs beside a UI that is
+    already up, and a courtesy check that can raise into a daemon thread at an arbitrary
+    moment is a courtesy nobody asked for. `check_update` already turns every failure
+    into a `(line, False)` pair, so this is belt under braces rather than the handling.
+    """
+    import threading
+
+    def run() -> None:
+        try:
+            line, _ran = check_update()
+        except Exception:  # noqa: BLE001 - see the docstring
+            return
+        say(f"update: {line}")
+
+    threading.Thread(target=run, name="flow-update-check", daemon=True).start()
+
+
 def _timeout_arg(text: str) -> float:
     """`--cli-timeout`, refused at the flag when it is not a wait.
 
@@ -536,11 +564,19 @@ def main(argv: list[str] | None = None) -> int:
     # First of the block that follows, because it is the fact the rest of the block are
     # facts *about*: a report naming a hotkey, a model or a decode time has to say which
     # copy produced them, and the download link always serves the newest zip, so the
-    # copy on disk is the only thing that knows which one arrived. That nothing checks
-    # on its own is said out loud for the reason the trace line names itself unprompted -
-    # a promise nobody is told about is one they have no way to believe.
-    say(f"version: {version()} (nothing checks for updates on its own; "
-        "--check-update asks GitHub)")
+    # copy on disk is the only thing that knows which one arrived. That what checks for
+    # updates is said out loud for the reason the trace line names itself unprompted -
+    # a promise nobody is told about is one they have no way to believe. Said as the
+    # setting says it rather than as a fixed reassurance, so the line cannot drift from
+    # the behaviour: with the check off this reads exactly as it always has, and with it
+    # on it names the one request this launch is about to make.
+    if profile is not None and profile.check_update:
+        say(f"version: {version()} (asking GitHub about updates at startup - "
+            "--check-update asks the same thing and waits for it)")
+        _ask_about_updates()
+    else:
+        say(f"version: {version()} (nothing checks for updates on its own; "
+            "--check-update asks GitHub)")
     if not lite:
         from .hotkey import (
             BAD_BLOCK_LINE, CHORD_IGNORED_LINE, CHORD_UNAVAILABLE,

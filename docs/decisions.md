@@ -2255,6 +2255,48 @@ traceback, and the consent paragraph in recording-kit.md, which public visibilit
 converts from desk item to mandatory. The agent CLI stays unbundled by design (R9):
 dictation works without it and the notes say so.
 
+### 2026-10-02 — The update check became a setting, off by default — and the call-site test grew an AST
+
+The production-readiness list named "automatic update checks" as item 1, and the
+obvious build is to call `version.check_update()` at startup. That reverses a
+position this file and `flow/version.py` both stated as architecture rather than
+habit: *nothing checks for updates on its own*, defended by three tests and the
+README, on the argument that a privacy claim is only worth anything if it is an
+enumeration rather than a description of the common case.
+
+**Opt-in, default off, and the distinction is drawn at "did a person ask" rather than
+at "did code do it".** `profile.check_update` is off in every profile that has never
+had it set, and absent reads as off — the opposite fallback from `auto_ask`, because
+the safe reading of an undecided privacy setting is the one that sends nothing. Flow
+Home's Settings page grows a switch beside the existing button. What shipped: the
+feature the item asked for, without spending the enumeration to get it.
+
+**Once per launch, on a daemon thread, never on a timer.** `version.TIMEOUT_SEC` is
+3 s, and 3 s in front of the pill is a launch that looks hung on a bad network — which
+is the one failure `version.py`'s own comment says is worth being quick about. No
+interval: "am I current?" has a shelf life measured in releases, and a poll is a
+phone-home with extra steps and a power bill.
+
+**The startup line now reads from the setting rather than asserting a fixed
+reassurance.** With the check off it says exactly what it always said; with it on it
+names the one request the launch is about to make. A promise printed as a constant is
+a promise that goes stale the moment the behaviour changes, which is the same argument
+`flow/diag.py` makes for naming itself unprompted.
+
+**The call-site test had to get sharper, and would not have if I had bent the code to
+fit it.** It counted *files whose text contains `check_update`*, and failed the moment
+`profile.py` declared a boolean with that name — a field that reaches no network.
+That is a test counting mentions, not calls, and the fix that survives is walking the
+AST for actual `Call` nodes. It also turned out `flow/*.py` never looked inside
+`flow/home/`, so Flow Home's own "Check for updates" button has been a caller since
+Home shipped, unobserved by the assertion written to catch exactly that. It is now
+recursive and AST-based, so `getattr(mod, "check" + "_update")()` trips it where the
+grep walked straight past.
+
+**Reopens if** a launch ever polls rather than asks once — at that point the setting
+stops being a courtesy and starts being a background network path, and the
+enumeration has to say so in those words rather than this entry's.
+
 ### 2026-08-01 — P9 decided from use: converse is a prompt workshop, grounded in a workspace setting
 
 The scoping session this waited for happened at the desk instead: the owner tried

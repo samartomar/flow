@@ -87,15 +87,18 @@ boundary is this:
   and nothing else; what it serves is Flow's own settings, to the window Flow opened.
   Nothing it serves leaves the machine, and a session that never opens Home never
   listens on anything.
-- **Sent to GitHub, once, when you type `flow --check-update`.** An anonymous GET of
+- **Sent to GitHub, when you ask, and — only if you switch it on — once per launch.**
+  An anonymous GET of
   `api.github.com/repos/samartomar/flow/releases/latest`, whose answer is a tag Flow
   compares to its own version *here* before printing one line. The request carries
   nothing but the request: no version number, no query string, no token, no account —
   the User-Agent names the product and not the copy, and it is there because GitHub's
-  API refuses a request without one. **Nothing calls it on its own**: no timer, no
-  startup check, no first-run prompt. The code that can make the request lives in
-  `flow/version.py`, the only thing that calls it is the flag in `flow/__main__.py`, and
-  `tests/test_version.py` counts those call sites so a third one cannot appear quietly.
+  API refuses a request without one. **Nothing calls it unless a person has asked**:
+  either the flag, or the `check_update` setting on Flow Home's Settings page, which is
+  off in every profile that has never had it turned on. There is no timer either way —
+  a launch asks once, not on an interval. The code that can make the request lives in
+  `flow/version.py`, and `tests/test_version.py` counts the call sites by walking the
+  AST so a third module cannot appear quietly.
   That is what keeps this list a complete enumeration rather than a description of the
   common case, which is the only form in which a privacy claim is worth anything.
 - **The desktop boundary.** Send places the draft on the Windows clipboard, where any

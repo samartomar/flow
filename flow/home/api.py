@@ -251,6 +251,7 @@ class Api:
             ("POST", "/api/settings/workspace/forget"): self.forget_workspace,
             ("POST", "/api/settings/auto_ask"): self.set_auto_ask,
             ("POST", "/api/settings/warm"): self.set_warm,
+            ("POST", "/api/settings/check-update"): self.set_check_update,
             ("POST", "/api/settings/design"): self.set_design,
             ("POST", "/api/settings/classic"): self.set_classic,
             ("POST", "/api/settings/apps"): self.set_app,
@@ -1377,7 +1378,14 @@ class Api:
                 "recent": list(getattr(profile, "workspaces", []) or []) if profile else [],
             },
             "ask": {"auto_ask": live["auto_ask"]},
-            "startup": {"warm": bool(getattr(profile, "warm", True)) if profile else True},
+            "startup": {
+                "warm": bool(getattr(profile, "warm", True)) if profile else True,
+                # Read the same way `warm` is - through getattr, defaulting to the safe
+                # answer when there is no profile at all, which is what a demo or a
+                # `--no-profile` launch hands this page. Off is the answer that can
+                # never be wrong about somebody's privacy.
+                "check": bool(getattr(profile, "check_update", False)) if profile else False,
+            },
             "design": {
                 "current": self.home.design,
                 "options": [{"name": n, "label": label} for n, label in DESIGN_LABELS.items()],
@@ -1584,6 +1592,30 @@ class Api:
 
         def apply() -> None:
             profile.warm = want
+
+        self._call(apply)
+        self._save()
+        return self.settings({})
+
+    def set_check_update(self, body: dict) -> dict:
+        """Turn the startup update check on or off, and save it.
+
+        A separate handler from `set_warm` rather than another key on it, because the two
+        are not the same kind of setting and the difference is the whole reason this one
+        defaults off: `warm` decides whether this machine spends CPU, and `check` decides
+        whether it opens a connection to somebody else's. Saving it is the moment the
+        promise changes, so it goes through `_call` like any other write rather than
+        being applied to the object behind the bridge's back.
+
+        Takes effect on the next launch, and says so in the page text rather than here:
+        the thread is started in `__main__` before this page can exist, so nothing this
+        handler does can reach the check that already ran or not run.
+        """
+        profile = self._need_profile()
+        want = bool(body.get("on"))
+
+        def apply() -> None:
+            profile.check_update = want
 
         self._call(apply)
         self._save()
