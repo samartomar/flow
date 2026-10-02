@@ -191,6 +191,102 @@ class TestTheStartupBlockNamesTheCopy(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+class TestTheOptInUpdateCheck(unittest.TestCase):
+    """`profile.check_update` — the one setting that lets a launch reach the network.
+
+    Two things have to be true at once and they pull against each other, which is why
+    this is a class rather than a line. Off by default, or the claim in
+    `docs/architecture.md` stops being an enumeration. On when asked, or the feature is
+    not a feature. So the default is asserted as a default, and the on case is asserted
+    as the thing that actually asks.
+    """
+
+    def launch_with(self, check):
+        """A launch whose profile says `check`, and the output plus the mocked call."""
+        import flow.asr
+        import flow.ui
+        import flow.__main__ as mod
+        import flow.profile as profile_mod
+
+        profile = profile_mod.Profile(Path(tempfile.mkdtemp()) / "profile.json")
+        profile.check_update = check
+        profile.warm = False
+        self.assertTrue(profile.save())
+
+        out = io.StringIO()
+        # `linux`, not `darwin`: both are Lite, but a faked darwin makes `urllib.request`
+        # try to import `_scproxy` the moment a real profile pulls Flow Home in, and that
+        # module only exists on a Mac. Nothing here is Mac-specific — the branch under
+        # test reads `profile.check_update` and starts a thread.
+        with mock.patch.object(sys, "platform", "linux"), \
+                mock.patch.object(mod, "Session"), \
+                mock.patch.object(flow.asr, "WhisperTranscriber"), \
+                mock.patch.object(flow.ui, "Pill"), \
+                mock.patch.object(profile_mod, "resolve_workspace", return_value=(None, "")), \
+                mock.patch.object(profile_mod, "Profile", return_value=profile), \
+                mock.patch.object(
+                    mod, "check_update",
+                    return_value=("flow 0.6.0 is out (you have 0.5.1)", True)) as asked:
+            with contextlib.redirect_stdout(out):
+                mod.main(["--design", "current", "--no-speak", "--no-lexicon", "--no-paste"])
+        return out.getvalue(), asked
+
+    def test_off_by_default_so_the_enumeration_is_still_one(self):
+        # A brand new profile, which is what every existing install has too: the field
+        # is absent from every file written before this, and absent has to mean the safe
+        # answer or adding the feature would have silently changed the answer for
+        # everybody already running it.
+        import flow.profile as profile_mod
+
+        fresh = profile_mod.Profile(Path(tempfile.mkdtemp()) / "profile.json")
+        self.assertFalse(fresh.check_update)
+
+    def test_a_string_in_the_file_cannot_turn_it_on(self):
+        # `bool("false")` is True. If this field were read the obvious way, a hand-edit
+        # saying `"false"` would be the one value that switches a launch's networking on
+        # - and it would read as the *most* explicit possible statement of the opposite.
+        import flow.profile as profile_mod
+
+        path = Path(tempfile.mkdtemp()) / "profile.json"
+        good = profile_mod.Profile(path)
+        good.check_update = True
+        good.save()
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            '"check_update": true', '"check_update": "false"'), encoding="utf-8")
+
+        again = profile_mod.Profile(path)
+        self.assertFalse(again.check_update)
+        self.assertIn("check_update", again.faults)
+
+    def test_on_the_line_says_so_rather_than_the_old_reassurance(self):
+        # The startup line is the only place a launch declares what it does to the
+        # network. If it can still claim nothing checks while the setting is on, the
+        # promise is worse than not making it - it is a false one.
+        out, asked = self.launch_with(True)
+        self.assertIn("asking GitHub about updates at startup", out)
+        self.assertNotIn("nothing checks for updates on its own", out)
+        asked.assert_called()
+
+    def test_and_off_says_the_old_thing_and_asks_nobody(self):
+        out, asked = self.launch_with(False)
+        self.assertIn("nothing checks for updates on its own", out)
+        asked.assert_not_called()
+
+    def test_the_check_runs_off_the_startup_path(self):
+        # A 3 s timeout in front of the pill is a launch that looks hung, which is what
+        # `version.TIMEOUT_SEC`'s own comment says is the case worth being quick about.
+        # The thread is a daemon, so nothing is waited on and nothing is left holding
+        # the process open.
+        import flow.__main__ as mod
+
+        with mock.patch.object(mod, "check_update", return_value=("fine", True)):
+            with mock.patch("threading.Thread") as thread:
+                mod._ask_about_updates()
+        thread.assert_called_once()
+        self.assertTrue(thread.call_args.kwargs["daemon"])
+        thread.return_value.start.assert_called_once()
+
+
 class TestCtrlCIsAQuitAndNotAnAbandonment(unittest.TestCase):
     """What happens to the session when the interrupt does not land in the frame pump.
 

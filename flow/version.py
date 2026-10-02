@@ -7,12 +7,20 @@ of the installed metadata rather than copied into a `__version__` here: a second
 a version is a second thing to keep true, and the copy that goes stale is always the one
 nobody re-reads.
 
-**Nothing calls the check but the flag.** No timer, no startup call, no "there is an
-update" bubble — `--check-update` runs once, when asked, and exits. That is not a
-courtesy setting; it is what keeps `docs/architecture.md` § "What leaves the machine"
-a complete list rather than an approximate one. A product whose privacy claim is an
-enumeration cannot afford one path that phones home on its own schedule, because then
-the enumeration is a description of the common case instead of a guarantee.
+**Two things call the check, and both are somebody asking.** `--check-update` runs once,
+when typed, and exits. The other is `profile.check_update`: off unless a person switches
+it on in Flow Home, and when on it makes *a launch* ask exactly once, on a daemon
+thread rather than on the startup path. That second caller is newer than this paragraph
+used to be flatly false about, and it is the shape the rule now takes — not "no
+automatic check" but "no automatic check a person did not ask for". The distinction is
+what keeps `docs/architecture.md` § "What leaves the machine" a complete list rather
+than an approximate one. A product whose privacy claim is an enumeration cannot afford
+one path that phones home on its own schedule, because then the enumeration is a
+description of the common case instead of a guarantee.
+
+**And no timer, either way.** There is no poll and no interval on the automatic path: a
+launch asks once, and "am I current?" has a shelf life measured in releases rather than
+hours.
 
 What goes out is the request and nothing else: no version number (the comparison happens
 here, after the answer arrives), no query string, no token, no account. GitHub sees an

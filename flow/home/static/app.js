@@ -453,7 +453,7 @@
           <section class="card">
             <h2>Start and update</h2>
             <div class="setting"><div class="text"><b>Load the speech model when Flow starts</b><span class="note">The first words come faster; starting takes a moment longer.</span></div>${sw(d.startup.warm, "warm", "Load the model at startup")}</div>
-            <div class="setting"><div class="text"><b>Flow ${esc(d.version)}</b><span class="note" id="update-line">Flow asks for updates only when you press this.</span></div><button type="button" class="btn" data-act="update">${icon("refresh", C.text, 15)}Check for updates</button></div>
+            <div class="setting"><div class="text"><b>Flow ${esc(d.version)}</b><span class="note" id="update-line">${d.startup.check ? "Flow asks GitHub about updates once at each start." : "Flow asks for updates only when you press Check now."}</span></div>${sw(d.startup.check, "check-update", "Check for updates automatically")}<button type="button" class="btn" data-act="update">${icon("refresh", C.text, 15)}Check now</button></div>
           </section>
         </div>
         <div class="col">
@@ -1329,6 +1329,11 @@
     "ws-forget": (el) => run(() => api("settings/workspace/forget", { path: el.dataset.path })),
     "auto-ask": (el) => run(() => api("settings/auto_ask", { on: el.getAttribute("aria-checked") !== "true" })),
     warm: (el) => run(() => api("settings/warm", { on: el.getAttribute("aria-checked") !== "true" }), "Saved"),
+    // Same shape as `warm`, and the same reason it is its own action: this one decides
+    // whether Flow opens a connection on its own, which is why the note beside it reads
+    // differently when it is on. The server has already saved by the time this returns,
+    // so there is nothing optimistic to do here.
+    "check-update": (el) => run(() => api("settings/check-update", { on: el.getAttribute("aria-checked") !== "true" }), "Saved"),
     design: (el) => run(() => api("settings/design", { name: el.dataset.value }), "Switching the pill"),
     "app-add": () => {
       const exe = (value("app-exe") || "").trim(), instruction = (value("app-text") || "").trim();

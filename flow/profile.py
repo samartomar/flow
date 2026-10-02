@@ -356,6 +356,19 @@ class Profile:
         #: on, so an existing profile does not acquire a preference nobody expressed;
         #: same no-bump reasoning as `voice`.
         self.auto_ask: bool = True
+        #: Whether a launch asks GitHub whether there is a newer Flow. **Off unless
+        #: somebody turns it on**, and that default is the point rather than a shrug:
+        #: `flow/version.py` holds the only URL opener in the package so that
+        #: `docs/architecture.md` § "What leaves the machine" can be an enumeration
+        #: instead of a description of the common case. Making this on-by-default would
+        #: turn every claim in that section into "unless you use it the way everyone
+        #: does", which is worth less than no claim at all.
+        #:
+        #: The opposite fallback from `auto_ask`, and for the same structural reason read
+        #: the other way round: absence here means *nobody has decided*, and the safe
+        #: reading of an undecided privacy setting is the one that sends nothing. So
+        #: absent is False, not True.
+        self.check_update: bool = False
         #: R5/P7: the words that press Send, and Send-then-Enter. Additive, schema stays
         #: 1, and a blank reads as absent rather than as "off" — `""` would match nothing
         #: and disable the feature silently, which is the `auto_ask` null trap one field
@@ -573,6 +586,13 @@ class Profile:
         # `bool(None)` is False, so a key that was never written — or written as null by
         # an older Flow — would read as a deliberate "off". Absent means the default.
         self.auto_ask = take("auto_ask", _flag, True)
+        # Absent is False here, and that is the whole safety argument in one line: the
+        # setting decides whether Flow opens a connection nobody asked it to open, so an
+        # undecided profile has to read as "decided no". `_flag` means a file carrying
+        # `"yes"` takes the default rather than being interpreted — `bool("false")` is
+        # True, which is the trap that would otherwise turn a bad hand-edit into a
+        # launch that phones home.
+        self.check_update = take("check_update", _flag, False)
         # Absent means False here, the opposite way round from `auto_ask` — the default
         # is "has not been told", so an upgrade shows the notice once.
         self.converse_seen = take("converse_seen", _flag, False)
@@ -668,6 +688,7 @@ class Profile:
             "calibrated_device": self.calibrated_device,
             "voice": self.voice,
             "auto_ask": self.auto_ask,
+            "check_update": self.check_update,
             "converse_seen": self.converse_seen,
             "welcomed": self.welcomed,
             "send_word": self.send_word,

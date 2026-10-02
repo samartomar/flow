@@ -1,11 +1,11 @@
 """Which copy this is, and the one flag that asks GitHub about it.
 
 Two flags that both exit before Flow starts, and between them one property worth more
-than either: **nothing checks for updates on its own.** `docs/architecture.md`'s "What
-leaves the machine" is an enumeration, and an enumeration is only worth reading if it is
-complete — so the call-site test below is not decoration, it is the assertion that keeps
-the document true. `tests/test_main.py` carries the other half, that a real launch opens
-no socket.
+than either: **a launch asks GitHub about updates only when somebody has switched that
+on.** `docs/architecture.md`'s "What leaves the machine" is an enumeration, and an
+enumeration is only worth reading if it is complete — so the call-site test below is not
+decoration, it is the assertion that keeps the document true. `tests/test_main.py`
+carries the other half, that a real launch with the setting off opens no socket.
 
 The exact printed lines are asserted rather than matched loosely. This is a one-shot
 command whose entire output is one line: if the line is wrong, there is nothing else on
@@ -16,6 +16,7 @@ failure mode the tag pattern in `flow/version.py` exists to prevent, and GitHub'
 is the one string here that Flow did not write.
 """
 
+import ast
 import contextlib
 import io
 import json
@@ -304,12 +305,40 @@ class TestNothingChecksOnItsOwn(unittest.TestCase):
     the common case. So the call sites are counted.
     """
 
-    def test_the_flag_is_the_only_thing_in_the_package_that_calls_it(self):
-        callers = {
-            path.name for path in (ROOT / "flow").glob("*.py")
-            if "check_update" in path.read_text(encoding="utf-8")
-        }
-        self.assertEqual(callers, {"version.py", "__main__.py"})
+    def test_the_only_things_in_the_package_that_call_it_are_the_two_you_asked(self):
+        """Count call sites by walking the AST, not by grepping for the name.
+
+        This used to read every `flow/*.py`, collect the ones whose text contains
+        `check_update`, and assert the set was `{version.py, __main__.py}`. That caught
+        what it was written for, but it counted a **mention** rather than a **call** —
+        so the moment the opt-in setting took the name `check_update` in `profile.py`,
+        declaring a bool and reaching no network, the test failed without a single thing
+        about the privacy claim having changed. A test that must be renamed to stay true
+        stops being a witness.
+
+        The AST asks the question the document actually cares about: which modules *call*
+        the check. That is strictly sharper — `getattr(mod, "check" + "_update")()` walks
+        straight past a grep and trips this.
+
+        Recursive, which the old one was not: `flow/*.py` never looked inside `flow/home/`,
+        so Flow Home's own "Check for updates" button has been calling this since Home
+        shipped, unobserved by the assertion that exists to catch exactly that. The
+        directory is the point — the claim is about the product, not the top layer of it.
+
+        Two callers, and both are a person asking: `__main__.py` for `--check-update` and
+        for the `check_update` profile setting, and `home/api.py` for the button. A third
+        module here is a launch that phones home, which is the whole thing this file is
+        guarding.
+        """
+        callers = set()
+        for path in sorted((ROOT / "flow").rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "check_update"):
+                    callers.add(path.relative_to(ROOT / "flow").as_posix())
+        self.assertEqual(callers, {"__main__.py", "home/api.py"})
 
     def test_and_nothing_else_in_the_package_opens_a_url(self):
         # `flow/edge.py` reaches Microsoft's speech service through `edge-tts`, which is
