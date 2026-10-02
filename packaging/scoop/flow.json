@@ -12,14 +12,14 @@
         "release workflow uploads beside the zip, so a version bump does not have to",
         "download 142 MB to learn one number."
     ],
-    "version": "0.6.1",
+    "version": "0.7.0",
     "description": "Local English dictation with a talk-to-it refine loop",
     "homepage": "https://github.com/samartomar/flow",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/samartomar/flow/releases/download/v0.6.1/flow-windows-x64.zip",
-            "hash": "d2fa70e54318b8766b721b6465059f1a9d83888d3e35469c46ddf193782713d1"
+            "url": "https://github.com/samartomar/flow/releases/download/v0.7.0/flow-windows-x64.zip",
+            "hash": "FILL-ME-SHA256"
         }
     },
     "bin": "flow\\flow.exe",
