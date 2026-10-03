@@ -2045,6 +2045,87 @@ NOTEPAD, BROWSER = 0x42, 0x99
 TASKBAR, MAIL = 0x10, 0x77
 
 
+class TestOnePressIsTheGesture(unittest.TestCase):
+    """The shipped gesture, asserted where it is decided rather than only in `hold.py`.
+
+    `Hold` has answered with `LATCH` for a single tap since it was written. What changed
+    is that the chord now asks for it: `on_latch` instead of `on_double_tap`, and
+    `LATCH` mapped to the toggle. These tests exist because that mapping lives in
+    `hotkey.py` and nothing in `hold.py`'s own suite could see it — a machine built with
+    the other callback produces every effect `Hold` defines and none of them arrive.
+    """
+
+    def test_latch_is_what_flips_hands_free(self):
+        from flow.hold import LATCH
+        from flow.hotkey import Chord
+
+        self.assertEqual(Chord._EFFECTS[LATCH], "toggle_action")
+
+    def test_and_the_chord_registers_the_single_tap_callback(self):
+        from flow.hold import Hold
+        from flow.hotkey import Chord
+
+        # By construction rather than by reading the source: `Chord` builds its own
+        # `Hold`, and the callback it passes is the switch `Hold` reads.
+        built = Chord.__new__(Chord)
+        built.mods = frozenset({"ctrl", "win"})
+        built.gesture = "hold"
+        built._hold = Hold(built.mods, gesture=built.gesture,
+                           on_latch=lambda: None)
+        built._sync()
+
+        self.assertIsNotNone(built._hold.on_latch)
+
+    def test_a_long_press_is_still_a_sentence_and_not_a_tap(self):
+        # The half that makes a single press safe rather than a trap. The two gestures
+        # are told apart by duration, so the boundary has to hold.
+        from flow.hold import Hold, MOD_DOWN, MOD_UP, START, STOP
+
+        latched = []
+        m = Hold(mods=frozenset({"ctrl", "win"}), on_latch=lambda: latched.append(1))
+        for event, name, at in ((MOD_DOWN, "ctrl", 0.0), (MOD_DOWN, "win", 0.0),
+                                (MOD_UP, "win", 2.0), (MOD_UP, "ctrl", 2.0)):
+            m.feed(event, name, at)
+
+        self.assertEqual(latched, [])
+        self.assertFalse(m.armed)
+
+    def test_a_short_press_latches(self):
+        from flow.hold import Hold, MOD_DOWN, MOD_UP
+
+        latched = []
+        m = Hold(mods=frozenset({"ctrl", "win"}), on_latch=lambda: latched.append(1))
+        for event, name, at in ((MOD_DOWN, "ctrl", 0.0), (MOD_DOWN, "win", 0.0),
+                                (MOD_UP, "win", 0.1), (MOD_UP, "ctrl", 0.1)):
+            m.feed(event, name, at)
+
+        self.assertEqual(latched, [1])
+
+    def test_and_nothing_anywhere_still_calls_it_a_double_tap(self):
+        # The words a person reads. Four files said "double-tap" and every one of them
+        # would have taught a gesture the product no longer has — which is worse than a
+        # stale number, because a wrong instruction is acted on.
+        root = Path(__file__).resolve().parent.parent
+        for name in ("flow/__main__.py", "flow/help.py"):
+            with self.subTest(name=name):
+                body = (root / name).read_text(encoding="utf-8")
+                live = [ln for ln in body.splitlines()
+                        if "double-tap" in ln and not ln.lstrip().startswith("#")]
+                self.assertEqual(live, [], f"{name} still tells the user to double-tap")
+
+    def test_and_the_help_row_describes_duration_not_count(self):
+        from flow.help import _ACTIONS
+
+        row = _ACTIONS["talk"]
+        self.assertIn("tap", row)
+        self.assertNotIn("double", row)
+        # The first half is the one that stops people hunting for a second shortcut to
+        # find, so a rewrite of the tap half must not take it with it. This caught exactly
+        # that: a first pass shortened the row to "tap to start hands-free, hold to talk"
+        # and dropped the sentence entirely.
+        self.assertIn("release to send", row)
+
+
 class TestTheHandEditorLivesOnTheCompactPanel(unittest.TestCase):
     """one-surface.md step 3: the hand editor, ported off the shipped surface.
 

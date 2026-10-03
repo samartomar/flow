@@ -522,9 +522,14 @@ The toggle is the only one of the two that survives a long thought with pauses i
 phone call you are transcribing, or hands that would rather not hold two keys down for a
 minute. It is remembered in `profile.json` as `"gesture": "toggle"`.
 
-**Two quick taps start and stop hands-free listening.** One chord, two gestures: **hold
-`ctrl+win`** to dictate and let go to send, **double-tap `ctrl+win`** to switch hands-free
-listening on or off. That is the whole of the shortcut.
+**A quick tap starts and stops hands-free listening.** One chord, two gestures: **hold
+`ctrl+win`** to dictate and let go to send, **tap `ctrl+win`** (under 400 ms) to switch
+hands-free listening on or off. That is the whole of the shortcut.
+
+It was two taps until the trace said otherwise: of 74 deliberate presses the median hold
+was 626 ms against a 400 ms tap window, so "two taps inside 500 ms" was a gesture the
+timing rules could not recognise and the hand could not reliably produce. A single press
+has no window to miss.
 
 A single tap does nothing at all — it is not a shortcut on its own, so reaching for the
 chord and brushing it changes nothing. Both presses have to be short (**under 400 ms**)

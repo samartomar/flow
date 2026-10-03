@@ -21,6 +21,7 @@ from .hold import (
     BREAK,
     DOUBLE_TAP,
     IDLE,
+    LATCH,
     MOD_DOWN,
     MOD_UP,
     OTHER_DOWN,
@@ -660,16 +661,27 @@ GESTURES = ("hold", "toggle")
 #: `hold.py:348`, which returns early rather than doing the arithmetic. The callbacks are
 #: therefore the switch: setting one is what turns the tap question on.
 #:
-#: It is `on_double_tap` and not `on_latch`, because the shipped gesture is two taps.
-#: Setting `on_latch` instead is what made a *single* tap toggle, which read as one
-#: gesture wearing two names: the fast way in and the deliberate way in were the same
-#: thing, and someone reaching for a double tap got a toggle that had already fired
-#: before they finished. With only `on_double_tap` set, a lone tap reports nothing.
+#: **`LATCH` is what asks, and one press is the gesture.** This was `on_double_tap`,
+#: on the reasoning that a single tap made "the fast way in" and "the deliberate way in"
+#: the same gesture wearing two names: someone reaching for a double tap got a toggle
+#: that had already fired before they finished the first tap.
 #:
-#: So this function does nothing at all, on purpose. The word the double tap puts on the
-#: queue is dispatched from the effect `Hold` *returns*, not from here — because the
-#: callback runs inside `feed`, before the caller has dispatched anything, and wiring it
-#: here put `toggle` between `talk` and `talk-end`. The function exists to be not-`None`.
+#: That reasoning was sound and the gesture still could not be made, because a trace off
+#: the owner's own machine said why: of 74 deliberate presses the median hold was
+#: **626 ms** and only 28% came in under `TAP_MAX_MS` (400). A two-modifier tap on that
+#: keyboard is a ~600 ms press, so most presses were classified as *sentences*, and a
+#: double tap is two of those inside a 500 ms window — which no hand produces twice in a
+#: row. It was never a race; the gesture asked for something the timing rules classified
+#: against, and widening the pairing window (the previous commit) could not change that.
+#:
+#: One press has no window to miss. Holding past `TAP_MAX_MS` is still a sentence, so the
+#: two gestures stay distinct by *duration* rather than by count — a rule a hand can
+#: satisfy where two presses inside half a second is one it cannot.
+#:
+#: So this function still does nothing at all: the effect is dispatched from the value
+#: `Hold` *returns*, not from here, because the callback runs inside `feed` before the
+#: caller has queued anything, and wiring it here put `toggle` between `talk` and
+#: `talk-end`. The function exists to be not-`None`, which is the switch `Hold` reads.
 def _tap_enabled() -> None:
     """Present so `Hold` will do the tap arithmetic. Deliberately does nothing."""
 GESTURE_DEFAULT = "hold"
@@ -867,8 +879,7 @@ class Chord:
         #: the two agree. What it costs is one attribute per chord and one dict copy per
         #: key event on the input path, which is why `_sync` writes only the three
         #: fields that changed rather than re-deriving them.
-        self._hold = Hold(self.mods, gesture=self.gesture,
-                          on_double_tap=_tap_enabled)
+        self._hold = Hold(self.mods, gesture=self.gesture, on_latch=_tap_enabled)
         #: **Where the machine's verdict goes, when something is listening.** A callable
         #: taking `Diag.write`'s shape, or None. Set from `__main__` because this object
         #: is built before the session is, and the trace is a property of the run rather
@@ -948,21 +959,27 @@ class Chord:
     #: that order, and the order is the feature — a model load must never land inside the
     #: first sentence.
     #:
-    #: **`DOUBLE_TAP` is `toggle_action`, and a single tap is deliberately nothing.**
-    #: Two taps are the gesture: hold for a sentence, double-tap for hands-free, one
-    #: chord either way — which is the whole of what `fireflt` ships and the reason this
-    #: is simpler than the pair of gestures it replaced. `LATCH` is not mapped, and its
-    #: absence is not an oversight: the machine is built with `on_double_tap` and no
-    #: `on_latch`, so a lone tap never reports anything at all. Without that, a single
-    #: tap toggled and the second of a pair was swallowed — so the fast way in and the
-    #: deliberate way in were the same gesture wearing two names, and a user reaching for
-    #: a double tap got one toggle that had already fired before they finished.
+    #: **`LATCH` is `toggle_action`, and one press is the gesture.** This was
+    #: `DOUBLE_TAP` with `LATCH` unmapped, on the reasoning that a single tap made "the
+    #: fast way in" and "the deliberate way in" the same gesture wearing two names — so a
+    #: lone tap reported nothing at all, and the shipped gesture was two taps.
+    #:
+    #: That is gone, for the measured reason set out at `_tap_enabled`: a median
+    #: deliberate hold of 626 ms against a 400 ms tap window meant two presses inside
+    #: 500 ms was not a gesture the hand produced. One press has no window to miss, and a
+    #: press past `TAP_MAX_MS` is still a sentence — so the two stay distinct by duration
+    #: rather than by count.
+    #:
+    #: `DOUBLE_TAP` stays mapped: `Hold` still emits it for anything that registers
+    #: `on_double_tap`, and a rider that wants the pair can have it. Unmapping it would
+    #: have made that path silently fall through to no word at all.
     #:
     #: Dispatched from the effect, not from the callback. Measured, not assumed: the
     #: callback runs *inside* `Hold.feed`, so wiring it put `toggle` on the queue between
     #: `talk` and `talk-end` — the draft closed by the wrong word.
     _EFFECTS = {START: None, STOP: "end_action", BREAK: "break_action",
-                TOGGLE: "toggle_action", DOUBLE_TAP: "toggle_action", IDLE: None}
+                TOGGLE: "toggle_action", LATCH: "toggle_action",
+                DOUBLE_TAP: "toggle_action", IDLE: None}
 
     def _feed(self, wparam, vk) -> None:
         """One key event, against this chord's shape.

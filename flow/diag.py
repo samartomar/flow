@@ -85,7 +85,7 @@ FIELDS = frozenset({
     # not do what it was asked to. Every one is a machine verdict or a state flag, and
     # none is a key: `effect`/`queued` are the queue's own vocabulary joined with ".",
     # because `_TOKEN` refuses a comma and a refused value reads as an absence.
-    "effect",     # what the chord decided: start | stop | double_tap | break | idle
+    "effect",     # what the chord decided: start | stop | latch | double_tap | break | idle
     "queued",     # the words that reached the surface, dot-joined. Names, never text
     "armed",      # whether the chord considers itself held right now
     "other",      # whether an outside key has gone down since it last looked

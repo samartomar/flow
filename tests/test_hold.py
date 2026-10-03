@@ -702,6 +702,16 @@ class TestHItAgreesWithTheChordItWasTakenFrom(unittest.TestCase):
         #: modifiers went down in which order, not how long a hand rested on them, and
         #: `test_chord.py` covers duration with a clock that moves.
         tick = iter([1000.0] * (len(down) + len(up)))
+        #: **A clock that does not move, and why.** The fixed reading above made every
+        #: press zero-length, which under the *single tap* gesture makes every press a tap
+        #: — so the two sides were compared on different questions and the clean hold
+        #: disagreed with itself. The sequences below are about *which* modifiers went down
+        #: in which order, not how long a hand rested on them, and every one of them is a
+        #: hold rather than a tap by intent: `test_chord.py` covers duration with a clock
+        #: that moves. So the clock is fixed at a reading far enough from `Hold`'s
+        #: zero-starting sentinels to read as "a hold", and it is asserted here rather than
+        #: left to whoever changes the gesture next.
+        tick = iter([hold.TAP_MAX_SEC + 10.0] * (len(down) + len(up)))
         chord.clock = lambda: next(tick)
 
         def event(message, vk):
@@ -733,15 +743,17 @@ class TestHItAgreesWithTheChordItWasTakenFrom(unittest.TestCase):
         side sees a hold the other calls a tap. Left unset, the bare `Hold` returned
         early from `_ended` and the two disagreed about a case where they agree.
         """
-        m = Hold(gesture=gesture, on_double_tap=lambda: None)
+        m = Hold(gesture=gesture, on_latch=lambda: None)
         words: list = []
 
         #: `Chord` puts the warm before the capture; `START` is that one moment, and
         #: the machine says it once rather than inventing a word for the pair.
-        #: `DOUBLE_TAP` is in this table because the shipped gesture is two taps:
-        #: `Chord` sends it to `toggle_action`, and a single tap reports nothing at all.
+        #: `DOUBLE_TAP` is in this table because a single tap is the shipped gesture and
+        #: `Chord` sends `LATCH` to `toggle_action`. `DOUBLE_TAP` is here too: `Chord`
+        #: still maps it, so a machine built with the other callback would arrive
+        #: carrying a word this side could not produce.
         expand = {START: ("warm", "talk"), STOP: ("talk-end",), BREAK: ("talk-break",),
-                  TOGGLE: ("toggle",), DOUBLE_TAP: ("toggle",)}
+                  TOGGLE: ("toggle",), LATCH: ("toggle",), DOUBLE_TAP: ("toggle",)}
 
         def put(effects):
             for effect in effects:

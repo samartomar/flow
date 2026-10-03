@@ -178,7 +178,7 @@ def _chord(profile, hotkeys, Chord, parse_chord, echo, ignored_line,
         # a person can find out it is there — and this line was still describing the
         # single-tap behaviour after the gesture changed, twice.
         say(f"chord   {'hold':8s} {chord.describe()}  "
-            "(hold to talk, release to send; double-tap for hands-free)")
+            "(hold to talk, release to send; tap for hands-free)")
     else:
         say(f"chord   {'toggle':8s} {chord.describe()}  (press to start, again to stop)")
     return chord
@@ -1075,7 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
             # line: it shares those keys, so this is the only place a person is told that
             # pressing them twice is a different thing from pressing and holding them.
             # A compact user has no other route to it.
-            hands_free = (f" | double-tap {chord.describe()} for hands-free"
+            hands_free = (f" | tap {chord.describe()} for hands-free"
                           if chord is not None and chord.gesture == "hold" else "")
             say(f"hold {held} to talk{asks}{hands_free} | tap the pill to cycle "
                 f"Type / Refine / Ask | right-click for the menu | {quits}")
