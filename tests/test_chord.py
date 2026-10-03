@@ -524,27 +524,35 @@ class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
         # press is a sentence, and a *pair* of short ones is the hands-free gesture.
         #
         # **Two numbers have to fit, not one**, and the second is the one that bites:
-        # each press must be a tap (under `TAP_MAX_MS`), *and* the two of them together
-        # must land inside `DOUBLE_TAP_WINDOW_MS`, which `Hold` measures **release to
-        # release**. At `gap_ms=0` that distance is two holds, so the edge is 250 ms
-        # rather than 400 — a 300 ms "tap" is short enough on its own and still out of
-        # the window as a pair. Measured across 50–400 ms before this was written.
-        # `DOUBLE_TAP_WINDOW_SEC` is already in seconds (the `_MS` name is the constant it is
-        # derived from), so it is halved and converted once here rather than at each use.
-        edge = hold.DOUBLE_TAP_WINDOW_SEC * 500  # seconds -> half -> milliseconds
-        for hold_ms, is_tap in ((edge - 1, True), (edge, True), (edge + 1, False)):
+        # each press must be a tap (under `TAP_MAX_MS`), *and* the gap between the first
+        # release and the second press must land inside `DOUBLE_TAP_WINDOW_MS`. At
+        # `gap_ms=0` that gap is exactly zero — the harness advances the clock by `hold_ms`
+        # on each key-up, so the second press reads at `2 * hold_ms` while the first
+        # released at `hold_ms` — so **the pair boundary is now `TAP_MAX_MS` alone**: a
+        # press that is a tap is fast enough to pair, and one that is not never pairs.
+        #
+        # That is the correct shape after the window moved to release-to-press: what
+        # decides a pair is how long the *pause* was, not how long the keys were down.
+        # The old release-to-release measure put the second hold inside the number and put
+        # the edge at 250 ms; press-to-press charged for the first hold; this one charges
+        # for neither.
+        for hold_ms, is_tap in ((hold.TAP_MAX_MS - 1, True),
+                                (hold.TAP_MAX_MS, True),
+                                (hold.TAP_MAX_MS + 1, False)):
             with self.subTest(hold_ms=hold_ms):
                 _chord_obj, presses = _chord()
                 self._pair(presses, hold_ms, gap_ms=0)
                 self.assertEqual("toggle" in _fired(presses), is_tap)
 
     def test_a_press_under_the_tap_window_that_is_too_slow_to_pair_is_two_sentences(self):
-        # The other half of the tap boundary. With `gap_ms=0` the press-to-press
-        # distance is twice the hold, so the edge sits at a 250 ms hold: under it pairs,
-        # over it the two presses are two sentences. Measured across 60–400 ms below
-        # rather than reasoned from the constants.
-        for hold_ms, pairs in ((60, True), (200, True), (250, True), (300, False),
-                               (400, False)):
+        # **The gap is what pairs, and the hold is not in the number.** With `gap_ms=0`
+        # the harness's pause is exactly zero, so every press that is a tap pairs and
+        # every press that is not does not — the second number, the pairing window, has
+        # nothing left to say at this gap, and the window is exercised by the gap tests
+        # below instead. The boundary is `TAP_MAX_MS` and is `>` not `>=`: a press of
+        # exactly `TAP_MAX_MS` is still a tap, because that is what `hold.py` tests.
+        for hold_ms, pairs in ((60, True), (200, True), (399, True), (401, False),
+                               (600, False)):
             with self.subTest(hold_ms=hold_ms):
                 _c, presses = _chord()
                 self._pair(presses, hold_ms, gap_ms=0)

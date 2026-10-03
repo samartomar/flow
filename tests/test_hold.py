@@ -67,6 +67,86 @@ def hold_chord(m, t=0.0, length=SENTENCE_SEC):
                        m.feed(MOD_UP, "ctrl", t + length)))
 
 
+class TestAGapIsWhatPairsNotHowLongTheKeysWereDown(unittest.TestCase):
+    """The defect the owner reported: "sometimes it catches, sometimes it does not."
+
+    A double tap whose window is measured press-to-press charges the user for their own
+    press duration. Two 200 ms taps with a 150 ms pause between them measure 550 ms and
+    never pair, inside a 500 ms window — so whether the gesture worked depended on how
+    fast the person could press two modifiers, which is not a thing anybody controls
+    deliberately. `Hold` now measures release-to-press: the pause alone.
+
+    **Found by reading Fireflies' shipped code, not by guessing.** `app.asar`'s
+    `dictation-focus.js` stores `lastTapUpAt` on the release and compares the next press
+    to it. Its `DOUBLE_TAP_WINDOW_MS` (500) and `MIN_DOUBLE_TAP_GAP_MS` (20) are the same
+    numbers this module already had, which is why a note claiming "it matches" was
+    believed for as long as it was: the constants were never the difference, the
+    measurement point was, and only reading the shipped source showed it.
+    """
+
+    def machine(self):
+        latched, doubled = [], []
+        return Hold(mods=frozenset({"ctrl", "win"}),
+                    on_latch=lambda: latched.append(1),
+                    on_double_tap=lambda: doubled.append(1)), latched, doubled
+
+    def test_a_slow_pair_with_a_normal_pause_still_pairs(self):
+        # The case that failed. Press-to-press: 200 + 150 + 200 = 550 ms, over the
+        # window, so this gesture could not land at *any* pause length.
+        m, _latched, doubled = self.machine()
+        hold_chord(m, t=0.0, length=0.200)
+        second = hold_chord(m, t=0.200 + 0.150, length=0.200)
+
+        self.assertIn(DOUBLE_TAP, second)
+        self.assertEqual(doubled, [1])
+
+    def test_and_a_genuinely_slow_pause_does_not_pair(self):
+        # The other direction, or the fix would be "everything is a double tap".
+        m, _latched, doubled = self.machine()
+        hold_chord(m, t=0.0, length=0.200)
+        late = 0.200 + hold.DOUBLE_TAP_WINDOW_SEC + 0.2
+        second = hold_chord(m, t=late, length=0.200)
+
+        self.assertNotIn(DOUBLE_TAP, second)
+        self.assertEqual(doubled, [])
+
+    def test_a_key_bounce_is_still_not_a_second_tap(self):
+        # The guard a wider window could have broken. A second down 10 ms after the up is
+        # the keyboard talking to itself; pairing it would turn bounce into hands-free.
+        m, _latched, doubled = self.machine()
+        hold_chord(m, t=0.0, length=0.100)
+        effects = meaningful((m.feed(MOD_DOWN, "ctrl", 0.110),
+                              m.feed(MOD_DOWN, "win", 0.110),
+                              m.feed(MOD_UP, "win", 0.110),
+                              m.feed(MOD_UP, "ctrl", 0.110)))
+
+        self.assertNotIn(DOUBLE_TAP, effects)
+        self.assertEqual(doubled, [])
+
+    def test_how_long_the_keys_were_down_is_not_in_the_number(self):
+        # The property, as one sweep of press durations at a fixed 150 ms pause. The slow
+        # end of this range is what the owner could not make work.
+        for length in (0.05, 0.10, 0.15, 0.20, 0.30):
+            with self.subTest(length=length):
+                m, _latched, doubled = self.machine()
+                hold_chord(m, t=0.0, length=length)
+                second = hold_chord(m, t=length + 0.150, length=length)
+                self.assertIn(DOUBLE_TAP, second)
+
+    def test_and_the_whole_window_is_still_reachable(self):
+        # The widening is not "anything goes": a pause of exactly the window still pairs
+        # and one millisecond past it does not. Both sides, because a window that only
+        # ever refuses is indistinguishable from no gesture at all.
+        window = hold.DOUBLE_TAP_WINDOW_SEC
+        for pause, pairs in ((window - 0.001, True), (window, True),
+                             (window + 0.001, False)):
+            with self.subTest(pause=pause):
+                m, _latched, doubled = self.machine()
+                hold_chord(m, t=0.0, length=0.05)
+                second = hold_chord(m, t=0.05 + pause, length=0.05)
+                self.assertEqual(DOUBLE_TAP in second, pairs, doubled)
+
+
 class TestTheModuleHasNoPlatformInIt(unittest.TestCase):
     """The reason this suite runs everywhere, asserted rather than assumed."""
 
