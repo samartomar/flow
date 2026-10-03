@@ -420,12 +420,37 @@ def decode_options(final: bool, hotwords: str | None = None) -> dict:
     }
 
 
+#: What each rejection reason means to a person. For a surface that can only speak,
+#: and for anyone who has to read the note on the classic panel.
+#:
+#: The filter's own words are for the filter. `unconfident` names a token probability
+#: nobody outside this module has an opinion about, and `empty` does not say what was
+#: wrong — the *text* was not empty, the words were the model's own invention, which is
+#: the one thing worth saying plainly. Read aloud, "empty" sounds like a bug report
+#: about the microphone.
+_REASON_WORDS = {
+    "empty": "that was the model talking, not you",
+    "filler": "that was not speech",
+    "unconfident": "that was too quiet to be sure of",
+}
+
+
 class Drop(NamedTuple):
     """One segment the filter rejected, with the evidence it used.
 
     P2 is "never loses words silently": a rejection is allowed, an *unexplained* one is
     not. Keeping the text is what makes a later rescue possible — the user cannot
     recover words they were never shown, but they can recover these.
+
+    **Two forms, and the reason there are two is this bug.** `describe()` quotes the
+    text and its evidence, which is right for a trace and for the History page. It is
+    also what the `drop` event carries, and the compact surface *speaks* that event —
+    so on a pill Flow read out "dropped 'Thank you for watching.' (empty, ns=0.85
+    lp=-1.10, final)" in a room where nobody had said it. Whisper's sign-off
+    hallucination is emitted on silence, and a burst of near-empty captures from a
+    flaky tap gesture produced a burst of these, so the app said a sentence nobody
+    spoke, repeatedly, out loud. `announce()` is the surface form: no quoted words, no
+    bare numbers, one clause a person can act on.
     """
 
     text: str
@@ -439,6 +464,33 @@ class Drop(NamedTuple):
         lp = "?" if self.avg_logprob is None else f"{self.avg_logprob:.2f}"
         kind = "final" if self.final else "partial"
         return f"dropped {self.text.strip()!r} ({self.reason}, ns={ns} lp={lp}, {kind})"
+
+    def announce(self) -> str:
+        """The same rejection, for a surface that reads it aloud or shows one line.
+
+        **No quoted words, and the count is in words rather than the text.** A
+        hallucination is by definition something the user did not say, and putting it
+        back in front of them — in a bubble, or through the speaker — reproduces the
+        defect the filter just prevented. The text is still kept on the History page for
+        rescue, which is the only place reading it back is useful.
+
+        **No bare numbers either.** "ns=0.85 lp=-1.10" read by a speech synthesiser is
+        gibberish, and shown on a pill it is the one line that has to survive being read
+        twice. The evidence is in `describe()` for whoever is diagnosing this.
+
+        So this reports *that* a segment was refused and *why*, never *what it said* —
+        except a count, which says nothing about the content and is the one number that
+        tells a person whether the refusal was their microphone or the room.
+        """
+        reason = _REASON_WORDS.get(self.reason)
+        if reason is None:
+            # A reason added to `clean.py` without a word here must still
+            # say something true rather than nothing: P2 is that a rejection is never
+            # silent, and a dropped word is the wrong one to drop twice.
+            reason = "that one did not sound like speech"
+        words = len(self.text.split())
+        span = "a word" if words == 1 else f"{words} words"
+        return f"I did not catch {span} - {reason}"
 
 
 class Transcriber(Protocol):

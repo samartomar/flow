@@ -379,6 +379,34 @@ class TestTheSessionRecordsHandovers(unittest.TestCase):
         self.assertEqual((e["kind"], e["text"], e["reason"]),
                          (SET_ASIDE, "Thank you.", "filler"))
 
+    def test_the_drop_event_never_carries_the_words_it_rejected(self):
+        # **The defect, at the seam that caused it.** The event text is spoken verbatim
+        # by the compact surface, so putting `describe()` on it meant a Whisper
+        # hallucination came back out of the speaker as a sentence nobody had said.
+        # Measured: 19 such drops in the history file, every one `reason="empty"`.
+        from flow.asr import Drop
+
+        s, _h = session(self)
+        s.asr.take_drops = lambda: [Drop("Thank you for watching.", "empty", 0.85,
+                                         -1.10, True)]
+        s._pump_drops()
+        emitted = [ev for ev in s.events() if ev.kind == "drop"]
+        self.assertEqual(len(emitted), 1)
+        self.assertNotIn("thank you", emitted[0].text.lower())
+        self.assertNotIn("ns=", emitted[0].text)
+
+    def test_and_the_text_is_still_recoverable_from_history(self):
+        # The whole point of keeping the drop: refusing to *say* the words must not
+        # mean throwing them away. P2's recovery is the History page.
+        from flow.asr import Drop
+
+        s, h = session(self)
+        s.asr.take_drops = lambda: [Drop("Thank you for watching.", "empty", 0.85,
+                                         -1.10, True)]
+        s._pump_drops()
+        (e,) = h.entries()
+        self.assertEqual((e["kind"], e["text"]), (SET_ASIDE, "Thank you for watching."))
+
     def test_a_whole_session_with_history_unchosen_writes_nothing(self):
         # Item 65's stance, kept: unchosen is the state every profile starts in.
         s, h = session(self, choice=None)
