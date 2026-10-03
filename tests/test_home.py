@@ -28,6 +28,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -988,5 +989,73 @@ class TestDownloadsReportBytesAndStop(unittest.TestCase):
         self.assertEqual(models_mod.human(464 * 1024 * 1024), "464 MB")
 
 
+class TestTheSettingsPageNeverSaysCpuWhileTheGpuIsLoading(unittest.TestCase):
+    """The device on the Models page must be the real one, from the first second.
+
+    It was not, and the error was in the one direction that costs something: the page
+    read the device off the *live transcriber* and fell back to a literal `"cpu"` when
+    there was not one yet. `session.asr` is None for the whole warm-up, which is exactly
+    when somebody opens Settings to check whether the GPU is being used — so a machine
+    decoding on `large-v3` in CUDA was told "cpu", and the "Run speech on" dropdown said
+    "Automatic" instead of showing the stored choice. The answer was always in the
+    profile; the page just was not looking at it.
+
+    Measured on this machine rather than assumed: `resolve_device("auto")` returned
+    `cuda`, `cuda_reason()` returned "", and the profile already held
+    `decode_device: "cuda"` — so the default was always validating and preferring the
+    GPU, and only the report of it was wrong.
+    """
+
+    def snapshot(self, session, resolved="cuda"):
+        mm = models_mod.ModelManager(session)
+        mm._scan = (time.monotonic(), {})
+        with mock.patch("flow.asr.resolve_device", return_value=resolved), \
+                mock.patch.object(models_mod, "gpu", return_value=None):
+            return mm.snapshot()
+
+    @staticmethod
+    def session(asr, device="cuda"):
+        return SimpleNamespace(asr=asr,
+                               profile=SimpleNamespace(decode_device=device))
+
+    def test_a_cold_machine_still_reports_the_gpu_it_is_about_to_use(self):
+        out = self.snapshot(self.session(None, "cuda"))
+        self.assertEqual(out["device"], "cuda")
+        self.assertEqual(out["device_asked"], "cuda")
+
+    def test_and_the_dropdown_shows_the_stored_choice_not_automatic(self):
+        # The half a person acts on: the select is bound to `device_asked`, so before
+        # the fix a profile saved as `cuda` rendered as "Automatic".
+        out = self.snapshot(self.session(None, "cuda"))
+        self.assertNotEqual(out["device_asked"], "auto")
+
+    def test_auto_still_resolves_through_the_probe(self):
+        # `auto` is a preference, not a device, so it must come back resolved — and it
+        # has to be the *same* probe the startup line uses, or the page and the console
+        # can disagree about the same machine.
+        out = self.snapshot(self.session(None, "auto"), resolved="cuda")
+        self.assertEqual(out["device"], "cuda")
+        self.assertEqual(out["device_asked"], "auto")
+
+    def test_a_cpu_machine_is_told_cpu_and_not_promised_a_gpu(self):
+        out = self.snapshot(self.session(None, "auto"), resolved="cpu")
+        self.assertEqual(out["device"], "cpu")
+
+    def test_a_loaded_transcriber_still_wins(self):
+        # The live object is the best answer when there is one; the profile is only the
+        # fallback for the window before it exists.
+        class Up:
+            _device = "cuda"
+            device = "cuda"
+            asked = (None, None)
+            names = ("small", "large-v3")
+            loading = False
+
+            def swap(self, *a):
+                return None
+
+        out = self.snapshot(self.session(Up(), "cpu"))
+        self.assertEqual(out["device"], "cuda")
+        self.assertEqual(out["device_asked"], "cuda")
 if __name__ == "__main__":
     unittest.main()
