@@ -500,15 +500,18 @@ class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
         keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
         return chord
 
-    def test_a_single_tap_does_nothing_at_all(self):
-        # **The consolidated gesture: two taps are the gesture, and one is not.** A single
-        # tap used to latch, which made the fast way into hands-free listening and the
-        # deliberate way into it the same thing wearing two names — and somebody reaching
-        # for a double tap got a toggle that had fired before they finished the first tap.
-        # So a lone tap reports nothing, and says so here rather than by omission.
+    def test_a_single_tap_is_the_gesture(self):
+        # **One press, not two.** This asserted the opposite for months: a lone tap
+        # reported nothing, on the reasoning that "the fast way in" and "the deliberate
+        # way in" should not be one gesture wearing two names.
+        #
+        # That reasoning was sound and the gesture still could not be made, because a
+        # trace off the owner's own machine had a median deliberate hold of 626 ms
+        # against a 400 ms tap window — so "two taps inside 500 ms" was not something a
+        # hand produces. A single press has no window to miss.
         _chord_obj, presses = _chord()
         self._one_tap(presses, hold.TAP_MAX_MS - 50)
-        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end"])
+        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end", "toggle"])
 
     def test_a_press_past_the_window_is_still_just_a_sentence(self):
         # The half that has to keep working. The tap is an addition; a person dictating
@@ -576,41 +579,44 @@ class TestBAQuickTapIsHandsFreeAndALongPressIsASentence(unittest.TestCase):
                 self.assertIn("toggle", _fired(presses))
 
     def test_a_gap_past_the_window_is_still_two_sentences(self):
-        # Widening the window by measuring presses must not have removed the bound.
+        # **Kept, and it now says something different.** With two taps there was a window
+        # a gap could miss; with one press there is not — every tap is a tap. What this
+        # still pins is the thing a future change could break: a press short enough to
+        # latch is never mistaken for a hold, however the timing arithmetic is later
+        # rearranged, because that is the whole safety of a single-press gesture.
         _c, presses = _chord()
         self._pair(presses, 60, gap_ms=hold.DOUBLE_TAP_WINDOW_SEC * 1000)
-        self.assertNotIn("toggle", _fired(presses))
+        fired = _fired(presses)
+        self.assertEqual(fired.count("talk-end"), 2, "both presses are still sentences")
+        self.assertEqual(fired.count("toggle"), 2, "and each one latches on its own")
 
-    def test_a_double_tap_puts_its_word_after_the_draft_is_closed(self):
+    def test_a_tap_puts_its_word_after_the_draft_is_closed(self):
         # Ordering, and it is not incidental. The callback `Hold` offers runs *inside*
         # `feed`, so dispatching the tap through it put `toggle` on the queue between
         # `talk` and `talk-end` — the draft closed by the wrong word. The returned
         # effect is dispatched instead, and this is the test that says so.
         _chord_obj, presses = _chord()
-        self._pair(presses, 100, gap_ms=120)
+        self._one_tap(presses, 100)
         words = _fired(presses)
-        # Two closed holds, then the toggle — the word lands last, never between them.
-        self.assertEqual(words[-3:], ["talk", "talk-end", "toggle"])
+        # A closed hold, then the toggle — the word lands last, never inside it.
+        self.assertEqual(words, ["warm", "talk", "talk-end", "toggle"])
 
-    def test_a_double_tap_is_one_gesture_and_not_a_toggle_and_an_untoggle(self):
-        # `Hold` swallows the first tap of a pair and reports the second, so the pair is
-        # worth exactly one toggle. Wiring both words would flip hands-free on and
-        # straight back off — a no-op that looks like it worked.
+    def test_a_tap_is_one_gesture_and_not_a_toggle_and_an_untoggle(self):
+        # The hazard a two-press gesture carried and a one-press gesture does not: one
+        # press must be worth exactly one toggle, or hands-free flips on and straight back
+        # off and the whole thing looks like it worked.
         _chord_obj, presses = _chord()
-        chord, keys = self._one_tap(presses, 100, gap_ms=120)
-        first = _fired(presses)
-        keys.down(VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
-        second = _fired(presses)
-        self.assertEqual(first, ["warm", "talk", "talk-end"])
-        self.assertEqual(second.count("toggle"), 1)
+        self._one_tap(presses, 100)
+        self.assertEqual(_fired(presses).count("toggle"), 1)
 
-    def test_two_taps_further_apart_than_the_window_are_not_a_gesture(self):
-        # Past `DOUBLE_TAP_WINDOW_MS` — release to release — there is no pair, so neither
-        # tap means anything. This is the number a user feels, and it is why the window is
-        # stated in the guide rather than left as a tap that "sometimes works".
+    def test_two_taps_further_apart_than_the_window_are_two_gestures(self):
+        # Past `DOUBLE_TAP_WINDOW_MS` this used to be "not a gesture". It is two: each
+        # press latches on its own, so two slow taps toggle twice — on, then off. Pinned
+        # because it is the one case where doing the obvious thing looks broken, and a
+        # person who taps twice out of habit gets the gesture they asked for.
         _chord_obj, presses = _chord()
         self._pair(presses, 50, gap_ms=hold.DOUBLE_TAP_WINDOW_MS * 1000)
-        self.assertNotIn("toggle", _fired(presses))
+        self.assertEqual(_fired(presses).count("toggle"), 2)
 
     def test_three_quick_taps_are_three_utterances(self):
         # `test_holding_it_three_times_is_three_utterances` says three presses are three
@@ -1032,10 +1038,14 @@ class TestTheGestureLeavesATrace(unittest.TestCase):
                            (WM_KEYUP, 0x11), (WM_KEYUP, 0x5B)):
             self.c._feed(wparam, vk)
 
-    def test_a_double_tap_is_recorded_as_the_double_tap(self):
+    def test_a_tap_is_recorded_as_the_latch(self):
+        # **The trace follows the gesture.** This looked for `double_tap`, because that
+        # was what a tap was for months. The word on the wire is now `latch`, and it is
+        # asserted by name rather than by "not none" — a trace that recorded *something*
+        # under a stale label would pass a looser check and then be unreadable in the one
+        # place it is meant to be read.
         self.tap()
-        self.tap()
-        recorded = [f for _, f in self.lines if "double_tap" in f["effect"]]
+        recorded = [f for _, f in self.lines if "latch" in f["effect"]]
         self.assertEqual(len(recorded), 1, f"the trace missed it: {self.lines}")
         self.assertFalse(recorded[0]["armed"])
 
@@ -1075,7 +1085,9 @@ class TestTheGestureLeavesATrace(unittest.TestCase):
             path = Path(tmp) / "diag.jsonl"
             diag = Diag(path=path, background=False)
             self.c.trace = diag.write
-            self.tap()
+            #: One tap, not two. The trace records the gesture the product now has; a
+            #: second tap would put a second latch on the wire and the assertion below —
+            #: that `latch` *survived* — would pass for the wrong reason.
             self.tap()
             diag.close()
             self.assertEqual(diag.rejected, 0,
@@ -1083,7 +1095,7 @@ class TestTheGestureLeavesATrace(unittest.TestCase):
             written = path.read_text(encoding="utf-8")
         self.assertNotIn(REFUSED, written,
                          "a value did not survive Diag's token and reads as absent")
-        self.assertIn("double_tap", written,
+        self.assertIn("latch", written,
                       "the whole point of the trace, and it did not get through")
 
 

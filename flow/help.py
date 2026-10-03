@@ -104,13 +104,20 @@ def auto_ask_notice(seconds: float) -> str:
 #: cannot find here is worse than one described badly.
 _ACTIONS = {
     "toggle": "start and stop listening",
-    # The chord's word, and the one row here that describes a *hold* rather than a
-    # press. Spelled out to the end — release and all — because the half people get
-    # wrong is that there is no second shortcut to send. A press under `TAP_MAX_MS` is a
-    # tap and taps nothing on their own; **two** of them inside `DOUBLE_TAP_WINDOW_MS`,
-    # release to release, flip hands-free listening. Same two keys as the hold, which is
-    # the whole point of naming it in one row rather than adding a second shortcut.
-    "talk": "hold to talk, release to send; double-tap for hands-free",
+    #: The chord's word, and the one row here that describes a *hold* rather than a
+    #: press. Spelled out to the end — release and all — because the half people get
+    #: wrong is that there is no second shortcut to send. A press under `TAP_MAX_MS` is a
+    #: tap and flips hands-free listening; hold longer and it is a sentence. Same two keys
+    #: either way, which is the whole point of naming it in one row rather than adding a
+    #: second shortcut.
+    #
+    # **One press, not two.** The trailing half said "double-tap" until the owner's trace
+    # showed the gesture could not land: a median deliberate hold of 626 ms against a
+    # 400 ms tap window means two of those inside 500 ms is not something a hand
+    #: produces. Duration separates the two gestures now, so the tap half says "tap".
+    # The first half is unchanged and must stay: "release to send" is the half that stops
+    # people hunting for a second shortcut to find.
+    "talk": "hold to talk, release to send; tap for hands-free",
     # Ask's own chord (decisions.md 2026-09-23, "Ask's own hold"): a question
     # whatever mode the pill is in, which is the whole of what it adds.
     "ask": "hold to ask, whatever the mode; release to send it",
