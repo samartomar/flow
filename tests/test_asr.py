@@ -169,6 +169,62 @@ class TestDropLog(unittest.TestCase):
         self.assertEqual(len(asr.take_drops()), 1)
         self.assertEqual(asr.take_drops(), [])
 
+    def test_announce_carries_no_evidence_numbers(self):
+        # The compact surface *speaks* this string, so anything a speech synthesiser
+        # would read as gibberish is a defect. "ns=0.90" becomes "n s equals zero point
+        # nine" — which is how the evidence form reached a speaker when it should never
+        # have left the trace.
+        _, asr = transcribe_with([FakeSegment("You", 0.9, -0.95)], final=False)
+        line = asr.take_drops()[0].announce()
+        for absent in ("ns=", "lp=", "partial", "0.90", "-0.95"):
+            self.assertNotIn(absent, line)
+
+    def test_and_announce_says_the_reason_in_words_a_person_can_use(self):
+        _, asr = transcribe_with([FakeSegment("You", 0.9, -0.95)], final=False)
+        self.assertIn("not speech", asr.take_drops()[0].announce())
+
+    def test_announce_never_repeats_a_hallucination_back(self):
+        # **The bug this method exists for.** Whisper emits "Thank you for watching."
+        # into silence, the filter drops it, and the *reporting* of that drop used to
+        # put the sentence back in front of the user — spoken, on the pill. Measured on
+        # this machine: 19 such drops in the history file, every one `reason="empty"`.
+        from flow.asr import Drop
+
+        d = Drop("Thank you for watching.", "empty", 0.85, -1.10, True)
+        self.assertNotIn("thank you", d.announce().lower())
+        # And the evidence form is untouched, so a trace and the History page keep it.
+        self.assertIn("Thank you for watching.", d.describe())
+
+    def test_and_an_unknown_reason_still_says_something_true(self):
+        # A reason added to `clean.py` without a matching word must not make the
+        # announcement empty or crash: P2 is that a rejection is never silent, and the
+        # guard against a silent rejection is a fallback rather than a lookup failure.
+        from flow.asr import Drop
+
+        line = Drop("something", "a-reason-nobody-translated", None, None, True).announce()
+        self.assertTrue(line.strip())
+        self.assertIn("did not catch", line)
+
+    def test_announce_handles_an_empty_text(self):
+        from flow.asr import Drop
+
+        # `empty` is the reason name, but `Drop.text` can still be blank after a strip.
+        # The count must not become the word "None", and the line must still be the
+        # sentence a person can act on rather than "I did not catch 0 words".
+        line = Drop("   ", "empty", 0.9, -0.8, True).announce()
+        self.assertNotIn("None", line)
+        self.assertIn("did not catch", line)
+        self.assertIn("model talking", line)
+
+    def test_announce_counts_words_rather_than_quoting_them(self):
+        # The count is the one number worth keeping: it says whether the refusal was
+        # one stray word or a whole utterance, without revealing what was in it.
+        from flow.asr import Drop
+
+        self.assertIn("4 words", Drop("Thank you for watching.", "empty",
+                                      0.85, -1.1, True).announce())
+        self.assertIn("a word", Drop("you", "filler", 0.9, -0.7, True).announce())
+
     def test_the_log_is_bounded(self):
         # R8: a long session costs what a short one costs, even one that drops a lot.
         _, asr = transcribe_with(

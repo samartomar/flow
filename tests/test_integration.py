@@ -229,6 +229,13 @@ class TestDropsReachTheUser(unittest.TestCase):
             return out
 
     def test_a_drop_is_emitted_as_its_own_event(self):
+        # P2 end to end, and **the event no longer quotes the words it refused.**
+        # It used to, and asserted it: the compact surface speaks this string, so a
+        # hallucination on silence came back out of the speaker as a sentence nobody had
+        # said. A rejection is still never silent — the event exists, and it says why —
+        # but it reports that a segment was refused rather than repeating the refusal.
+        # The text is still recoverable from History, which is where reading it back
+        # does any good.
         from flow.asr import Drop
 
         mic = ScriptedMic()
@@ -243,8 +250,10 @@ class TestDropsReachTheUser(unittest.TestCase):
         events = s.events()
         drops = [e for e in events if e.kind == "drop"]
         self.assertEqual(len(drops), 1, f"events were {events}")
-        self.assertIn("'You'", drops[0].text)
-        self.assertIn("thin+unconfident", drops[0].text)
+        # Not the quoted text, and not the filter's internal vocabulary either.
+        self.assertNotIn("'You'", drops[0].text)
+        self.assertNotIn("thin+unconfident", drops[0].text)
+        self.assertIn("did not catch", drops[0].text)
         # The surviving text still lands in the draft — a drop is not a failure.
         self.assertEqual(s.draft.text, "the part that survived")
         s.close()

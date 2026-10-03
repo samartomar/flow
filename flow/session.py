@@ -1903,12 +1903,26 @@ class Session:
         the one event a UI may want to make *recoverable* rather than merely readable —
         the text is still in the record. `getattr` because the Transcriber protocol is
         deliberately one method wide, and fakes in the tests do not carry a drop log.
+
+        **`announce()`, not `describe()` — this is the fix for the spoken sign-off.**
+        The event used to carry `describe()`, which quotes the rejected text and its
+        evidence, and the compact surface *speaks* its events. So a Whisper
+        hallucination on silence came back out of the speaker as a sentence nobody in
+        the room had said: "dropped 'Thank you for watching.' (empty, ns=0.85 lp=-1.10,
+        final)". A burst of near-empty captures from the flaky tap gesture produced a
+        burst of these, so it recurred across a session. The filter was working the
+        whole time; it was the *reporting* that reproduced the defect it had caught.
+
+        The evidence form is not lost — it is what `describe()` is for, and the text
+        goes to History on the next line below, which is where reading it back is
+        actually useful. A person is told the drop happened and why, in words they can
+        act on, without being handed the invention.
         """
         take = getattr(self.asr, "take_drops", None)
         if take is None:
             return
         for drop in take():
-            self._emit("drop", drop.describe())
+            self._emit("drop", drop.announce())
             # A final's rejection is the one that decided what reached the draft; a
             # partial's is replaced by the final a second later either way. Kept so the
             # History page can hand the words back — the recovery P2 promised and a
