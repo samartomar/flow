@@ -358,11 +358,31 @@ class ModelManager:
 
     def snapshot(self) -> dict:
         """Everything the speech half of the page draws."""
+        from ..asr import default_models, resolve_device
+
         asr = getattr(self.session, "asr", None)
         sizes = self._disk()
         jobs = self.downloads.jobs()
         using = self.in_use()
-        device = getattr(asr, "device", "cpu") if asr is not None else "cpu"
+        #: **What the person asked for, and what is actually running — never guessed.**
+        #:
+        #: Both used to be read off the live transcriber with a hardcoded fallback, which
+        #: is wrong in the one direction that matters. `device` fell back to `"cpu"` and
+        #: `device_asked` to `"auto"` whenever `asr` was None — and `asr` is None for the
+        #: whole warm-up, which is exactly when somebody opens Settings to check whether
+        #: the GPU is being used. So on a machine decoding on `large-v3` in CUDA, the page
+        #: said "cpu" and the dropdown said "Automatic" until the model had loaded. The
+        #: stored preference is the answer to the first question and the profile is where
+        #: it lives, so it is read from there and resolved through the real probe, which
+        #: is the same `resolve_device` the startup line uses — one answer, not two.
+        asked_device = getattr(asr, "_device", None) if asr is not None else None
+        if not asked_device:
+            asked_device = (getattr(getattr(self.session, "profile", None),
+                                    "decode_device", None)
+                            or "auto")
+        device = getattr(asr, "device", None) if asr is not None else None
+        if not device or device == "auto":
+            device = resolve_device(asked_device)
         rows = []
         for spec in CATALOG:
             here = complete(spec.repo)
@@ -390,18 +410,16 @@ class ModelManager:
                              "installed": True,
                              "errors": None, "speed": None, "note": "chosen outside Flow Home", "maker": "",
                              "blind": False, "in_use": roles, "download": None})
-        from ..asr import default_models
-
-        auto_partial, auto_final = default_models(device)
+        info = gpu() if device == "cuda" or sys.platform == "win32" else None
         asked = getattr(asr, "asked", (None, None)) if asr is not None else (None, None)
         if not (isinstance(asked, tuple) and len(asked) == 2):
             asked = (None, None)
-        info = gpu() if device == "cuda" or sys.platform == "win32" else None
+        auto_partial, auto_final = default_models(device)
         return {
             "models": rows,
             "measured_on": MEASURED_ON,
             "device": device,
-            "device_asked": getattr(asr, "_device", "auto") if asr is not None else "auto",
+            "device_asked": asked_device,
             "why_cpu": _why_cpu(device),
             "gpu": info,
             "compute_types": compute_types(device),
