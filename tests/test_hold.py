@@ -1,8 +1,8 @@
 """`flow.hold`: the chord's decisions, tested on every platform.
 
 **Why this file exists when `test_chord.py` already tests the chord.** Because
-`test_chord.py` skips at its `import` line on anything that is not Windows Ã¢â‚¬â€
-`flow.hotkey` calls `ctypes.WinDLL("user32")` at module scope Ã¢â‚¬â€ and the chord's state
+`test_chord.py` skips at its `import` line on anything that is not Windows —
+`flow.hotkey` calls `ctypes.WinDLL("user32")` at module scope — and the chord's state
 machine is where the behaviour is. So the part of Flow hardest to get right, the part
 with the most rules in it, is the part the macOS CI leg has never once executed. Its own
 docstring says the hook "is never installed" and the suite drives `Chord._on_key`
@@ -16,7 +16,7 @@ stops importing, and it will stop on **both** legs rather than quietly going qui
 one.
 
 **Two halves.** The first states the behaviour `hotkey.Chord` already has, so that
-extracting it into this module can be proved not to have changed anything Ã¢â‚¬â€ these are
+extracting it into this module can be proved not to have changed anything — these are
 the assertions `test_chord.py` makes today, re-made against the machine that will
 produce them. The second covers what the machine has that `Chord` does not: the timing
 rules, the latch, and the double tap.
@@ -37,7 +37,7 @@ from flow.hold import (  # noqa: E402
 
 #: One long hold, so that "a sentence" is the default in these tests rather than a tap.
 #: Comfortably past `TAP_MAX_MS`, and the reason every rule here about taps has to say
-#: so explicitly Ã¢â‚¬â€ the point of that number is that a sentence is not a tap.
+#: so explicitly — the point of that number is that a sentence is not a tap.
 SENTENCE_SEC = 2.0
 
 
@@ -54,7 +54,7 @@ def meaningful(groups) -> tuple:
 
     `IDLE` is the machine saying it has nothing to do, which is what most keystrokes on
     a machine earn. `Chord` puts a word on its queue only when there is one, so an
-    adapter reads the answer the same way Ã¢â‚¬â€ and these tests are about the words, with
+    adapter reads the answer the same way — and these tests are about the words, with
     `TestG` holding the shape of the quiet ones.
     """
     return tuple(effect for effect in flatten(groups) if effect != IDLE)
@@ -152,7 +152,7 @@ class TestTheModuleHasNoPlatformInIt(unittest.TestCase):
 
     def test_it_imports_without_any_win32_having_been_bound(self):
         # If `flow.hold` grew `ctypes.WinDLL`, this file would stop importing on macOS
-        # and take every test below with it Ã¢â‚¬â€ silently, because a suite that skips looks
+        # and take every test below with it — silently, because a suite that skips looks
         # green. So the check lives here, in the file that would break.
         self.assertNotIn("ctypes", vars(hold))
 
@@ -181,7 +181,7 @@ class TestATheHoldIsTheUtterance(unittest.TestCase):
     def test_it_ends_on_the_first_release_and_not_again_on_the_second(self):
         # The reason `armed` is latched rather than recomputed. Two modifiers go up as
         # two events, and a chord that asked "are they all up now?" would either end
-        # twice Ã¢â‚¬â€ sending the same utterance into the window twice Ã¢â‚¬â€ or need the
+        # twice — sending the same utterance into the window twice — or need the
         # releases in a particular order.
         m = machine()
         m.feed(MOD_DOWN, "ctrl")
@@ -222,7 +222,7 @@ class TestATheHoldIsTheUtterance(unittest.TestCase):
 
     def test_a_key_pressed_before_the_chord_formed_is_not_the_chords_business(self):
         # Holding Ctrl to click a link, tapping a key, then adding Win must still work
-        # Ã¢â‚¬â€ otherwise every chord after an accidental keystroke is dead.
+        # — otherwise every chord after an accidental keystroke is dead.
         m = machine()
         m.feed(MOD_DOWN, "ctrl")
         m.feed(OTHER_DOWN)
@@ -253,7 +253,7 @@ class TestATheHoldIsTheUtterance(unittest.TestCase):
 class TestBBothGesturesShipAndNeitherReplacesTheOther(unittest.TestCase):
     """What `test_chord.py` calls `TestBB`, against the machine.
 
-    A hold is better for a sentence Ã¢â‚¬â€ no decision about when you are finished, and it
+    A hold is better for a sentence — no decision about when you are finished, and it
     cannot leave a microphone running. A toggle is the only one of the two that
     survives a paragraph or hands that cannot hold two keys down. Shipping only the hold
     takes the second case away from everybody who has it.
@@ -299,7 +299,7 @@ class TestBBothGesturesShipAndNeitherReplacesTheOther(unittest.TestCase):
         # The reason `gesture` is a plain attribute read on every event rather than
         # something baked in at construction: switching by rebuilding would mean
         # unhooking and re-installing a `WH_KEYBOARD_LL` hook, which the OS may refuse
-        # Ã¢â‚¬â€ and being refused *while changing a setting* leaves somebody with no chord.
+        # — and being refused *while changing a setting* leaves somebody with no chord.
         m = machine()
         self.assertEqual(hold_chord(m), (START, STOP))
         m.gesture = "toggle"
@@ -307,7 +307,7 @@ class TestBBothGesturesShipAndNeitherReplacesTheOther(unittest.TestCase):
 
     def test_an_unknown_gesture_falls_back_rather_than_disabling_the_chord(self):
         # It arrives from a hand-edited profile. A typo must cost the setting, not the
-        # shortcut Ã¢â‚¬â€ a chord that silently did nothing would be unattributable.
+        # shortcut — a chord that silently did nothing would be unattributable.
         for name in ("Hold", "push-to-talk", "", None, 7):
             with self.subTest(name=name):
                 self.assertEqual(machine(gesture=name).gesture, GESTURE_DEFAULT)
@@ -317,7 +317,7 @@ class TestBBothGesturesShipAndNeitherReplacesTheOther(unittest.TestCase):
 class TestCOperatingSystemsOwnCtrlWinToo(unittest.TestCase):
     """What `test_chord.py` calls `TestC`, against the machine.
 
-    `ctrl+win` is a prefix in Windows itself Ã¢â‚¬â€ ctrl+win+d makes a virtual desktop,
+    `ctrl+win` is a prefix in Windows itself — ctrl+win+d makes a virtual desktop,
     ctrl+win+left and +right switch between them. Under the old toggle gesture this
     needed no code: nothing had started, so refusing to fire was the whole behaviour.
     Push-to-talk opens the microphone on the press-down, so a desktop switch now
@@ -375,7 +375,7 @@ class TestCOperatingSystemsOwnCtrlWinToo(unittest.TestCase):
 class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
     """The narrowing of R16, asserted against the machine rather than about it.
 
-    The claim being defended is not "Flow is trustworthy" Ã¢â‚¬â€ it is that a key outside the
+    The claim being defended is not "Flow is trustworthy" — it is that a key outside the
     chord changes one boolean and leaves nothing behind. So the test is a state
     comparison: feed different things, and check the object cannot tell them apart.
     """
@@ -400,7 +400,7 @@ class TestETheTimingRulesThatChordNeverHad(unittest.TestCase):
 
     A chord of two modifiers cannot be confused with ordinary typing and cannot fire by
     accident, so `Chord` never needed a timer. A single key, or a modifier-only chord on
-    a platform where the OS has its own idea of what that key means, does Ã¢â‚¬â€ and that is
+    a platform where the OS has its own idea of what that key means, does — and that is
     the shape the macOS side will need.
 
     **Nothing here is wired to a gesture.** Every callback defaults to `None`, so a
@@ -458,7 +458,7 @@ class TestETheTimingRulesThatChordNeverHad(unittest.TestCase):
     def test_the_very_first_tap_of_a_session_still_latches(self):
         # `stopped_at` starts one whole cooldown in the negative for exactly this. A
         # machine that has never stopped has to answer "has enough time passed since we
-        # stopped" with yes, and starting the clock at zero would answer no Ã¢â‚¬â€ so the
+        # stopped" with yes, and starting the clock at zero would answer no — so the
         # first tap of every session would silently never latch.
         latched = []
         m = machine(on_latch=lambda: latched.append(1))
@@ -541,7 +541,7 @@ class TestFTheEchoGuardIsOffUntilSomebodySaysItsSourceBounces(unittest.TestCase)
     """A per-source guard, and the test that makes it one.
 
     Some keyboards emit a second key-up for one physical press. Left alone that is one
-    more release, which is harmless for a hold Ã¢â‚¬â€ `armed` is already false Ã¢â‚¬â€ but it is
+    more release, which is harmless for a hold — `armed` is already false — but it is
     how a latched machine gets told to stop twice. Suppressing it unconditionally would
     cost more than it saves: a real re-tap can follow a release in about 20 ms, and
     `TestA::test_holding_it_three_times_is_three_utterances` holds the chord three times
@@ -608,12 +608,12 @@ class TestHItAgreesWithTheChordItWasTakenFrom(unittest.TestCase):
 
     **This is the test that makes the rest of the plan possible.** Wiring `Chord` to
     delegate to `Hold` is then a mechanical change with a test already standing on both
-    sides of it â€” and after it lands, this whole file runs on the macOS leg too, which
+    sides of it — and after it lands, this whole file runs on the macOS leg too, which
     is the point of the exercise.
 
     Skipped off Windows for the same reason `test_chord.py` is: `flow.hotkey` binds
     user32 at import, so the comparison cannot be made where there is no user32. It is
-    named, and the reason says which mechanism â€” so a Mac reader knows this is a
+    named, and the reason says which mechanism — so a Mac reader knows this is a
     platform fact and not a test that quietly stopped running.
     """
 

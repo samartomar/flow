@@ -2,7 +2,7 @@
 
 Everything here goes through `Pill._draw` on a fake canvas rather than through a real
 window, for the reason `test_indicator.py` does: a desktop is expensive and `_draw` is
-pure â€” given a session state and a frame counter, it writes a fixed set of shapes. The
+pure — given a session state and a frame counter, it writes a fixed set of shapes. The
 one test that does need Tk is the font measurement, and it says so.
 
 The four things pinned here were all "drawn nowhere yet" until now:
@@ -143,7 +143,7 @@ class TestTheSlotIsReservedAtTheWidestLabel(unittest.TestCase):
                 self.skipTest(f"{ui.FONT_TRACE[0]} not installed; "
                               f"Tk substituted {f.actual('family')!r}")
             self.assertEqual(f.measure("M"), ui.LABEL_ADV)
-            # Monospaced, which is the assumption behind one advance for every glyph â€”
+            # Monospaced, which is the assumption behind one advance for every glyph —
             # including the space in `NO INPUT`.
             for ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ ":
                 self.assertEqual(f.measure(ch), ui.LABEL_ADV, ch)
@@ -204,8 +204,8 @@ class TestTheBarLabelSaysWhatFlowIsDoing(unittest.TestCase):
 
     def test_a_spoken_reply_is_not_labelled_as_an_edit(self):
         # Found in `23-converse-speaking.png`: the first version asked
-        # `speaker.speaking`, and a session whose speaker does not carry that flag â€”
-        # which is every session with speech switched off â€” fell through to `EDITING`.
+        # `speaker.speaking`, and a session whose speaker does not carry that flag —
+        # which is every session with speech switched off — fell through to `EDITING`.
         # `hearing` is defined as "not speaking and not editing", so `editing` alone
         # separates them, and it is a plain attribute rather than a reach through an
         # object that can be `None`.
@@ -216,14 +216,14 @@ class TestTheBarLabelSaysWhatFlowIsDoing(unittest.TestCase):
     def test_a_dead_device_outranks_the_state_that_does_not_know_it_yet(self):
         # The session can still report LISTENING for a frame after the device drops.
         # "no input" is the true answer, and it is the one that tells the user to stop
-        # talking â€” so it wins.
+        # talking — so it wins.
         self.assertEqual(
             pill(State.LISTENING, mic_active=False)._bar_label(), ui.LABEL_NO_INPUT)
 
     def test_it_is_drawn_a_character_at_a_time_on_one_pitch(self):
         # Tk has no letter-spacing, so `_draw` places each glyph itself and the pitch
         # is this module's to choose. Â§02's `+.1em` tracking was retired by the compact
-        # pass â€” the 7 px it cost the slot went to the command marks the row carries â€”
+        # pass — the 7 px it cost the slot went to the command marks the row carries —
         # so the pitch is exactly the advance now, and a test that demanded tracking
         # would be asking for the room back.
         p = pill(State.DRAFT, _docked_w=ui.PILL_W, _flash=0, _tint=0.0)
@@ -296,8 +296,8 @@ class TestTheWaitingDotsStandInForTheMeter(unittest.TestCase):
                 self.assertEqual(min(lit), ui.DOT_DIM)
 
     def test_full_brightness_lasts_long_enough_to_be_seen(self):
-        # The defect the first curve had. A sawtooth â€” snap to full, decay across the
-        # loop â€” reached 1.0 on exactly one frame in forty, so the peak that makes three
+        # The defect the first curve had. A sawtooth — snap to full, decay across the
+        # loop — reached 1.0 on exactly one frame in forty, so the peak that makes three
         # dots read as *marching* rather than as three greys was invisible in practice:
         # two screenshots a third of a second apart both caught the brightest dot at
         # 68 %. A test that only asked "does it reach 1.0" passed the whole time.
@@ -316,7 +316,7 @@ class TestTheWaitingDotsStandInForTheMeter(unittest.TestCase):
             p._dots_frame = frame
             lit = [p._dot_lit(i) for i in range(3)]
             leaders.append(lit.index(max(lit)))
-        # Each dot leads in turn, and it leads for a stretch â€” a row where the leader
+        # Each dot leads in turn, and it leads for a stretch — a row where the leader
         # changed every frame would be flickering, not marching.
         self.assertEqual(set(leaders), {0, 1, 2})
         self.assertLessEqual(sum(a != b for a, b in zip(leaders, leaders[1:])), 3)
@@ -360,7 +360,7 @@ class TestTheErrorFlashTravels(unittest.TestCase):
         self.assertEqual(curve[ui.FLASH_ATTACK + ui.FLASH_HOLD - 1], 1.0)
         self.assertLess(curve[-1], 0.1, "it ends as abruptly as it used to")
         # Monotone in each leg, so no frame is brighter than the one before it during
-        # the decay â€” a sawtooth would read as a second error.
+        # the decay — a sawtooth would read as a second error.
         decay = curve[ui.FLASH_ATTACK + ui.FLASH_HOLD:]
         self.assertEqual(decay, sorted(decay, reverse=True))
 
@@ -445,7 +445,7 @@ class TestTheModeSwitchIsContinuous(unittest.TestCase):
 class TestTheMeterBloomsFromItsCentre(unittest.TestCase):
     """The shape taken from FluidVoice's `BottomWaveformView`, asserted as a shape.
 
-    Flow's meter used to be a scrolling history â€” one level per frame through a deque,
+    Flow's meter used to be a scrolling history — one level per frame through a deque,
     travelling right to left. It is a symmetric bloom now: every bar reads the same
     current level, and the envelope is what makes the middle ones tallest. These are
     the properties that distinguish the two, so that a future edit which quietly
@@ -461,7 +461,7 @@ class TestTheMeterBloomsFromItsCentre(unittest.TestCase):
 
     def test_it_falls_away_toward_both_ends(self):
         # Monotonic out from the centre in each direction. The per-bar variation is
-        # deliberately small enough not to break this â€” a wobble that reordered the
+        # deliberately small enough not to break this — a wobble that reordered the
         # envelope would be a comb, not a bloom.
         h = self.heights(1.0)
         mid = ui.BARS // 2
@@ -488,7 +488,7 @@ class TestTheMeterBloomsFromItsCentre(unittest.TestCase):
 
     def test_ordinary_speech_reaches_most_of_the_way_up(self):
         # What the 0.55 exponent buys. At half level a linear meter would draw half
-        # height, which is what made the old one look timid at conversational volume â€”
+        # height, which is what made the old one look timid at conversational volume —
         # the top of the widget was reserved for shouting.
         half = self.heights(0.5)[ui.BARS // 2]
         full = self.heights(1.0)[ui.BARS // 2]
@@ -505,13 +505,13 @@ class TestWhereThePanelOpens(unittest.TestCase):
     """FluidVoice's `positionWindow` arithmetic, ported and asserted.
 
     Their rule reads oddly until you notice it uses *two* rectangles on purpose:
-    centred on `screen.frame` â€” the physical display â€” but stood on
+    centred on `screen.frame` — the physical display — but stood on
     `screen.visibleFrame`, which excludes the Dock. Windows hands back the same pair as
     `rcMonitor` and `rcWork`, so this ports without being reinterpreted.
     """
 
     #: A 1920Ã—1080 display with a 48 px taskbar, offset on a virtual desktop so that a
-    #: test cannot pass by assuming the origin is (0, 0) â€” which is the bug a
+    #: test cannot pass by assuming the origin is (0, 0) — which is the bug a
     #: second-monitor user gets.
     FULL = (1920, 0, 3840, 1080)
     WORK = (1920, 0, 3840, 1032)
@@ -563,7 +563,7 @@ class TestWhereThePanelOpens(unittest.TestCase):
 
     def test_the_monitor_under_the_pointer_answers_with_two_rectangles(self):
         # `_work_area` asks `SystemParametersInfoW`, which only ever answers for the
-        # primary display â€” so on a two-monitor desk everything Flow drew landed on the
+        # primary display — so on a two-monitor desk everything Flow drew landed on the
         # wrong one whenever the user was working on the other.
         full, work = ui._pointer_monitor(1280, 720)
         for rect in (full, work):
@@ -653,7 +653,7 @@ class TestTheStackFollowsThePointersMonitor(unittest.TestCase):
 
     `self.work` was read once in `__init__` from `SystemParametersInfoW`, which only
     ever answers for the primary display. On a two-monitor desk that put every window
-    Flow drew against a screen the user might not be looking at â€” and pointed the
+    Flow drew against a screen the user might not be looking at — and pointed the
     on-screen clamps at the wrong rectangle too.
     """
 
@@ -689,14 +689,14 @@ class TestTheStackFollowsThePointersMonitor(unittest.TestCase):
 
     def test_a_pointer_that_has_not_left_the_monitor_costs_nothing(self):
         # Every frame asks. Acting unconditionally would be a `geometry` call per frame
-        # forever â€” the same shape `_track_target` uses for `classify`, for the reason.
+        # forever — the same shape `_track_target` uses for `classify`, for the reason.
         p = self.pill(self.ONE)
         with mock.patch.object(ui, "_pointer_monitor", return_value=self.ONE):
             p._sync_monitor()
         p.geometry.assert_not_called()
 
     def test_a_panel_that_is_up_is_moved_with_the_pill(self):
-        # The panels are placed *from* the pill, so moving it is the whole move â€” but
+        # The panels are placed *from* the pill, so moving it is the whole move — but
         # only for a window somebody can see.
         p = self.pill(self.ONE)
         p.bubble = mock.Mock(_visible=True, width=ui.BUBBLE_W, _h=ui.PANEL_MAX_H)
@@ -726,7 +726,7 @@ class TestAHiddenPanelIsParkedRatherThanUnmapped(unittest.TestCase):
         self.assertGreater(y, self.DESKTOP[3])
 
     def test_the_panel_clears_the_edge_by_its_own_size_as_well_as_the_margin(self):
-        # Its top-left corner being past the edge is not enough â€” the window extends
+        # Its top-left corner being past the edge is not enough — the window extends
         # right and down from there.
         for w, h in ((205, 40), (420, 300), (640, 900)):
             with self.subTest(w=w, h=h):
@@ -756,7 +756,7 @@ class TestAHiddenPanelIsParkedRatherThanUnmapped(unittest.TestCase):
         self.assertTrue(asked.startswith("420x300+"), asked)
 
     def test_a_panel_with_no_height_yet_is_still_parked_somewhere_legal(self):
-        # `_h` is not set until the first render, and a hide can beat it â€” a zero-sized
+        # `_h` is not set until the first render, and a hide can beat it — a zero-sized
         # geometry request is one a window manager is entitled to refuse.
         win = mock.Mock(width=420, spec=["width", "geometry", "winfo_screenwidth",
                                          "winfo_screenheight"])
@@ -860,9 +860,9 @@ class TestTheWorkAreaOnAqua(unittest.TestCase):
     """`_aqua_work_area`, which exists because the maximise probe is ignored on a Mac.
 
     A Mac reported `_tk_work_area()` answering with the whole 1352x878 screen, identical
-    to `_work_area()`. `state("zoomed")` had neither raised nor maximised â€” asked to
+    to `_work_area()`. `state("zoomed")` had neither raised nor maximised — asked to
     maximise a 200x120 window at +80+80 it returned the same window at +80+80, and no
-    error â€” so the fallback did not fall back, `bottom_centre` stood the pill 24 px above
+    error — so the fallback did not fall back, `bottom_centre` stood the pill 24 px above
     878, and the pill sat inside an 85 px Dock.
 
     `wm maxsize` is the instrument here and *only* here: Tk's Aqua port answers it from
@@ -922,7 +922,7 @@ class TestTheWorkAreaOnAqua(unittest.TestCase):
         """The bug this shape was written to make impossible.
 
         `maxsize` is a maximum *content* size, short by whatever decoration its window
-        wears â€” 735 from a titled probe against 763 from the `overrideredirect` pill on
+        wears — 735 from a titled probe against 763 from the `overrideredirect` pill on
         the same display. The first version took the origin from a probe and the size
         from the caller's window, counted the 28 px title bar twice, and put the work
         area at 821: the pill moved off the Dock and straight back onto it.
@@ -1005,12 +1005,12 @@ class TestTheWorkAreaOffWindows(unittest.TestCase):
     """`_tk_work_area`, which exists because a Mac put the pill under the Dock.
 
     `_work_area` degrades to the whole screen off Windows, so bottom-centre placement
-    stood the stack on the very bottom edge â€” behind the Dock on macOS, behind the panel
+    stood the stack on the very bottom edge — behind the Dock on macOS, behind the panel
     on a bottom-taskbar Linux.
 
     The fix is a *measurement*: maximise a window and look at where the window manager
     put it, since it has to honour its own panels to do that. The obvious call,
-    `wm_maxsize`, was tried first and is useless â€” on Windows it answers with the whole
+    `wm_maxsize`, was tried first and is useless — on Windows it answers with the whole
     screen even with a taskbar present, which is wrong in exactly the way this is meant
     to fix.
     """
@@ -1181,7 +1181,7 @@ class TestTheMacFrame(unittest.TestCase):
         """On Tk 9 that is `-stylemask`; on 8.6, which has none, `overrideredirect`.
 
         Pinned to darwin rather than left to the host, and the drift is why: on Windows
-        the darwin branch never ran, so this asserted `overrideredirect` and passed â€” and
+        the darwin branch never ran, so this asserted `overrideredirect` and passed — and
         on a Mac, where a Mock answers `wm_attributes` happily, the function returned at
         the style mask and `overrideredirect` was never reached. A test in a class called
         `TestTheMacFrame` was checking the frame every platform *but* a Mac gets.
@@ -1215,7 +1215,7 @@ class TestMix(unittest.TestCase):
 def docker(*, showing=True, panel_w=ui.BUBBLE_W, window=None, x=1047, docked_w=ui.PILL_W):
     """A pill with just enough of one to run `_sync_dock`, and a window it can lie about.
 
-    `window` is what the window manager is pretending to hold â€” pass a (w, x, y) that
+    `window` is what the window manager is pretending to hold — pass a (w, x, y) that
     disagrees with the pill's own state to stage the defect this class is about.
     """
     p = ui.Pill.__new__(ui.Pill)
@@ -1244,9 +1244,9 @@ class TestTheShellIsOneWindow(unittest.TestCase):
     "nothing to do" on every frame after. That failure needs two windows to be possible.
     There is one now, and all that arithmetic has collapsed into a height.
 
-    What the two classes here used to cover â€” holding the right edge in corner placement,
+    What the two classes here used to cover — holding the right edge in corner placement,
     re-centring on the new width in bottom placement, the 107 px lurch when a draft
-    appeared â€” is gone with the width change that caused it. The pill is the panel's
+    appeared — is gone with the width change that caused it. The pill is the panel's
     width whether a panel is up or not.
     """
 
@@ -1261,7 +1261,7 @@ class TestTheShellIsOneWindow(unittest.TestCase):
 
     def test_a_panel_opening_grows_the_window_upward(self):
         # The band reports its own height now that it is snug around its content, so the
-        # shell is the row plus whatever that is â€” bounded by the ceiling.
+        # shell is the row plus whatever that is — bounded by the ceiling.
         p = docker(showing=True)
         p._sync_shell()
         self.assertEqual(self.asked(p), (ui.BUBBLE_W, ui.PANEL_MAX_H + ui.PILL_H))
@@ -1278,7 +1278,7 @@ class TestTheShellIsOneWindow(unittest.TestCase):
         """The whole of "the controls stay where they are", as arithmetic.
 
         Send, the meter and the chip row are laid out from the bottom of the window. A
-        shell that grew downward â€” or that centred its growth â€” would move every one of
+        shell that grew downward — or that centred its growth — would move every one of
         them every time a draft appeared, which is the motion this work exists to end.
         """
         idle = docker(showing=False)
@@ -1324,7 +1324,7 @@ class TestTheShellIsOneWindow(unittest.TestCase):
         changes with nothing else changing beside it.
 
         Left out of the comparison, the row kept the width it was built at while the band
-        above it took the new one â€” two boxes of different widths stacked in one window,
+        above it took the new one — two boxes of different widths stacked in one window,
         which is what a screenshot of "panel size: larger" showed. `_docked_w` is what
         `_draw` measures the row against, so it moves in the same breath as the canvas.
         """
@@ -1342,7 +1342,7 @@ class TestTheShellIsOneWindow(unittest.TestCase):
         self.assertIn(str(ui.PANEL_WIDTHS["larger"]), p.geometry.call_args.args[0])
 
     def test_the_row_is_placed_at_the_foot_of_whatever_height_it_is(self):
-        # The canvas is the bottom band of the window, not the whole of it â€” which is
+        # The canvas is the bottom band of the window, not the whole of it — which is
         # what makes "the foot never moves" true of the pixels and not just of the frame.
         for showing in (False, True):
             with self.subTest(showing=showing):
@@ -1357,11 +1357,11 @@ class TestTheRowIcons(unittest.TestCase):
 
     **These were a strip of words above the draft first.** Written from "Dictate and
     Converse for sure Then workspace and voices", it put a chip and two labels across the
-    top of the panel â€” and on seeing it the owner's answer was "Not looking good instead
+    top of the panel — and on seeing it the owner's answer was "Not looking good instead
     after progress bar add settings icon ... and top you can remove it". Words that name
     a setting are a sentence *about* the app; the row is where the app already says what
     it is doing with a drawn mic and a drawn meter, and three more drawn marks belong
-    there. It costs nothing at rest, too, which the strip could not â€” the row is on
+    there. It costs nothing at rest, too, which the strip could not — the row is on
     screen either way.
     """
 
@@ -1394,7 +1394,7 @@ class TestTheRowIcons(unittest.TestCase):
         """A shortcut that costs an extra hover is not a shortcut.
 
         `open_settings` posted `_settings_menu`, which *adds a cascade* to whatever it is
-        given â€” so the gear opened a menu whose only row was `Settings >`, and the whole
+        given — so the gear opened a menu whose only row was `Settings >`, and the whole
         list was one hover further away than the right-click had it.
         """
         p = ui.Pill.__new__(ui.Pill)
@@ -1410,7 +1410,7 @@ class TestTheRowIcons(unittest.TestCase):
 
     def test_the_mode_glyph_is_a_pen_in_refine_not_a_bubble(self):
         # The two-way read (`mode != DICTATE`) drew converse's speech bubble
-        # over a mode that pastes â€” the exact defect the third mode was not to
+        # over a mode that pastes — the exact defect the third mode was not to
         # introduce silently. The pen is its own mark: shaft and nib.
         #
         # Counted as arcs as well as lines since the glyph language changed:
@@ -1423,7 +1423,7 @@ class TestTheRowIcons(unittest.TestCase):
             shapes[mode] = (len(c.arcs), len(c.lines))
         self.assertEqual(shapes[DICTATE], (0, 3))   # three lines of text
         # The pen: shaft, band, and the draft line it rewrites. Its nib used to
-        # be a second line off the shaft's lower end â€” collinear with it, so the
+        # be a second line off the shaft's lower end — collinear with it, so the
         # two drew one diagonal and the pen had no pen.
         self.assertEqual(shapes[REFINE], (0, 3))
         self.assertEqual(shapes[CONVERSE], (4, 5))  # the bubble and its tail
@@ -1488,8 +1488,8 @@ if __name__ == "__main__":  # pragma: no cover
 class TestTheWindowFlowIsAimedAt(unittest.TestCase):
     """The name of the app that will receive the paste, at the left of the row.
 
-    Asked for as an *icon* â€” "if i am on notepad i see notepad icon and when i am on
-    claude ide i see claude icon" â€” and the name is the half that costs nothing.
+    Asked for as an *icon* — "if i am on notepad i see notepad icon and when i am on
+    claude ide i see claude icon" — and the name is the half that costs nothing.
     `_track_target` already resolves the foreground process for the paste, on the edge
     rather than per frame, so `session.target_app` is already sitting there reading
     `claude.exe`. The picture needs `ExtractIconExW`, `GetIconInfo` and `GetDIBits` to
@@ -1529,7 +1529,7 @@ class TestTheWindowFlowIsAimedAt(unittest.TestCase):
 
     def test_the_slot_is_the_same_width_whatever_the_name_is(self):
         """A slot that sized itself to the name would shift the mic, the meter and every
-        icon each time you changed window â€” the motion this surface spent a night
+        icon each time you changed window — the motion this surface spent a night
         removing."""
         short = self.drawn("vi.exe")
         long_ = self.drawn("WindowsTerminal.exe")
@@ -1544,7 +1544,7 @@ class TestTheWindowFlowIsAimedAt(unittest.TestCase):
                            min(r[0] for r in bare.canvas.rects))
 
     def test_lite_reserves_nothing_because_it_tracks_nothing(self):
-        # `_track_target` returns early in Lite, so `target_app` never fills â€” the row on
+        # `_track_target` returns early in Lite, so `target_app` never fills — the row on
         # a Mac is exactly what it always was.
         self.assertEqual(self.drawn("notepad.exe", lite=True)._row_shift(), 0)
 
