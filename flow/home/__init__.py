@@ -48,6 +48,11 @@ class Home:
         #: run's Download, which fetches the models the session will use without pinning
         #: them in the profile, so it cannot ride on `pending_models`.
         self.warm_when_ready = False
+        #: What `--engine auto` decided about the Parakeet GPU build for this launch:
+        #: "use" (installed, running), "fetch" (Whisper until the background download
+        #: lands) or "" (not on this path). Set by `__main__` from the same `_gpu_auto`
+        #: that chose the engine, so the first run's model step cannot disagree with it.
+        self.gpu_auto = ""
         self.bridge = Bridge(session.post)
         self.models = ModelManager(session, on_downloaded=self._downloaded)
         #: What the Voice page's listening tasks open instead of a real microphone, or

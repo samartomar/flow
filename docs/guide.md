@@ -685,8 +685,11 @@ and need the add-on; installing it changes nothing until you choose one.
 **The first run on a PC with a GPU** starts on Whisper, so dictation works at once, and
 downloads the GPU build in the background through the same machinery as the Models page's
 **Download & use** — the strip shows it, and it takes over when it lands (queued while you are
-talking). The startup line says so. A failed download leaves Whisper running with the reason
-in the strip. None of this happens when you have chosen an engine on the Models page, named
+talking). The startup line says so, and the first run's "Getting the speech model" step shows
+this build (and the same download) instead of Whisper's pair. A failed download leaves Whisper
+running with the reason in the strip and is retried once at the next launch; **cancelling** it
+is taken as a no and remembered, so it is not fetched again unasked (Models still offers
+Download & use). None of this happens when you have chosen an engine on the Models page, named
 one with `--engine`, named a Whisper model with a flag, or have no GPU backend.
 
 **What Whisper is still for:** Hindi and Hinglish, which `large-v3` and `small` hear and write

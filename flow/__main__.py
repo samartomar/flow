@@ -1317,6 +1317,9 @@ def main(argv: list[str] | None = None) -> int:
     # Whisper for this launch and said so on the startup line; this is the download that
     # takes over. Through `home` for the reason `_background_gpu_fetch` gives.
     _background_gpu_fetch(home, args, saved_engine, saved_variant, whisper_asked)
+    # And what the first run's model step reads, so it shows the build this launch is on
+    # (or about to be) and not a Whisper pair that would be fetched as well.
+    home.gpu_auto = _gpu_auto(args, saved_engine, saved_variant, whisper_asked)
 
     def build(name: str, arm: bool = False):
         """The surface `name` draws, over the session that is already running.
