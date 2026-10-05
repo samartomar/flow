@@ -147,7 +147,11 @@ class Home:
             # Parakeet was chosen before its model was here ("downloads first, then
             # takes over", as the tier dropdowns do). Posted, so the session applies it —
             # and refuses it, with a note, if the person is mid-sentence by now.
-            self.session.post(lambda: self.session.set_engine("parakeet"))
+            from .models import SPECS
+
+            spec = SPECS.get(job.name)
+            variant = getattr(spec, "variant", "") or None
+            self.session.post(lambda: self.session.set_engine("parakeet", variant))
             return
         pending = self.pending_models
         if not job.then_use or pending is None:

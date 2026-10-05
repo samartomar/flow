@@ -56,22 +56,25 @@ voice = [
     "piper-tts>=1.6",
 ]
 # `parakeet` is the opt-in second speech engine, and an extra by the same reading of R16: a
-# default install still fetches three packages. `sherpa-onnx` is ~93 MB with no torch, and
-# the model it runs (NVIDIA Parakeet TDT 0.6B v3 int8) is a separate 465 MB download from
-# GitHub releases that `flow --engine parakeet` fetches once into `~/.flow/models`. What it
-# buys is measured in `flow/parakeet.py`: 17.3 errors per 100 words on the accent slice
-# against 19.5 for `small.en`, at 14x real time on a CPU where `small.en` manages ~2x. It
-# is never selected by `--engine auto`, so installing this changes nothing until it is asked
-# for by name.
+# default install still fetches three packages. `onnx-asr` is ~7 MB and the `cpu` extra of it
+# is what pulls `onnxruntime` (with the version exclusions onnx-asr itself knows about) —
+# no torch. The models it runs are separate downloads from huggingface.co, pinned to one
+# commit, that the Models page (or `flow --engine parakeet`) fetches into `~/.flow/models`:
+# `fp32` at 2.4 GB and `int8` at 640 MB. What it buys is measured in `flow/parakeet.py`:
+# 14.7 errors per 100 words on the accent slice for fp32 against 19.5 for `small.en` and
+# 16.8 for `large-v3` on a GPU, at about 14x real time on a CPU. It is never selected by
+# `--engine auto`, so installing this changes nothing until it is asked for by name.
 #
 #     uv pip install -e ".[parakeet]"
 #     flow --engine parakeet
 #
-# Not pinned tighter than 1.13, the first version tested: what this depends on is
-# `OfflineRecognizer.from_transducer` and `result.ys_log_probs`, which `TestParakeetReal`
-# checks against whatever is actually installed rather than against a version number.
+# Not pinned tighter than 0.12, the first version tested: what this depends on is
+# `load_model(..., sess_options=, providers=)` and `with_timestamps().recognize()` returning
+# `.text` and `.logprobs`, which `TestParakeetReal` checks against whatever is actually
+# installed rather than against a version number. It replaced `sherpa-onnx` (a 93 MB wheel),
+# which measured 17.3 on the int8 export and cannot run the fp32 one.
 parakeet = [
-    "sherpa-onnx>=1.13",
+    "onnx-asr[cpu]>=0.12",
 ]
 # `edge` is the one part of Flow that sends anything off the machine, which is why it is
 # an extra you have to ask for and why `flow/edge.py` says so in its first paragraph. It

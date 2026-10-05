@@ -27,6 +27,7 @@ from flow import parakeet  # noqa: E402
 from flow.home import models as models_mod  # noqa: E402
 
 PK = "parakeet-tdt-0.6b-v3"
+PK8 = "parakeet-tdt-0.6b-v3-int8"
 
 
 class _Case(unittest.TestCase):
@@ -34,12 +35,14 @@ class _Case(unittest.TestCase):
         self.h = Pumped(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.state = {"runtime": (True, ""), "model": True}
+        # Which Parakeet builds are on disk: both, unless a test says otherwise.
+        self.state = {"runtime": (True, ""), "model": True, "fp32": True, "int8": True}
         patches = (
             mock.patch.object(parakeet, "runtime_installed",
                               side_effect=lambda: self.state["runtime"]),
             mock.patch.object(parakeet, "model_present",
-                              side_effect=lambda model_dir=None: self.state["model"]),
+                              side_effect=lambda key, model_dir=None:
+                              self.state["model"] and self.state[key]),
             mock.patch.object(models_mod, "on_disk", return_value={}),
             mock.patch.object(models_mod, "complete", return_value=False),
             mock.patch.object(models_mod, "gpu", return_value=None),
@@ -88,13 +91,13 @@ class TestThePayload(_Case):
         row = rows[PK]
         self.assertEqual(row["engine"], "parakeet")
         self.assertEqual((row["maker"], row["family"]), ("NVIDIA", "Parakeet"))
-        self.assertEqual(row["errors"], 17.3)
-        self.assertEqual(row["speed"], 14.3)
+        self.assertEqual(row["errors"], 14.7)
+        self.assertEqual(row["speed"], 14.7)  # 1 / 0.068, measured on the CPU
         # Never mislabelled as the GTX 1070 the other rows were measured on.
         self.assertEqual(row["speed_basis"], "CPU")
         self.assertFalse(row["blind"])
-        self.assertEqual(row["size"], parakeet.ARCHIVE_BYTES)  # the download, until here
-        self.assertEqual({n for n, r in rows.items() if r["speed_basis"]}, {PK})
+        self.assertEqual(row["size"], parakeet.VARIANTS["fp32"].bytes)  # the download, until here
+        self.assertEqual({n for n, r in rows.items() if r["speed_basis"]}, {PK, PK8})
         self.assertEqual(rows["large-v3"]["family"], "Whisper")
 
     def test_a_row_whose_runtime_is_missing_is_not_offered_for_download(self):
@@ -102,7 +105,7 @@ class TestThePayload(_Case):
         self.state["runtime"] = (False, "no")
         rows = {r["name"]: r for r in self.page()["models"]}
         self.assertIn("Parakeet add-on", rows[PK]["blocked"])
-        self.assertTrue(all(r["blocked"] == "" for n, r in rows.items() if n != PK))
+        self.assertTrue(all(r["blocked"] == "" for n, r in rows.items() if n not in (PK, PK8)))
 
     def test_an_installed_parakeet_reports_its_size_on_disk(self):
         with mock.patch.object(parakeet, "installed_bytes", return_value=670_000_000):
@@ -171,7 +174,7 @@ class TestSwitching(_Case):
         self.assertEqual(job.then_use, "")
 
     def test_a_refusal_from_the_session_is_the_pages_error(self):
-        self.h.session.engine_refusal = lambda name: "stop listening first"
+        self.h.session.engine_refusal = lambda name, variant=None: "stop listening first"
         status, body = self.post("parakeet")
         self.assertEqual(status, 400)
         self.assertEqual(body["error"], "stop listening first")
@@ -211,7 +214,7 @@ class TestTheRowsDownloadCancelAndDelete(_Case):
         done = []
         d = models_mod.Downloader(on_done=done.append)
 
-        def fake_fetch(progress=None, cancelled=None, **_kw):
+        def fake_fetch(key, progress=None, cancelled=None, **_kw):
             progress(10, 100)
             progress(60, 100)
 
@@ -226,7 +229,7 @@ class TestTheRowsDownloadCancelAndDelete(_Case):
     def test_progress_reaches_the_page_while_it_runs(self):
         gate = threading.Event()
 
-        def slow_fetch(progress=None, cancelled=None, **_kw):
+        def slow_fetch(key, progress=None, cancelled=None, **_kw):
             progress(25, 100)
             gate.wait(2)
 
@@ -249,7 +252,7 @@ class TestTheRowsDownloadCancelAndDelete(_Case):
         d = models_mod.Downloader()
         started = threading.Event()
 
-        def cancellable_fetch(progress=None, cancelled=None, **_kw):
+        def cancellable_fetch(key, progress=None, cancelled=None, **_kw):
             started.set()
             self.wait(cancelled)
             if cancelled():
@@ -272,19 +275,166 @@ class TestTheRowsDownloadCancelAndDelete(_Case):
         self.assertEqual(job.error, "download failed: offline")
 
     def test_deleting_it_removes_the_model_folder(self):
-        folder = Path(self.tmp.name) / "model"
-        folder.mkdir()
-        (folder / "tokens.txt").write_text("x", encoding="utf-8")
-        with mock.patch.object(parakeet, "MODEL_DIR", folder):
+        root = Path(self.tmp.name)
+        folder = root / "parakeet-tdt-0.6b-v3"
+        other = root / "parakeet-tdt-0.6b-v3-int8"
+        for d in (folder, other):
+            d.mkdir()
+            (d / "vocab.txt").write_text("x", encoding="utf-8")
+        with mock.patch.object(parakeet, "MODELS_DIR", root):
             status, _ = self.h.call("POST", "/api/models/delete", {"name": PK})
         self.assertEqual(status, 200)
         self.assertFalse(folder.exists())
+        self.assertTrue(other.exists())  # only the one named
 
     def test_the_one_in_use_cannot_be_deleted(self):
         self.post("parakeet")
         status, body = self.h.call("POST", "/api/models/delete", {"name": PK})
         self.assertEqual(status, 400)
         self.assertIn("in use", body["error"])
+
+
+class TestTheTwoBuilds(_Case):
+    """Accurate (fp32) and Light (int8): two rows, one engine, a choice that is remembered."""
+
+    def test_both_builds_are_rows_with_their_own_measurements_and_the_cpu_basis(self):
+        rows = {r["name"]: r for r in self.page()["models"]}
+        accurate, light = rows[PK], rows[PK8]
+        self.assertEqual((accurate["variant"], light["variant"]), ("fp32", "int8"))
+        self.assertEqual((accurate["errors"], light["errors"]), (14.7, 16.9))
+        self.assertEqual(accurate["speed_basis"], "CPU")
+        self.assertEqual(light["speed_basis"], "CPU")
+        self.assertFalse(accurate["blind"] or light["blind"])
+        self.assertEqual(accurate["size"], parakeet.VARIANTS["fp32"].bytes)
+        self.assertEqual(light["size"], parakeet.VARIANTS["int8"].bytes)
+        self.assertLess(light["size"], accurate["size"])
+        self.assertNotIn(PK8, models_mod.BY_NAME)  # still never a Whisper tier
+
+    def test_neither_build_is_in_the_whisper_dropdowns_or_chosen_as_a_tier(self):
+        for name in (PK, PK8):
+            status, _ = self.h.call("POST", "/api/models/use", {"final": name})
+            self.assertEqual(status, 400)
+
+    def test_the_engine_lists_its_builds_and_which_is_chosen(self):
+        entry = {e["id"]: e for e in self.page()["engines"]}["parakeet"]
+        self.assertEqual(entry["variant"], "fp32")
+        self.assertEqual([(v["key"], v["label"], v["installed"]) for v in entry["variants"]],
+                         [("fp32", "Accurate", True), ("int8", "Light", True)])
+
+    def test_a_downloaded_build_switches_and_is_remembered(self):
+        status, body = self.h.call("POST", "/api/models/engine",
+                                   {"engine": "parakeet", "variant": "int8"})
+        self.assertEqual(status, 200)
+        sp = body["speech"]
+        self.assertEqual(sp["engine"], "parakeet")
+        rows = {r["name"]: r for r in sp["models"]}
+        self.assertEqual(rows[PK8]["in_use"], ["partial", "final"])
+        self.assertEqual(rows[PK]["in_use"], [])
+        self.assertEqual({e["id"]: e for e in sp["engines"]}["parakeet"]["variant"], "int8")
+        self.assertEqual(self.h.profile.parakeet_model, "int8")
+
+    def test_the_other_build_switches_live_through_the_same_route(self):
+        self.h.call("POST", "/api/models/engine", {"engine": "parakeet", "variant": "int8"})
+        _status, body = self.h.call("POST", "/api/models/engine",
+                                    {"engine": "parakeet", "variant": "fp32"})
+        rows = {r["name"]: r for r in body["speech"]["models"]}
+        self.assertEqual(rows[PK]["in_use"], ["partial", "final"])
+        self.assertEqual(self.h.profile.parakeet_model, "fp32")
+
+    def test_a_build_that_is_not_here_downloads_first_and_switches_to_that_build(self):
+        self.state["int8"] = False
+        with mock.patch.object(models_mod.Downloader, "start") as start:
+            status, _ = self.h.call("POST", "/api/models/engine",
+                                    {"engine": "parakeet", "variant": "int8"})
+        self.assertEqual(status, 200)
+        self.assertEqual(start.call_args.args[0].name, PK8)
+        self.assertEqual(start.call_args.kwargs.get("then_use"), "engine")
+        self.assertEqual(self.h.session.engine, "whisper")
+
+        self.state["int8"] = True
+        self.h.home._downloaded(models_mod.Download(PK8, state="done", then_use="engine"))
+        deadline = time.time() + 2
+        while self.h.session.engine_variant != "int8" and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.h.session.engine_variant, "int8")
+
+    def test_choosing_the_other_build_ends_a_download_waiting_to_switch(self):
+        waiting = models_mod.Download(PK8, then_use="engine")
+        self.state["fp32"] = False
+        with mock.patch.object(models_mod.Downloader, "jobs", return_value={PK8: waiting}), \
+                mock.patch.object(models_mod.Downloader, "start"):
+            self.h.call("POST", "/api/models/engine",
+                        {"engine": "parakeet", "variant": "fp32"})
+        self.assertEqual(waiting.then_use, "")
+
+    def test_an_unknown_build_is_refused(self):
+        status, body = self.h.call("POST", "/api/models/engine",
+                                   {"engine": "parakeet", "variant": "fp16"})
+        self.assertEqual(status, 400)
+        self.assertIn("fp32", body["error"])
+
+    def test_each_row_downloads_and_deletes_its_own_build(self):
+        got = []
+        with mock.patch.object(parakeet, "fetch",
+                               side_effect=lambda key, **kw: got.append(key)):
+            self.h.call("POST", "/api/models/download", {"name": PK8})
+            self.assertTrue(self.wait(lambda: got))
+        self.assertEqual(got, ["int8"])
+
+    def test_the_footer_names_parakeet_whichever_build(self):
+        self.h.call("POST", "/api/models/engine", {"engine": "parakeet", "variant": "int8"})
+        self.assertEqual(self.h.call("GET", "/api/state")[1]["engine"], "parakeet")
+
+
+class TestTheOldSherpaFiles(_Case):
+    def old(self):
+        root = Path(self.tmp.name)
+        folder = root / parakeet.LEGACY_NAME
+        folder.mkdir()
+        (folder / "encoder.int8.onnx").write_bytes(b"x" * 50)
+        return root, folder
+
+    def test_the_page_reports_them_without_touching_them(self):
+        root, folder = self.old()
+        with mock.patch.object(parakeet, "MODELS_DIR", root):
+            cache = self.page()["cache"]
+        self.assertEqual(cache["legacy_bytes"], 50)
+        self.assertTrue(folder.exists())
+
+    def test_there_is_nothing_to_offer_when_there_are_none(self):
+        with mock.patch.object(parakeet, "MODELS_DIR", Path(self.tmp.name)):
+            self.assertEqual(self.page()["cache"]["legacy_bytes"], 0)
+
+    def test_removing_them_is_an_explicit_request(self):
+        root, folder = self.old()
+        with mock.patch.object(parakeet, "MODELS_DIR", root):
+            status, _ = self.h.call("POST", "/api/models/delete",
+                                    {"name": "sherpa-onnx-legacy"})
+            self.assertEqual(status, 200)
+            self.assertFalse(folder.exists())
+            status, body = self.h.call("POST", "/api/models/delete",
+                                       {"name": "sherpa-onnx-legacy"})
+        self.assertEqual(status, 400)
+        self.assertIn("not on this PC", body["error"])
+
+    def test_the_page_script_offers_it(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn("legacy-delete", js)
+        self.assertIn("sherpa-onnx-legacy", js)
+
+
+class TestOpenFolder(_Case):
+    def test_it_opens_parakeets_own_folder_when_asked_for_it(self):
+        opened = []
+        with mock.patch.object(parakeet, "MODELS_DIR", Path(self.tmp.name) / "m"), \
+                mock.patch("flow.home.api.reveal", opened.append):
+            status, _ = self.h.call("POST", "/api/open", {"what": "parakeet"})
+        self.assertEqual(status, 200)
+        self.assertEqual(opened, [Path(self.tmp.name) / "m"])
+
+    def test_the_page_asks_for_the_folder_of_the_engine_in_use(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('data-what="${engine === "parakeet" ? "parakeet" : "models"}"', js)
 
 
 if __name__ == "__main__":  # pragma: no cover

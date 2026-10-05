@@ -59,6 +59,9 @@ class FakeParakeet:
     loaded = True
     lexicon = None
 
+    def __init__(self, variant: str = "fp32") -> None:
+        self.variant = variant
+
     def text(self, audio, *, final: bool = False, hotwords: str = "") -> str:
         return ""
 
@@ -378,24 +381,33 @@ class FakeSession:
     def engine(self) -> str:
         return self.asr.engine
 
-    def engine_refusal(self, name) -> str:
+    @property
+    def engine_variant(self) -> str:
+        return getattr(self.asr, "variant", "")
+
+    def engine_refusal(self, name, variant=None) -> str:
         from ..profile import ENGINES
 
         return "" if name in ENGINES else "Flow does not know that speech engine"
 
-    def set_engine(self, name) -> bool:
-        """Swap the pretend transcriber, keeping the Whisper one for the way back."""
-        if self.engine_refusal(name):
+    def set_engine(self, name, variant=None) -> bool:
+        """Swap the pretend transcriber, keeping the one it leaves for the way back."""
+        if self.engine_refusal(name, variant):
             return False
-        if name == self.engine:
+        want = (variant or getattr(self.profile, "parakeet_model", "auto")
+                if name == "parakeet" else "")
+        want = "fp32" if want == "auto" else want
+        if name == self.engine and want == self.engine_variant:
             return True
         kept = getattr(self, "_kept", {})
-        kept[self.engine] = self.asr
-        self.asr = kept.get(name) or (FakeParakeet() if name == "parakeet"
-                                      else FakeTranscriber())
+        kept[(self.engine, self.engine_variant)] = self.asr
+        self.asr = kept.get((name, want)) or (FakeParakeet(want) if name == "parakeet"
+                                              else FakeTranscriber())
         self._kept = kept
         if self.profile is not None:
             self.profile.engine = name
+            if variant is not None:
+                self.profile.parakeet_model = variant
             self.profile.save()
         return True
 
@@ -623,7 +635,7 @@ def main(argv=None) -> int:
         from .. import parakeet
 
         parakeet.runtime_installed = lambda: (True, "")
-        parakeet.model_present = lambda model_dir=None: True
+        parakeet.model_present = lambda key, model_dir=None: True
     home, _session = build(kept=args.history)
     page = "start" if args.first_run else "home"
     url = home.url(page)

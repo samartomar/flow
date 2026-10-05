@@ -279,7 +279,7 @@
       return `${failed}<span class="note">on this PC</span>
         <button type="button" class="icon-btn" aria-label="Delete ${esc(m.name)}" title="${using ? "In use - choose another model first" : "Delete"}" data-act="delete" data-name="${esc(m.name)}" ${using || busy ? "disabled" : ""}>${icon("trash", using ? C.dim : C.soft, 16)}</button>`;
     }
-    // A model whose engine cannot run here is not offered for download: 465 MB for
+    // A model whose engine cannot run here is not offered for download: gigabytes for
     // something the page would then refuse to switch to.
     const blocked = m.blocked ? `disabled title="${esc(m.blocked)}"` : "";
     return `${failed}<button type="button" class="btn sm" data-act="download" ${blocked} data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
@@ -307,6 +307,10 @@
     const now = sp.models.filter((m) => m.in_use.length);
     const finalNow = (now.find((m) => m.in_use.includes("final")) || {}).name || sp.automatic.final;
     const partialNow = (now.find((m) => m.in_use.includes("partial")) || {}).name || sp.automatic.partial;
+    // The figure worth pointing at is the most accurate model that does not invent words in
+    // silence; a blind model's lower number buys hallucinations, so it does not qualify.
+    const guarded = sp.models.filter((m) => !m.blind && m.errors != null).map((m) => m.errors);
+    const bestErrors = guarded.length ? Math.min(...guarded) : null;
     const rows = sp.models.map((m) => {
       const tags = [];
       if (m.in_use.includes("final")) tags.push('<span class="badge green"><span class="dot green"></span>in use: pasted words</span>');
@@ -317,7 +321,7 @@
       return `<div class="tr ${m.in_use.length ? "using" : ""}" role="row">
         <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.maker ? `<span class="fine">${esc(m.family || "Whisper")}, by ${esc(m.maker)}</span>` : ""}${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
         <div role="cell" class="note">${esc(m.size_text)}</div>
-        <div role="cell">${m.errors != null ? `<span class="${m.name === "large-v3" ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
+        <div role="cell">${m.errors != null ? `<span class="${!m.blind && m.errors === bestErrors ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
         <div role="cell" class="note">${m.speed != null ? `<div class="col"><span>${m.speed}&times;</span>${basis}</div>` : "&ndash;"}</div>
         <div role="cell" class="acts">${modelActions(m, sp.loading)}</div></div>`;
     }).join("");
@@ -385,11 +389,13 @@
       </div></section>
       <section class="card">
         <div class="row wrap"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}
-          <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="models">${icon("folder", C.text, 14)}Open folder</button></div>
-        <p class="note">These are Whisper models from OpenAI, smaller distil- copies of them from Hugging Face, and Parakeet from NVIDIA. They run on this PC; nothing you say is sent to any of them.</p>
+          <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="${engine === "parakeet" ? "parakeet" : "models"}">${icon("folder", C.text, 14)}Open folder</button></div>
+        <p class="note">These are Whisper models from OpenAI, smaller distil- copies of them, and Parakeet from NVIDIA, all downloaded from Hugging Face. They run on this PC; nothing you say is sent to any of them.</p>
         ${engineControl}
         ${engine === "parakeet"
-          ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. It runs on the CPU, ${esc(parakeet.threads || "")} threads. It is weaker than Whisper on Japanese-accented English, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint.</p>`
+          ? `<div class="row wrap"><span class="note">Version</span>${seg((parakeet.variants || []).map((v) =>
+              [v.key, `${v.label} · ${v.size_text}${v.installed ? "" : " · downloads first"}`]), parakeet.variant, "pk-variant", "Which Parakeet build")}</div>
+            <p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. It runs on the CPU, ${esc(parakeet.threads || "")} threads, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : "The accurate version is the most accurate model measured here, Japanese-accented English included."}</p>`
           : `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>`}
         ${engine === "whisper" && sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
@@ -399,6 +405,7 @@
         </div>
         <div class="row"><button type="button" class="btn primary" data-act="use-models">Use these</button><p class="note">Applies now. A model that is not on this PC downloads first, then takes over.</p></div>`
         : engine === "parakeet" ? "" : '<p class="note">This speech engine has no models to choose between.</p>'}
+        ${sp.cache.legacy_bytes ? `<div class="row wrap"><p class="note grow">An earlier Flow left Parakeet files here that this version does not use (${esc(sp.cache.legacy_text)}).</p><button type="button" class="btn sm" data-act="legacy-delete">Remove them</button></div>` : ""}
         <div class="table" role="table" aria-label="Speech models">
           <div class="tr head" role="row"><span class="label" role="columnheader">Model</span><span class="label" role="columnheader">Size</span><span class="label" role="columnheader">Errors / 100 words</span><span class="label" role="columnheader">Speed</span><span role="columnheader"></span></div>
           ${rows}
@@ -1268,6 +1275,12 @@
     },
     engine: (el) => run(() => api("models/engine", { engine: el.dataset.value }),
       el.dataset.value === "parakeet" ? "Choosing Parakeet - the pill shows the load" : "Choosing Whisper - the pill shows the load"),
+    "pk-variant": (el) => run(() => api("models/engine", { engine: "parakeet", variant: el.dataset.value }),
+      "Choosing that Parakeet - the pill shows the load"),
+    "legacy-delete": () => {
+      if (!confirm("Remove the old Parakeet files? This version does not use them.")) return;
+      run(() => api("models/delete", { name: "sherpa-onnx-legacy" }), "Removed");
+    },
     "use-models": () => run(() => api("models/use", {
       final: value("final-model") || null, partial: value("partial-model") || null,
       device: value("decode-device") || "auto",

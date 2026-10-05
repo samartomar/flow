@@ -45,18 +45,27 @@ CONFIDENCE_MARGIN = -0.5
 
 
 #: The invention bar for an engine that has no `no_speech_prob` at all: the **mean
-#: log-probability of the tokens it emitted** (`flow/parakeet.py` reads it from sherpa-onnx's
-#: `ys_log_probs`). Not `LOW_CONFIDENCE`, which is Whisper's per-segment `avg_logprob` on
+#: log-probability of the tokens it emitted** (`flow/parakeet.py` reads it from onnx-asr's
+#: `logprobs`). Not `LOW_CONFIDENCE`, which is Whisper's per-segment `avg_logprob` on
 #: Whisper's own scale, so it is a second constant rather than a reuse.
 #:
-#: **Provisional, and it rests on ONE invention.** Parakeet TDT 0.6B v3 int8, measured
-#: 2026-10-04: 7 of 8 silence/noise clips decoded to nothing; the eighth, a fan-noise
-#: recording, produced "It is." at a mean token log-prob of **-1.10**. Real speech (299
-#: EdAcc clips) sat at p1 -0.59, p5 -0.40, p50 -0.11. -0.8 sits between the
-#: only invention and the worst 1% of real speech, so by that distribution fewer than 1 clip
-#: in 100 of accented speech is at risk and the one invention is caught — but a single
-#: sample cannot say where the invented ones really sit. Re-measure before trusting it
-#: more, and prefer relaxing it to tightening it: a dropped real word cannot be recovered.
+#: **Provisional: thin on inventions, and measured twice.** Parakeet TDT 0.6B v3 on
+#: onnx-asr, 2026-10-05 (`scripts/parakeet_bench.py`), 300 EdAcc clips and 8 silence/noise
+#: clips, CPU:
+#:
+#:                  real speech mean log-prob        silence/noise inventions
+#:                  p1      p5     p50   below bar     (mean log-prob)
+#:   fp32          -0.51   -0.28  -0.09    1 of 300      none of 8
+#:   int8          -0.57   -0.40  -0.11    0 of 299      "Okay." -0.60, "Ha ha" -0.90
+#:   sherpa int8   -0.59   -0.40  -0.11                   "It is." -1.10  (the first spike)
+#:
+#: The two builds sit on the same scale, so one bar serves both. -0.8 catches "Ha ha" and
+#: "It is."; "Okay." is not below it and is caught by the filler list instead. The cost is
+#: the one fp32 clip under the bar — a one-word "So", which the filler list would have taken
+#: anyway. What is NOT known: fp32 produced no invention at all, so on that build the bar has
+#: nothing to be checked against, and three inventions in total cannot say where the rest
+#: sit. Re-measure before trusting it more, and prefer relaxing it to tightening it: a
+#: dropped real word cannot be recovered.
 TOKEN_LOGPROB_MIN = -0.8
 
 

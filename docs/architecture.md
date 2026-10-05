@@ -81,10 +81,14 @@ boundary is this:
 - **Network, but never user content.** The first decode of each tier downloads its
   model from Hugging Face, and so does a Download on Flow Home's Models page — the same
   files, from the same place, and only when asked. The opt-in Parakeet engine
-  (`--engine parakeet`, never chosen by `auto`) downloads its model once, from
-  `github.com/k2-fsa/sherpa-onnx` releases rather than Hugging Face, into
-  `~/.flow/models`; `flow/parakeet.py` is the one module besides `version.py` that
-  holds a URL opener, and `tests/test_version.py` counts it.
+  (`--engine parakeet` or the Models page, never chosen by `auto`) downloads its model
+  once — 640 MB (`int8`) or 2.4 GB (`fp32`) — from `huggingface.co/istupakov/
+  parakeet-tdt-0.6b-v3-onnx` at one pinned commit, into `~/.flow/models`, verifying every
+  file's size and SHA-256. It does not go through `huggingface_hub`, and it does **not**
+  avoid huggingface.co: an earlier build of this engine fetched from GitHub releases and
+  did, and the native engine is now the only answer for a network that blocks the hub.
+  `flow/parakeet.py` is the one module besides `version.py` that holds a URL opener, and
+  `tests/test_version.py` counts it.
 - **A local port, and only while Flow Home has been opened.** `flow/home/server.py`
   binds `127.0.0.1` — never another interface — the first time the window is opened, and
   closes with Flow. It answers its own host, its own origin and a token made per launch,

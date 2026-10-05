@@ -3807,7 +3807,23 @@ class Session:
         """Which speech engine decodes now: "whisper", "parakeet" or "native"."""
         return getattr(self.asr, "engine", "whisper")
 
-    def engine_refusal(self, name: str) -> str:
+    @property
+    def engine_variant(self) -> str:
+        """Which build of the engine runs: "fp32" or "int8" for Parakeet, "" otherwise."""
+        return getattr(self.asr, "variant", "")
+
+    def _parakeet_variant(self, asked: str | None) -> str:
+        """`asked`, or the profile's choice, resolved to a variant ("auto" -> what is here)."""
+        from . import parakeet
+
+        return parakeet.resolve_variant(
+            asked or getattr(self.profile, "parakeet_model", None))
+
+    @staticmethod
+    def _engine_key(name: str, variant: str) -> str:
+        return f"{name}:{variant}" if variant else name
+
+    def engine_refusal(self, name: str, variant: str | None = None) -> str:
         """Why the engine cannot change to `name` right now, or "" when it can.
 
         Read by `set_engine` and by Flow Home, so the page can say the reason in the
@@ -3832,7 +3848,9 @@ class Session:
             ok, why = parakeet.runtime_installed()
             if not ok:
                 return "needs the Parakeet add-on: " + 'uv pip install -e ".[parakeet]"'
-            if not parakeet.model_present():
+            if variant is not None and variant not in parakeet.VARIANTS:
+                return "Flow does not know that Parakeet build"
+            if not parakeet.model_present(self._parakeet_variant(variant)):
                 return "the Parakeet model is not on this PC - download it first"
         return self._engine_busy()
 
@@ -3845,8 +3863,12 @@ class Session:
             return "wait for the words being decoded to land, then switch"
         return ""
 
-    def set_engine(self, name: str) -> bool:
+    def set_engine(self, name: str, variant: str | None = None) -> bool:
         """Change the speech engine live, to "whisper" or "parakeet". True when it did.
+
+        `variant` ("fp32" or "int8") picks Parakeet's build, and is how the same swap that
+        changes engine also changes build — a different variant is a different transcriber
+        and goes through exactly the same checks. None means the profile's choice.
 
         Refused with a note when `engine_refusal` has a reason. Otherwise the new
         transcriber is built and **loaded on a thread of its own** — Parakeet's 2 s, or
@@ -3857,19 +3879,22 @@ class Session:
         loaded, the switch is abandoned with a note and the loaded engine is released.
         The choice is remembered in the profile only once it has happened.
         """
-        why = self.engine_refusal(name)
+        why = self.engine_refusal(name, variant)
         if why:
             self._emit("note", f"speech engine: {why}")
             return False
-        if name == self.engine:
+        want = self._parakeet_variant(variant) if name == "parakeet" else ""
+        if name == self.engine and want == self.engine_variant:
             return True
+        key = self._engine_key(name, want)
         try:
-            new = self._engines.get(name) or self.engine_factory(name)
+            new = self._engines.get(key) or self.engine_factory(name, want)
         except Exception as exc:
             self._emit("note", f"speech engine: could not start {name} - {exc}")
             return False
         self._switching_engine = True
-        self._emit("note", f"switching to the {name} speech engine - loading it now")
+        label = f"{name} ({want})" if want else name
+        self._emit("note", f"switching to the {label} speech engine - loading it now")
 
         def fail(text: str) -> None:
             self._switching_engine = False
@@ -3888,13 +3913,16 @@ class Session:
                 return
             self._switching_engine = False
             self.asr = new
-            self._engines[getattr(old, "engine", "whisper")] = old
-            self._engines[name] = new
+            self._engines[self._engine_key(getattr(old, "engine", "whisper"),
+                                           getattr(old, "variant", ""))] = old
+            self._engines[key] = new
             old.unload()
             if self.profile is not None:
                 self.profile.engine = name
+                if variant is not None:
+                    self.profile.parakeet_model = variant
                 self.profile.save()
-            self._emit("note", f"speech engine: {name}")
+            self._emit("note", f"speech engine: {label}")
 
         def run() -> None:
             try:
@@ -3904,7 +3932,7 @@ class Session:
                     warm()
             except Exception as exc:
                 # Bound now: `exc` is deleted when this block ends, and the lambda runs later.
-                text = f"{name} did not load ({exc})"
+                text = f"{label} did not load ({exc})"
                 self.post(lambda: fail(text))
                 return
             self.post(finish)

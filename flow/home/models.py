@@ -65,11 +65,13 @@ class Spec:
     note: str = ""
     #: No usable `no_speech_prob`, so it invents words in silence.
     blind: bool = False
-    #: Which engine runs it: "whisper" (faster-whisper) or "parakeet" (sherpa-onnx).
+    #: Which engine runs it: "whisper" (faster-whisper) or "parakeet" (onnx-asr).
     engine: str = "whisper"
     #: What `rtf` was measured on when that is not `MEASURED_ON`'s GTX 1070. "" means it
     #: was; anything else is shown beside the speed so the column is never mislabelled.
     basis: str = ""
+    #: Which build of the model, for the Parakeet rows: `parakeet.VARIANTS`' key.
+    variant: str = ""
 
     @property
     def maker(self) -> str:
@@ -88,7 +90,7 @@ _MB = 1024 * 1024
 
 CATALOG: tuple[Spec, ...] = (
     Spec("large-v3", "Systran/faster-whisper-large-v3", 2970 * _MB, 16.8, 0.190,
-         note="the most accurate model with a working silence guard"),
+         note="the most accurate Whisper model with a working silence guard"),
     Spec("large-v2", "Systran/faster-whisper-large-v2", 2970 * _MB, 17.0, 0.211),
     Spec("distil-large-v3.5", "distil-whisper/distil-large-v3.5-ct2", 1510 * _MB, 16.0, 0.104,
          blind=True),
@@ -107,17 +109,24 @@ CATALOG: tuple[Spec, ...] = (
 
 BY_NAME = {spec.name: spec for spec in CATALOG}
 
-#: Parakeet TDT 0.6B v3 (int8), measured 2026-10-04 and recorded in `flow/parakeet.py`:
-#: 17.3 errors per 100 words on the same 300 EdAcc clips, real-time factor 0.070 on a
-#: **CPU with 8 threads** — not the GTX 1070 — hence `basis`. `repo` is the directory name
-#: under `~/.flow/models` and not a Hugging Face repo: this model is on GitHub.
+#: Parakeet TDT 0.6B v3, in the two builds `flow/parakeet.py` ships, measured 2026-10-05 on
+#: the same 300 EdAcc clips (`scripts/parakeet_bench.py`) — the real-time factor on a **CPU
+#: with 8 threads**, not the GTX 1070, hence `basis`. `repo` is the directory name under
+#: `~/.flow/models`, not a Hugging Face repo, and `variant` is `parakeet.VARIANTS`' key.
 PARAKEET = Spec(
-    "parakeet-tdt-0.6b-v3", parakeet.MODEL_NAME, parakeet.ARCHIVE_BYTES, 17.3, 0.070,
-    engine="parakeet", basis="CPU",
-    note="no GPU needed; weaker than Whisper on Japanese-accented English")
+    "parakeet-tdt-0.6b-v3", parakeet.VARIANTS["fp32"].name, parakeet.VARIANTS["fp32"].bytes,
+    14.7, 0.068, engine="parakeet", basis="CPU", variant="fp32",
+    note="the most accurate model measured, and it runs on the CPU")
+PARAKEET_INT8 = Spec(
+    "parakeet-tdt-0.6b-v3-int8", parakeet.VARIANTS["int8"].name,
+    parakeet.VARIANTS["int8"].bytes, 16.9, 0.067, engine="parakeet", basis="CPU",
+    variant="int8",
+    note="the light one: a quarter of the size, a little behind on Japanese-accented English")
+PARAKEET_SPECS = (PARAKEET, PARAKEET_INT8)
 
 #: Every row the page lists. `BY_NAME` stays Whisper-only on purpose — see the docstring.
-SPECS = {**BY_NAME, PARAKEET.name: PARAKEET}
+SPECS = {**BY_NAME, **{spec.name: spec for spec in PARAKEET_SPECS}}
+BY_VARIANT = {spec.variant: spec for spec in PARAKEET_SPECS}
 
 #: What `errors` and `rtf` were measured on, said wherever they are shown.
 MEASURED_ON = "300 clips of accented English (EdAcc), on a GTX 1070"
@@ -181,7 +190,7 @@ def delete(repo: str) -> bool:
 def is_here(spec: Spec) -> bool:
     """Whether a finished copy of `spec` is on this PC, whichever engine runs it."""
     if spec.engine == "parakeet":
-        return parakeet.model_present()
+        return parakeet.model_present(spec.variant)
     return complete(spec.repo)
 
 
@@ -191,10 +200,11 @@ def remove(spec: Spec) -> bool:
         return delete(spec.repo)
     import shutil
 
-    if not parakeet.MODEL_DIR.exists():
+    root = parakeet.variant_dir(spec.variant)
+    if not root.exists():
         return False
-    shutil.rmtree(parakeet.MODEL_DIR, ignore_errors=True)
-    return not parakeet.MODEL_DIR.exists()
+    shutil.rmtree(root, ignore_errors=True)
+    return not root.exists()
 
 
 # -- the machine ---------------------------------------------------------------------
@@ -347,7 +357,7 @@ class Downloader:
     def _run(self, spec: Spec, job: Download) -> None:
         try:
             if spec.engine == "parakeet":
-                self._run_parakeet(job)
+                self._run_parakeet(spec, job)
             else:
                 from huggingface_hub import snapshot_download
 
@@ -373,13 +383,13 @@ class Downloader:
 
 
     @staticmethod
-    def _run_parakeet(job: Download) -> None:
-        """Fetch the Parakeet model with the page's own progress and cancel."""
+    def _run_parakeet(spec: Spec, job: Download) -> None:
+        """Fetch a Parakeet variant with the page's own progress and cancel."""
         def progress(done: int, total: int) -> None:
             job.done = done
             job.total = total or job.total
 
-        parakeet.fetch(progress=progress,
+        parakeet.fetch(spec.variant, progress=progress,
                        cancelled=job.cancel.is_set if job.cancel is not None else None)
 
 
@@ -417,12 +427,20 @@ class ModelManager:
     def forget_scan(self) -> None:
         self._scan = (0.0, {})
 
+    def _parakeet_variant(self, asr) -> str:
+        """The variant the page shows as chosen: the one running, else the profile's."""
+        if getattr(asr, "engine", "whisper") == "parakeet" and getattr(asr, "variant", ""):
+            return asr.variant
+        profile = getattr(self.session, "profile", None)
+        return parakeet.resolve_variant(getattr(profile, "parakeet_model", None))
+
     def in_use(self) -> dict[str, list[str]]:
         """{model name: ["partial"] / ["final"] / both} for what the session runs now."""
         asr = getattr(self.session, "asr", None)
         out: dict[str, list[str]] = {}
         if getattr(asr, "engine", "whisper") == "parakeet":
-            return {PARAKEET.name: ["partial", "final"]}
+            spec = BY_VARIANT.get(getattr(asr, "variant", ""), PARAKEET)
+            return {spec.name: ["partial", "final"]}
         names = getattr(asr, "names", None)
         if isinstance(names, tuple) and len(names) == 2:
             out.setdefault(names[0], []).append("partial")
@@ -456,20 +474,21 @@ class ModelManager:
         device = getattr(asr, "device", None) if asr is not None else None
         if not device or device == "auto":
             device = resolve_device(asked_device)
-        engine_list = engines()
+        engine_list = engines(self._parakeet_variant(asr))
         runtime_why = next(e["why"] for e in engine_list if e["id"] == "parakeet")
         rows = []
         for spec in SPECS.values():
             here = is_here(spec)
             job = jobs.get(spec.name)
             if spec.engine == "parakeet":
-                have = parakeet.installed_bytes()
+                have = parakeet.installed_bytes(spec.variant)
             else:
                 have = sizes.get(spec.repo)
             rows.append({
                 "name": spec.name,
                 "catalog": True,
                 "engine": spec.engine,
+                "variant": spec.variant,
                 "size": (have or spec.size) if here else spec.size,
                 "size_text": human(have or spec.size),
                 "installed": here,
@@ -493,12 +512,14 @@ class ModelManager:
         # still the model in use, and the page must not pretend otherwise.
         for name, roles in using.items():
             if name not in SPECS:
-                rows.append({"name": name, "catalog": False, "engine": "whisper",
+                rows.append({"name": name, "catalog": False, "engine": "whisper", "variant": "",
                              "speed_basis": "", "family": "Whisper",
                              "size": None, "size_text": "",
                              "installed": True, "blocked": "",
                              "errors": None, "speed": None, "note": "chosen outside Flow Home", "maker": "",
                              "blind": False, "in_use": roles, "download": None})
+        cached = (sum(sizes.get(s.repo, 0) for s in CATALOG)
+                  + sum(parakeet.installed_bytes(s.variant) for s in PARAKEET_SPECS))
         info = gpu() if device == "cuda" or sys.platform == "win32" else None
         asked = getattr(asr, "asked", (None, None)) if asr is not None else (None, None)
         if not (isinstance(asked, tuple) and len(asked) == 2):
@@ -519,20 +540,23 @@ class ModelManager:
             "automatic": {"partial": auto_partial, "final": auto_final},
             "chosen": {"partial": asked[0], "final": asked[1]},
             "cache": {"path": cache_dir(),
-                      "bytes": sum(sizes.get(s.repo, 0) for s in CATALOG)
-                      + parakeet.installed_bytes(),
-                      "text": human(sum(sizes.get(s.repo, 0) for s in CATALOG)
-                                    + parakeet.installed_bytes())},
+                      "bytes": cached, "text": human(cached),
+                      # Parakeet's own folder, and what an earlier Flow's (sherpa-onnx)
+                      # copy still takes — offered for removal, never removed unasked.
+                      "parakeet_path": str(parakeet.MODELS_DIR),
+                      "legacy_bytes": parakeet.legacy_bytes(),
+                      "legacy_text": human(parakeet.legacy_bytes())},
             "swappable": callable(getattr(asr, "swap", None)),
         }
 
 
-def engines() -> list[dict]:
+def engines(variant: str = "fp32") -> list[dict]:
     """The speech engines the page's selector offers, and whether each can be chosen here.
 
     A list rather than two fixed buttons, so a third (Apple's, on a Mac) is one more entry
     and not a restructure. `available` is whether the *runtime* is installed — the model
     download is a separate step the page offers — and `why` is what to say when it is not.
+    Parakeet also carries its two builds and which one is chosen.
     """
     ok, why = parakeet.runtime_installed()
     return [
@@ -542,7 +566,14 @@ def engines() -> list[dict]:
          "available": ok,
          "why": "" if ok else ("needs the Parakeet add-on: "
                                'uv pip install -e ".[parakeet]"'),
-         "installed": parakeet.model_present(), "threads": parakeet.default_threads()},
+         "installed": bool(parakeet.installed_variants()),
+         "threads": parakeet.default_threads(),
+         "variant": variant,
+         "variants": [{"key": spec.variant, "name": spec.name,
+                       "label": "Accurate" if spec.variant == "fp32" else "Light",
+                       "installed": parakeet.model_present(spec.variant),
+                       "size_text": human(spec.size), "errors": spec.errors}
+                      for spec in PARAKEET_SPECS]},
     ]
 
 

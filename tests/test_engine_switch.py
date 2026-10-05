@@ -48,8 +48,11 @@ class FakeMic:
 class FakeEngine:
     """A transcriber that records what was done to it."""
 
-    def __init__(self, engine: str, load_gate: threading.Event | None = None) -> None:
+    def __init__(self, engine: str, load_gate: threading.Event | None = None,
+                 variant: str = "") -> None:
         self.engine = engine
+        if variant:
+            self.variant = variant
         self.loaded = False
         self.calls: list[str] = []
         self._gate = load_gate
@@ -105,8 +108,8 @@ class _Case(unittest.TestCase):
         self.built: list[FakeEngine] = []
         self.gate: threading.Event | None = None
 
-        def factory(name):
-            engine = FakeEngine(name, self.gate)
+        def factory(name, variant=None):
+            engine = FakeEngine(name, self.gate, variant or "")
             self.built.append(engine)
             return engine
 
@@ -118,8 +121,8 @@ class _Case(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def switch(self, name="parakeet"):
-        self.assertTrue(self.session.set_engine(name))
+    def switch(self, name="parakeet", variant=None):
+        self.assertTrue(self.session.set_engine(name, variant))
         self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
 
 
@@ -132,7 +135,7 @@ class TestSwitching(_Case):
         self.assertIs(self.session.worker._asr, new)  # the decoder follows
         self.assertEqual(new.calls, ["load", "warmup"])
         self.assertEqual(self.whisper.calls[-1], "unload")
-        self.assertIn("speech engine: parakeet", notes(self.session))
+        self.assertIn("speech engine: parakeet (fp32)", notes(self.session))
 
     def test_the_choice_is_remembered_in_the_profile_once_it_has_happened(self):
         self.assertEqual(self.profile.engine, "whisper")
@@ -156,7 +159,7 @@ class TestSwitching(_Case):
         self.assertTrue(pump(self.session, lambda: "parakeet" in self.session.draft.text))
 
     def test_an_engine_that_will_not_load_leaves_the_old_one_running(self):
-        def boom(name):
+        def boom(name, variant=None):
             engine = FakeEngine(name)
             engine.load = mock.Mock(side_effect=RuntimeError("no memory"))
             return engine
@@ -174,6 +177,60 @@ class TestSwitching(_Case):
         self.assertFalse(self.session.set_engine("parakeet"))
         self.assertIn("could not start", notes(self.session)[-1])
         self.assertFalse(self.session._switching_engine)
+
+
+class TestSwitchingBetweenBuilds(_Case):
+    """fp32 and int8 are different transcribers, so a build change is an engine change."""
+
+    def test_the_build_is_made_and_remembered(self):
+        self.switch("parakeet", "int8")
+        self.assertEqual((self.session.engine, self.session.engine_variant),
+                         ("parakeet", "int8"))
+        self.assertEqual(self.built[0].variant, "int8")
+        self.assertEqual(reloaded(self.profile.path).parakeet_model, "int8")
+
+    def test_the_other_build_goes_through_the_same_swap_and_unloads_the_first(self):
+        self.switch("parakeet", "int8")
+        first = self.session.asr
+        self.switch("parakeet", "fp32")
+        self.assertEqual(self.session.engine_variant, "fp32")
+        self.assertIs(self.session.worker._asr, self.session.asr)
+        self.assertEqual(first.calls[-1], "unload")
+        self.assertEqual(self.profile.parakeet_model, "fp32")
+
+    def test_the_build_already_running_is_a_no_op(self):
+        self.switch("parakeet", "int8")
+        built = len(self.built)
+        self.assertTrue(self.session.set_engine("parakeet", "int8"))
+        self.assertEqual(len(self.built), built)
+
+    def test_going_back_to_a_build_reuses_the_instance(self):
+        self.switch("parakeet", "int8")
+        int8 = self.session.asr
+        self.switch("parakeet", "fp32")
+        self.switch("parakeet", "int8")
+        self.assertIs(self.session.asr, int8)
+        self.assertEqual(len(self.built), 2)
+
+    def test_no_variant_means_the_profiles_choice(self):
+        self.profile.parakeet_model = "int8"
+        self.switch("parakeet")
+        self.assertEqual(self.session.engine_variant, "int8")
+
+    def test_the_build_must_be_downloaded_and_must_exist(self):
+        parakeet.model_present.side_effect = lambda key, model_dir=None: key == "fp32"
+        self.assertFalse(self.session.set_engine("parakeet", "int8"))
+        self.assertIn("download it first", notes(self.session)[-1])
+        self.assertFalse(self.session.set_engine("parakeet", "fp16"))
+        self.assertIn("does not know", notes(self.session)[-1])
+        self.assertEqual(self.built, [])
+
+    def test_a_build_change_is_refused_while_decoding_like_any_engine_change(self):
+        self.switch("parakeet", "fp32")
+        with mock.patch.object(type(self.session.worker), "busy",
+                               new_callable=mock.PropertyMock, return_value=True):
+            self.assertFalse(self.session.set_engine("parakeet", "int8"))
+        self.assertEqual(self.session.engine_variant, "fp32")
 
 
 class TestRefusals(_Case):
@@ -298,6 +355,25 @@ class TestTheEngineIsAProfileSetting(unittest.TestCase):
         self.path.write_text(json.dumps({"schema": 1, "engine": 7}), encoding="utf-8")
         q = reloaded(self.path)
         self.assertEqual(q.engine, "whisper")
+
+    def test_the_parakeet_build_round_trips_and_defaults_to_auto(self):
+        p = Profile(self.path)
+        self.assertEqual(p.parakeet_model, "auto")
+        p.parakeet_model = "int8"
+        p.save()
+        self.assertEqual(reloaded(self.path).parakeet_model, "int8")
+
+    def test_a_bad_parakeet_build_is_a_named_fault(self):
+        self.path.write_text(json.dumps({"schema": 1, "parakeet_model": "fp16"}),
+                             encoding="utf-8")
+        q = reloaded(self.path)
+        self.assertEqual(q.parakeet_model, "auto")
+        self.assertIn("parakeet_model", q.faults)
+
+    def test_the_profiles_choices_match_the_engines(self):
+        from flow.profile import PARAKEET_MODELS
+
+        self.assertEqual(PARAKEET_MODELS, parakeet.VARIANT_CHOICES)
 
     def test_an_older_profile_without_it_launches_as_before(self):
         self.path.write_text(json.dumps({"schema": 1, "decode_device": "cpu"}),
