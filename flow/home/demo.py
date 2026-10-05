@@ -425,6 +425,12 @@ class FakeSession:
             self._result = None
             return True
         self._pending = None
+        # "done" before the swap, not after: the pump thread applies a queued switch while
+        # the page reads from another, and a reader that already sees the new engine must
+        # see its status too. In the old order a profile save sat between the two, and a
+        # slow macOS runner read in that gap (CI on main, 2026-10-05).
+        self._result = {"state": "done", "engine": name, "variant": want, "reason": "",
+                        "at": time.monotonic()}
         kept = getattr(self, "_kept", {})
         kept[(self.engine, self.engine_variant)] = self.asr
         self.asr = kept.get((name, want)) or (FakeParakeet(want) if name == "parakeet"
@@ -435,8 +441,6 @@ class FakeSession:
             if variant is not None:
                 self.profile.parakeet_model = variant
             self.profile.save()
-        self._result = {"state": "done", "engine": name, "variant": want, "reason": "",
-                        "at": time.monotonic()}
         return True
 
     def cancel_engine_switch(self) -> bool:
