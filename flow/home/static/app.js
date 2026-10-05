@@ -1004,10 +1004,11 @@
     const gpu = m.gpu && m.gpu.name ? m.gpu.name.replace(/^NVIDIA\s+(GeForce\s+)?/i, "") : "";
     const measuredHere = gpu && m.measured_on.includes(gpu);
     const speed = m.final.speed ? Math.round(m.final.speed) : 0;
-    const why = m.device === "cuda" && speed
+    const onGpu = m.device === "cuda" || m.device === "vulkan";
+    const why = onGpu && speed
       ? (measuredHere ? `Your ${esc(gpu)} runs it about ${speed} times faster than you talk.`
         : `On a GTX 1070 it runs about ${speed} times faster than speech; ${esc(gpu || "your card")} is likely no slower.`)
-      : m.device === "cuda" ? "It runs on your graphics card." : "It runs on this PC's processor.";
+      : onGpu ? "It runs on your graphics card." : "It runs on this PC's processor.";
     const action = m.ready
       ? `<p class="note good">${icon("circlecheck", C.green, 15)} ${m.loaded ? "Ready." : m.loading ? "On this PC - loading it now." : "On this PC."}</p>`
       : m.downloading
@@ -1016,7 +1017,7 @@
     return `
       <h1 class="fr-title">Getting the speech model</h1>
       <p class="sub">Recommended for this PC: <b>${esc(m.final.name)}</b>. ${why}</p>
-      <div class="col">${modelLine(m.final, "writes the words that get pasted")}${modelLine(m.partial, "draws the live preview")}</div>
+      <div class="col">${m.single ? modelLine(m.final, "writes the words that get pasted and draws the live preview") : `${modelLine(m.final, "writes the words that get pasted")}${modelLine(m.partial, "draws the live preview")}`}</div>
       ${action}
       ${m.alternative && !m.ready ? `<p class="note">Short on space or time? <button type="button" class="linkish" data-act="fr-models" data-value="smaller">Use ${esc(m.alternative.final)} instead${m.alternative.size_text ? " - " + esc(m.alternative.size_text) : ""}</button></p>` : ""}`;
   }

@@ -567,8 +567,43 @@ class Api:
 
     def model_cancel(self, body: dict) -> dict:
         spec = self._spec(body)
-        self.home.models.downloads.cancel(spec.name)
+        self._cancel_download(spec)
         return self.models({})
+
+    def _cancel_download(self, spec) -> bool:
+        """Cancel `spec`'s download. A switch that was waiting on it is declined, and that is
+        remembered.
+
+        **A cancel is somebody saying no; a failure is not.** The background fetch that
+        `--engine auto` starts on a PC with a GPU (decisions.md 2026-10-05) is skipped at the
+        next launch only for a person who has chosen an engine, and cancelling it is that
+        choice: they are running Whisper, so `profile.engine` becomes "whisper" - the same
+        value the Models page's Whisper button saves - unless one is already saved. The
+        Models page still offers Download & use. A download that *fails* saves nothing and
+        retries at the next launch, once, with its reason in the strip.
+        """
+        jobs = self.home.models.downloads.jobs()
+        job = jobs.get(spec.name)
+        was_switching = (job is not None and job.state == "running"
+                         and job.then_use == "engine")
+        cancelled = self.home.models.downloads.cancel(spec.name)
+        if cancelled and was_switching:
+            self._remember_whisper()
+        return cancelled
+
+    def _remember_whisper(self) -> None:
+        """Save "whisper" as the engine unless a choice is already saved, on the session's
+        thread. What turns a declined Parakeet fetch into somebody who has chosen."""
+        profile = self.profile
+        if profile is None:
+            return
+
+        def remember() -> None:
+            if not profile.engine:
+                profile.engine = "whisper"
+                profile.save()
+
+        self._call(remember)
 
     def model_delete(self, body: dict) -> dict:
         if body.get("name") == LEGACY_ROW:
@@ -1291,6 +1326,7 @@ class Api:
                 "mic": getattr(mic, "device_name", "") or "",
                 "names": names if isinstance(names, tuple) and len(names) == 2 else None,
                 "loaded": bool(getattr(asr, "loaded", False)),
+                "engine": getattr(asr, "engine", "whisper"),
                 "mode": MODE_KEYS.get(getattr(s, "mode", DICTATE), "dictate"),
                 "last": last,
                 "lent": getattr(s, "mic_on_loan", "") or "",
@@ -1321,7 +1357,7 @@ class Api:
             missing = sum(BY_NAME[n].size for n in small if not complete(BY_NAME[n].repo))
             alternative = {"partial": small[0], "final": small[1],
                            "size_text": human(missing) if missing else ""}
-        return {
+        page = {
             "profile": profile is not None,
             "lite": bool(self.home.lite),
             "keys": self._shortcut_names(),
@@ -1352,6 +1388,9 @@ class Api:
             # session carries the resolved pair, the profile only the stored half.
             "send": {"word": self._send_word()},
         }
+        if self._gpu_first_run():
+            page["model"] = self._gpu_model(live, speech)
+        return page
 
     def _send_word(self) -> str:
         """The word that ends a hands-free utterance, defaulting to the shipped one.
@@ -1402,6 +1441,48 @@ class Api:
             task.start()
         return self.start_page({})
 
+    def _gpu_first_run(self) -> bool:
+        """Whether this launch's model step is Parakeet's GPU build and not Whisper's pair.
+
+        `Home.gpu_auto` is `--engine auto`'s own answer for the launch, and a person who has
+        since said no (`_cancel_download`, or choosing Whisper) has a saved "whisper" and
+        gets Whisper's step back. Nothing here re-derives the precedence.
+        """
+        saved = getattr(self.profile, "engine", "") if self.profile is not None else ""
+        return bool(self.home.gpu_auto) and saved in ("", "parakeet")
+
+    def _gpu_model(self, live: dict, speech: dict) -> dict:
+        """`start_page`'s model step on a PC where Parakeet's GPU build is the engine.
+
+        One model does the preview and the pasted words, so the page draws one line
+        (`single`). Its download is the job the background fetch started - read, never
+        started a second time - and "ready" is the build being installed. The smaller
+        alternative is the CPU Whisper pair, as everywhere else.
+        """
+        from .. import parakeet
+        from ..asr import default_models
+        from .models import PARAKEET_GPU, complete
+
+        row = next(m for m in speech["models"] if m["name"] == PARAKEET_GPU.name)
+        job = self.home.models.downloads.jobs().get(PARAKEET_GPU.name)
+        shown = {"name": PARAKEET_GPU.name, "installed": bool(row["installed"]),
+                 "size_text": row["size_text"], "speed": row["speed"],
+                 "download": row["download"]}
+        small = default_models("cpu")
+        missing = sum(BY_NAME[n].size for n in small if not complete(BY_NAME[n].repo))
+        return {
+            "partial": shown, "final": shown, "single": True,
+            "ready": shown["installed"],
+            "downloading": job is not None and job.state == "running",
+            "loaded": bool(live["loaded"]) and live["engine"] == "parakeet",
+            "loading": speech["loading"],
+            "device": parakeet.gpu_backend()[0] or speech["device"],
+            "gpu": speech["gpu"],
+            "measured_on": speech["measured_on"],
+            "alternative": {"partial": small[0], "final": small[1],
+                            "size_text": human(missing) if missing else ""},
+        }
+
     def start_models(self, body: dict) -> dict:
         """Get the speech models ready: the ones this PC will use, or the smaller pair.
 
@@ -1413,8 +1494,24 @@ class Api:
         action = body.get("action")
         names = self._call(lambda: getattr(getattr(self.session, "asr", None), "names", None))
         names = names if isinstance(names, tuple) else ()
-        from .models import complete
+        from .models import PARAKEET_GPU, complete
 
+        if self._gpu_first_run() and action in ("download", "cancel"):
+            # Parakeet's GPU build is this launch's model: the same download the background
+            # fetch started (`start` returns the running job rather than a second one), with
+            # the same switch when it lands. Whisper's `warm` is not this engine's business.
+            if action == "download":
+                from .. import parakeet
+
+                if parakeet.model_present("gpu"):
+                    warm = getattr(self.session, "warm", None)
+                    if callable(warm):
+                        self._call(warm)
+                else:
+                    self.home.models.downloads.start(PARAKEET_GPU, then_use="engine")
+            else:
+                self._cancel_download(PARAKEET_GPU)
+            return self.start_page({})
         if action == "download":
             missing = [BY_NAME[n] for n in names if n in BY_NAME and not complete(BY_NAME[n].repo)]
             if missing:
@@ -1429,6 +1526,11 @@ class Api:
             from ..asr import default_models
 
             partial, final = default_models("cpu")
+            if self._gpu_first_run():
+                # Asking for the smaller Whisper pair declines the Parakeet build, the way
+                # cancelling its download does.
+                self._cancel_download(PARAKEET_GPU)
+                self._remember_whisper()
             self.model_use({"partial": partial, "final": final})
         elif action == "cancel":
             self.home.warm_when_ready = False

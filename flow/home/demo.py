@@ -672,14 +672,30 @@ def main(argv=None) -> int:
     ap.add_argument("--parakeet", action="store_true",
                     help="pretend the Parakeet add-on and its model are installed, so the "
                          "Models page shows the engine choice enabled")
+    ap.add_argument("--gpu-first-run", action="store_true",
+                    help="pretend a first run on a PC with a GPU: the Parakeet GPU build is "
+                         "not installed and its background download is part way through, so "
+                         "the first run's model step shows that instead of Whisper's pair")
     args = ap.parse_args(argv)
-    if args.parakeet:
+    if args.gpu_first_run:
+        args.first_run = True
+    if args.parakeet or args.gpu_first_run:
         from .. import parakeet
 
         parakeet.runtime_installed = lambda: (True, "")
         parakeet.gpu_backend = lambda: ("cuda", "")
-        parakeet.model_present = lambda key, model_dir=None: True
+        parakeet.model_present = lambda key, model_dir=None: not (
+            args.gpu_first_run and key == "gpu")
     home, _session = build(kept=args.history)
+    if args.gpu_first_run:
+        import threading as _threading
+
+        from .models import PARAKEET_GPU, Download
+
+        home.gpu_auto = "fetch"
+        home.models.downloads._jobs[PARAKEET_GPU.name] = Download(
+            PARAKEET_GPU.name, done=int(PARAKEET_GPU.size * 0.43), total=PARAKEET_GPU.size,
+            then_use="engine", cancel=_threading.Event())
     page = "start" if args.first_run else "home"
     url = home.url(page)
     print(url, flush=True)

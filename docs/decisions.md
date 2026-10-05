@@ -49,6 +49,20 @@ choice, because the safe way to be wrong is to leave a machine on the engine it 
 Anyone whose profile already says "whisper" and wants Parakeet chooses it once on the Models
 page.
 
+**The first run's model step follows the engine, and a cancel is a "no".** On that path the
+Home first run's "Getting the speech model" step shows the Parakeet GPU build — one line, its
+size, the *same* download job the background fetch started (reused, never a second) — instead
+of Whisper's `large-v3` pair, so a fresh GPU PC is not offered 2.9 GB it will not use; "Short
+on space or time?" still offers the CPU Whisper pair. `main` hands `Home` the same `_gpu_auto`
+answer that chose the engine (`Home.gpu_auto`), so the page does not re-derive the
+precedence; a saved "whisper" gives Whisper's step back. Cancelling the background download —
+from the strip, the Models row or the first-run step — saves `profile.engine = "whisper"`
+(unless an engine is already saved), the value the Models page's Whisper button writes, because
+cancelling is choosing: it makes them a chooser, so `auto` stops fetching, and the Models page
+still offers Download & use. A *failed* download saves nothing: it shows its reason in the
+strip and retries at the next launch, once per launch, because a network that was down is not
+a decision.
+
 **What Whisper still owns**, so it stays one click away and `auto` leaves it alone there:
 
 - **Hindi and Hinglish.** `asr.TASK` is "translate" with `language` pinned to "en": on the
