@@ -280,6 +280,10 @@ DESIGNS = ("current", "compact")
 #: imported from `flow/asr.py`, which pulls in numpy and the decoder: this module is read
 #: on every launch and by `flow --stats`, which loads no model.
 DECODE_DEVICES = ("auto", "cuda", "cpu")
+#: The speech engines a person can choose and have remembered. `native` (macOS on-device
+#: speech) is deliberately not here: it is reached by `--engine native` or by `auto` when
+#: Whisper has nothing to run, and nothing on the Models page can choose it yet.
+ENGINES = ("whisper", "parakeet")
 
 #: How many model names the settings menu will remember. A ceiling rather than a
 #: judgement: this list is only ever appended to, by hand, one name at a time, and a menu
@@ -522,6 +526,10 @@ class Profile:
         self.final_model: str | None = None
         #: "auto", "cuda" or "cpu" — `--decode-device`, remembered.
         self.decode_device: str = "auto"
+        #: "whisper" or "parakeet" — the engine the Models page chose, remembered.
+        #: `--engine` on the command line wins for one launch. Absent means Whisper,
+        #: which is also what leaves `--engine auto` exactly as it was before this field.
+        self.engine: str = "whisper"
         #: The microphone, by *name* and never by index — see `Mic.device_name` for why
         #: an index stored across launches comes to mean a different device. None follows
         #: the system default, which is also what a name that is not connected falls back
@@ -650,6 +658,10 @@ class Profile:
         if self.decode_device not in DECODE_DEVICES:
             self.faults.append("decode_device")
             self.decode_device = "auto"
+        self.engine = take("engine", _text, "whisper")
+        if self.engine not in ENGINES:
+            self.faults.append("engine")
+            self.engine = "whisper"
         self.mic_device = take("mic_device", _text)
         # A wait is a positive number of seconds no longer than the flag would accept;
         # anything else degrades to the shipped wait and is named, like any wrong type.
@@ -723,6 +735,7 @@ class Profile:
             "partial_model": self.partial_model,
             "final_model": self.final_model,
             "decode_device": self.decode_device,
+            "engine": self.engine,
             "mic_device": self.mic_device,
             "cli_timeout": self.cli_timeout,
             "warm": self.warm,

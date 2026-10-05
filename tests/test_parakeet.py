@@ -451,6 +451,44 @@ class TestFetch(_TempCase):
         self.assertTrue(parakeet.model_present(dest))
         self.assertFalse((dest / "junk").exists())
 
+    def test_a_cancel_mid_download_leaves_no_partial_model_and_no_scratch(self):
+        archive = _good_archive(self.tmp / "a.tar.bz2")
+        asked = []
+
+        def cancelled():
+            asked.append(1)
+            return len(asked) > 2  # let two chunks through, then stop
+
+        with mock.patch.object(parakeet, "_CHUNK", 8):
+            with self.assertRaises(parakeet.Cancelled):
+                self.fetch(archive, cancelled=cancelled)
+        self.assertGreaterEqual(len(asked), 3)  # asked per chunk, not once
+        self.assertFalse((self.tmp / "models" / "m").exists())
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_cancel_after_the_download_stops_before_anything_is_installed(self):
+        archive = _good_archive(self.tmp / "a.tar.bz2")
+        # False through every chunk and the end-of-stream read, true at the unpack gate.
+        chunks = archive.stat().st_size // parakeet._CHUNK + 2
+        answers = iter([False] * chunks + [True])
+        with self.assertRaises(parakeet.Cancelled):
+            self.fetch(archive, cancelled=lambda: next(answers, True))
+        self.assertFalse((self.tmp / "models" / "m").exists())
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_cancel_keeps_an_earlier_good_copy(self):
+        dest = _model_dir(self.tmp / "models" / "m")
+        with self.assertRaises(parakeet.Cancelled):
+            self.fetch(_good_archive(self.tmp / "a.tar.bz2"), cancelled=lambda: True)
+        self.assertTrue(parakeet.model_present(dest))
+
+    def test_cancelled_is_not_a_failure(self):
+        self.assertFalse(issubclass(parakeet.Cancelled, parakeet.NotAvailable))
+
+    def test_the_size_on_disk_is_the_four_files(self):
+        self.assertEqual(parakeet.installed_bytes(self.tmp / "nope"), 0)
+        self.assertEqual(parakeet.installed_bytes(_model_dir(self.tmp / "m")), len(NAMES))
+
     def test_the_constants_say_what_was_measured(self):
         self.assertEqual(parakeet.ARCHIVE_BYTES, 487_170_055)
         self.assertTrue(parakeet.URL.startswith("https://github.com/k2-fsa/"))
@@ -540,6 +578,69 @@ class TestAskingForParakeet(unittest.TestCase):
         self.assertEqual(engine, "parakeet")
         self.assertEqual(len(lines), 10)
         self.assertTrue(all(s.isascii() for s in said))
+
+
+class TestThePrecedenceOfFlagProfileAndAuto(unittest.TestCase):
+    """`--engine` beats the Models page's remembered choice; `auto` honours it; and with no
+    remembered Parakeet everything is exactly as it was — native on a Mac included."""
+
+    def ready(self, runtime=(True, ""), model=True):
+        return (mock.patch.object(parakeet, "runtime_installed", return_value=runtime),
+                mock.patch.object(parakeet, "model_present", return_value=model),
+                mock.patch.object(parakeet, "fetch"))
+
+    def pick(self, engine, saved, runtime=(True, ""), model=True, platform="win32",
+             whisper_here=True, native=(False, "no")):
+        said = []
+        a, b, c = self.ready(runtime, model)
+        with a, b, c as fetching, mock.patch.object(sys, "platform", platform),                 mock.patch("flow.__main__.say", said.append),                 mock.patch("flow.__main__._models_present", return_value=whisper_here),                 mock.patch("flow.native.available", return_value=native):
+            got = _engine(_args(engine), "base.en", "small.en", saved=saved)
+        return got, said, fetching
+
+    def test_auto_with_a_saved_parakeet_is_parakeet(self):
+        (engine, why), said, fetching = self.pick("auto", "parakeet")
+        self.assertEqual(engine, "parakeet")
+        self.assertIn("Models page", why)
+        fetching.assert_not_called()
+
+    def test_auto_with_a_saved_parakeet_wins_over_native_on_a_mac(self):
+        (engine, _why), _said, _f = self.pick("auto", "parakeet", platform="darwin",
+                                              whisper_here=False, native=(True, ""))
+        self.assertEqual(engine, "parakeet")
+
+    def test_the_flag_beats_the_saved_choice_both_ways(self):
+        self.assertEqual(self.pick("whisper", "parakeet")[0], ("whisper", ""))
+        self.assertEqual(self.pick("parakeet", "whisper")[0][0], "parakeet")
+
+    def test_a_saved_whisper_or_none_leaves_auto_exactly_as_it_was(self):
+        for saved in ("whisper", ""):
+            with self.subTest(saved=saved):
+                self.assertEqual(self.pick("auto", saved)[0], ("whisper", ""))
+        # ...native on a Mac with no Whisper models included.
+        (engine, why), _s, _f = self.pick("auto", "whisper", platform="darwin",
+                                          whisper_here=False, native=(True, ""))
+        self.assertEqual(engine, "native")
+        self.assertIn("models not found", why)
+
+    def test_a_saved_parakeet_whose_runtime_is_gone_falls_back_and_says_why(self):
+        (engine, _w), said, fetching = self.pick(
+            "auto", "parakeet", runtime=(False, "sherpa-onnx is not installed"))
+        self.assertEqual(engine, "whisper")
+        self.assertIn("sherpa-onnx is not installed", " ".join(said))
+        self.assertIn("Models page", " ".join(said))
+        fetching.assert_not_called()
+
+    def test_a_saved_parakeet_whose_model_is_gone_never_blocks_launch_on_a_download(self):
+        (engine, _w), said, fetching = self.pick("auto", "parakeet", model=False)
+        self.assertEqual(engine, "whisper")
+        fetching.assert_not_called()  # the page offers it; the launch does not wait on it
+        self.assertIn("downloads it", " ".join(said))
+        self.assertTrue(all(s.isascii() for s in said))
+
+    def test_the_explicit_flag_still_downloads_as_before(self):
+        (engine, _w), _said, fetching = self.pick("parakeet", "whisper", model=False)
+        self.assertEqual(engine, "parakeet")
+        fetching.assert_called_once()
 
 
 class TestTheEngineFlag(unittest.TestCase):

@@ -358,7 +358,8 @@ class TestTheModelsPage(unittest.TestCase):
         status, page = self.call(h, "GET", "/api/models")
         self.assertEqual(status, 200)
         rows = {r["name"]: r for r in page["speech"]["models"]}
-        self.assertEqual(set(rows), set(models_mod.BY_NAME))
+        # Every Whisper model, and Parakeet beside them as an engine's row.
+        self.assertEqual(set(rows), set(models_mod.SPECS))
         self.assertEqual(rows["large-v3"]["in_use"], ["final"])
         self.assertEqual(rows["small"]["in_use"], ["partial"])
         self.assertTrue(rows["large-v3"]["installed"])

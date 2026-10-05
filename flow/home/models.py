@@ -12,6 +12,13 @@ model here, and it and `large-v3-turbo` report no `no_speech_prob` — so the ha
 guard in `clean.py` cannot fire for them, and they hear "thank you" in an empty room.
 `asr.reports_no_speech` keeps them usable; the page says what they cost.
 
+**Parakeet is a row here and not a tier choice.** It is a second *engine* (`flow/parakeet.py`),
+so it lives in `SPECS` beside `CATALOG` but never in `CATALOG` or `BY_NAME`: everything that
+chooses a Whisper tier — the dropdowns, `model_use`, the pending-download swap — reads
+`BY_NAME` and so cannot be handed it. Its speed is measured on a CPU where the others'
+is on the GTX 1070, which `Spec.basis` says wherever the number is shown. Choosing it is
+`Session.set_engine`, not `set_models`.
+
 **Downloads report bytes.** faster-whisper downloads through `huggingface_hub` with the
 progress bar switched off (`faster_whisper.utils.disabled_tqdm`), which is why a first
 run said "loading the model" over three gigabytes. This calls `snapshot_download` with
@@ -27,6 +34,8 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+
+from .. import parakeet
 
 #: The files faster-whisper downloads for a model, and nothing else — the same list
 #: `faster_whisper.utils.download_model` asks for, so a model fetched here is one it
@@ -48,7 +57,7 @@ class Spec:
     repo: str
     #: What the download weighs, about — measured as the models sit on disk here.
     size: int
-    #: Errors per 100 words on the EdAcc slice, GTX 1070 int8. None: not measured.
+    #: Errors per 100 words on the EdAcc slice (GTX 1070 int8 for Whisper). None: not measured.
     errors: float | None = None
     #: Real-time factor on the same card. None: not measured there.
     rtf: float | None = None
@@ -56,11 +65,23 @@ class Spec:
     note: str = ""
     #: No usable `no_speech_prob`, so it invents words in silence.
     blind: bool = False
+    #: Which engine runs it: "whisper" (faster-whisper) or "parakeet" (sherpa-onnx).
+    engine: str = "whisper"
+    #: What `rtf` was measured on when that is not `MEASURED_ON`'s GTX 1070. "" means it
+    #: was; anything else is shown beside the speed so the column is never mislabelled.
+    basis: str = ""
 
     @property
     def maker(self) -> str:
         """Who made the weights: Whisper is OpenAI's, the distil- copies are Hugging Face's."""
+        if self.engine == "parakeet":
+            return "NVIDIA"
         return "Hugging Face" if self.name.startswith("distil-") else "OpenAI"
+
+    @property
+    def family(self) -> str:
+        """The model family, for the row's second line: "Whisper, by OpenAI"."""
+        return "Parakeet" if self.engine == "parakeet" else "Whisper"
 
 
 _MB = 1024 * 1024
@@ -85,6 +106,18 @@ CATALOG: tuple[Spec, ...] = (
 )
 
 BY_NAME = {spec.name: spec for spec in CATALOG}
+
+#: Parakeet TDT 0.6B v3 (int8), measured 2026-10-04 and recorded in `flow/parakeet.py`:
+#: 17.3 errors per 100 words on the same 300 EdAcc clips, real-time factor 0.070 on a
+#: **CPU with 8 threads** — not the GTX 1070 — hence `basis`. `repo` is the directory name
+#: under `~/.flow/models` and not a Hugging Face repo: this model is on GitHub.
+PARAKEET = Spec(
+    "parakeet-tdt-0.6b-v3", parakeet.MODEL_NAME, parakeet.ARCHIVE_BYTES, 17.3, 0.070,
+    engine="parakeet", basis="CPU",
+    note="no GPU needed; weaker than Whisper on Japanese-accented English")
+
+#: Every row the page lists. `BY_NAME` stays Whisper-only on purpose — see the docstring.
+SPECS = {**BY_NAME, PARAKEET.name: PARAKEET}
 
 #: What `errors` and `rtf` were measured on, said wherever they are shown.
 MEASURED_ON = "300 clips of accented English (EdAcc), on a GTX 1070"
@@ -143,6 +176,25 @@ def delete(repo: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def is_here(spec: Spec) -> bool:
+    """Whether a finished copy of `spec` is on this PC, whichever engine runs it."""
+    if spec.engine == "parakeet":
+        return parakeet.model_present()
+    return complete(spec.repo)
+
+
+def remove(spec: Spec) -> bool:
+    """Delete `spec` from this PC. True when anything was removed."""
+    if spec.engine != "parakeet":
+        return delete(spec.repo)
+    import shutil
+
+    if not parakeet.MODEL_DIR.exists():
+        return False
+    shutil.rmtree(parakeet.MODEL_DIR, ignore_errors=True)
+    return not parakeet.MODEL_DIR.exists()
 
 
 # -- the machine ---------------------------------------------------------------------
@@ -294,15 +346,22 @@ class Downloader:
 
     def _run(self, spec: Spec, job: Download) -> None:
         try:
-            from huggingface_hub import snapshot_download
+            if spec.engine == "parakeet":
+                self._run_parakeet(job)
+            else:
+                from huggingface_hub import snapshot_download
 
-            snapshot_download(spec.repo, allow_patterns=ALLOW_PATTERNS,
-                              tqdm_class=_progress_class(job))
+                snapshot_download(spec.repo, allow_patterns=ALLOW_PATTERNS,
+                                  tqdm_class=_progress_class(job))
             job.state = "done"
             if job.total and job.done < job.total:
                 job.done = job.total
-        except Cancelled:
+        except (Cancelled, parakeet.Cancelled):
             job.state = "cancelled"
+        except parakeet.NotAvailable as exc:
+            # Already said the way somebody can act on it, and not a Hugging Face message.
+            job.state = "failed"
+            job.error = str(exc)[:200]
         except Exception as exc:
             job.state = "failed"
             job.error = _why(exc)
@@ -311,6 +370,17 @@ class Downloader:
                 self.on_done(job)
             except Exception:
                 pass
+
+
+    @staticmethod
+    def _run_parakeet(job: Download) -> None:
+        """Fetch the Parakeet model with the page's own progress and cancel."""
+        def progress(done: int, total: int) -> None:
+            job.done = done
+            job.total = total or job.total
+
+        parakeet.fetch(progress=progress,
+                       cancelled=job.cancel.is_set if job.cancel is not None else None)
 
 
 def _why(exc: Exception) -> str:
@@ -349,8 +419,11 @@ class ModelManager:
 
     def in_use(self) -> dict[str, list[str]]:
         """{model name: ["partial"] / ["final"] / both} for what the session runs now."""
-        names = getattr(getattr(self.session, "asr", None), "names", None)
+        asr = getattr(self.session, "asr", None)
         out: dict[str, list[str]] = {}
+        if getattr(asr, "engine", "whisper") == "parakeet":
+            return {PARAKEET.name: ["partial", "final"]}
+        names = getattr(asr, "names", None)
         if isinstance(names, tuple) and len(names) == 2:
             out.setdefault(names[0], []).append("partial")
             out.setdefault(names[1], []).append("final")
@@ -383,20 +456,34 @@ class ModelManager:
         device = getattr(asr, "device", None) if asr is not None else None
         if not device or device == "auto":
             device = resolve_device(asked_device)
+        engine_list = engines()
+        runtime_why = next(e["why"] for e in engine_list if e["id"] == "parakeet")
         rows = []
-        for spec in CATALOG:
-            here = complete(spec.repo)
+        for spec in SPECS.values():
+            here = is_here(spec)
             job = jobs.get(spec.name)
+            if spec.engine == "parakeet":
+                have = parakeet.installed_bytes()
+            else:
+                have = sizes.get(spec.repo)
             rows.append({
                 "name": spec.name,
                 "catalog": True,
-                "size": (sizes.get(spec.repo) or spec.size) if here else spec.size,
-                "size_text": human(sizes.get(spec.repo) or spec.size),
+                "engine": spec.engine,
+                "size": (have or spec.size) if here else spec.size,
+                "size_text": human(have or spec.size),
                 "installed": here,
                 "errors": spec.errors,
                 "speed": round(1 / spec.rtf, 1) if spec.rtf else None,
+                # What the speed was measured on when it was not the GPU the page's
+                # footnote names: "" for the Whisper rows, "CPU, 8 threads" for Parakeet.
+                "speed_basis": spec.basis,
                 "note": spec.note,
                 "maker": spec.maker,
+                "family": spec.family,
+                # Why this row cannot be downloaded for use here: its engine's runtime is
+                # not installed. "" for every row that can.
+                "blocked": runtime_why if spec.engine == "parakeet" else "",
                 "blind": spec.blind,
                 "in_use": using.get(spec.name, []),
                 "download": job.public() if job is not None and
@@ -405,9 +492,11 @@ class ModelManager:
         # A model named by a flag or a hand-edited profile that is not in the catalog is
         # still the model in use, and the page must not pretend otherwise.
         for name, roles in using.items():
-            if name not in BY_NAME:
-                rows.append({"name": name, "catalog": False, "size": None, "size_text": "",
-                             "installed": True,
+            if name not in SPECS:
+                rows.append({"name": name, "catalog": False, "engine": "whisper",
+                             "speed_basis": "", "family": "Whisper",
+                             "size": None, "size_text": "",
+                             "installed": True, "blocked": "",
                              "errors": None, "speed": None, "note": "chosen outside Flow Home", "maker": "",
                              "blind": False, "in_use": roles, "download": None})
         info = gpu() if device == "cuda" or sys.platform == "win32" else None
@@ -417,6 +506,9 @@ class ModelManager:
         auto_partial, auto_final = default_models(device)
         return {
             "models": rows,
+            "engine": getattr(asr, "engine", "whisper"),
+            "engines": engine_list,
+            "engine_switchable": callable(getattr(self.session, "set_engine", None)),
             "measured_on": MEASURED_ON,
             "device": device,
             "device_asked": asked_device,
@@ -427,10 +519,31 @@ class ModelManager:
             "automatic": {"partial": auto_partial, "final": auto_final},
             "chosen": {"partial": asked[0], "final": asked[1]},
             "cache": {"path": cache_dir(),
-                      "bytes": sum(sizes.get(s.repo, 0) for s in CATALOG),
-                      "text": human(sum(sizes.get(s.repo, 0) for s in CATALOG))},
+                      "bytes": sum(sizes.get(s.repo, 0) for s in CATALOG)
+                      + parakeet.installed_bytes(),
+                      "text": human(sum(sizes.get(s.repo, 0) for s in CATALOG)
+                                    + parakeet.installed_bytes())},
             "swappable": callable(getattr(asr, "swap", None)),
         }
+
+
+def engines() -> list[dict]:
+    """The speech engines the page's selector offers, and whether each can be chosen here.
+
+    A list rather than two fixed buttons, so a third (Apple's, on a Mac) is one more entry
+    and not a restructure. `available` is whether the *runtime* is installed — the model
+    download is a separate step the page offers — and `why` is what to say when it is not.
+    """
+    ok, why = parakeet.runtime_installed()
+    return [
+        {"id": "whisper", "label": "Whisper", "maker": "OpenAI",
+         "available": True, "why": "", "installed": True},
+        {"id": "parakeet", "label": "Parakeet", "maker": "NVIDIA",
+         "available": ok,
+         "why": "" if ok else ("needs the Parakeet add-on: "
+                               'uv pip install -e ".[parakeet]"'),
+         "installed": parakeet.model_present(), "threads": parakeet.default_threads()},
+    ]
 
 
 def _why_cpu(device: str) -> str:

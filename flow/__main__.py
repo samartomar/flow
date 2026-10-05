@@ -298,7 +298,32 @@ def _parakeet_engine() -> tuple[str, str]:
     return "parakeet", " (--engine parakeet)"
 
 
-def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
+def _saved_parakeet_engine() -> tuple[str, str]:
+    """The Parakeet the Models page chose last time, if this launch can run it.
+
+    Unlike `--engine parakeet` this **never downloads**: a flag is somebody asking right
+    now and is told what is happening; a remembered choice is a launch that must not sit
+    behind 465 MB before the pill appears. So a runtime or a model that has gone missing
+    is a line saying so and Whisper for this launch — the saved choice is left alone, so
+    it takes effect again the moment the add-on or the model is back, and the Models page
+    is where the download is offered.
+    """
+    from . import parakeet
+
+    ok, why = parakeet.runtime_installed()
+    if not ok:
+        say(f"Parakeet was chosen on the Models page but {why}; using whisper this time")
+        return "whisper", ""
+    if not parakeet.model_present():
+        say(f"Parakeet was chosen on the Models page but its model is not on this PC "
+            f"({parakeet.ARCHIVE_BYTES / 1024 ** 2:.0f} MB) - Flow Home > Models "
+            f"downloads it; using whisper this time")
+        return "whisper", ""
+    return "parakeet", " (chosen on the Models page)"
+
+
+def _engine(args, partial_name: str, final_name: str,
+            saved: str = "whisper") -> tuple[str, str]:
     """Which decoder this launch gets, and the clause explaining why.
 
     `--engine` decides when it is asked to. `auto` is the interesting one, and its rule
@@ -314,12 +339,16 @@ def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
     network that blocks huggingface.co, where the alternative is not a worse engine but
     no dictation at all.
 
-    **`auto` never selects Parakeet, on any platform, whatever is installed or on disk.**
-    It is the most accurate engine a CPU can run here, and it still asks for a 93 MB
-    runtime and a 465 MB model, has no hotword biasing, is one tier, hears Japanese-accented
-    English worse than `small.en`, and guards against invention with a threshold that
-    rests on one measured example. That is a trade a person makes by typing
-    `--engine parakeet`, and `--engine` is the only way to make it.
+    **`auto` never selects Parakeet on its own, on any platform, whatever is installed or
+    on disk.** It is the most accurate engine a CPU can run here, and it still asks for a
+    93 MB runtime and a 465 MB model, has no hotword biasing, is one tier, hears
+    Japanese-accented English worse than `small.en`, and guards against invention with a
+    threshold that rests on one measured example. That is a trade a person makes by name:
+    `--engine parakeet`, or choosing it on Flow Home's Models page, which is remembered in
+    the profile as `saved`. `--engine auto` with a saved "parakeet" **is** that choice
+    being honoured and not Flow deciding — a profile that is absent or says "whisper"
+    leaves everything below exactly as it was, native-on-a-Mac included. An explicit
+    `--engine` always beats the saved one, for that launch only.
 
     Every path returns a clause for the startup line, because the engine decides what
     Flow can hear and a silent choice would be the one thing nobody could check.
@@ -328,6 +357,8 @@ def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
         return "whisper", ""
     if args.engine == "parakeet":
         return _parakeet_engine()
+    if args.engine == "auto" and saved == "parakeet":
+        return _saved_parakeet_engine()
     if sys.platform != "darwin":
         if args.engine == "native":
             say("--engine native is macOS only; using whisper")
@@ -730,7 +761,9 @@ def main(argv: list[str] | None = None) -> int:
     if sys.platform == "darwin" and args.engine == "auto":
         planned = decode_plan()
         partial_name, final_name, _lines = planned
-    engine, engine_why = _engine(args, partial_name, final_name)
+    engine, engine_why = _engine(
+        args, partial_name, final_name,
+        saved=profile.engine if profile is not None else "whisper")
 
     def say_models() -> None:
         """The device and model lines, from a thread, after the pill is on screen."""
@@ -922,6 +955,25 @@ def main(argv: list[str] | None = None) -> int:
         lite=lite,
         history=history,
     )
+    def make_engine(name: str):
+        """What `Session.set_engine` builds a transcriber from, for the engine it has not run.
+
+        Whisper's names are read **now**: a flag still wins, then whatever the Models page
+        has since written to the profile — the same order the launch used.
+        """
+        if name == "parakeet":
+            return _parakeet_transcriber(lexicon)
+        return WhisperTranscriber(
+            args.model or args.partial_model
+            or (profile.partial_model if profile is not None else None),
+            args.model or args.final_model
+            or (profile.final_model if profile is not None else None),
+            lexicon=lexicon,
+            baseline=profile.confidence if profile is not None else None,
+            device=decode_device,
+        )
+
+    session.engine_factory = make_engine
     if args.device is None and mic_index is not None and profile is not None:
         # Found by name at launch, so found by name again after a device change.
         session.mic.want = profile.mic_device

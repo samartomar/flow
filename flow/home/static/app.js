@@ -109,6 +109,8 @@
     }).join("")}</div>`;
   const bars = (n = 12, cls = "") => `<span class="meter ${cls}" data-meter="${n}">${"<i></i>".repeat(n)}</span>`;
   const human = (bytes) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+  // What the rail's footer and the Models page call an engine that has no tier names.
+  const ENGINE_WORD = { parakeet: "Parakeet", native: "Apple speech" };
   const SIDE_TINT = { dictate: C.type, refine: C.refine, ask: C.ask };
   const MODE_WORD = { dictate: "Dictate", refine: "Refine", ask: "Ask" };
 
@@ -142,7 +144,8 @@
     if (!live) { el.innerHTML = '<span class="fine">connecting to Flow</span>'; return; }
     const heard = live.capturing ? C.green : C.muted;
     const model = live.loading ? "loading the speech model"
-      : live.models ? `${live.models[1]} for your words` : "speech model not loaded yet";
+      : live.models ? `${live.models[1]} for your words`
+        : ENGINE_WORD[live.engine] ? `${ENGINE_WORD[live.engine]} for your words` : "speech model not loaded yet";
     el.innerHTML = `
       <div class="row">${icon("mic", heard, 15)}<span class="grow ellipsis">${esc(live.mic || "no microphone")}</span>${bars(6, live.capturing ? "live" : "")}</div>
       <div class="row">${icon("layers", C.muted, 15)}<span class="grow ellipsis">${esc(model)}</span></div>
@@ -276,7 +279,10 @@
       return `${failed}<span class="note">on this PC</span>
         <button type="button" class="icon-btn" aria-label="Delete ${esc(m.name)}" title="${using ? "In use - choose another model first" : "Delete"}" data-act="delete" data-name="${esc(m.name)}" ${using || busy ? "disabled" : ""}>${icon("trash", using ? C.dim : C.soft, 16)}</button>`;
     }
-    return `${failed}<button type="button" class="btn sm" data-act="download" data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
+    // A model whose engine cannot run here is not offered for download: 465 MB for
+    // something the page would then refuse to switch to.
+    const blocked = m.blocked ? `disabled title="${esc(m.blocked)}"` : "";
+    return `${failed}<button type="button" class="btn sm" data-act="download" ${blocked} data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
   }
 
   function renderModels(d) {
@@ -285,7 +291,16 @@
     const vo = d.voice;
     const gpu = sp.gpu;
     const onGpu = sp.device === "cuda";
-    const catalog = sp.models.filter((m) => m.catalog);
+    // The tier dropdowns are Whisper's: Parakeet is an engine, chosen by the control above.
+    const catalog = sp.models.filter((m) => m.catalog && m.engine === "whisper");
+    const engine = sp.engine || "whisper";
+    const engines = sp.engines || [];
+    const parakeet = engines.find((e) => e.id === "parakeet") || {};
+    const engineControl = sp.engine_switchable && engines.length > 1 ? `
+        <div class="row wrap"><span class="note">Engine</span>
+          <div class="seg" role="group" aria-label="Speech engine">${engines.map((e) =>
+            `<button type="button" aria-pressed="${e.id === engine ? "true" : "false"}" data-act="engine" data-value="${esc(e.id)}" ${e.available ? "" : "disabled"} ${e.why ? `title="${esc(e.why)}"` : ""}>${esc(e.label)} &middot; ${esc(e.maker)}</button>`).join("")}</div></div>
+        ${engines.filter((e) => !e.available).map((e) => `<p class="note warn">${esc(e.why.charAt(0).toUpperCase() + e.why.slice(1))}</p>`).join("")}` : "";
     const option = (tier, chosen, auto) => [`<option value="" ${chosen ? "" : "selected"}>Automatic (${esc(auto)})</option>`]
       .concat(catalog.map((m) => `<option value="${esc(m.name)}" ${m.name === chosen ? "selected" : ""}>${esc(m.name)}${m.installed ? "" : " - downloads first"}${m.blind ? " - invents words in silence" : ""}</option>`))
       .join("");
@@ -298,11 +313,12 @@
       if (m.in_use.includes("partial")) tags.push('<span class="badge green"><span class="dot green"></span>in use: live preview</span>');
       if (m.name === sp.automatic.final && !m.in_use.includes("final")) tags.push('<span class="badge">recommended here</span>');
       if (m.blind) tags.push(`<span class="badge amber">${icon("warn", C.amber, 12)}invents words in silence</span>`);
+      const basis = m.speed_basis ? `<span class="fine">on ${esc(m.speed_basis)}</span>` : "";
       return `<div class="tr ${m.in_use.length ? "using" : ""}" role="row">
-        <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.maker ? `<span class="fine">Whisper, by ${esc(m.maker)}</span>` : ""}${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
+        <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.maker ? `<span class="fine">${esc(m.family || "Whisper")}, by ${esc(m.maker)}</span>` : ""}${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
         <div role="cell" class="note">${esc(m.size_text)}</div>
         <div role="cell">${m.errors != null ? `<span class="${m.name === "large-v3" ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
-        <div role="cell" class="note">${m.speed != null ? m.speed + "&times;" : "&ndash;"}</div>
+        <div role="cell" class="note">${m.speed != null ? `<div class="col"><span>${m.speed}&times;</span>${basis}</div>` : "&ndash;"}</div>
         <div role="cell" class="acts">${modelActions(m, sp.loading)}</div></div>`;
     }).join("");
     const clis = ag.available.length
@@ -363,28 +379,31 @@
           <div class="row wrap"><b>${esc(gpu ? gpu.name : "No NVIDIA GPU found")}</b>${gpu && gpu.memory_mb ? `<span class="note">${Math.round(gpu.memory_mb / 1024)} GB video memory</span>` : ""}
             <span class="badge ${onGpu ? "green" : ""}">${onGpu ? '<span class="dot green"></span>speech runs on the GPU' : "speech runs on the CPU"}</span>
             ${sp.compute_types.includes("int8") && onGpu && !sp.compute_types.includes("float16") ? '<span class="badge">int8</span>' : ""}</div>
-          <p class="note">${onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
+          <p class="note">${engine === "parakeet" ? "Parakeet runs on the CPU whatever graphics card this PC has; the card matters only to Whisper." : onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
             : esc(sp.why_cpu || "The CPU runs the smaller models in time; the large ones need a GPU.")}</p>
         </div>
       </div></section>
       <section class="card">
         <div class="row wrap"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}
           <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="models">${icon("folder", C.text, 14)}Open folder</button></div>
-        <p class="note">These are Whisper models from OpenAI, and smaller distil- copies of them from Hugging Face. They run on this PC; nothing you say is sent to either.</p>
-        <p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>
-        ${sp.swappable ? `<div class="choose">
+        <p class="note">These are Whisper models from OpenAI, smaller distil- copies of them from Hugging Face, and Parakeet from NVIDIA. They run on this PC; nothing you say is sent to any of them.</p>
+        ${engineControl}
+        ${engine === "parakeet"
+          ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. It runs on the CPU, ${esc(parakeet.threads || "")} threads. It is weaker than Whisper on Japanese-accented English, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint.</p>`
+          : `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>`}
+        ${engine === "whisper" && sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
           <label>Live preview<select id="partial-model">${option("partial", sp.chosen.partial, sp.automatic.partial)}</select></label>
           <label>Run speech on<select id="decode-device">${[["", "Automatic"], ["cuda", "The GPU"], ["cpu", "The CPU"]].map(([v, t]) =>
             `<option value="${v}" ${(sp.device_asked === v || (!v && sp.device_asked === "auto")) ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         </div>
         <div class="row"><button type="button" class="btn primary" data-act="use-models">Use these</button><p class="note">Applies now. A model that is not on this PC downloads first, then takes over.</p></div>`
-        : '<p class="note">This speech engine has no models to choose between.</p>'}
+        : engine === "parakeet" ? "" : '<p class="note">This speech engine has no models to choose between.</p>'}
         <div class="table" role="table" aria-label="Speech models">
           <div class="tr head" role="row"><span class="label" role="columnheader">Model</span><span class="label" role="columnheader">Size</span><span class="label" role="columnheader">Errors / 100 words</span><span class="label" role="columnheader">Speed</span><span role="columnheader"></span></div>
           ${rows}
         </div>
-        <p class="fine">Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement. The marked models skip the silence signal Flow's filter relies on, so they hear &ldquo;thank you&rdquo; in an empty room.</p>
+        <p class="fine">Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement. The marked models skip the silence signal Flow's filter relies on, so they hear &ldquo;thank you&rdquo; in an empty room.${sp.models.some((m) => m.speed_basis) ? " Parakeet&rsquo;s speed was measured on a CPU with 8 threads rather than the GPU, so it is not comparable to the speeds above it; its errors are on the same clips." : ""}</p>
       </section>
       <div class="split">
         <section class="card">
@@ -1247,6 +1266,8 @@
       if (!confirm(`Delete ${el.dataset.name} from this PC? You can download it again.`)) return;
       run(() => api("models/delete", { name: el.dataset.name }), `Deleted ${el.dataset.name}`);
     },
+    engine: (el) => run(() => api("models/engine", { engine: el.dataset.value }),
+      el.dataset.value === "parakeet" ? "Choosing Parakeet - the pill shows the load" : "Choosing Whisper - the pill shows the load"),
     "use-models": () => run(() => api("models/use", {
       final: value("final-model") || null, partial: value("partial-model") || null,
       device: value("decode-device") || "auto",

@@ -148,6 +148,7 @@ p { margin: 0; }
   color: var(--muted); font-weight: 500; font-size: 12.5px; cursor: pointer; white-space: nowrap;
 }
 .seg button[aria-pressed="true"] { background: #30353F; color: var(--text); }
+.seg button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 select, .input {
   height: 32px; border-radius: 8px; background-color: var(--chip); border: 1px solid var(--ring);

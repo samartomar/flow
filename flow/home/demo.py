@@ -50,7 +50,25 @@ DEMO_ANSWER = (
 )
 
 
+class FakeParakeet:
+    """The pretend Parakeet: one model, on the CPU, with no tiers to choose between."""
+
+    engine = "parakeet"
+    device = "cpu"
+    loading = False
+    loaded = True
+    lexicon = None
+
+    def text(self, audio, *, final: bool = False, hotwords: str = "") -> str:
+        return ""
+
+    def unload(self) -> None:
+        self.loaded = False
+
+
 class FakeTranscriber:
+    engine = "whisper"
+
     def __init__(self) -> None:
         self._asked = (None, None)
         self.device = "cuda"
@@ -356,6 +374,31 @@ class FakeSession:
             self.profile.save()
         return True
 
+    @property
+    def engine(self) -> str:
+        return self.asr.engine
+
+    def engine_refusal(self, name) -> str:
+        from ..profile import ENGINES
+
+        return "" if name in ENGINES else "Flow does not know that speech engine"
+
+    def set_engine(self, name) -> bool:
+        """Swap the pretend transcriber, keeping the Whisper one for the way back."""
+        if self.engine_refusal(name):
+            return False
+        if name == self.engine:
+            return True
+        kept = getattr(self, "_kept", {})
+        kept[self.engine] = self.asr
+        self.asr = kept.get(name) or (FakeParakeet() if name == "parakeet"
+                                      else FakeTranscriber())
+        self._kept = kept
+        if self.profile is not None:
+            self.profile.engine = name
+            self.profile.save()
+        return True
+
     def set_microphone(self, name) -> bool:
         why = self.mic.use(name)
         if self.profile is not None:
@@ -572,7 +615,15 @@ def main(argv=None) -> int:
                     help="start with history kept, and a few days of pretend entries")
     ap.add_argument("--first-run", action="store_true",
                     help="open at the first run's five steps, as a new profile does")
+    ap.add_argument("--parakeet", action="store_true",
+                    help="pretend the Parakeet add-on and its model are installed, so the "
+                         "Models page shows the engine choice enabled")
     args = ap.parse_args(argv)
+    if args.parakeet:
+        from .. import parakeet
+
+        parakeet.runtime_installed = lambda: (True, "")
+        parakeet.model_present = lambda model_dir=None: True
     home, _session = build(kept=args.history)
     page = "start" if args.first_run else "home"
     url = home.url(page)

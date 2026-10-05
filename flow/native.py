@@ -151,6 +151,8 @@ class NativeTranscriber:
     #: Set so `Session._pump_health`'s idle-unload check reads something true. There is
     #: no 605 MB to give back here — the models belong to the OS — but the session asks.
     loading = False
+    #: Which engine this is, as `Session.engine` and the Models page name it.
+    engine = "native"
 
     def __init__(self, binary: Path | None = None) -> None:
         self._binary = Path(binary) if binary else None

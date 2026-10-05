@@ -521,6 +521,9 @@ class WhisperTranscriber:
     finals model at all.
     """
 
+    #: Which engine this is, as `Session.engine`, the profile and the Models page name it.
+    engine = "whisper"
+
     def __init__(
         self,
         partial_model: str | None = None,
