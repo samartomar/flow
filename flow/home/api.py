@@ -107,6 +107,7 @@ APP_NAMES = {
 SET_ASIDE_WHY = {
     "filler": "what speech models write when they hear only the room",
     "unconfident": "Flow was not sure these were words",
+    "unconfident-tokens": "Flow was not sure these were words",
     "empty": "nothing but noise",
 }
 

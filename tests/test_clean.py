@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.clean import (  # noqa: E402
+    TOKEN_LOGPROB_MIN,
     collapse_phrase_repeats,
     collapse_repeats,
     invented_reason,
@@ -278,6 +279,54 @@ class TestTheSignOffHallucinationInFrontOfRealSpeech(unittest.TestCase):
                      "Thank you for watching!", "Thanks for listening"):
             with self.subTest(text=text):
                 self.assertIsNotNone(invented_reason(text, None))
+
+
+class TestTokenConfidenceForAnEngineWithNoSilenceProbability(unittest.TestCase):
+    """Parakeet's gate: `mean_token_logprob`, read only when `no_speech_prob` is None.
+
+    The numbers are the 2026-10-04 measurements in `TOKEN_LOGPROB_MIN`'s comment: the one
+    invention ("It is." on fan noise) at -1.10, and real EdAcc speech at p1 -0.59.
+    """
+
+    def test_the_measured_invention_is_dropped_and_named(self):
+        self.assertEqual(invented_reason("It is.", None, None, None, -1.10),
+                         "unconfident-tokens")
+        self.assertTrue(is_invented("It is.", mean_token_logprob=-1.10))
+
+    def test_the_worst_one_percent_of_real_speech_is_kept(self):
+        self.assertIsNone(invented_reason(REAL, None, None, None, -0.59))
+        self.assertFalse(is_invented(REAL, mean_token_logprob=-0.59))
+
+    def test_the_bar_is_the_constant_and_exclusive(self):
+        self.assertIsNone(invented_reason(REAL, mean_token_logprob=TOKEN_LOGPROB_MIN))
+        self.assertEqual(invented_reason(REAL, mean_token_logprob=TOKEN_LOGPROB_MIN - 0.01),
+                         "unconfident-tokens")
+
+    def test_no_reading_means_no_evidence_not_a_drop(self):
+        self.assertIsNone(invented_reason(REAL, mean_token_logprob=None))
+
+    def test_a_known_filler_keeps_its_more_specific_name(self):
+        self.assertEqual(invented_reason("Thank you", None, None, None, -1.5), "filler")
+
+    def test_empty_is_still_empty(self):
+        self.assertEqual(invented_reason("[BLANK_AUDIO]", None, None, None, -0.1), "empty")
+
+    def test_whisper_decisions_ignore_it_entirely(self):
+        # Byte-identical for a caller that has `no_speech_prob`: the argument can neither
+        # rescue a segment Whisper's rules reject nor condemn one they keep.
+        cases = [
+            ("You", 0.69, -0.71),
+            ("I need...", 0.099, -0.914),
+            (REAL, 0.00017, -0.2),
+            (REAL, 0.9, -0.95),
+            (REAL, 0.9, -0.3),
+        ]
+        for text, ns, lp in cases:
+            with self.subTest(text=text, ns=ns, lp=lp):
+                plain = invented_reason(text, ns, lp)
+                for token_lp in (-5.0, -0.5, 0.0):
+                    self.assertEqual(
+                        invented_reason(text, ns, lp, None, token_lp), plain)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,22 @@ LOW_CONFIDENCE = -0.8
 CONFIDENCE_MARGIN = -0.5
 
 
+#: The invention bar for an engine that has no `no_speech_prob` at all: the **mean
+#: log-probability of the tokens it emitted** (`flow/parakeet.py` reads it from sherpa-onnx's
+#: `ys_log_probs`). Not `LOW_CONFIDENCE`, which is Whisper's per-segment `avg_logprob` on
+#: Whisper's own scale, so it is a second constant rather than a reuse.
+#:
+#: **Provisional, and it rests on ONE invention.** Parakeet TDT 0.6B v3 int8, measured
+#: 2026-10-04: 7 of 8 silence/noise clips decoded to nothing; the eighth, a fan-noise
+#: recording, produced "It is." at a mean token log-prob of **-1.10**. Real speech (299
+#: EdAcc clips) sat at p1 -0.59, p5 -0.40, p50 -0.11. -0.8 sits between the
+#: only invention and the worst 1% of real speech, so by that distribution fewer than 1 clip
+#: in 100 of accented speech is at risk and the one invention is caught — but a single
+#: sample cannot say where the invented ones really sit. Re-measure before trusting it
+#: more, and prefer relaxing it to tightening it: a dropped real word cannot be recovered.
+TOKEN_LOGPROB_MIN = -0.8
+
+
 def confidence_floor(baseline: float | None) -> float:
     """The unconfident bar for this speaker.
 
@@ -237,6 +253,7 @@ def invented_reason(
     no_speech_prob: float | None = None,
     avg_logprob: float | None = None,
     baseline: float | None = None,
+    mean_token_logprob: float | None = None,
 ) -> str | None:
     """Which rule rejects this segment, or None to keep it.
 
@@ -244,6 +261,11 @@ def invented_reason(
     A drop is a deletion of something the user said, so it has to be attributable —
     both for the log line the runtime will emit (P2) and for a benchmark that needs to
     say *which* filter ate the speech rather than that some filter did.
+
+    `mean_token_logprob` is read **only when `no_speech_prob` is None** — an engine that
+    has no silence probability (Parakeet) and does have per-token log-probabilities. A
+    caller that has `no_speech_prob` is a Whisper caller and gets exactly the rules below
+    the early return, unchanged; the argument cannot soften or tighten them.
     """
     stripped = normalise(text).strip().strip(".!?,").lower()
     if not stripped:
@@ -251,8 +273,14 @@ def invented_reason(
 
     if no_speech_prob is None:
         # No probability available (a non-Whisper engine, say): fall back to the
-        # narrow whole-utterance filler check only.
-        return "filler" if stripped in _FILLER_ONLY else None
+        # narrow whole-utterance filler check, and — for an engine that reports its
+        # token confidence — the one signal it has. Filler first, so a known
+        # hallucination keeps the more specific name.
+        if stripped in _FILLER_ONLY:
+            return "filler"
+        if mean_token_logprob is not None and mean_token_logprob < TOKEN_LOGPROB_MIN:
+            return "unconfident-tokens"
+        return None
 
     if no_speech_prob <= NO_SPEECH_MAX:
         return None
@@ -284,10 +312,13 @@ def is_invented(
     no_speech_prob: float | None = None,
     avg_logprob: float | None = None,
     baseline: float | None = None,
+    mean_token_logprob: float | None = None,
 ) -> bool:
     """True if this segment looks like the model talking to itself.
 
     Requires two signals to agree, so an unusual-but-real utterance is not discarded on
-    one borderline number.
+    one borderline number. (The token-confidence path for an engine with no
+    `no_speech_prob` is the exception, and `TOKEN_LOGPROB_MIN` says why it is allowed.)
     """
-    return invented_reason(text, no_speech_prob, avg_logprob, baseline) is not None
+    return invented_reason(text, no_speech_prob, avg_logprob, baseline,
+                           mean_token_logprob) is not None
