@@ -30,6 +30,6 @@ NestedInstallerFiles:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/samartomar/flow/releases/download/v0.8.0/flow-windows-x64.zip
-    InstallerSha256: FILL-ME-SHA256
+    InstallerSha256: 325957561fc0b8e6ea6036b98a5cd9c40e76cf7790d8ebd5dd5aecd415ab1e49
 ManifestType: installer
 ManifestVersion: 1.12.0
