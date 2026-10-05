@@ -606,21 +606,23 @@ def _args(engine):
     return mock.Mock(engine=engine)
 
 
-class TestAutoNeverChoosesParakeet(unittest.TestCase):
-    """The rule that keeps this an opt-in: nothing installed or on disk changes `auto`."""
+class TestAutoNeverChoosesTheOnnxBuilds(unittest.TestCase):
+    """`auto` picks Parakeet only as the GPU build (`TestAutoPicksTheGpuBuild`). The two ONNX
+    builds ask for an add-on and are chosen by name, whatever is installed or on disk."""
 
     def everything_ready(self):
         return (mock.patch.object(parakeet, "runtime_installed", return_value=(True, "")),
                 mock.patch.object(parakeet, "model_present", return_value=True),
                 mock.patch.object(parakeet, "available", return_value=(True, "")),
+                mock.patch.object(parakeet, "gpu_backend", return_value=("", "no GPU")),
                 mock.patch.object(parakeet, "fetch"))
 
-    def test_auto_keeps_whisper_on_every_platform_with_parakeet_fully_ready(self):
+    def test_auto_keeps_whisper_on_every_platform_with_the_onnx_builds_fully_ready(self):
         for platform in ("win32", "linux", "darwin"):
             for whisper_here in (True, False):
                 with self.subTest(platform=platform, whisper_here=whisper_here):
-                    a, b, c, fetch = self.everything_ready()
-                    with a, b, c, fetch as fetching, \
+                    a, b, c, d, fetch = self.everything_ready()
+                    with a, b, c, d, fetch as fetching, \
                             mock.patch.object(sys, "platform", platform), \
                             mock.patch("flow.__main__._models_present",
                                        return_value=whisper_here), \
@@ -631,10 +633,164 @@ class TestAutoNeverChoosesParakeet(unittest.TestCase):
                     fetching.assert_not_called()
 
     def test_whisper_by_name_never_looks_at_parakeet(self):
-        with mock.patch.object(parakeet, "runtime_installed") as probe:
+        with mock.patch.object(parakeet, "runtime_installed") as probe, \
+                mock.patch.object(parakeet, "gpu_backend") as backend:
             self.assertEqual(_engine(_args("whisper"), "base.en", "small.en"),
                              ("whisper", ""))
         probe.assert_not_called()
+        backend.assert_not_called()
+
+
+class TestAutoPicksTheGpuBuild(unittest.TestCase):
+    """The reversal of "`auto` never selects Parakeet" (decisions.md 2026-10-05): on a PC with a
+    GPU backend `auto` is Parakeet's GPU build when it is installed, and when it is not it is
+    Whisper for this launch plus a background download that takes over."""
+
+    def pick(self, engine="auto", saved="", variant=None, backend="cuda", present=True,
+             whisper_asked=False, platform="win32", whisper_here=True, native=(False, "no")):
+        said = []
+        with mock.patch.object(parakeet, "gpu_backend",
+                               return_value=(backend, "" if backend else "no GPU")), \
+                mock.patch.object(parakeet, "model_present",
+                                  side_effect=lambda key, model_dir=None: present and key == "gpu"), \
+                mock.patch.object(parakeet, "runtime_installed", return_value=(False, "no")), \
+                mock.patch.object(parakeet, "fetch") as fetching, \
+                mock.patch.object(sys, "platform", platform), \
+                mock.patch("flow.__main__.say", said.append), \
+                mock.patch("flow.__main__._models_present", return_value=whisper_here), \
+                mock.patch("flow.native.available", return_value=native):
+            got = _engine(_args(engine), "base.en", "small.en", saved=saved, variant=variant,
+                          whisper_asked=whisper_asked)
+        return got, said, fetching
+
+    def test_a_gpu_and_the_installed_build_is_parakeet_and_the_line_says_why(self):
+        (engine, why), said, fetching = self.pick()
+        self.assertEqual(engine, "parakeet")
+        self.assertIn("auto", why)
+        self.assertIn("GPU", why)
+        fetching.assert_not_called()  # the launch never downloads: the background fetch does
+        self.assertEqual(said, [])
+
+    def test_it_needs_no_onnx_add_on(self):
+        # `runtime_installed` is (False, ...) in `pick`: the GPU build is a helper process.
+        self.assertEqual(self.pick()[0][0], "parakeet")
+
+    def test_vulkan_counts_as_a_gpu_backend(self):
+        self.assertEqual(self.pick(backend="vulkan")[0][0], "parakeet")
+
+    def test_a_gpu_without_the_build_is_whisper_for_now_and_says_a_download_is_coming(self):
+        (engine, why), _said, fetching = self.pick(present=False)
+        self.assertEqual(engine, "whisper")
+        self.assertIn("downloading in the background", why)
+        self.assertIn("MB", why)
+        fetching.assert_not_called()  # `_engine` decides; Home's downloader does the work
+
+    def test_no_gpu_backend_leaves_auto_exactly_as_it_was(self):
+        self.assertEqual(self.pick(backend="")[0], ("whisper", ""))
+        (engine, why), _s, _f = self.pick(backend="", platform="darwin", whisper_here=False,
+                                          native=(True, ""))
+        self.assertEqual(engine, "native")
+        self.assertIn("models not found", why)
+
+    def test_a_saved_choice_is_never_overridden_either_way(self):
+        # A saved whisper is a choice: no Parakeet even with the build installed...
+        self.assertEqual(self.pick(saved="whisper")[0], ("whisper", ""))
+        # ...and no clause promising a download that will not happen.
+        self.assertEqual(self.pick(saved="whisper", present=False)[0], ("whisper", ""))
+
+    def test_a_saved_parakeet_still_goes_through_its_own_path(self):
+        (engine, why), _s, _f = self.pick(saved="parakeet", variant="gpu")
+        self.assertEqual(engine, "parakeet")
+        self.assertIn("Models page", why)
+
+    def test_the_flag_beats_auto_both_ways(self):
+        self.assertEqual(self.pick(engine="whisper")[0], ("whisper", ""))
+        self.assertEqual(self.pick(engine="whisper", present=False)[0], ("whisper", ""))
+        self.assertEqual(self.pick(engine="native", platform="win32")[0], ("whisper", ""))
+
+    def test_a_whisper_model_named_by_a_flag_is_asking_for_whisper(self):
+        self.assertEqual(self.pick(whisper_asked=True)[0], ("whisper", ""))
+        self.assertEqual(self.pick(whisper_asked=True, present=False)[0], ("whisper", ""))
+
+    def test_a_saved_onnx_build_is_a_choice_of_build_and_auto_stays_out(self):
+        self.assertEqual(self.pick(variant="int8")[0], ("whisper", ""))
+        self.assertEqual(self.pick(variant="fp32", present=False)[0], ("whisper", ""))
+        # "auto" and "gpu" are the build `auto` would pick anyway.
+        self.assertEqual(self.pick(variant="auto")[0][0], "parakeet")
+        self.assertEqual(self.pick(variant="gpu")[0][0], "parakeet")
+
+    def test_a_mac_has_no_gpu_backend_so_its_native_path_is_untouched(self):
+        # The real answer on a Mac, not a patched one: `_detect_backend` says Windows-only.
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.assertEqual(parakeet._detect_backend()[0], "")
+
+
+class _FakeDownloads:
+    def __init__(self):
+        self.started = []
+
+    def start(self, spec, then_use=""):
+        self.started.append((spec.name, then_use))
+
+
+class TestTheBackgroundFetch(unittest.TestCase):
+    """`_background_gpu_fetch`: the same `start(then_use="engine")` the Models page's
+    "Download & use" makes, through the `ModelManager` that exists with the session and not
+    with the window."""
+
+    def fetch(self, **kw):
+        from flow.__main__ import _background_gpu_fetch
+
+        home = mock.Mock()
+        home.models.downloads = _FakeDownloads()
+        picks = dict(engine="auto", saved="", variant=None, whisper_asked=False,
+                     backend="cuda", present=False)
+        picks.update(kw)
+        with mock.patch.object(parakeet, "gpu_backend",
+                               return_value=(picks["backend"], "" if picks["backend"] else "none")), \
+                mock.patch.object(parakeet, "model_present", return_value=picks["present"]):
+            started = _background_gpu_fetch(
+                home, _args(picks["engine"]), picks["saved"], picks["variant"],
+                picks["whisper_asked"])
+        return started, home.models.downloads.started
+
+    def test_a_gpu_without_the_build_starts_the_download_to_switch_when_it_lands(self):
+        started, calls = self.fetch()
+        self.assertTrue(started)
+        self.assertEqual(calls, [("parakeet-tdt-0.6b-v3-gpu", "engine")])
+
+    def test_nothing_starts_where_auto_does_not_apply(self):
+        for label, kw in (("installed", dict(present=True)),
+                          ("no backend", dict(backend="")),
+                          ("saved whisper", dict(saved="whisper")),
+                          ("saved parakeet", dict(saved="parakeet")),
+                          ("--engine whisper", dict(engine="whisper")),
+                          ("--engine parakeet", dict(engine="parakeet")),
+                          ("a whisper flag", dict(whisper_asked=True)),
+                          ("a saved onnx build", dict(variant="int8"))):
+            with self.subTest(label):
+                started, calls = self.fetch(**kw)
+                self.assertFalse(started)
+                self.assertEqual(calls, [])
+
+    def test_the_finished_download_ends_in_set_engine_through_home(self):
+        # The chain without a network: the real Home hands the finished job to the
+        # session as `set_engine("parakeet", "gpu")`, the step a click on the Models
+        # page's "Download & use" takes too.
+        import time
+
+        from flow.home.demo import build
+
+        home, session = build()
+        job = mock.Mock(then_use="engine")
+        job.name = "parakeet-tdt-0.6b-v3-gpu"
+        seen = []
+        session.set_engine = lambda name, variant=None: seen.append((name, variant)) or True
+        home._downloaded(job)
+        deadline = time.time() + 2
+        while not seen and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(seen, [("parakeet", "gpu")])
 
 
 class TestAskingForParakeet(unittest.TestCase):
@@ -774,7 +930,7 @@ class TestTheEngineFlag(unittest.TestCase):
                              env={**os.environ, "PYTHONIOENCODING": "utf-8"}).stdout
         flat = " ".join(out.split())
         self.assertIn("{auto,whisper,native,parakeet}", flat)
-        self.assertIn("never chosen by auto", flat)
+        self.assertIn("Default auto: Parakeet's GPU build", flat)
         self.assertIn("onnx-asr", flat)
 
 

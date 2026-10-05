@@ -341,8 +341,13 @@
           <div class="seg" role="group" aria-label="Speech engine">${engines.map((e) =>
             `<button type="button" aria-pressed="${e.id === engine ? "true" : "false"}" data-act="engine" data-value="${esc(e.id)}" ${e.available ? "" : "disabled"} ${e.why ? `title="${esc(e.why)}"` : ""}>${esc(e.label)} &middot; ${esc(e.maker)}</button>`).join("")}</div></div>
         ${engines.filter((e) => !e.available).map((e) => `<p class="note warn">${esc(e.why.charAt(0).toUpperCase() + e.why.slice(1))}</p>`).join("")}` : "";
+    // A model the profile or a flag names that is not in the list (one Flow stopped listing)
+    // is still the choice, so it is shown as chosen instead of the select claiming Automatic.
+    const outside = (chosen) => chosen && !catalog.some((m) => m.name === chosen)
+      ? [`<option value="${esc(chosen)}" selected>${esc(chosen)} - no longer listed</option>`] : [];
     const option = (tier, chosen, auto) => [`<option value="" ${chosen ? "" : "selected"}>Automatic (${esc(auto)})</option>`]
-      .concat(catalog.map((m) => `<option value="${esc(m.name)}" ${m.name === chosen ? "selected" : ""}>${esc(m.name)}${m.installed ? "" : " - downloads first"}${m.blind ? " - invents words in silence" : ""}</option>`))
+      .concat(catalog.map((m) => `<option value="${esc(m.name)}" ${m.name === chosen ? "selected" : ""}>${esc(m.name)}${m.installed ? "" : " - downloads first"}</option>`))
+      .concat(outside(chosen))
       .join("");
     const sstate = sp.switch || null;
     // The engine control filters the table: Whisper shows Whisper's rows, Parakeet its two.
@@ -350,16 +355,15 @@
     const now = sp.models.filter((m) => m.in_use.length);
     const finalNow = (now.find((m) => m.in_use.includes("final")) || {}).name || sp.automatic.final;
     const partialNow = (now.find((m) => m.in_use.includes("partial")) || {}).name || sp.automatic.partial;
-    // The figure worth pointing at is the most accurate model that does not invent words in
-    // silence; a blind model's lower number buys hallucinations, so it does not qualify.
-    const guarded = sp.models.filter((m) => !m.blind && m.errors != null).map((m) => m.errors);
-    const bestErrors = guarded.length ? Math.min(...guarded) : null;
+    // The figure worth pointing at is the lowest in the table on screen, so each tab marks
+    // its own best rather than Whisper's never being marked beside Parakeet's.
+    const measured = shown.filter((m) => m.errors != null).map((m) => m.errors);
+    const bestErrors = measured.length ? Math.min(...measured) : null;
     const rows = shown.map((m) => {
       const tags = [];
       if (m.in_use.includes("final")) tags.push('<span class="badge green"><span class="dot green"></span>in use: pasted words</span>');
       if (m.in_use.includes("partial")) tags.push('<span class="badge green"><span class="dot green"></span>in use: live preview</span>');
       if (m.name === sp.automatic.final && !m.in_use.includes("final")) tags.push('<span class="badge">recommended here</span>');
-      if (m.blind) tags.push(`<span class="badge amber">${icon("warn", C.amber, 12)}invents words in silence</span>`);
       // Where the speed was measured when it is not the GTX 1070 the Whisper rows were: the
       // two ONNX builds on a CPU. The GPU build is on that same card, and says which backend.
       const basis = m.speed_basis ? `<span class="fine">on ${esc(m.speed_basis)}</span>`
@@ -367,7 +371,7 @@
       return `<div class="tr ${m.in_use.length ? "using" : ""}" role="row">
         <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.maker ? `<span class="fine">${esc(m.family || "Whisper")}, by ${esc(m.maker)}</span>` : ""}${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
         <div role="cell" class="note">${esc(m.size_text)}</div>
-        <div role="cell">${m.errors != null ? `<span class="${!m.blind && m.errors === bestErrors ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
+        <div role="cell">${m.errors != null ? `<span class="${m.errors === bestErrors ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
         <div role="cell" class="note">${m.speed != null ? `<div class="col"><span>${m.speed}&times;</span>${basis}</div>` : "&ndash;"}</div>
         <div role="cell" class="acts">${modelActions(m, sp.loading, sstate)}</div></div>`;
     }).join("");
@@ -436,11 +440,11 @@
       <section class="card">
         <div class="row wrap"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}
           <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="${engine === "parakeet" ? "parakeet" : "models"}">${icon("folder", C.text, 14)}Open folder</button></div>
-        <p class="note">These are Whisper models from OpenAI, smaller distil- copies of them, and Parakeet from NVIDIA, downloaded from Hugging Face (the Parakeet GPU helper, parakeet.cpp, from GitHub). They run on this PC; nothing you say is sent to any of them.</p>
+        <p class="note">Parakeet from NVIDIA is the engine Flow uses on a PC with a GPU: the most accurate model measured here, and the fastest. Whisper from OpenAI is the engine for Hindi, for a PC without a GPU, and for the rest of what Parakeet does not hear. Both are downloaded from Hugging Face (the Parakeet GPU helper, parakeet.cpp, from GitHub) and run on this PC; nothing you say is sent to either.</p>
         ${engineControl}
         ${switchStrip(sstate)}
         ${engine === "parakeet"
-          ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. ${parakeet.variant === "gpu" ? `It runs on the GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}` : `It runs on the CPU, ${esc(parakeet.threads || "")} threads`}, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : parakeet.variant === "gpu" ? "The GPU version is as accurate as the accurate one, and several times faster." : "The accurate version is the most accurate model measured here, Japanese-accented English included."}</p>`
+          ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. ${parakeet.variant === "gpu" ? `It runs on the GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}` : `It runs on the CPU, ${esc(parakeet.threads || "")} threads`}, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : parakeet.variant === "gpu" ? "The GPU version is as accurate as the accurate one, and several times faster." : "The accurate version is the most accurate model measured here, Japanese-accented English included."} Parakeet hears 25 European languages and not Hindi: for Hindi or Hinglish, choose Whisper, which writes them as English.</p>`
           : `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>`}
         ${engine === "whisper" && sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
@@ -456,9 +460,10 @@
           <div class="tr head" role="row"><span class="label" role="columnheader">Model</span><span class="label" role="columnheader">Size</span><span class="label" role="columnheader">Errors / 100 words</span><span class="label" role="columnheader">Speed</span><span role="columnheader"></span></div>
           ${rows}
         </div>
+        ${engine !== "parakeet" && sp.unlisted && sp.unlisted.names.length ? `<div class="row wrap"><p class="note grow">Flow no longer lists ${sp.unlisted.names.length === 1 ? "this Whisper model" : `these ${sp.unlisted.names.length} Whisper models`}, still on this PC: <span class="mono">${sp.unlisted.names.map(esc).join(", ")}</span> (${esc(sp.unlisted.text)}). They keep working if a flag names them; removing them frees the space.</p><button type="button" class="btn sm" data-act="unlisted-delete" data-names="${esc(sp.unlisted.names.join(", "))}" data-text="${esc(sp.unlisted.text)}">Remove ${sp.unlisted.names.length} model${sp.unlisted.names.length === 1 ? "" : "s"} (${esc(sp.unlisted.text)})</button></div>` : ""}
         <p class="fine">${engine === "parakeet"
           ? "Errors per 100 words were measured on 300 clips of accented English (EdAcc), the same clips as the Whisper models; speed is how many times faster than you talk. The Accurate and Light versions were measured on a CPU with 8 threads, so they are not comparable to the Whisper speeds; the GPU version was measured on the same GTX 1070 as the Whisper speeds, through CUDA or Vulkan as marked. They compare the models - your own voice is its own measurement. Parakeet is NVIDIA's model (CC-BY-4.0), run through onnx-asr and parakeet.cpp (MIT)."
-          : `Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement.${shown.some((m) => m.blind) ? " The marked models skip the silence signal Flow's filter relies on, so they hear &ldquo;thank you&rdquo; in an empty room." : ""}`}</p>
+          : `Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement.`}</p>
       </section>
       <div class="split">
         <section class="card">
@@ -1326,6 +1331,10 @@
     "pk-use": (el) => run(() => api("models/engine", { engine: "parakeet", variant: el.dataset.value }),
       "Choosing that Parakeet"),
     "engine-cancel": () => run(() => api("models/engine/cancel", {}), "Cancelled"),
+    "unlisted-delete": (el) => {
+      if (!confirm(`Remove ${el.dataset.names} (${el.dataset.text}) from this PC? Flow no longer lists them; you can download any of them again by naming it with --final-model.`)) return;
+      run(() => api("models/delete", { name: "unlisted-whisper" }), "Removed");
+    },
     "legacy-delete": () => {
       if (!confirm("Remove the old Parakeet files? This version does not use them.")) return;
       run(() => api("models/delete", { name: "sherpa-onnx-legacy" }), "Removed");

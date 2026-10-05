@@ -49,7 +49,19 @@ def _only(present):
     return lambda self: self == present
 
 
-class TestTheEngineChoice(unittest.TestCase):
+class _NoGpuBackend(unittest.TestCase):
+    """These tests are about Whisper-or-native, which is what `auto` decides on a PC with
+    no GPU backend for Parakeet. Whether *this* machine has one must not decide them -
+    `auto` picks Parakeet's GPU build where there is one (decisions.md 2026-10-05), and
+    that rule's own tests are in `test_parakeet.TestAutoPicksTheGpuBuild`."""
+
+    def setUp(self):
+        patch = mock.patch("flow.parakeet.gpu_backend", return_value=("", "no GPU"))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+
+class TestTheEngineChoice(_NoGpuBackend):
     """`_engine`, which is the whole feature — the rest is plumbing."""
 
     def test_asking_for_whisper_gets_whisper_and_asks_nothing(self):
@@ -119,7 +131,7 @@ def _engine_result():
     return _engine(args(), "base.en", "small.en")
 
 
-class TestAutoNeverPaysForAnEngineItMayNotUse(unittest.TestCase):
+class TestAutoNeverPaysForAnEngineItMayNotUse(_NoGpuBackend):
     """The regression CI found, pinned so it cannot come back.
 
     Asking `available()` unconditionally at startup took the macOS CI leg from **35

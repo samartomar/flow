@@ -7,10 +7,14 @@ The page labels them that way. They are a fair comparison between models and not
 promise about somebody else's voice or card — Voice's accuracy check is what measures
 theirs.
 
-**Two models are marked, not hidden.** `distil-large-v3.5` has the lowest error of any
-model here, and it and `large-v3-turbo` report no `no_speech_prob` — so the hallucination
-guard in `clean.py` cannot fire for them, and they hear "thank you" in an empty room.
-`asr.reports_no_speech` keeps them usable; the page says what they cost.
+**The Whisper list is short on purpose** (decisions.md 2026-10-05). Parakeet on the GPU is the
+primary engine now, so Whisper keeps the rows that do a job Parakeet cannot: `large-v3`
+and `small` (the GPU pair, multilingual: Hindi and Hinglish come out as English text) and
+`small.en` and `base.en` (the CPU pair, the default install's). Five models that were
+within a point or two of each other, and none of them better than Parakeet, left the list;
+they are `RETIRED` below, which exists so the page can still name one a profile or a
+`--final-model` flag asks for and offer to remove the copy on disk - never to remove it
+unasked. `asr.reports_no_speech` still guards any of them a flag brings back.
 
 **Parakeet is a row here and not a tier choice.** It is a second *engine* (`flow/parakeet.py`),
 so it lives in `SPECS` beside `CATALOG` but never in `CATALOG` or `BY_NAME`: everything that
@@ -63,8 +67,6 @@ class Spec:
     rtf: float | None = None
     #: A few words for the row, when the model has a job only it does.
     note: str = ""
-    #: No usable `no_speech_prob`, so it invents words in silence.
-    blind: bool = False
     #: Which engine runs it: "whisper" (faster-whisper) or "parakeet" (onnx-asr).
     engine: str = "whisper"
     #: What `rtf` was measured on when that is not `MEASURED_ON`'s GTX 1070. "" means it
@@ -75,10 +77,8 @@ class Spec:
 
     @property
     def maker(self) -> str:
-        """Who made the weights: Whisper is OpenAI's, the distil- copies are Hugging Face's."""
-        if self.engine == "parakeet":
-            return "NVIDIA"
-        return "Hugging Face" if self.name.startswith("distil-") else "OpenAI"
+        """Who made the weights: Whisper is OpenAI's, Parakeet is NVIDIA's."""
+        return "NVIDIA" if self.engine == "parakeet" else "OpenAI"
 
     @property
     def family(self) -> str:
@@ -90,24 +90,31 @@ _MB = 1024 * 1024
 
 CATALOG: tuple[Spec, ...] = (
     Spec("large-v3", "Systran/faster-whisper-large-v3", 2970 * _MB, 16.8, 0.190,
-         note="the most accurate Whisper model with a working silence guard"),
-    Spec("large-v2", "Systran/faster-whisper-large-v2", 2970 * _MB, 17.0, 0.211),
-    Spec("distil-large-v3.5", "distil-whisper/distil-large-v3.5-ct2", 1510 * _MB, 16.0, 0.104,
-         blind=True),
-    Spec("large-v3-turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo", 1620 * _MB, 17.8,
-         0.116, blind=True),
-    Spec("distil-large-v3", "Systran/faster-distil-whisper-large-v3", 1510 * _MB, 18.1, 0.111,
-         blind=True),
-    Spec("medium.en", "Systran/faster-whisper-medium.en", 1530 * _MB, 18.3, 0.131),
+         note="hears Hindi and Hinglish and writes English - Parakeet cannot"),
     Spec("small.en", "Systran/faster-whisper-small.en", 464 * _MB, 19.4, 0.070,
          note="the most accurate model a CPU can run in time"),
     Spec("small", "Systran/faster-whisper-small", 464 * _MB, None, 0.070,
-         note="multilingual; the live preview on a GPU"),
+         note="multilingual (Hindi too); the live preview on a GPU"),
     Spec("base.en", "Systran/faster-whisper-base.en", 141 * _MB, None, None,
          note="the live preview on a CPU"),
 )
 
+#: What left the list on 2026-10-05, with the measurements they left on (same 300 EdAcc
+#: clips, GTX 1070 int8). Never offered, never downloaded; kept so a profile or a flag that
+#: still names one has a repo to find, a size to show and a copy to remove. Each is within
+#: a point or two of `large-v3` and none beats Parakeet's 14.5, and the three that are not
+#: OpenAI's lose the silence guard (`asr.reports_no_speech`).
+RETIRED: tuple[Spec, ...] = (
+    Spec("large-v2", "Systran/faster-whisper-large-v2", 2970 * _MB, 17.0, 0.211),
+    Spec("distil-large-v3.5", "distil-whisper/distil-large-v3.5-ct2", 1510 * _MB, 16.0, 0.104),
+    Spec("large-v3-turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo", 1620 * _MB, 17.8,
+         0.116),
+    Spec("distil-large-v3", "Systran/faster-distil-whisper-large-v3", 1510 * _MB, 18.1, 0.111),
+    Spec("medium.en", "Systran/faster-whisper-medium.en", 1530 * _MB, 18.3, 0.131),
+)
+
 BY_NAME = {spec.name: spec for spec in CATALOG}
+BY_RETIRED = {spec.name: spec for spec in RETIRED}
 
 #: Parakeet TDT 0.6B v3, in the three builds `flow/parakeet.py` ships, measured 2026-10-05
 #: on the same 300 EdAcc clips (`scripts/parakeet_bench.py`) — the two ONNX builds' real-time
@@ -464,6 +471,17 @@ class ModelManager:
                         "variant": spec.variant, "name": spec.name, "reason": "",
                         "eta_sec": None, "done_bytes": job.done, "total_bytes": total,
                         "pct": min(100, round(100 * job.done / total)) if total else 0}
+        # A download that was only there to switch engines and did not finish: Flow is still
+        # on the engine it had, and the strip says why instead of leaving a row's small
+        # print to. It ends when the person chooses Whisper (`Api.model_engine` clears
+        # `then_use`), retries, or cancels - the same ways a waiting switch ends.
+        for spec in PARAKEET_SPECS:
+            job = jobs.get(spec.name)
+            if job is not None and job.state == "failed" and job.then_use == "engine":
+                return {"state": "failed", "engine": "parakeet", "variant": spec.variant,
+                        "name": spec.name, "eta_sec": None,
+                        "reason": f"the Parakeet {spec.variant} download failed ({job.error}) - "
+                                  "Flow is still on the engine it had"}
         return None
 
     def _parakeet_variant(self, asr) -> str:
@@ -472,6 +490,30 @@ class ModelManager:
             return asr.variant
         profile = getattr(self.session, "profile", None)
         return parakeet.resolve_variant(getattr(profile, "parakeet_model", None))
+
+    def unlisted(self) -> list[tuple[Spec, int]]:
+        """`(spec, bytes on disk)` for every retired model that is here and not needed.
+
+        Not needed means neither running now nor named by the profile: the profile names
+        what a switch back to Whisper would load, and removing that would turn a switch
+        into a download.
+        """
+        profile = getattr(self.session, "profile", None)
+        keep = set(self.in_use()) | {getattr(profile, "partial_model", None),
+                                     getattr(profile, "final_model", None)}
+        sizes = self._disk()
+        return [(spec, sizes[spec.repo]) for spec in RETIRED
+                if sizes.get(spec.repo) and spec.name not in keep]
+
+    def remove_unlisted(self) -> list[str]:
+        """Delete the models `unlisted` names, through the same `delete` as a row's trash can.
+
+        Returns the names removed. Only ever called for a person's press: nothing in Flow
+        deletes a model on its own.
+        """
+        gone = [spec.name for spec, _size in self.unlisted() if delete(spec.repo)]
+        self.forget_scan()
+        return gone
 
     def in_use(self) -> dict[str, list[str]]:
         """{model name: ["partial"] / ["final"] / both} for what the session runs now."""
@@ -488,7 +530,7 @@ class ModelManager:
 
     def snapshot(self) -> dict:
         """Everything the speech half of the page draws."""
-        from ..asr import default_models, resolve_device
+        from ..asr import default_models, reports_no_speech, resolve_device
 
         asr = getattr(self.session, "asr", None)
         sizes = self._disk()
@@ -549,22 +591,33 @@ class ModelManager:
                 # Why this row cannot be downloaded for use here: its engine's runtime is
                 # not installed. "" for every row that can.
                 "blocked": parakeet.missing_runtime(spec.variant) if spec.engine == "parakeet" else "",
-                "blind": spec.blind,
                 "in_use": using.get(spec.name, []),
                 "download": job.public() if job is not None and
                 (job.state == "running" or job.state == "failed") else None,
             })
         # A model named by a flag or a hand-edited profile that is not in the catalog is
-        # still the model in use, and the page must not pretend otherwise.
+        # still the model in use, and the page must not pretend otherwise. One that left
+        # the list says so, with the measurements it left on; one Flow never listed says it
+        # was chosen outside Flow Home. Either way a model with no silence signal says what
+        # that costs, since the badge that used to say it belonged to the catalog rows.
         for name, roles in using.items():
             if name not in SPECS:
+                gone = BY_RETIRED.get(name)
+                note = "no longer listed - still works" if gone else "chosen outside Flow Home"
+                if not reports_no_speech(name):
+                    note += "; invents words in silence"
+                have = sizes.get(gone.repo) if gone else None
                 rows.append({"name": name, "catalog": False, "engine": "whisper", "variant": "",
                              "speed_basis": "", "backend": "", "family": "Whisper",
-                             "size": None, "size_text": "",
+                             "size": have, "size_text": human(have) if have else "",
                              "installed": True, "blocked": "",
-                             "errors": None, "speed": None, "note": "chosen outside Flow Home", "maker": "",
-                             "blind": False, "in_use": roles, "download": None})
-        cached = (sum(sizes.get(s.repo, 0) for s in CATALOG)
+                             "errors": gone.errors if gone else None,
+                             "speed": round(1 / gone.rtf, 1) if gone and gone.rtf else None,
+                             "note": note, "maker": gone.maker if gone else "",
+                             "in_use": roles, "download": None})
+        unlisted = self.unlisted()
+        unlisted_bytes = sum(size for _spec, size in unlisted)
+        cached = (sum(sizes.get(s.repo, 0) for s in (*CATALOG, *RETIRED))
                   + sum(parakeet.installed_bytes(s.variant) for s in PARAKEET_SPECS))
         info = gpu() if device == "cuda" or sys.platform == "win32" else None
         asked = getattr(asr, "asked", (None, None)) if asr is not None else (None, None)
@@ -586,6 +639,10 @@ class ModelManager:
             "loading": bool(getattr(asr, "loading", False)),
             "automatic": {"partial": auto_partial, "final": auto_final},
             "chosen": {"partial": asked[0], "final": asked[1]},
+            # Models Flow stopped listing that are still on this PC and nothing is using:
+            # the page offers to remove them, by name, and never does it unasked.
+            "unlisted": {"names": [spec.name for spec, _size in unlisted],
+                         "bytes": unlisted_bytes, "text": human(unlisted_bytes)},
             "cache": {"path": cache_dir(),
                       "bytes": cached, "text": human(cached),
                       # Parakeet's own folder, and what an earlier Flow's (sherpa-onnx)
@@ -601,7 +658,8 @@ def engines(variant: str = "fp32") -> list[dict]:
     """The speech engines the page's selector offers, and whether each can be chosen here.
 
     A list rather than two fixed buttons, so a third (Apple's, on a Mac) is one more entry
-    and not a restructure. `available` is whether the *runtime* is installed — the model
+    and not a restructure. In the order the page draws them: Parakeet first, because it is
+    the primary engine on a PC with a GPU (decisions.md 2026-10-05). `available` is whether the *runtime* is installed — the model
     download is a separate step the page offers — and `why` is what to say when it is not.
     Parakeet also carries its two builds and which one is chosen.
     """
@@ -614,8 +672,6 @@ def engines(variant: str = "fp32") -> list[dict]:
                 for spec in PARAKEET_SPECS]
     ok = any(not v["why"] for v in variants)
     return [
-        {"id": "whisper", "label": "Whisper", "maker": "OpenAI",
-         "available": True, "why": "", "installed": True},
         {"id": "parakeet", "label": "Parakeet", "maker": "NVIDIA",
          # Usable when any build can run: the GPU build needs no add-on, and the ONNX
          # builds need nothing else.
@@ -626,6 +682,8 @@ def engines(variant: str = "fp32") -> list[dict]:
          "variant": variant,
          "backend": parakeet.BACKEND_LABEL.get(parakeet.gpu_backend()[0], ""),
          "variants": variants},
+        {"id": "whisper", "label": "Whisper", "maker": "OpenAI",
+         "available": True, "why": "", "installed": True},
     ]
 
 

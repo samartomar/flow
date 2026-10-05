@@ -363,7 +363,7 @@ class TestTheModelsPage(unittest.TestCase):
         self.assertEqual(rows["large-v3"]["in_use"], ["final"])
         self.assertEqual(rows["small"]["in_use"], ["partial"])
         self.assertTrue(rows["large-v3"]["installed"])
-        self.assertFalse(rows["medium.en"]["installed"])
+        self.assertFalse(rows["small.en"]["installed"])
 
     def test_the_numbers_say_where_they_were_measured(self):
         h = Pumped(self)
@@ -371,8 +371,9 @@ class TestTheModelsPage(unittest.TestCase):
         self.assertIn("GTX 1070", page["speech"]["measured_on"])
         rows = {r["name"]: r for r in page["speech"]["models"]}
         self.assertEqual(rows["large-v3"]["errors"], 16.8)
-        self.assertTrue(rows["distil-large-v3.5"]["blind"])
-        self.assertFalse(rows["large-v3"]["blind"])
+        # What left the list is not a row: the page names it only when something uses it.
+        self.assertNotIn("distil-large-v3.5", rows)
+        self.assertNotIn("blind", rows["large-v3"])
 
     def test_choosing_models_that_are_here_swaps_them_now(self):
         h = Pumped(self)
@@ -385,22 +386,22 @@ class TestTheModelsPage(unittest.TestCase):
         h = Pumped(self)
         with mock.patch.object(models_mod.Downloader, "start") as start:
             self.call(h, "POST", "/api/models/use",
-                      {"partial": None, "final": "medium.en"})
+                      {"partial": None, "final": "small.en"})
         start.assert_called_once()
         self.assertEqual(start.call_args.kwargs.get("then_use"), "final")
         self.assertEqual(h.session.asr.swaps, [])
-        self.assertEqual(h.home.pending_models, (None, "medium.en", None))
+        self.assertEqual(h.home.pending_models, (None, "small.en", None))
 
     def test_the_finished_download_is_used_then(self):
         h = Pumped(self)
-        h.home.pending_models = (None, "medium.en", None)
-        job = models_mod.Download("medium.en", state="done", then_use="final")
+        h.home.pending_models = (None, "small.en", None)
+        job = models_mod.Download("small.en", state="done", then_use="final")
         with mock.patch.object(models_mod, "complete", return_value=True):
             h.home._downloaded(job)
         deadline = time.time() + 2
         while not h.session.asr.swaps and time.time() < deadline:
             time.sleep(0.01)
-        self.assertEqual(h.session.asr.swaps[-1], (None, "medium.en", None))
+        self.assertEqual(h.session.asr.swaps[-1], (None, "small.en", None))
         self.assertIsNone(h.home.pending_models)
 
     def test_a_choice_that_applies_now_ends_one_still_waiting(self):
@@ -408,11 +409,11 @@ class TestTheModelsPage(unittest.TestCase):
         # must not swap back to the choice that was abandoned.
         h = Pumped(self)
         with mock.patch.object(models_mod.Downloader, "start"):
-            self.call(h, "POST", "/api/models/use", {"partial": None, "final": "medium.en"})
+            self.call(h, "POST", "/api/models/use", {"partial": None, "final": "small.en"})
         self.call(h, "POST", "/api/models/use",
                   {"partial": None, "final": "large-v3", "device": "auto"})
         self.assertIsNone(h.home.pending_models)
-        job = models_mod.Download("medium.en", state="done", then_use="final")
+        job = models_mod.Download("small.en", state="done", then_use="final")
         with mock.patch.object(models_mod, "complete", return_value=True), \
                 mock.patch.object(h.session, "post") as post:
             h.home._downloaded(job)

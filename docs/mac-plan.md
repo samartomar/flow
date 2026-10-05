@@ -59,7 +59,7 @@ makes the engine choice the most consequential decision on this platform.
 
 | Candidate | Runtime | What we know | Measure on the Mac |
 |---|---|---|---|
-| `small.en` / `large-v3-turbo` | faster-whisper, CPU (Accelerate) | 19.4 / 17.8 errors per 100 words on EdAcc (GTX 1070) | RTF on M-series; whether large is usable on CPU at all |
+| `small.en` / `large-v3-turbo` (the latter left Flow's catalog 2026-10-05, still nameable with `--final-model`) | faster-whisper, CPU (Accelerate) | 19.4 / 17.8 errors per 100 words on EdAcc (GTX 1070) | RTF on M-series; whether large is usable on CPU at all |
 | **Parakeet TDT 0.6B v3 int8** | sherpa-onnx, the `[parakeet]` extra (built 2026-10-05) | 17.3 errors per 100 words, RTF 0.070 on a Zen 2 CPU, a token log-prob gate; **Japanese worse (26.3)** | RTF on the CPU and with `provider="coreml"`; gate threshold on Mac room noise |
 | **Parakeet TDT 0.6B v3 GPU build** | parakeet.cpp server (`flow/parakeet.py`, Windows CUDA/Vulkan built 2026-10-05) | 14.5 errors per 100 words, 50x real time on a GTX 1070; parakeet.cpp ships a **Metal** build (up to ~5x its CPU on an M4, by its own numbers) | Not built here. The helper-process shape ports as is: a macOS release zip pin, `Variant` runtime `gpu`, backend `metal` in `_detect_backend`; word confidence gate already measured |
 | parakeet-redux (1.58-bit) | Photon, Metal/NEON | Vendor: 38× CPU / 43× GPU on an M2. Our run (dense path, Windows): 17.1 errors per 100 words, silent on 8/8 silence clips | Whether 1.1 GB of torch for a faster Parakeet earns an extra; confidence output |
@@ -67,8 +67,10 @@ makes the engine choice the most consequential decision on this platform.
 
 **Decision rule:** the Mac's `auto` picks the most accurate engine that holds the latency
 budget on the measured machine. That is likely Parakeet, which is a change from Windows,
-where `auto` never picks Parakeet. That asymmetry has to be written down in `_engine`'s
-docstring and in decisions.md when it happens, not left implicit.
+where `auto` picked Whisper until 2026-10-05 and now picks Parakeet's GPU build on a PC with a
+GPU backend (decisions.md 2026-10-05). The Mac has no such backend yet, so its `auto` is
+still Whisper-or-native; when the Mac's choice is made it is written down in `_engine`'s
+docstring and in decisions.md, not left implicit.
 
 **Open questions:**
 - Partials: sherpa's offline recogniser re-decodes the whole buffer each time. At an RTF of

@@ -108,8 +108,11 @@ uv sync && uv run flow
 
 Downloads ~244 MB of packages (28 distributions, measured) and installs Flow itself into
 the venv in editable mode, which is what puts the `flow` command on the path. The two
-models are fetched on first use, not at install: `base.en` (141 MiB) drives the live
-partials and `small.en` (464 MiB) produces the text that actually gets pasted.
+models are fetched on first use, not at install. On a PC with no GPU, `base.en` (141 MiB)
+drives the live partials and `small.en` (464 MiB) produces the text that actually gets
+pasted. On a PC with a GPU, Whisper's `small` and `large-v3` start the first run and
+Parakeet's GPU build (about 930 MB) downloads beside them and takes over when it lands —
+see [Parakeet](#parakeet-from-nvidia).
 
 ### The agent CLI is optional, and Flow says which it found
 
@@ -276,7 +279,7 @@ hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | tap the pill to c
 | `--final-model X` | stronger model for the pasted text (default `small.en` on a CPU, `large-v3` on a GPU). Same as above: Models remembers it, the flag wins for one launch |
 | `--model X` | pin BOTH tiers to one model, for a low-memory machine |
 | `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one). Models remembers a choice; the flag wins for one launch |
-| `--engine {auto,whisper,native,parakeet}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all; `parakeet` is NVIDIA Parakeet through onnx-asr (extra `[parakeet]`, a model of 640 MB or 2.4 GB fetched once from huggingface.co into `~/.flow/models`, or the GPU build: a 940 MB model and a helper from github.com, no add-on) and is never chosen by `auto` — see [Parakeet](#parakeet-from-nvidia). Flow Home's Models page chooses it too, and remembers; the flag wins for one launch. Default `auto`: whisper unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface) |
+| `--engine {auto,whisper,native,parakeet}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all; `parakeet` is NVIDIA Parakeet through onnx-asr (extra `[parakeet]`, a model of 640 MB or 2.4 GB fetched once from huggingface.co into `~/.flow/models`, or the GPU build: a 940 MB model and a helper from github.com, no add-on) — see [Parakeet](#parakeet-from-nvidia). Flow Home's Models page chooses it too, and remembers; the flag wins for one launch. Default `auto`: **Parakeet's GPU build on a PC with a GPU** (downloaded in the background on the first run, with Whisper running until it lands); otherwise whisper, unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface). A saved choice on the Models page, or a `--model`/`--partial-model`/`--final-model` flag, keeps `auto` out of it |
 | `--lexicon PATH` | personal terms file (default `~/.flow/lexicon.txt`) |
 | `--no-lexicon` | ignore that file without deleting it |
 | `--device N` | input device index; list them with `scripts/devices.py`. **Pinned**: if it goes away mid-session Flow retries *this* index and never substitutes another — see [When the microphone goes away](#if-the-microphone-goes-away-mid-session). Flow Home's Settings chooses a microphone by name instead, which is what most people want |
@@ -671,12 +674,26 @@ chord   ask      ctrl+alt+win  (hold to ask, release to send the question)
 
 ### Parakeet, from NVIDIA
 
-The most accurate speech model Flow has measured, and it runs on the CPU. On the same 300
-accented-English clips: **14.7 errors per 100 words** for Parakeet's accurate build, 16.9 for
-its light build, 19.5 for `small.en` and 16.8 for `large-v3` on a GTX 1070 — at 13 to 15
-times faster than you talk, on 8 CPU threads. The accurate build beats `small.en` in every
-accent group, Japanese-accented English included; the light build is level with it there.
-It is opt-in, and nothing about installing it changes what Flow does until you choose it.
+The most accurate speech model Flow has measured, and **the engine Flow uses on a PC with a
+GPU** (decisions.md, 2026-10-05): `--engine auto` picks its GPU build when a CUDA or Vulkan
+backend is here and the build is installed. On the same 300 accented-English clips: **14.5
+errors per 100 words** for the GPU build, 14.7 for the accurate CPU build, 16.9 for the light
+build, 19.4 for `small.en` and 16.8 for `large-v3` on a GTX 1070. On silence and noise it
+invented text on 0 of 8 clips where `small.en` did on 8 of 8. The two CPU builds are opt-in
+and need the add-on; installing it changes nothing until you choose one.
+
+**The first run on a PC with a GPU** starts on Whisper, so dictation works at once, and
+downloads the GPU build in the background through the same machinery as the Models page's
+**Download & use** — the strip shows it, and it takes over when it lands (queued while you are
+talking). The startup line says so. A failed download leaves Whisper running with the reason
+in the strip. None of this happens when you have chosen an engine on the Models page, named
+one with `--engine`, named a Whisper model with a flag, or have no GPU backend.
+
+**What Whisper is still for:** Hindi and Hinglish, which `large-v3` and `small` hear and write
+as English (Parakeet's 25 European languages do not include Hindi); any language beyond
+Parakeet's; a mis-heard command, which Whisper retries with the command words as hints and
+Parakeet cannot take; and a PC with no GPU and no add-on, where `small.en` is what a CPU
+can run in time. Choose **Whisper · OpenAI** on the Models page, or `--engine whisper`.
 
 ```bash
 uv pip install -e ".[parakeet]"        # onnx-asr, about 7 MB; onnxruntime is already here
@@ -759,9 +776,10 @@ talks to it through a small Swift helper it compiles on first use, which needs X
 Command Line Tools (`xcode-select --install`) and one grant under **Privacy & Security ▸
 Speech Recognition**.
 
-**`--engine auto`, the default, will not switch a machine that is working.** It reaches
-for the native engine in exactly one case: the Whisper models are not on the machine and
-cannot be fetched. That is deliberate — Apple's recogniser is a *different* engine rather
+**On a Mac, `--engine auto` will not switch a machine that is working.** (On a PC with a GPU
+it picks Parakeet's GPU build; a Mac has no GPU backend for Parakeet yet, so none of that
+applies here.) It reaches for the native engine in exactly one case: the Whisper models are
+not on the machine and cannot be fetched. That is deliberate — Apple's recogniser is a *different* engine rather
 than a spare one. It reports no `no_speech_prob`, so Flow's hallucination filter falls
 back to a much narrower check; it has one quality tier where Whisper has two; and it
 cannot be biased toward your lexicon, so the re-listen that rescues a mis-heard command
@@ -1008,7 +1026,7 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 | Page | What is on it |
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
-| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The two models that invent words in silence are marked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
+| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The Whisper list is four models — `large-v3` and `small` (the GPU pair, which also write Hindi as English), `small.en` and `base.en` (the CPU pair); the engine control reads **Parakeet · NVIDIA** then **Whisper · OpenAI**. A model Flow stopped listing but that is still on this PC is offered for removal, by name and size, with one press; nothing is removed unasked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
 | **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
 | **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
 | **History** | Only if you choose to keep one: what you dictated, the program it went to, whether it pasted, what the agent CLI made of a Refine and what it was made from, and anything the speech filter set aside — by day, searchable, each with Copy, Fix a word and Delete ([History and Paste last](#history-and-paste-last)) |
@@ -1972,7 +1990,7 @@ figure — along with everything else in there.
 | `~/.flow/lexicon.txt` | you, by hand — and by Flow only when you act: creating it from a template of comments when it is missing, appending one line when you tap an offered correction or press Add on Flow Home's Voice page, and taking out one entry's lines when you press Remove there | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders or reformats a line — everything you did not ask to change comes back byte for byte |
 | `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the six global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup, and whether to keep a history and for how long (`history`, `history_days`: absent means not chosen, which keeps nothing) — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
 | `~/.flow/models/` | `--engine parakeet`, and Flow Home's Models page | the Parakeet models, as plain files (not the Hugging Face cache, which onnxruntime cannot read external weights through): `parakeet-tdt-0.6b-v3` at 2.4 GB and `parakeet-tdt-0.6b-v3-int8` at 640 MB. Models lists them with their sizes and deletes the one you do not use |
-| `~/.cache/huggingface/hub/` | first decode, and Flow Home's Models page | the models. `base.en` 141 MiB, `small.en` 464 MiB, `large-v3` 2.9 GiB; Models lists them with their sizes and deletes the ones you do not use |
+| `~/.cache/huggingface/hub/` | first decode, and Flow Home's Models page | the models. `base.en` 141 MiB, `small.en` 464 MiB, `large-v3` 2.9 GiB; Models lists them with their sizes and deletes the ones you do not use, and offers to remove the ones an earlier Flow listed (`large-v2`, `medium.en`, `distil-large-v3`, `distil-large-v3.5`, `large-v3-turbo`) |
 | `~/.flow/history.jsonl` | **only if you chose to keep a history** on Flow Home's History page: every Send, every Ask and its answer, and what the speech filter set aside | one JSON line per entry, the words included — which is why it exists only by your choice ([History and Paste last](#history-and-paste-last)). Kept 7, 30 or 90 days and at most 20 000 entries, then trimmed; **Stop keeping** deletes it. A line broken by hand costs that line only |
 | `~/.flow/home/` | Microsoft Edge, for the Flow Home window | the window's own browser profile — its size and position, and Edge's cache. Nothing Flow writes; deleting it resets the window |
 | `~/.flow/diag.jsonl` (+ `.1`) | every state change, route, CLI call and device event, unless `--no-profile` | a content-free shadow of the event stream: timestamps, state transitions, route kinds, operation ids, durations, provider names, lengths, error *categories*, on each route a `confidence` — how well the decoder heard the utterance being routed, or `null` when that is unknown — and on each utterance that reached the draft, how many words it was and how long it took to say ([The numbers](#the-numbers)). **No words.** A count of words is a number; the words are never written Field names are an allow-list checked against a deny-list at import, so a draft cannot get in by being short. Bounded with one rotation: two files, a known ceiling. Startup names the path out loud |

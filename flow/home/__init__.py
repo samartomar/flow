@@ -163,8 +163,9 @@ class Home:
         from .models import BY_NAME, complete
 
         # Both tiers may have been waiting; swap only once everything asked for is here.
+        # A name outside the catalogue (a retired model already on this PC) needs nothing.
         for name in (partial, final):
-            if name is not None and not complete(BY_NAME[name].repo):
+            if name in BY_NAME and not complete(BY_NAME[name].repo):
                 return
         self.pending_models = None
         self.session.post(lambda: self.session.set_models(partial, final, device))
