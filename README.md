@@ -187,7 +187,7 @@ MIT. Flow is built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper
 OpenAI's [Whisper](https://github.com/openai/whisper) models, and reads answers aloud with
 [Piper](https://github.com/OHF-Voice/piper1-gpl) if you add it.
 
-The opt-in Parakeet engine runs NVIDIA's
+The Parakeet engine, which Flow uses on a PC with a GPU, runs NVIDIA's
 [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (CC-BY-4.0,
 converted and quantised copies by [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx)
 and [mudler](https://huggingface.co/mudler/parakeet-cpp-gguf)) through

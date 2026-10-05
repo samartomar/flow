@@ -531,9 +531,13 @@ class Profile:
         #: "auto", "cuda" or "cpu" — `--decode-device`, remembered.
         self.decode_device: str = "auto"
         #: "whisper" or "parakeet" — the engine the Models page chose, remembered.
-        #: `--engine` on the command line wins for one launch. Absent means Whisper,
-        #: which is also what leaves `--engine auto` exactly as it was before this field.
-        self.engine: str = "whisper"
+        #: `--engine` on the command line wins for one launch. **"" means nobody has
+        #: chosen**, and is what lets `--engine auto` decide (Parakeet on the GPU when this
+        #: PC has one, decisions.md 2026-10-05): a "whisper" here is a choice and `auto`
+        #: leaves it alone. It used to default to "whisper", which made "never chosen" and
+        #: "chose Whisper" the same string - and so a profile written before this change
+        #: that says "whisper" is read as a choice, because that is the safe way to be wrong.
+        self.engine: str = ""
         #: "auto", "fp32" or "int8" — which Parakeet build, remembered. See PARAKEET_MODELS.
         self.parakeet_model: str = "auto"
         #: The microphone, by *name* and never by index — see `Mic.device_name` for why
@@ -664,10 +668,10 @@ class Profile:
         if self.decode_device not in DECODE_DEVICES:
             self.faults.append("decode_device")
             self.decode_device = "auto"
-        self.engine = take("engine", _text, "whisper")
-        if self.engine not in ENGINES:
+        self.engine = take("engine", _text, "")
+        if self.engine and self.engine not in ENGINES:
             self.faults.append("engine")
-            self.engine = "whisper"
+            self.engine = ""
         self.parakeet_model = take("parakeet_model", _text, "auto")
         if self.parakeet_model not in PARAKEET_MODELS:
             self.faults.append("parakeet_model")

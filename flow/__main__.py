@@ -328,34 +328,70 @@ def _saved_parakeet_engine(variant: str | None = None) -> tuple[str, str]:
     return "parakeet", " (chosen on the Models page)"
 
 
+def _gpu_auto(args, saved: str, variant: str | None, whisper_asked: bool) -> str:
+    """What `--engine auto` does about the Parakeet GPU build: "use", "fetch" or "".
+
+    "" when auto is not allowed to decide at all: a saved engine is a choice somebody made,
+    a Whisper model named by a flag (`--model`, `--final-model`, `--partial-model`) is
+    somebody asking for Whisper by its tier, and a saved Parakeet build that is not the GPU
+    one is a choice of build. Otherwise it needs a GPU backend on this PC (`gpu_backend`,
+    which is the CUDA or Vulkan question), and then "use" when the build and its helper are
+    installed, or "fetch" when they are not - which `_engine` answers with Whisper for this
+    launch and `_background_gpu_fetch` with the download that takes over when it lands.
+    """
+    if args.engine != "auto" or saved or whisper_asked or variant not in (None, "auto", "gpu"):
+        return ""
+    from . import parakeet
+
+    if not parakeet.gpu_backend()[0]:
+        return ""
+    return "use" if parakeet.model_present("gpu") else "fetch"
+
+
 def _engine(args, partial_name: str, final_name: str,
-            saved: str = "whisper", variant: str | None = None) -> tuple[str, str]:
+            saved: str = "", variant: str | None = None,
+            whisper_asked: bool = False) -> tuple[str, str]:
     """Which decoder this launch gets, and the clause explaining why.
 
-    `--engine` decides when it is asked to. `auto` is the interesting one, and its rule
-    is deliberately conservative: **Whisper unless it cannot run.** Apple's recogniser
-    is a real engine but a different one — no `no_speech_prob`, so `clean.py` drops to
-    the narrow filler check it documents for a non-Whisper engine, one quality tier
-    where Whisper has two, and no hotword biasing for the rescue path. Switching to it
-    silently, on a machine where Whisper was working, would change what Flow hears for
-    reasons the user never asked about.
+    **Precedence:** an explicit `--engine` wins; then the engine the Models page saved
+    (`saved`, "" when nobody has chosen - the profile's default); then `auto`, whose rule is
+    below. `--engine auto` with a saved "parakeet" **is** that choice being honoured, and a
+    saved "whisper" is a choice too: it is why `profile.engine` has no default of "whisper".
 
-    So `auto` reaches for it in exactly one situation: the Whisper models are not on
-    this machine and cannot be fetched. That is the situation it was written for — a
-    network that blocks huggingface.co, where the alternative is not a worse engine but
-    no dictation at all.
+    **`auto` is Parakeet on the GPU when this PC has a GPU backend and the build is
+    installed** (decisions.md 2026-10-05, which reverses "auto never selects Parakeet").
+    The reason is measured, on 300 clips of accented English on a GTX 1070: 14.5 errors per
+    100 words against 16.8 for `large-v3` (the best Whisper that guards against invention),
+    at a real-time factor of 0.020 against 0.190, so a final lands in ~70 ms where
+    Whisper-era finals on the owner's own log had a median of 790 ms (p95 1,516). Silence is
+    the other half: Parakeet invented text on 0 of 8 silence and noise clips, `small.en` on
+    8 of 8, caught only by `no_speech_prob`. More accurate, ten times faster, and no
+    safety net to maintain.
 
-    **`auto` never selects Parakeet on its own, on any platform, whatever is installed or
-    on disk.** It is the most accurate engine a CPU can run here, and it still asks for a
-    ~7 MB runtime and a model of 640 MB or 2.4 GB from huggingface.co, has no hotword
-    biasing, is one tier, and guards against invention with a threshold that rests on three
-    measured examples (its int8 build is also a little behind `small.en` on Japanese-accented
-    English; fp32 is not). That is a trade a person makes by name:
-    `--engine parakeet`, or choosing it on Flow Home's Models page, which is remembered in
-    the profile as `saved`. `--engine auto` with a saved "parakeet" **is** that choice
-    being honoured and not Flow deciding — a profile that is absent or says "whisper"
-    leaves everything below exactly as it was, native-on-a-Mac included. An explicit
-    `--engine` always beats the saved one, for that launch only.
+    **First run, GPU backend, no Parakeet GPU build yet:** Whisper runs this launch, so
+    dictation works at once, and `_background_gpu_fetch` downloads the build through Flow
+    Home's own download-then-switch path, which takes over (queued while you are talking)
+    when it lands. Gigabytes behind a first launch are not new - Whisper's 2.9 GB arrives
+    the same way - and a failed download leaves Whisper running with the reason in the
+    Models page's status strip. The startup line says so.
+
+    **What still makes Whisper the right engine, so `auto` leaves it alone there:** a PC
+    with no GPU backend and no add-on (the default install), where `small.en` is what a
+    CPU can run in time; Hindi and Hinglish, which Whisper hears and writes as English
+    (`asr.TASK`) and Parakeet's 25 European languages do not include; any language beyond
+    those; and a mis-heard command, which Whisper retries with the command words as
+    hotwords and Parakeet cannot take. Those are choices a person makes on the Models page
+    or with `--engine whisper`, remembered in the profile.
+
+    **Everything else is as it was.** Apple's recogniser is a real engine but a different
+    one - no `no_speech_prob` (so `clean.py` drops to the narrow filler check it documents
+    for a non-Whisper engine), one quality tier where Whisper has two, no hotword biasing -
+    so on a Mac `auto` still reaches for it in exactly one situation: the Whisper models are
+    not on the machine and cannot be fetched, a network that blocks huggingface.co, where
+    the alternative is not a worse engine but no dictation at all. A Mac has no GPU backend
+    for Parakeet yet (`parakeet.gpu_backend`), so nothing above applies there. The ONNX
+    builds of Parakeet (`fp32`, `int8`) are never picked by `auto`: they ask for the
+    `[parakeet]` add-on and are chosen by name.
 
     Every path returns a clause for the startup line, because the engine decides what
     Flow can hear and a silent choice would be the one thing nobody could check.
@@ -366,6 +402,16 @@ def _engine(args, partial_name: str, final_name: str,
         return _parakeet_engine(variant)
     if args.engine == "auto" and saved == "parakeet":
         return _saved_parakeet_engine(variant)
+    gpu = _gpu_auto(args, saved, variant, whisper_asked)
+    if gpu == "use":
+        return "parakeet", " (auto: a GPU is here and the Parakeet GPU build is installed)"
+    if gpu == "fetch":
+        from . import parakeet
+
+        return "whisper", (f" (the Parakeet GPU build, "
+                           f"{parakeet.download_size('gpu') / 1024 ** 2:.0f} MB, is downloading "
+                           "in the background; Flow switches to it when it lands - Flow Home > "
+                           "Models shows it)")
     if sys.platform != "darwin":
         if args.engine == "native":
             say("--engine native is macOS only; using whisper")
@@ -385,11 +431,34 @@ def _engine(args, partial_name: str, final_name: str,
         return "whisper", ""
     # `compile_if_missing=False`, and a short probe. A launch is not the place to
     # discover how slow `swiftc` is, and the probe blocks on a permission dialog that
-    # nobody has been shown yet — measured at a full minute per launch before this.
+    # nobody has been shown yet - measured at a full minute per launch before this.
     ok, why = native_available(compile_if_missing=False, timeout=10.0)
     if ok:
         return "native", " (whisper models not found on this machine)"
     return "whisper", f" (not found locally, and no native engine: {why})"
+
+
+def _background_gpu_fetch(home, args, saved: str, variant: str | None,
+                          whisper_asked: bool) -> bool:
+    """Start the Parakeet GPU download that `_engine` promised, if it promised one.
+
+    **It lives on `Home`, not here and not on the window.** `Home.models` is the
+    `ModelManager` the Models page downloads through, and it is built with the session, not
+    with the window: its downloads run on threads of their own and `Home._downloaded`
+    posts the switch to the session when one lands, which is the "download first, then take
+    over" path a click on "Download & use" takes - with the status strip, the queue while
+    you are talking, and a failure reported in the strip. So a Flow whose window was never
+    opened still downloads and switches, and nothing here re-implements any of it. Only the
+    request is new: the same `start(..., then_use="engine")` the page's button makes.
+
+    Run after `Home` exists and the session is up; returns whether a download was started.
+    """
+    if _gpu_auto(args, saved, variant, whisper_asked) != "fetch":
+        return False
+    from .home.models import PARAKEET_GPU
+
+    home.models.downloads.start(PARAKEET_GPU, then_use="engine")
+    return True
 
 
 def _models_present(*names: str) -> bool:
@@ -463,10 +532,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--engine", default="auto", choices=("auto", "whisper", "native", "parakeet"),
         help="which decoder: whisper (faster-whisper, needs model files), native "
-             "(macOS on-device speech, no download at all) or parakeet (NVIDIA Parakeet "
-             "through onnx-asr: needs the [parakeet] extra and a 640 MB or 2.4 GB model it "
-             "downloads once; never chosen by auto). Default auto: whisper "
-             "unless its models are missing and the native engine is ready",
+             "(macOS on-device speech, no download at all) or parakeet (NVIDIA Parakeet: "
+             "the GPU build through parakeet.cpp, or onnx-asr on the CPU with the "
+             "[parakeet] extra). Default auto: Parakeet's GPU build on a PC with a GPU "
+             "backend (downloaded in the background on the first run, Whisper until it "
+             "lands), else whisper unless its models are missing and the native engine is "
+             "ready. A saved choice on Flow Home's Models page, or a --model flag, wins",
     )
     ap.add_argument(
         "--lexicon", default=None,
@@ -768,20 +839,29 @@ def main(argv: list[str] | None = None) -> int:
     if sys.platform == "darwin" and args.engine == "auto":
         planned = decode_plan()
         partial_name, final_name, _lines = planned
+    saved_engine = profile.engine if profile is not None else ""
+    saved_variant = profile.parakeet_model if profile is not None else None
+    # A flag that names a Whisper model is asking for Whisper, whatever `auto` would pick.
+    whisper_asked = bool(args.model or args.partial_model or args.final_model)
     engine, engine_why = _engine(
-        args, partial_name, final_name,
-        saved=profile.engine if profile is not None else "whisper",
-        variant=profile.parakeet_model if profile is not None else None)
+        args, partial_name, final_name, saved=saved_engine, variant=saved_variant,
+        whisper_asked=whisper_asked)
 
     def say_models() -> None:
         """The device and model lines, from a thread, after the pill is on screen."""
         if engine == "parakeet":
             # No `decoding on:` line: that one resolves CUDA, and this engine does not
             # use it, so naming a GPU here would be a false statement.
-            from .parakeet import VARIANTS, default_threads, resolve_variant
+            from .parakeet import (BACKEND_LABEL, VARIANTS, default_threads, gpu_backend,
+                                   resolve_variant)
 
             variant = VARIANTS[resolve_variant(
                 profile.parakeet_model if profile is not None else None)]
+            if variant.name == VARIANTS["gpu"].name:
+                backend = BACKEND_LABEL.get(gpu_backend()[0], "GPU")
+                say(f"engine: Parakeet ({variant.name}, parakeet.cpp) on the GPU via {backend}, "
+                    f"for partials and finals both{engine_why}")
+                return
             say(f"engine: Parakeet ({variant.name}, onnx-asr) on the CPU, "
                 f"{default_threads()} threads, for partials and finals both{engine_why}")
             return
@@ -1233,6 +1313,10 @@ def main(argv: list[str] | None = None) -> int:
         lexicon_path=lexicon.path, trace_path=diag.path if diag is not None else None,
     )
     session.home = home
+    # The first run on a PC with a GPU backend and no Parakeet GPU build: `_engine` kept
+    # Whisper for this launch and said so on the startup line; this is the download that
+    # takes over. Through `home` for the reason `_background_gpu_fetch` gives.
+    _background_gpu_fetch(home, args, saved_engine, saved_variant, whisper_asked)
 
     def build(name: str, arm: bool = False):
         """The surface `name` draws, over the session that is already running.

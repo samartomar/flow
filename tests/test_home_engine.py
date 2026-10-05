@@ -76,7 +76,9 @@ class TestThePayload(_Case):
         self.assertEqual(sp["engine"], "whisper")
         self.assertTrue(sp["engine_switchable"])
         engines = {e["id"]: e for e in sp["engines"]}
-        self.assertEqual(list(engines), ["whisper", "parakeet"])
+        # Parakeet first: it is the primary engine (decisions.md 2026-10-05), and the page
+        # draws the control in this order.
+        self.assertEqual(list(engines), ["parakeet", "whisper"])
         self.assertEqual((engines["whisper"]["label"], engines["whisper"]["maker"]),
                          ("Whisper", "OpenAI"))
         self.assertEqual((engines["parakeet"]["label"], engines["parakeet"]["maker"]),
@@ -100,7 +102,7 @@ class TestThePayload(_Case):
         self.assertEqual(row["speed"], 14.7)  # 1 / 0.068, measured on the CPU
         # Never mislabelled as the GTX 1070 the other rows were measured on.
         self.assertEqual(row["speed_basis"], "CPU")
-        self.assertFalse(row["blind"])
+        self.assertNotIn("blind", row)  # no catalog row is marked blind any more
         self.assertEqual(row["size"], parakeet.VARIANTS["fp32"].bytes)  # the download, until here
         self.assertEqual({n for n, r in rows.items() if r["speed_basis"]}, {PK, PK8})  # the GPU row has none
         self.assertEqual(rows["large-v3"]["family"], "Whisper")
@@ -309,7 +311,8 @@ class TestTheTwoBuilds(_Case):
         self.assertEqual((accurate["errors"], light["errors"]), (14.7, 16.9))
         self.assertEqual(accurate["speed_basis"], "CPU")
         self.assertEqual(light["speed_basis"], "CPU")
-        self.assertFalse(accurate["blind"] or light["blind"])
+        self.assertNotIn("blind", accurate)
+        self.assertNotIn("blind", light)
         self.assertEqual(accurate["size"], parakeet.VARIANTS["fp32"].bytes)
         self.assertEqual(light["size"], parakeet.VARIANTS["int8"].bytes)
         self.assertLess(light["size"], accurate["size"])
@@ -408,7 +411,7 @@ class TestTheStatusStrip(_Case):
         self.assertEqual((sw["state"], sw["engine"], sw["variant"]),
                          ("waiting", "parakeet", "fp32"))
         self.assertEqual(body["speech"]["engine"], "whisper")  # the footer's source: not yet
-        self.assertEqual(self.h.profile.engine, "whisper")
+        self.assertEqual(self.h.profile.engine, "")  # a queued choice is not remembered yet
 
     def test_it_applies_when_idle_and_then_says_done_briefly(self):
         self.h.session.busy = "waiting for you to finish talking"
@@ -516,14 +519,14 @@ class TestTheTableFollowsTheEngine(_Case):
 
     def test_the_footnote_parts_are_only_under_their_own_engine(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
-        whisper_only = js.index("skip the silence signal")
+        whisper_only = js.index("were measured on ${esc(sp.measured_on)}")
         parakeet_only = js.index("measured on a CPU with 8 threads")
         self.assertGreater(whisper_only, 0)
         self.assertGreater(parakeet_only, 0)
         # Each sentence sits inside its own branch of the engine conditional.
         branch = js[js.index('<p class="fine">${engine === "parakeet"'):]
         self.assertLess(branch.index("measured on a CPU with 8 threads"),
-                        branch.index("skip the silence signal"))
+                        branch.index("were measured on ${esc(sp.measured_on)}"))
 
     def test_the_rows_say_which_engine_they_are_for_the_page_to_filter_on(self):
         rows = {r["name"]: r for r in self.page()["models"]}
@@ -544,10 +547,15 @@ class TestTheTableFollowsTheEngine(_Case):
         rows = {r["name"]: r for r in body["speech"]["models"]}
         self.assertEqual(rows[PK]["in_use"], ["partial", "final"])
 
-    def test_the_best_errors_highlight_is_still_the_lowest_non_blind_row(self):
+    def test_the_best_errors_highlight_is_the_lowest_row_of_the_table_on_screen(self):
+        # Was "the lowest non-blind row of every model"; with no blind rows left to
+        # exclude it is each tab's own best, so Whisper's table is not left unmarked
+        # beside Parakeet's 14.5.
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         self.assertIn("bestErrors", js)
-        self.assertIn("!m.blind && m.errors === bestErrors", js)
+        self.assertIn("m.errors === bestErrors", js)
+        self.assertNotIn("m.blind", js)
+        self.assertIn("shown.filter((m) => m.errors != null)", js)
 
     def test_the_old_sherpa_row_stays_under_parakeet(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -578,7 +586,7 @@ class TestTheGpuRow(_Case):
         self.assertEqual(row["speed"], 50.0)  # 1 / 0.020, CUDA on the GTX 1070
         self.assertEqual(row["speed_basis"], "")  # same basis as the Whisper rows
         self.assertEqual(row["backend"], "CUDA")
-        self.assertFalse(row["blind"])
+        self.assertNotIn("blind", row)
         self.assertEqual((row["maker"], row["family"]), ("NVIDIA", "Parakeet"))
 
     def test_the_speed_follows_the_backend_this_pc_would_use(self):

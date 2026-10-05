@@ -80,9 +80,14 @@ boundary is this:
   client or a codebase. Set no workspace and nothing of the kind is sent.
 - **Network, but never user content.** The first decode of each tier downloads its
   model from Hugging Face, and so does a Download on Flow Home's Models page — the same
-  files, from the same place, and only when asked. The opt-in Parakeet engine
-  (`--engine parakeet` or the Models page, never chosen by `auto`) downloads its model
-  once — 640 MB (`int8`) or 2.4 GB (`fp32`) — from `huggingface.co/istupakov/
+  files, from the same place, and only when asked. Parakeet — the primary engine on a PC with a GPU
+  (`auto` picks its GPU build there since decisions.md 2026-10-05; the CPU builds are chosen
+  by `--engine parakeet` or the Models page) — downloads its model once. **The one download
+  nobody clicked is the GPU build's**: a first run on a PC with a GPU backend, no saved engine
+  and no Whisper model flag starts it in the background while Whisper runs — the same
+  unasked-for fetch policy as Whisper's own first decode, said on the startup line and shown
+  in the Models page's strip. The CPU builds are 640 MB (`int8`) or 2.4 GB (`fp32`), fetched
+  from `huggingface.co/istupakov/
   parakeet-tdt-0.6b-v3-onnx` at one pinned commit, into `~/.flow/models`, verifying every
   file's size and SHA-256. It does not go through `huggingface_hub`, and it does **not**
   avoid huggingface.co: an earlier build of this engine fetched from GitHub releases and

@@ -42,7 +42,7 @@ from ..refine import EFFORTS, available, named
 from ..session import CONVERSE, DICTATE, REFINE, RECENT_ANSWERED, RECENT_ASKED
 from ..version import check_update, version
 from .bridge import Busy
-from .models import BY_NAME, BY_VARIANT, PARAKEET_SPECS, SPECS, human
+from .models import BY_NAME, BY_RETIRED, BY_VARIANT, PARAKEET_SPECS, SPECS, human
 
 #: Session mode -> the word the pages use. The product has two sides, Dictate and Ask;
 #: Refine is Dictate with a polish step, and says so.
@@ -104,6 +104,9 @@ APP_NAMES = {
 
 #: What the Speech model row calls an engine that has no model names of its own.
 LEGACY_ROW = "sherpa-onnx-legacy"
+#: What the Whisper tab's "Remove N models Flow no longer lists" sends: every retired model
+#: that is on this PC and not in use, through the same delete as a row's trash can.
+UNLISTED_ROW = "unlisted-whisper"
 
 
 def parakeet_models_dir() -> Path:
@@ -576,6 +579,12 @@ class Api:
             if not parakeet.remove_legacy():
                 raise ApiError("the old Parakeet files are not on this PC")
             return self.models({})
+        if body.get("name") == UNLISTED_ROW:
+            # Models Flow stopped listing (decisions.md 2026-10-05). Only what nothing is
+            # using, and only on this press: the page names them first.
+            if not self.home.models.remove_unlisted():
+                raise ApiError("there are no unlisted models on this PC")
+            return self.models({})
         spec = self._spec(body)
         if spec.name in self.home.models.in_use():
             raise ApiError(f"{spec.name} is in use - choose another model first")
@@ -597,16 +606,21 @@ class Api:
         """
         partial, final = body.get("partial"), body.get("final")
         device = body.get("device")
+        from .models import complete
+
+        # A model that left the list is still a model Flow can run, when it is already on
+        # this PC: the Models page shows the one the profile names, and a press of "Use
+        # these" that changes only the other tier must not be refused for it. Not
+        # downloadable, so one that is not here is as unknown as it ever was.
         for value in (partial, final):
-            if value is not None and value not in BY_NAME:
+            if value is not None and value not in BY_NAME and not (
+                    value in BY_RETIRED and complete(BY_RETIRED[value].repo)):
                 raise ApiError("Flow does not know that model")
         if device is not None and device not in ("auto", "cuda", "cpu"):
             raise ApiError("the device is auto, cuda or cpu")
-        from .models import complete
-
         waiting = []
         for tier, value in (("partial", partial), ("final", final)):
-            if value is not None and not complete(BY_NAME[value].repo):
+            if value in BY_NAME and not complete(BY_NAME[value].repo):
                 self.home.models.downloads.start(BY_NAME[value], then_use=tier)
                 waiting.append(tier)
         if waiting:

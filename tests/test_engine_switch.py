@@ -141,7 +141,7 @@ class TestSwitching(_Case):
         self.assertIn("speech engine: parakeet (fp32)", notes(self.session))
 
     def test_the_choice_is_remembered_in_the_profile_once_it_has_happened(self):
-        self.assertEqual(self.profile.engine, "whisper")
+        self.assertEqual(self.profile.engine, "")  # nobody has chosen yet
         self.switch()
         self.assertEqual(reloaded(self.profile.path).engine, "parakeet")
 
@@ -172,7 +172,7 @@ class TestSwitching(_Case):
         self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
         self.assertIs(self.session.asr, self.whisper)
         self.assertTrue(self.whisper.loaded)
-        self.assertEqual(self.profile.engine, "whisper")
+        self.assertEqual(self.profile.engine, "")  # a switch that failed is not a choice
         self.assertTrue(any("did not load" in n for n in notes(self.session)))
 
     def test_a_factory_that_raises_is_a_note_and_not_a_crash(self):
@@ -316,7 +316,7 @@ class TestHardRefusalsStillRefuse(_Case):
         self.assertEqual(self.built, [])
         self.assertIs(self.session.asr, self.whisper)
         self.assertEqual(self.whisper.calls, [])  # not unloaded, not touched
-        self.assertEqual(self.profile.engine, "whisper")
+        self.assertEqual(self.profile.engine, "")  # a refusal is not a choice either
         self.assertIsNone(self.session._pending_engine)  # and never queued
 
     def test_an_unknown_engine(self):
@@ -565,9 +565,19 @@ class TestTheEngineIsAProfileSetting(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.path = Path(self._tmp.name) / "profile.json"
 
-    def test_it_defaults_to_whisper_which_leaves_auto_as_it_was(self):
-        self.assertEqual(Profile(self.path).engine, "whisper")
+    def test_it_defaults_to_unchosen_which_is_what_lets_auto_decide(self):
+        # "" and not "whisper": a saved "whisper" is somebody's choice and `auto` leaves
+        # it alone, so "never chose" has to be a different value (decisions.md 2026-10-05).
+        self.assertEqual(Profile(self.path).engine, "")
         self.assertEqual(ENGINES, ("whisper", "parakeet"))
+
+    def test_a_saved_whisper_is_a_choice_and_survives_a_round_trip(self):
+        p = Profile(self.path)
+        p.engine = "whisper"
+        p.save()
+        q = reloaded(self.path)
+        self.assertEqual(q.engine, "whisper")
+        self.assertNotIn("engine", q.faults)
 
     def test_it_round_trips(self):
         p = Profile(self.path)
@@ -577,17 +587,17 @@ class TestTheEngineIsAProfileSetting(unittest.TestCase):
         self.assertEqual(q.engine, "parakeet")
         self.assertNotIn("engine", q.faults)
 
-    def test_a_bad_value_is_a_named_fault_and_falls_back_to_whisper(self):
+    def test_a_bad_value_is_a_named_fault_and_falls_back_to_unchosen(self):
         self.path.write_text(json.dumps({"schema": 1, "engine": "deepgram"}),
                              encoding="utf-8")
         q = reloaded(self.path)
-        self.assertEqual(q.engine, "whisper")
+        self.assertEqual(q.engine, "")
         self.assertIn("engine", q.faults)
 
     def test_a_wrong_type_is_a_fault_too(self):
         self.path.write_text(json.dumps({"schema": 1, "engine": 7}), encoding="utf-8")
         q = reloaded(self.path)
-        self.assertEqual(q.engine, "whisper")
+        self.assertEqual(q.engine, "")
 
     def test_the_parakeet_build_round_trips_and_defaults_to_auto(self):
         p = Profile(self.path)
@@ -608,11 +618,11 @@ class TestTheEngineIsAProfileSetting(unittest.TestCase):
 
         self.assertEqual(PARAKEET_MODELS, parakeet.VARIANT_CHOICES)
 
-    def test_an_older_profile_without_it_launches_as_before(self):
+    def test_an_older_profile_without_it_has_not_chosen(self):
         self.path.write_text(json.dumps({"schema": 1, "decode_device": "cpu"}),
                              encoding="utf-8")
         q = reloaded(self.path)
-        self.assertEqual(q.engine, "whisper")
+        self.assertEqual(q.engine, "")
         self.assertNotIn("engine", q.faults)
 
 

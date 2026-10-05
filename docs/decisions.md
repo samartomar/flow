@@ -6,6 +6,89 @@ numbered condition that reopens it. The items these decisions spec'd are archive
 their evidence in [history/loop-rounds-1-3.md](history/loop-rounds-1-3.md). New
 decisions append here when NEEDS_YOU.md closes them.
 
+### 2026-10-05 — Parakeet on the GPU is the primary engine, and the Whisper catalog is cut to four
+
+The owner read the benchmark and decided. The measurement was 300 clips of accented English
+(EdAcc, `scripts/accent_bench.py`'s scorer) on a GTX 1070: **Parakeet on the GPU
+(parakeet.cpp, q8_0) 14.5 errors per 100 words** at a real-time factor of 0.020 (p50 107 ms,
+p95 229 ms a clip), the CPU builds 14.7 (fp32) and 16.9 (int8), against Whisper `large-v3`
+16.8 at 0.190, `large-v2` 17.0, `distil-large-v3.5` 16.0 (blind), `large-v3-turbo` 17.8
+(blind), `distil-large-v3` 18.1 (blind), `medium.en` 18.3 and `small.en` 19.4. On silence
+and noise Parakeet invented text on 0 of 8 clips and `small.en` on 8 of 8, caught only by
+`no_speech_prob` at 0.78–0.95. On the owner's own `~/.flow/diag.jsonl`, Whisper-era finals
+had a median of 790 ms (p95 1,516, n=44) and Parakeet GPU finals about 70 ms. More accurate,
+about ten times faster, and nothing to guard against.
+
+**This reverses "`auto` never selects Parakeet"**, which `_engine`'s docstring held on every
+platform since Parakeet arrived: it was the most accurate engine a *CPU* could run, behind a
+7 MB add-on and a 640 MB–2.4 GB download, and a person chose it by name. The GPU build has no
+add-on and no invention problem, and it is faster than the engine it is behind. The new
+precedence: **`--engine` wins; then the engine the Models page saved; then `auto`**, which is
+Parakeet's GPU build when `parakeet.gpu_backend()` finds CUDA or Vulkan and the build and
+its helper are installed, and otherwise exactly what it was — Whisper, or the native engine
+on a Mac with no Whisper models. A Mac has no GPU backend for Parakeet yet, so nothing
+changes there.
+
+**The first run is the same policy as Whisper's, not a new one.** On a PC with a GPU backend,
+no saved engine and no Whisper model named by a flag, but no Parakeet GPU build yet, Flow
+starts on Whisper — dictation works at once — and begins the 930 MB download in the
+background through the Models page's own download-then-switch path (`start(...,
+then_use="engine")`), so the strip shows it and it takes over when it lands, queued while
+you are talking. The startup line says so. It lives on `Home`, which owns the
+`ModelManager` and is built with the session, not with the window, so a Flow whose Home was
+never opened still downloads and switches. Whisper already fetches 2.9 GB on first use
+without asking; asking about 930 MB more would be a stricter standard than the one already
+accepted. A failed download leaves Whisper running with the reason in the strip. **Not** done
+when the user has a saved choice (they chose), names an engine or a Whisper model on the
+command line, saved an ONNX build of Parakeet, or has no GPU backend.
+
+**`profile.engine` stopped defaulting to "whisper".** The rule needs "nobody has chosen"
+to be a different value from "chose Whisper", and they were the same string. It is "" now,
+and a "whisper" on disk — including one an older Flow wrote on every save — reads as a
+choice, because the safe way to be wrong is to leave a machine on the engine it has.
+Anyone whose profile already says "whisper" and wants Parakeet chooses it once on the Models
+page.
+
+**What Whisper still owns**, so it stays one click away and `auto` leaves it alone there:
+
+- **Hindi and Hinglish.** `asr.TASK` is "translate" with `language` pinned to "en": on the
+  multilingual models (`large-v3`, `small`) Hindi speech comes out as English text; the `.en`
+  models are English-only. Parakeet hears 25 European languages and not Hindi.
+- **Rescue of mis-heard commands.** Whisper retries with the command words as hotwords;
+  Parakeet takes none.
+- **The default install**, with no GPU backend and no add-on: `small.en` is what a CPU can
+  run in time.
+- **Languages beyond Parakeet's 25.**
+
+**The catalog is cut to four rows, and only the catalog.** `large-v3` and `small` stay (the
+GPU pair — `CUDA_PARTIAL_MODEL` is `small`, `large-v3`'s live preview — and the multilingual
+ones), as do `small.en` and `base.en` (the CPU pair). Cut, each for its reason:
+
+| Model | Left because |
+|---|---|
+| `large-v2` | 17.0, within a point of `large-v3` at 0.211 against 0.190: nothing it does that `large-v3` does not |
+| `medium.en` | 18.3 at 0.131: behind `large-v3` on accuracy and `small.en` is what a CPU runs |
+| `distil-large-v3.5` | 16.0 — the best Whisper number, and blind: no `no_speech_prob`, so the hallucination guard is off |
+| `large-v3-turbo` | 17.8, blind |
+| `distil-large-v3` | 18.1, blind |
+
+They are `models.RETIRED`: never offered or downloaded, but `--final-model`, `--partial-model`
+and `--model` still take any faster-whisper name (unchanged), `asr.reports_no_speech` and
+`_NO_SPEECH_BLIND` stay for exactly that, and a profile that names one still runs it — the
+Models page shows it as a row ("no longer listed - still works", with its measurements and,
+for a blind one, what that costs) and the tier dropdown shows it as chosen instead of
+claiming Automatic. The `blind` badge left the catalog with the three models that carried it
+and the page's code for it went with it. **Nothing is ever deleted automatically**: where
+retired models are still in the Hugging Face cache, the Whisper tab offers "Remove N models
+Flow no longer lists (X GB)", naming them, through the same delete as a row's trash can.
+
+**Reopens if** the Voice page's accuracy check on the owner's own voice favours Whisper over
+Parakeet by more than its run-to-run noise; or Parakeet invents words in real use (text
+pasted that nobody said); or the helper
+proves unreliable on a driver Flow supports; or a Whisper release beats Parakeet on the
+EdAcc slice *and* reports `no_speech_prob`. Any of them puts a catalog row back
+(`models.RETIRED` keeps the measurements and repos) and `_engine`'s `auto` back to Whisper.
+
 ### 2026-09-23 — Better voices from Flow Home
 
 The owner looked at the voice list and asked whether nine 2013 voices were all there was.
