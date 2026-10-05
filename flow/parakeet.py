@@ -639,9 +639,21 @@ def _download(url: str, out: Path, file: File, before: int, total: int,
 
 
 def _scratch(parent: Path) -> Path:
+    """A fresh directory beside the model, that becomes the model when it is renamed.
+
+    **Not `tempfile.mkdtemp`.** On Windows, Python 3.12.4+ gives a `mkdtemp` directory a
+    protected ACL - SYSTEM, Administrators and OWNER RIGHTS, nothing inherited - and the
+    rename into `~/.flow/models` keeps it. A model folder is then readable only by the
+    identity that downloaded it: found 2026-10-05, when two builds fetched under another
+    identity were "Access is denied" to the owner's own Flow and showed as not downloaded.
+    A plain `mkdir` inherits the parent's ACL, as every other folder Flow makes does; the
+    random suffix is the only part of `mkdtemp` this needed.
+    """
     try:
         parent.mkdir(parents=True, exist_ok=True)
-        return Path(tempfile.mkdtemp(prefix=".parakeet-", dir=parent))
+        scratch = parent / f".parakeet-{uuid.uuid4().hex}"
+        scratch.mkdir()
+        return scratch
     except OSError as exc:
         raise NotAvailable(f"cannot write to {parent}: {exc}") from exc
 

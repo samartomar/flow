@@ -975,3 +975,28 @@ class TestParakeetReal(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)
+
+
+
+class TestADownloadedModelIsReadableByItsOwner(unittest.TestCase):
+    """2026-10-05: `tempfile.mkdtemp` gives its directory a protected, owner-only ACL on
+    Windows (Python 3.12.4+) and the rename into `~/.flow/models` kept it, so two builds
+    downloaded under another identity were "Access is denied" to the owner's own Flow."""
+
+    def test_the_scratch_directory_is_not_made_by_mkdtemp(self):
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch("tempfile.mkdtemp", side_effect=AssertionError("mkdtemp")):
+            scratch = parakeet._scratch(Path(root) / "models")
+            self.assertTrue(scratch.is_dir())
+            self.assertTrue(scratch.name.startswith(".parakeet-"))
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows ACLs")
+    def test_it_inherits_the_parents_permissions(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as root:
+            scratch = parakeet._scratch(Path(root) / "models")
+            acl = subprocess.run(["icacls", str(scratch)], capture_output=True,
+                                 text=True, errors="replace").stdout
+            # "(I)" marks an inherited entry; a protected mkdtemp ACL has none.
+            self.assertIn("(I)", acl, acl)
