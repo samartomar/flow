@@ -276,7 +276,7 @@ hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | tap the pill to c
 | `--final-model X` | stronger model for the pasted text (default `small.en` on a CPU, `large-v3` on a GPU). Same as above: Models remembers it, the flag wins for one launch |
 | `--model X` | pin BOTH tiers to one model, for a low-memory machine |
 | `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one). Models remembers a choice; the flag wins for one launch |
-| `--engine {auto,whisper,native,parakeet}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all; `parakeet` is NVIDIA Parakeet through sherpa-onnx (`pip` extra `[parakeet]`, a 465 MB model fetched once into `~/.flow/models`) and is never chosen by `auto`. Default `auto`: whisper unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface) |
+| `--engine {auto,whisper,native,parakeet}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all; `parakeet` is NVIDIA Parakeet through onnx-asr (extra `[parakeet]`, a model of 640 MB or 2.4 GB fetched once from huggingface.co into `~/.flow/models`) and is never chosen by `auto` — see [Parakeet](#parakeet-from-nvidia). Flow Home's Models page chooses it too, and remembers; the flag wins for one launch. Default `auto`: whisper unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface) |
 | `--lexicon PATH` | personal terms file (default `~/.flow/lexicon.txt`) |
 | `--no-lexicon` | ignore that file without deleting it |
 | `--device N` | input device index; list them with `scripts/devices.py`. **Pinned**: if it goes away mid-session Flow retries *this* index and never substitutes another — see [When the microphone goes away](#if-the-microphone-goes-away-mid-session). Flow Home's Settings chooses a microphone by name instead, which is what most people want |
@@ -668,6 +668,37 @@ turns it off. It cannot be the talk keys: one press would start both.
 ```
 chord   ask      ctrl+alt+win  (hold to ask, release to send the question)
 ```
+
+### Parakeet, from NVIDIA
+
+The most accurate speech model Flow has measured, and it runs on the CPU. On the same 300
+accented-English clips: **14.7 errors per 100 words** for Parakeet's accurate build, 16.9 for
+its light build, 19.5 for `small.en` and 16.8 for `large-v3` on a GTX 1070 — at 13 to 15
+times faster than you talk, on 8 CPU threads. The accurate build beats `small.en` in every
+accent group, Japanese-accented English included; the light build is level with it there.
+It is opt-in, and nothing about installing it changes what Flow does until you choose it.
+
+```bash
+uv pip install -e ".[parakeet]"        # onnx-asr, about 7 MB; onnxruntime is already here
+uv run python -m flow --engine parakeet
+```
+
+Or open **Flow Home ▸ Models**, choose **Parakeet · NVIDIA** above the model list, and pick a
+version: **Accurate** (2.4 GB, loads in about five seconds) or **Light** (640 MB). A version
+that is not on this PC downloads first, with a progress bar and a Cancel, then takes over —
+live, as long as you are not mid-sentence. The choice is remembered, and `--engine` on the
+command line beats it for one launch. Without the add-on installed the option is greyed out
+and says how to get it.
+
+What it costs: one model does the live preview *and* the pasted words, so there are no tiers
+to choose between; it cannot be steered toward command words (a mis-heard command is not
+retried with a hint); and its guard against words it invented rests on a threshold measured
+on only three examples, which `flow/clean.py` says. The models come from huggingface.co at
+one pinned commit, each file checked against its published SHA-256, into
+`~/.flow/models/` — so **this engine does not avoid huggingface.co**; `--engine native` is
+still the answer for a network that blocks it. An earlier Flow kept a differently-built copy
+under `~/.flow/models/sherpa-onnx-…`; this version does not use it, and Models offers to
+remove it. `uv run python scripts/parakeet_bench.py fp32` reproduces every number.
 
 ### Without HuggingFace
 
@@ -1925,6 +1956,7 @@ figure — along with everything else in there.
 |---|---|---|
 | `~/.flow/lexicon.txt` | you, by hand — and by Flow only when you act: creating it from a template of comments when it is missing, appending one line when you tap an offered correction or press Add on Flow Home's Voice page, and taking out one entry's lines when you press Remove there | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders or reformats a line — everything you did not ask to change comes back byte for byte |
 | `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the six global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup, and whether to keep a history and for how long (`history`, `history_days`: absent means not chosen, which keeps nothing) — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
+| `~/.flow/models/` | `--engine parakeet`, and Flow Home's Models page | the Parakeet models, as plain files (not the Hugging Face cache, which onnxruntime cannot read external weights through): `parakeet-tdt-0.6b-v3` at 2.4 GB and `parakeet-tdt-0.6b-v3-int8` at 640 MB. Models lists them with their sizes and deletes the one you do not use |
 | `~/.cache/huggingface/hub/` | first decode, and Flow Home's Models page | the models. `base.en` 141 MiB, `small.en` 464 MiB, `large-v3` 2.9 GiB; Models lists them with their sizes and deletes the ones you do not use |
 | `~/.flow/history.jsonl` | **only if you chose to keep a history** on Flow Home's History page: every Send, every Ask and its answer, and what the speech filter set aside | one JSON line per entry, the words included — which is why it exists only by your choice ([History and Paste last](#history-and-paste-last)). Kept 7, 30 or 90 days and at most 20 000 entries, then trimmed; **Stop keeping** deletes it. A line broken by hand costs that line only |
 | `~/.flow/home/` | Microsoft Edge, for the Flow Home window | the window's own browser profile — its size and position, and Edge's cache. Nothing Flow writes; deleting it resets the window |

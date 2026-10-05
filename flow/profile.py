@@ -284,6 +284,10 @@ DECODE_DEVICES = ("auto", "cuda", "cpu")
 #: speech) is deliberately not here: it is reached by `--engine native` or by `auto` when
 #: Whisper has nothing to run, and nothing on the Models page can choose it yet.
 ENGINES = ("whisper", "parakeet")
+#: Which build of Parakeet: "auto" is the most accurate one that is on this PC (fp32, else
+#: int8), and fp32 to be downloaded when neither is. Kept as a literal here so the profile
+#: never imports the engine; `flow.parakeet.VARIANT_CHOICES` is the same list.
+PARAKEET_MODELS = ("auto", "fp32", "int8")
 
 #: How many model names the settings menu will remember. A ceiling rather than a
 #: judgement: this list is only ever appended to, by hand, one name at a time, and a menu
@@ -530,6 +534,8 @@ class Profile:
         #: `--engine` on the command line wins for one launch. Absent means Whisper,
         #: which is also what leaves `--engine auto` exactly as it was before this field.
         self.engine: str = "whisper"
+        #: "auto", "fp32" or "int8" — which Parakeet build, remembered. See PARAKEET_MODELS.
+        self.parakeet_model: str = "auto"
         #: The microphone, by *name* and never by index — see `Mic.device_name` for why
         #: an index stored across launches comes to mean a different device. None follows
         #: the system default, which is also what a name that is not connected falls back
@@ -662,6 +668,10 @@ class Profile:
         if self.engine not in ENGINES:
             self.faults.append("engine")
             self.engine = "whisper"
+        self.parakeet_model = take("parakeet_model", _text, "auto")
+        if self.parakeet_model not in PARAKEET_MODELS:
+            self.faults.append("parakeet_model")
+            self.parakeet_model = "auto"
         self.mic_device = take("mic_device", _text)
         # A wait is a positive number of seconds no longer than the flag would accept;
         # anything else degrades to the shipped wait and is named, like any wrong type.
@@ -736,6 +746,7 @@ class Profile:
             "final_model": self.final_model,
             "decode_device": self.decode_device,
             "engine": self.engine,
+            "parakeet_model": self.parakeet_model,
             "mic_device": self.mic_device,
             "cli_timeout": self.cli_timeout,
             "warm": self.warm,

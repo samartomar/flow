@@ -42,7 +42,7 @@ from ..refine import EFFORTS, available, named
 from ..session import CONVERSE, DICTATE, REFINE, RECENT_ANSWERED, RECENT_ASKED
 from ..version import check_update, version
 from .bridge import Busy
-from .models import BY_NAME, PARAKEET, SPECS, human
+from .models import BY_NAME, BY_VARIANT, PARAKEET_SPECS, SPECS, human
 
 #: Session mode -> the word the pages use. The product has two sides, Dictate and Ask;
 #: Refine is Dictate with a polish step, and says so.
@@ -103,6 +103,15 @@ APP_NAMES = {
 }
 
 #: What the Speech model row calls an engine that has no model names of its own.
+LEGACY_ROW = "sherpa-onnx-legacy"
+
+
+def parakeet_models_dir() -> Path:
+    from .. import parakeet
+
+    return parakeet.MODELS_DIR
+
+
 ENGINE_NAMES = {"parakeet": "Parakeet", "native": "Apple speech"}
 
 #: Why the speech filter set words aside, as somebody reading History needs to hear it.
@@ -541,6 +550,14 @@ class Api:
         return self.models({})
 
     def model_delete(self, body: dict) -> dict:
+        if body.get("name") == LEGACY_ROW:
+            # What the first Parakeet (sherpa-onnx) left behind: never read by this
+            # runtime, never deleted unasked, removed here when somebody asks.
+            from .. import parakeet
+
+            if not parakeet.remove_legacy():
+                raise ApiError("the old Parakeet files are not on this PC")
+            return self.models({})
         spec = self._spec(body)
         if spec.name in self.home.models.in_use():
             raise ApiError(f"{spec.name} is in use - choose another model first")
@@ -597,30 +614,44 @@ class Api:
         """
         from ..profile import ENGINES
 
+        from .. import parakeet
+
         name = body.get("engine")
         if name not in ENGINES:
             raise ApiError("the engine is " + " or ".join(ENGINES))
+        # Parakeet's build — "fp32" (accurate) or "int8" (light) — or None for the profile's.
+        variant = body.get("variant")
+        if variant is not None and variant not in parakeet.VARIANTS:
+            raise ApiError("the Parakeet build is " + " or ".join(parakeet.VARIANTS))
         # Choosing Whisper ends a Parakeet download that was only waiting to switch.
-        job = self.home.models.downloads.jobs().get(PARAKEET.name)
-        if job is not None and name != "parakeet":
-            job.then_use = ""
-        from .. import parakeet
-
+        if name != "parakeet":
+            for spec in PARAKEET_SPECS:
+                job = self.home.models.downloads.jobs().get(spec.name)
+                if job is not None:
+                    job.then_use = ""
+        s = self.session
         if name == "parakeet":
             ok, why = parakeet.runtime_installed()
             if not ok:
                 raise ApiError("needs the Parakeet add-on: " + 'uv pip install -e ".[parakeet]"')
-            if not parakeet.model_present():
-                self.home.models.downloads.start(PARAKEET, then_use="engine")
+            asked = variant or self._call(lambda: getattr(s.profile, "parakeet_model", None))
+            chosen = BY_VARIANT[parakeet.resolve_variant(asked)]
+            if not parakeet.model_present(chosen.variant):
+                # Other build waiting on its download no longer is: this choice replaces it.
+                for spec in PARAKEET_SPECS:
+                    other = self.home.models.downloads.jobs().get(spec.name)
+                    if other is not None and spec is not chosen:
+                        other.then_use = ""
+                self.home.models.downloads.start(chosen, then_use="engine")
                 return self.models({})
-        s = self.session
 
         def change() -> str:
-            if getattr(s, "engine", "whisper") == name:
+            if (getattr(s, "engine", "whisper") == name
+                    and (variant is None or getattr(s, "engine_variant", "") == variant)):
                 return ""
-            why = s.engine_refusal(name)
+            why = s.engine_refusal(name, variant)
             if not why:
-                s.set_engine(name)
+                s.set_engine(name, variant)
             return why
 
         why = self._call(change)
@@ -1771,6 +1802,9 @@ class Api:
             "trace": Path(self.home.trace_path).parent if self.home.trace_path else None,
             "lexicon": Path(self.home.lexicon_path).parent if self.home.lexicon_path else None,
             "models": Path(cache_dir()) if cache_dir() else None,
+            # Parakeet's models are not in the Hugging Face cache: Open folder on the
+            # Models page opens the one for the engine in use.
+            "parakeet": parakeet_models_dir(),
         }
         folder = folders.get(what) if isinstance(what, str) else None
         if folder is None:

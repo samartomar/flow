@@ -1,0 +1,3147 @@
+{
+ "identity": {
+  "date": "2026-10-05",
+  "faster-whisper": "1.2.1",
+  "ctranslate2": "4.8.1",
+  "device": "cpu",
+  "models": {
+   "parakeet-int8": "istupakov/parakeet-tdt-0.6b-v3-onnx@8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce"
+  },
+  "onnx-asr": "0.12.0",
+  "onnxruntime": "1.28.0"
+ },
+ "variant": "int8",
+ "threads": 8,
+ "summary": {
+  "errors_per_100": 16.896217264791463,
+  "rtf": 0.07606443879777662,
+  "p50_ms": 400.39669995894656,
+  "p95_ms": 1011.8004850170115,
+  "load_s": 3.1592724999645725,
+  "empty_clips": 1,
+  "logprob_p1": -0.5659827669978722,
+  "logprob_p5": -0.39852454335127463,
+  "logprob_p50": -0.10953509092770994,
+  "clips_below_threshold": 0,
+  "threshold": -0.8,
+  "clips": 300
+ },
+ "groups": {
+  "us-control": {
+   "errors": 227,
+   "words": 1143,
+   "audio": 303.73000000000013,
+   "decode": 23.33591119974153,
+   "clips": 60,
+   "empty": 0
+  },
+  "indian": {
+   "errors": 183,
+   "words": 969,
+   "audio": 368.21999999999997,
+   "decode": 27.473569799913093,
+   "clips": 60,
+   "empty": 0
+  },
+  "japanese": {
+   "errors": 187,
+   "words": 782,
+   "audio": 392.21993749999996,
+   "decode": 29.01982849999331,
+   "clips": 60,
+   "empty": 1
+  },
+  "russian": {
+   "errors": 119,
+   "words": 1142,
+   "audio": 368.2299375,
+   "decode": 28.83060060016578,
+   "clips": 60,
+   "empty": 0
+  },
+  "spanish": {
+   "errors": 155,
+   "words": 1119,
+   "audio": 427.7,
+   "decode": 32.82754299987573,
+   "clips": 60,
+   "empty": 0
+  }
+ },
+ "silence": [
+  {
+   "name": "digital silence 3s",
+   "expected_empty": true,
+   "text": "",
+   "mean_logprob": null
+  },
+  {
+   "name": "very quiet noise 3s",
+   "expected_empty": true,
+   "text": "",
+   "mean_logprob": null
+  },
+  {
+   "name": "room-ish noise 3s",
+   "expected_empty": true,
+   "text": "",
+   "mean_logprob": null
+  },
+  {
+   "name": "loud noise 3s",
+   "expected_empty": true,
+   "text": "",
+   "mean_logprob": null
+  },
+  {
+   "name": "room",
+   "expected_empty": true,
+   "text": "",
+   "mean_logprob": null
+  },
+  {
+   "name": "fan45_quiet",
+   "expected_empty": true,
+   "text": "",
+   "mean_logprob": null
+  },
+  {
+   "name": "fan55_quiet",
+   "expected_empty": true,
+   "text": "Okay.",
+   "mean_logprob": -0.6030038595199585
+  },
+  {
+   "name": "setup_quiet",
+   "expected_empty": true,
+   "text": "Ha ha",
+   "mean_logprob": -0.9015854001045227
+  },
+  {
+   "name": "acoustic",
+   "expected_empty": false,
+   "text": "Refactor the OAuth middleware to use PKCE instead of the implicit grant, then redeploy to staging.",
+   "mean_logprob": -0.06706782322933122
+  },
+  {
+   "name": "fan45_speech",
+   "expected_empty": false,
+   "text": "Refactor the O middleware to use EKCE instead of the implicit red. And read the voice is AJ.",
+   "mean_logprob": -0.28857001377602154
+  },
+  {
+   "name": "fan55_speech",
+   "expected_empty": false,
+   "text": "Refactor the Ohawk middleware to use PKCE instead of the implicit red. Then redeploy to stage A.",
+   "mean_logprob": -0.15169304361529612
+  },
+  {
+   "name": "setup_speech",
+   "expected_empty": false,
+   "text": "The Kubernetes operator for Postgres needs an updated help chart before PIA reviews the pull request.",
+   "mean_logprob": -0.18625234825224438
+  }
+ ],
+ "clips": [
+  {
+   "wav": "edacc/us-control/00001.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 5,
+   "seconds": 2.08,
+   "decode_s": 0.1874674999853596,
+   "mean_logprob": -0.1319645776525249,
+   "text": "C eleven dash P two."
+  },
+  {
+   "wav": "edacc/us-control/00005.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 13,
+   "seconds": 4.18,
+   "decode_s": 0.3258544999989681,
+   "mean_logprob": -0.03474713777579035,
+   "text": "Is that uh I mean realistically I would rather go to the beach today."
+  },
+  {
+   "wav": "edacc/us-control/00007.wav",
+   "group": "us-control",
+   "errors": 8,
+   "words": 23,
+   "seconds": 6.91,
+   "decode_s": 0.49943049997091293,
+   "mean_logprob": -0.17531266580135443,
+   "text": "I mean obviously, but it's been I'd rather go right now as well say what he's doing there and pop up to be a little bit grim."
+  },
+  {
+   "wav": "edacc/us-control/00009.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 6,
+   "seconds": 1.51,
+   "decode_s": 0.14320609997957945,
+   "mean_logprob": -0.05719668360094287,
+   "text": "Especially in this time staying inside."
+  },
+  {
+   "wav": "edacc/us-control/00011.wav",
+   "group": "us-control",
+   "errors": 4,
+   "words": 28,
+   "seconds": 7.33,
+   "decode_s": 0.6186710000038147,
+   "mean_logprob": -0.17320554896514267,
+   "text": "I mean we could after the after this, yeah, but I don't say everybody's like saying Oh yeah, go Burber and all that stuff, like nobody really cares."
+  },
+  {
+   "wav": "edacc/us-control/00013.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 10,
+   "seconds": 2.62,
+   "decode_s": 0.21578250004677102,
+   "mean_logprob": -0.08534289100316528,
+   "text": "It sounds really great. I would not want to go there."
+  },
+  {
+   "wav": "edacc/us-control/00015.wav",
+   "group": "us-control",
+   "errors": 1,
+   "words": 16,
+   "seconds": 4.54,
+   "decode_s": 0.4924004999920726,
+   "mean_logprob": -0.05904555902113849,
+   "text": "No, never again. I know you're a big you're the big big promoter there, but"
+  },
+  {
+   "wav": "edacc/us-control/00017.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 10,
+   "seconds": 3.94,
+   "decode_s": 0.30771800002548844,
+   "mean_logprob": -0.06753758565807289,
+   "text": "I mean, please do not ever mention that ever again."
+  },
+  {
+   "wav": "edacc/us-control/00019.wav",
+   "group": "us-control",
+   "errors": 2,
+   "words": 15,
+   "seconds": 4.09,
+   "decode_s": 0.32196059997659177,
+   "mean_logprob": -0.10208387605283255,
+   "text": "Oh I'm seeing a great I'm seeing a great question here, not gonna lie. It's uh"
+  },
+  {
+   "wav": "edacc/us-control/00021.wav",
+   "group": "us-control",
+   "errors": 1,
+   "words": 18,
+   "seconds": 3.76,
+   "decode_s": 0.2964754000422545,
+   "mean_logprob": -0.0699810077683893,
+   "text": "It's is there a particular food you used like as a child? I'm quite tempted by that."
+  },
+  {
+   "wav": "edacc/us-control/00023.wav",
+   "group": "us-control",
+   "errors": 6,
+   "words": 25,
+   "seconds": 10.78,
+   "decode_s": 0.7537858999567106,
+   "mean_logprob": -0.21400683649399485,
+   "text": "I mean I mean I mean depends when'cause I think when I was in Ukraine, I would definitely say it was like the dump place, the Vayaki."
+  },
+  {
+   "wav": "edacc/us-control/00025.wav",
+   "group": "us-control",
+   "errors": 4,
+   "words": 6,
+   "seconds": 4.18,
+   "decode_s": 0.32633970002643764,
+   "mean_logprob": -0.325540179206531,
+   "text": "Boston. Yeah, Peter Pew is like more Polish, I'd say."
+  },
+  {
+   "wav": "edacc/us-control/00027.wav",
+   "group": "us-control",
+   "errors": 6,
+   "words": 60,
+   "seconds": 19.96,
+   "decode_s": 1.4522354999789968,
+   "mean_logprob": -0.0788120569968014,
+   "text": "I mean they're just all just realistically, they're all just like lamb or beef or pork with stuffed with herbs, which I mean depends, obviously you might do it differently depending on where you're from. But it's realistic realistically that with a very thick outer crust. And most of the time you'll have cream uh sour cream with them and they are so good. They're delicious."
+  },
+  {
+   "wav": "edacc/us-control/00029.wav",
+   "group": "us-control",
+   "errors": 2,
+   "words": 19,
+   "seconds": 4.21,
+   "decode_s": 0.31312760000582784,
+   "mean_logprob": -0.05576515844450114,
+   "text": "I do not have that you must have that in Romania, like some form or version of it."
+  },
+  {
+   "wav": "edacc/us-control/00043.wav",
+   "group": "us-control",
+   "errors": 4,
+   "words": 21,
+   "seconds": 4.51,
+   "decode_s": 0.35600510000949726,
+   "mean_logprob": -0.10951717770106167,
+   "text": "Yeah, but you you watched Die Hard as well for Christmas, which is like honestly the best version. Like who cares?"
+  },
+  {
+   "wav": "edacc/us-control/00045.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 13,
+   "seconds": 2.95,
+   "decode_s": 0.22658730001421645,
+   "mean_logprob": -0.06979227501791943,
+   "text": "Is that just a you thing being like very special?"
+  },
+  {
+   "wav": "edacc/us-control/00049.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 13,
+   "seconds": 3.16,
+   "decode_s": 0.2524595999857411,
+   "mean_logprob": -0.11671027707337128,
+   "text": "He's an absolute specimen. He should not be let out of the house."
+  },
+  {
+   "wav": "edacc/us-control/00051.wav",
+   "group": "us-control",
+   "errors": 12,
+   "words": 15,
+   "seconds": 2.89,
+   "decode_s": 0.23939209996024147,
+   "mean_logprob": -0.4085715019609779,
+   "text": "Oh my god."
+  },
+  {
+   "wav": "edacc/us-control/00053.wav",
+   "group": "us-control",
+   "errors": 1,
+   "words": 19,
+   "seconds": 3.43,
+   "decode_s": 0.26996230002259836,
+   "mean_logprob": -0.11444219832027067,
+   "text": "I mean any man would lo would is insane when they watch Die Hard Four, not gonna lie."
+  },
+  {
+   "wav": "edacc/us-control/00055.wav",
+   "group": "us-control",
+   "errors": 8,
+   "words": 14,
+   "seconds": 6.37,
+   "decode_s": 0.46557459997711703,
+   "mean_logprob": -0.17892935921970224,
+   "text": "You can just track the mail pattern boldness."
+  },
+  {
+   "wav": "edacc/us-control/00057.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 6,
+   "seconds": 2.02,
+   "decode_s": 0.17444619996240363,
+   "mean_logprob": -0.08947401313046364,
+   "text": "What no, never in my life."
+  },
+  {
+   "wav": "edacc/us-control/00059.wav",
+   "group": "us-control",
+   "errors": 2,
+   "words": 12,
+   "seconds": 2.98,
+   "decode_s": 0.2361170999938622,
+   "mean_logprob": -0.10232682843428147,
+   "text": "People said that about AirPods. Everybody's wearing that right now."
+  },
+  {
+   "wav": "edacc/us-control/00063.wav",
+   "group": "us-control",
+   "errors": 5,
+   "words": 15,
+   "seconds": 2.68,
+   "decode_s": 0.21210549998795614,
+   "mean_logprob": -0.06932771322968101,
+   "text": "I used to mock them everywhere and here I am."
+  },
+  {
+   "wav": "edacc/us-control/00069.wav",
+   "group": "us-control",
+   "errors": 4,
+   "words": 33,
+   "seconds": 8.71,
+   "decode_s": 0.6251263000303879,
+   "mean_logprob": -0.15313121017639145,
+   "text": "Exactly. And as well as that like oh my God, like you can literally like do walk I think like ten meters and like that and nobody cares. Like it's gonna be fun."
+  },
+  {
+   "wav": "edacc/us-control/00071.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 21,
+   "seconds": 4.66,
+   "decode_s": 0.3521688000182621,
+   "mean_logprob": -0.09299416358235728,
+   "text": "Remember that brings up remember the whole like Google Glasses thing that came out? That whole thing, that was so dumb."
+  },
+  {
+   "wav": "edacc/us-control/00075.wav",
+   "group": "us-control",
+   "errors": 5,
+   "words": 18,
+   "seconds": 4.57,
+   "decode_s": 0.3507019000244327,
+   "mean_logprob": -0.21830297013554129,
+   "text": "Probably'cause you're number one, probably like a tool squaring that and second of all you just"
+  },
+  {
+   "wav": "edacc/us-control/00077.wav",
+   "group": "us-control",
+   "errors": 1,
+   "words": 6,
+   "seconds": 1.54,
+   "decode_s": 0.17055820004316047,
+   "mean_logprob": -0.07082762958614491,
+   "text": "Probably they probably have like"
+  },
+  {
+   "wav": "edacc/us-control/00079.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 15,
+   "seconds": 4.15,
+   "decode_s": 0.329685700009577,
+   "mean_logprob": -0.16024426686562948,
+   "text": "Just no there's no Google classes'cause nobody's tried to like do do it ever since."
+  },
+  {
+   "wav": "edacc/us-control/00081.wav",
+   "group": "us-control",
+   "errors": 4,
+   "words": 23,
+   "seconds": 4.54,
+   "decode_s": 0.36184839997440577,
+   "mean_logprob": -0.12154907831572292,
+   "text": "I mean yeah, it looks really s you look like an absolute tool walking around with that, but it's fine, not gonna judge."
+  },
+  {
+   "wav": "edacc/us-control/00083.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 6,
+   "seconds": 4.03,
+   "decode_s": 0.30954869999550283,
+   "mean_logprob": -0.16553967606392497,
+   "text": "It's a beautiful question that I'm seeing."
+  },
+  {
+   "wav": "edacc/us-control/00085.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 9,
+   "seconds": 5.23,
+   "decode_s": 0.4238471999997273,
+   "mean_logprob": -0.27675418007624103,
+   "text": "Oh absolutely. Adventure Trivacy Privacy all the way, honestly still."
+  },
+  {
+   "wav": "edacc/us-control/00087.wav",
+   "group": "us-control",
+   "errors": 2,
+   "words": 9,
+   "seconds": 3.31,
+   "decode_s": 0.26250919996527955,
+   "mean_logprob": -0.19325985559752504,
+   "text": "To this day. To this day. Eventually supremacy."
+  },
+  {
+   "wav": "edacc/us-control/00089.wav",
+   "group": "us-control",
+   "errors": 1,
+   "words": 24,
+   "seconds": 5.59,
+   "decode_s": 0.41838409996125847,
+   "mean_logprob": -0.06364180635605912,
+   "text": "It's amazing. What have you ever seen? Like as a kid watching that coming back from school, I just watched that. That was amazing."
+  },
+  {
+   "wav": "edacc/us-control/00091.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 8,
+   "seconds": 1.72,
+   "decode_s": 0.16413290001219139,
+   "mean_logprob": -0.08617860755833817,
+   "text": "I've heard of that. I've heard of that."
+  },
+  {
+   "wav": "edacc/us-control/00099.wav",
+   "group": "us-control",
+   "errors": 5,
+   "words": 33,
+   "seconds": 6.04,
+   "decode_s": 0.451790000020992,
+   "mean_logprob": -0.07843143689694691,
+   "text": "I'm just gonna like try I'm just trying to imagine like a like a primary school teacher trying to explain to kids that this is somehow normal just to any job."
+  },
+  {
+   "wav": "edacc/us-control/00101.wav",
+   "group": "us-control",
+   "errors": 8,
+   "words": 34,
+   "seconds": 7.3,
+   "decode_s": 0.5382334000314586,
+   "mean_logprob": -0.1456099540116702,
+   "text": "Like what are you doing? Like imagine like that child is like imagine like the children like super small. They're just gonna be like at the foot level of the D1."
+  },
+  {
+   "wav": "edacc/us-control/00103.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 8,
+   "seconds": 2.59,
+   "decode_s": 0.22041150002041832,
+   "mean_logprob": -0.11035415373714841,
+   "text": "Playing football with their head."
+  },
+  {
+   "wav": "edacc/us-control/00105.wav",
+   "group": "us-control",
+   "errors": 6,
+   "words": 29,
+   "seconds": 6.97,
+   "decode_s": 0.5142903999658301,
+   "mean_logprob": -0.10920891917703557,
+   "text": "What about what was like your I'm I I can see it's a very like big movie, man. What was like your like formatting movie as a kid?"
+  },
+  {
+   "wav": "edacc/us-control/00115.wav",
+   "group": "us-control",
+   "errors": 6,
+   "words": 11,
+   "seconds": 3.22,
+   "decode_s": 0.268644800002221,
+   "mean_logprob": -0.1657358877905925,
+   "text": "Soundtrack to it is so good. Yeah, it's great, it's amazing."
+  },
+  {
+   "wav": "edacc/us-control/00117.wav",
+   "group": "us-control",
+   "errors": 10,
+   "words": 47,
+   "seconds": 9.79,
+   "decode_s": 0.7328540000016801,
+   "mean_logprob": -0.18897634411732198,
+   "text": "But it reminds me, remember I remember watching as a kid, like the whole like I remember my teacher showed me the the what was it again, the wizard of all and I re I like learnt like ten years later that kind of like"
+  },
+  {
+   "wav": "edacc/us-control/00119.wav",
+   "group": "us-control",
+   "errors": 6,
+   "words": 20,
+   "seconds": 5.11,
+   "decode_s": 0.402369599964004,
+   "mean_logprob": -0.05549099662306724,
+   "text": "got like massive amounts of skin cancer from the mercury and the paints'cause the lighting was so poor."
+  },
+  {
+   "wav": "edacc/us-control/00123.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 9,
+   "seconds": 2.35,
+   "decode_s": 0.20862360001774505,
+   "mean_logprob": -0.034533717910348705,
+   "text": "And like got like massive amounts of radiation damage."
+  },
+  {
+   "wav": "edacc/us-control/00125.wav",
+   "group": "us-control",
+   "errors": 4,
+   "words": 13,
+   "seconds": 2.17,
+   "decode_s": 0.19305449997773394,
+   "mean_logprob": -0.22095735559195728,
+   "text": "Wicked. Oh my god, yeah, I remember watching that."
+  },
+  {
+   "wav": "edacc/us-control/00127.wav",
+   "group": "us-control",
+   "errors": 2,
+   "words": 30,
+   "seconds": 5.89,
+   "decode_s": 0.44656020001275465,
+   "mean_logprob": -0.14407987324999588,
+   "text": "But I think it's such a cult thing. It's like it's like Disney movies like people will just re watch them whenever. So but like in the in the play industry."
+  },
+  {
+   "wav": "edacc/us-control/00131.wav",
+   "group": "us-control",
+   "errors": 4,
+   "words": 23,
+   "seconds": 5.71,
+   "decode_s": 0.42550449998816475,
+   "mean_logprob": -0.06300981721997231,
+   "text": "see that in in countries that just like are not like English speaking. Like you only ever see that in like"
+  },
+  {
+   "wav": "edacc/us-control/00133.wav",
+   "group": "us-control",
+   "errors": 10,
+   "words": 13,
+   "seconds": 5.56,
+   "decode_s": 0.4022782999672927,
+   "mean_logprob": -0.14045236151320173,
+   "text": "English speaking countries."
+  },
+  {
+   "wav": "edacc/us-control/00151.wav",
+   "group": "us-control",
+   "errors": 9,
+   "words": 21,
+   "seconds": 4.36,
+   "decode_s": 0.3320606999914162,
+   "mean_logprob": -0.26964987435181126,
+   "text": "Well and then was like did you did you understand all of it or were you like still as a kid?"
+  },
+  {
+   "wav": "edacc/us-control/00153.wav",
+   "group": "us-control",
+   "errors": 8,
+   "words": 13,
+   "seconds": 2.68,
+   "decode_s": 0.2150815000059083,
+   "mean_logprob": -0.2330361807183917,
+   "text": "Oh, what are you saying in English where they like adapt it to Greek?"
+  },
+  {
+   "wav": "edacc/us-control/00155.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 8,
+   "seconds": 1.66,
+   "decode_s": 0.1617979999864474,
+   "mean_logprob": -0.19416193402503149,
+   "text": "Finding Nemo, I don't know."
+  },
+  {
+   "wav": "edacc/us-control/00159.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 17,
+   "seconds": 4.48,
+   "decode_s": 0.3379585999646224,
+   "mean_logprob": -0.06686775202892022,
+   "text": "Did you ever see in Finding Nemo in the Swedish one at the at the very end?"
+  },
+  {
+   "wav": "edacc/us-control/00161.wav",
+   "group": "us-control",
+   "errors": 9,
+   "words": 38,
+   "seconds": 6.55,
+   "decode_s": 0.4854407999664545,
+   "mean_logprob": -0.22462022799468165,
+   "text": "I haven't either, but it's this cool thing at the end. I think it's at the end could it's like the and it just says slut and that's the end of it."
+  },
+  {
+   "wav": "edacc/us-control/00163.wav",
+   "group": "us-control",
+   "errors": 3,
+   "words": 16,
+   "seconds": 3.58,
+   "decode_s": 0.2896672999486327,
+   "mean_logprob": -0.13698356020649954,
+   "text": "It's just the one frame, it just says the one slot in the ocean. It's amazing."
+  },
+  {
+   "wav": "edacc/us-control/00165.wav",
+   "group": "us-control",
+   "errors": 13,
+   "words": 46,
+   "seconds": 11.83,
+   "decode_s": 0.8405384000507183,
+   "mean_logprob": -0.13176202120833228,
+   "text": "Probably not. It probably means something on the end, but it's like imagine they're w watching a really emotional kids movie. His all his family died looking for his wife. He's met a really like special friend and now it's like it's just a slut at the end."
+  },
+  {
+   "wav": "edacc/us-control/00169.wav",
+   "group": "us-control",
+   "errors": 7,
+   "words": 12,
+   "seconds": 1.66,
+   "decode_s": 0.15396399999735877,
+   "mean_logprob": -0.3327795217313299,
+   "text": "Like a Joe Rogan podcast."
+  },
+  {
+   "wav": "edacc/us-control/00173.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 10,
+   "seconds": 9.56,
+   "decode_s": 0.6659592000069097,
+   "mean_logprob": -0.21657767202123068,
+   "text": "All right, um I am participant C one three P one"
+  },
+  {
+   "wav": "edacc/us-control/00175.wav",
+   "group": "us-control",
+   "errors": 1,
+   "words": 11,
+   "seconds": 3.91,
+   "decode_s": 0.3049423000193201,
+   "mean_logprob": -0.13541733016332036,
+   "text": "Okay, now I'm uh I have to read out this text, so again."
+  },
+  {
+   "wav": "edacc/us-control/00179.wav",
+   "group": "us-control",
+   "errors": 2,
+   "words": 13,
+   "seconds": 4.48,
+   "decode_s": 0.33644729998195544,
+   "mean_logprob": -0.17732435198231541,
+   "text": "Alright, so uh now we can just go into a normal conversation, so"
+  },
+  {
+   "wav": "edacc/us-control/00181.wav",
+   "group": "us-control",
+   "errors": 0,
+   "words": 21,
+   "seconds": 6.1,
+   "decode_s": 0.44867919996613637,
+   "mean_logprob": -0.04610428586228019,
+   "text": "Uh which we have not had all day, so we can actually have a nice relaxing conversation right now. So how's work?"
+  },
+  {
+   "wav": "edacc/us-control/00209.wav",
+   "group": "us-control",
+   "errors": 9,
+   "words": 61,
+   "seconds": 11.92,
+   "decode_s": 0.8494493999751285,
+   "mean_logprob": -0.10342362081577784,
+   "text": "Yeah, no, I was gonna mention because usually every time you tell me that you're gonna go to work, it's like because of the whole twenty four hour thing, I expect that okay, right now you would still be at work and then tomorrow in the afternoon you'd say, Ah, I got I got free, no, I'm I'm free."
+  },
+  {
+   "wav": "edacc/us-control/00211.wav",
+   "group": "us-control",
+   "errors": 1,
+   "words": 32,
+   "seconds": 9.13,
+   "decode_s": 0.6536931999726221,
+   "mean_logprob": -0.10404379417501072,
+   "text": "Um but it's weird that you started in the morning and you're free now. Which is how the the average person works, but with with you it's the twenty four hour shift. So um"
+  },
+  {
+   "wav": "edacc/indian/00440.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 35,
+   "seconds": 14.86,
+   "decode_s": 1.0480237000156194,
+   "mean_logprob": -0.045062702192543234,
+   "text": "Uh yeah, so the topic that we chosen was basically what was the first uh movie that we watched that was based on a book. So for me it's Alice in Wonderland. What is it for you?"
+  },
+  {
+   "wav": "edacc/indian/00441.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 8,
+   "seconds": 3.52,
+   "decode_s": 0.2742127000237815,
+   "mean_logprob": -0.12327240620756388,
+   "text": "Uh for me I think it's Harry Potter."
+  },
+  {
+   "wav": "edacc/indian/00443.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 31,
+   "seconds": 14.53,
+   "decode_s": 0.999459599959664,
+   "mean_logprob": -0.08284421482941202,
+   "text": "Yeah, the first one. I mean I remember reading uh Philosoph of Sorcerer's Tone and then I watched the movie like my sister told me that there are movies on these books."
+  },
+  {
+   "wav": "edacc/indian/00445.wav",
+   "group": "indian",
+   "errors": 8,
+   "words": 17,
+   "seconds": 4.99,
+   "decode_s": 0.3770022999960929,
+   "mean_logprob": -0.3064088959844135,
+   "text": "And then I'm watching and then was a music. The first one was really nice."
+  },
+  {
+   "wav": "edacc/indian/00446.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 17,
+   "seconds": 6.34,
+   "decode_s": 0.46302889997605234,
+   "mean_logprob": -0.05317073063798279,
+   "text": "True. What was your favorite uh have you seen all the seven Harry Potter movies or"
+  },
+  {
+   "wav": "edacc/indian/00447.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 6,
+   "seconds": 3.16,
+   "decode_s": 0.24584729998605326,
+   "mean_logprob": -0.1461343191428265,
+   "text": "Yes, yes, I'm I'm uh pure blood."
+  },
+  {
+   "wav": "edacc/indian/00448.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 15,
+   "seconds": 4.93,
+   "decode_s": 0.36080819997005165,
+   "mean_logprob": -0.1504801583320406,
+   "text": "Sorry, but uh what is what what's your favorite one out of all of those?"
+  },
+  {
+   "wav": "edacc/indian/00449.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 24,
+   "seconds": 9.91,
+   "decode_s": 0.6830818000016734,
+   "mean_logprob": -0.10675768919937775,
+   "text": "I think the first one because so the first one was like the exact like the most appropriate representation of what I had heard."
+  },
+  {
+   "wav": "edacc/indian/00451.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 7,
+   "seconds": 2.02,
+   "decode_s": 0.1917816999484785,
+   "mean_logprob": -0.05070269118170307,
+   "text": "what I had imagined from the book."
+  },
+  {
+   "wav": "edacc/indian/00453.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 11,
+   "seconds": 3.7,
+   "decode_s": 0.2800512000103481,
+   "mean_logprob": -0.02809206612619164,
+   "text": "Um, so the first one was the most appropriate one for me."
+  },
+  {
+   "wav": "edacc/indian/00455.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 17,
+   "seconds": 9.46,
+   "decode_s": 0.6506690999958664,
+   "mean_logprob": -0.11755176376716149,
+   "text": "just yeah and it was also like uh I don't know it was nice and"
+  },
+  {
+   "wav": "edacc/indian/00456.wav",
+   "group": "indian",
+   "errors": 4,
+   "words": 15,
+   "seconds": 4.45,
+   "decode_s": 0.3368965000263415,
+   "mean_logprob": -0.20202392939720287,
+   "text": "Like uh like very very similar to what she wrote, at least, like Jake Rolling."
+  },
+  {
+   "wav": "edacc/indian/00459.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 12,
+   "seconds": 5.44,
+   "decode_s": 0.40343429998029023,
+   "mean_logprob": -0.04383912993061282,
+   "text": "What about you? How did you feel after watching that?"
+  },
+  {
+   "wav": "edacc/indian/00460.wav",
+   "group": "indian",
+   "errors": 8,
+   "words": 41,
+   "seconds": 14.44,
+   "decode_s": 1.0098940000170842,
+   "mean_logprob": -0.09622072433452168,
+   "text": "animation movie, of course. So it was interesting, of course. But um I obviously preferred the books. I actually preferred the sequel to Alice in Wonderland called through the looking glass much more than"
+  },
+  {
+   "wav": "edacc/indian/00461.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 7,
+   "seconds": 3.34,
+   "decode_s": 0.2569046999560669,
+   "mean_logprob": -0.2518851134678673,
+   "text": "Oh yes, I remember that poem, Jabor Walkie."
+  },
+  {
+   "wav": "edacc/indian/00462.wav",
+   "group": "indian",
+   "errors": 5,
+   "words": 6,
+   "seconds": 2.02,
+   "decode_s": 0.1757394999731332,
+   "mean_logprob": -0.36227237679330365,
+   "text": "It was brilliant and the slightly toes."
+  },
+  {
+   "wav": "edacc/indian/00464.wav",
+   "group": "indian",
+   "errors": 10,
+   "words": 12,
+   "seconds": 5.29,
+   "decode_s": 0.3933471000054851,
+   "mean_logprob": -0.3326390611094666,
+   "text": "And then give them the way we should not make this nonsense for you."
+  },
+  {
+   "wav": "edacc/indian/00467.wav",
+   "group": "indian",
+   "errors": 5,
+   "words": 6,
+   "seconds": 1.99,
+   "decode_s": 0.17362810001941398,
+   "mean_logprob": -0.5154705184201399,
+   "text": "Hunger game."
+  },
+  {
+   "wav": "edacc/indian/00468.wav",
+   "group": "indian",
+   "errors": 10,
+   "words": 14,
+   "seconds": 3.37,
+   "decode_s": 0.2726709999842569,
+   "mean_logprob": -0.27960903339442755,
+   "text": "I watch one more games. I watch the games. That's that's"
+  },
+  {
+   "wav": "edacc/indian/00470.wav",
+   "group": "indian",
+   "errors": 6,
+   "words": 12,
+   "seconds": 2.56,
+   "decode_s": 0.20812269998714328,
+   "mean_logprob": -0.19817267438360936,
+   "text": "Yeah, I've read hundred books. Of course I've read hundred things."
+  },
+  {
+   "wav": "edacc/indian/00472.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 32,
+   "seconds": 13.96,
+   "decode_s": 0.9860748999635689,
+   "mean_logprob": -0.13558169584222202,
+   "text": "The Hunger Games, uh honestly, I feel okay, like I this is going to be a spoiler field conversation, I think. But uh the ending of Hunger Games, do you remember it or not?"
+  },
+  {
+   "wav": "edacc/indian/00473.wav",
+   "group": "indian",
+   "errors": 7,
+   "words": 8,
+   "seconds": 1.51,
+   "decode_s": 0.14388139999937266,
+   "mean_logprob": -0.5658930316461576,
+   "text": "Yeah, yeah, I am very good."
+  },
+  {
+   "wav": "edacc/indian/00474.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 7,
+   "seconds": 4.57,
+   "decode_s": 0.344311699969694,
+   "mean_logprob": -0.07557458217229396,
+   "text": "Yeah, right. So it's so realistic, right?"
+  },
+  {
+   "wav": "edacc/indian/00476.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 13,
+   "seconds": 3.58,
+   "decode_s": 0.28674080001655966,
+   "mean_logprob": -0.05147208645722339,
+   "text": "That's exactly what happens, and that is why I hate it so much."
+  },
+  {
+   "wav": "edacc/indian/00477.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 15,
+   "seconds": 7.45,
+   "decode_s": 0.5235462000127882,
+   "mean_logprob": -0.17620504411899254,
+   "text": "The my favorite part of Hunger Games was like uh Catness the dresses that she wore."
+  },
+  {
+   "wav": "edacc/indian/00478.wav",
+   "group": "indian",
+   "errors": 4,
+   "words": 4,
+   "seconds": 1.51,
+   "decode_s": 0.15272810001624748,
+   "mean_logprob": -0.7513390132080531,
+   "text": "But I've seen the."
+  },
+  {
+   "wav": "edacc/indian/00481.wav",
+   "group": "indian",
+   "errors": 5,
+   "words": 30,
+   "seconds": 10.54,
+   "decode_s": 0.7582814000197686,
+   "mean_logprob": -0.15522807302182387,
+   "text": "So every time like and the representation of it in movies also was so amazing. Like every time she'd open some dress and she'd turn into Mokinjo or something."
+  },
+  {
+   "wav": "edacc/indian/00482.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 24,
+   "seconds": 7.48,
+   "decode_s": 0.531761699996423,
+   "mean_logprob": -0.05597371180255589,
+   "text": "Yeah, that's true. I mean I think that's the uh the two dresses, right? The first is one where she's on fire because like she's called"
+  },
+  {
+   "wav": "edacc/indian/00484.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 14,
+   "seconds": 3.52,
+   "decode_s": 0.2905299999983981,
+   "mean_logprob": -0.1002325397637737,
+   "text": "And then the other one is the one where she turns into the mocking J."
+  },
+  {
+   "wav": "edacc/indian/00485.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 17,
+   "seconds": 5.26,
+   "decode_s": 0.4074131000088528,
+   "mean_logprob": -0.05696390770750158,
+   "text": "Yeah. And there's another one when they are re when they're called again for the games."
+  },
+  {
+   "wav": "edacc/indian/00487.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 16,
+   "seconds": 5.47,
+   "decode_s": 0.40236090001417324,
+   "mean_logprob": -0.10953509092770994,
+   "text": "When all that when sh when they say that she's pregnant, she comes as a bride. Um"
+  },
+  {
+   "wav": "edacc/indian/00488.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 13,
+   "seconds": 3.25,
+   "decode_s": 0.2685485999681987,
+   "mean_logprob": -0.06973397158993694,
+   "text": "Oh, I I haven't seen that part, so I don't remember."
+  },
+  {
+   "wav": "edacc/indian/00489.wav",
+   "group": "indian",
+   "errors": 4,
+   "words": 26,
+   "seconds": 13.06,
+   "decode_s": 0.9500226000091061,
+   "mean_logprob": -0.0685144260849764,
+   "text": "Oh so there's this like her dress is always for me I don't know her dresses dress speaks way more than anything else that's happening there."
+  },
+  {
+   "wav": "edacc/indian/00491.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 9,
+   "seconds": 2.23,
+   "decode_s": 0.21603650000179186,
+   "mean_logprob": -0.04565079902016912,
+   "text": "Like it's a it's a story of its own."
+  },
+  {
+   "wav": "edacc/indian/00492.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 22,
+   "seconds": 7.06,
+   "decode_s": 0.5102156000211835,
+   "mean_logprob": -0.061868719903061226,
+   "text": "Fair enough. I mean that is what uh they wanted to show in the books also, right? Like that was"
+  },
+  {
+   "wav": "edacc/indian/00494.wav",
+   "group": "indian",
+   "errors": 5,
+   "words": 44,
+   "seconds": 16.78,
+   "decode_s": 1.161034299992025,
+   "mean_logprob": -0.059712904158181666,
+   "text": "the plot line with Sinna that he used the like he used fashion to bring up and it is actually interesting to think about considering like throughout at least the first book they really keep describing the capital's fashion and how outrageous it is."
+  },
+  {
+   "wav": "edacc/indian/00495.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 2,
+   "seconds": 1.87,
+   "decode_s": 0.17953989998204634,
+   "mean_logprob": -0.09605303401531273,
+   "text": "Exactly. Exactly."
+  },
+  {
+   "wav": "edacc/indian/00496.wav",
+   "group": "indian",
+   "errors": 9,
+   "words": 54,
+   "seconds": 17.38,
+   "decode_s": 1.2536410000175238,
+   "mean_logprob": -0.08505963099002153,
+   "text": "Sina using it to, you know, create to like display Cactus's personality is such a like it's uh so like he literally just turns it on its head, turns the trope on its head, like the outrageous fashion, and it's like suddenly it becomes a what do you call it? Like a symbol."
+  },
+  {
+   "wav": "edacc/indian/00497.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 11,
+   "seconds": 4.12,
+   "decode_s": 0.3127881999826059,
+   "mean_logprob": -0.10285138348990586,
+   "text": "Exactly. It becomes a symbol and like expression because if"
+  },
+  {
+   "wav": "edacc/indian/00499.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 8,
+   "seconds": 3.07,
+   "decode_s": 0.24707600002875552,
+   "mean_logprob": -0.14329609972483012,
+   "text": "Can you say anything against the capital out loud?"
+  },
+  {
+   "wav": "edacc/indian/00501.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 6,
+   "seconds": 1.9,
+   "decode_s": 0.16471740003908053,
+   "mean_logprob": -0.07644414782407694,
+   "text": "You can't stand against the capital."
+  },
+  {
+   "wav": "edacc/indian/00503.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 11,
+   "seconds": 5.92,
+   "decode_s": 0.4194635000312701,
+   "mean_logprob": -0.06463242892277776,
+   "text": "And so like this is very subtly rebelling against the capital."
+  },
+  {
+   "wav": "edacc/indian/00505.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 4,
+   "seconds": 2.35,
+   "decode_s": 0.19880389998434111,
+   "mean_logprob": -0.06034189363063805,
+   "text": "Which was extremely amazing."
+  },
+  {
+   "wav": "edacc/indian/00506.wav",
+   "group": "indian",
+   "errors": 5,
+   "words": 41,
+   "seconds": 15.64,
+   "decode_s": 1.0940260999486782,
+   "mean_logprob": -0.04709759358880114,
+   "text": "That's true, actually. Like I I feel like for I mean it was pretty brilliant how if you look at it for um for like the people of the capital, that was just another kind of outrageous fashion."
+  },
+  {
+   "wav": "edacc/indian/00508.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 18,
+   "seconds": 7.69,
+   "decode_s": 0.5562569000176154,
+   "mean_logprob": -0.11883755877212164,
+   "text": "People they were like oh wow, look at this. New designer like New York type feelings."
+  },
+  {
+   "wav": "edacc/indian/00510.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 13,
+   "seconds": 4.3,
+   "decode_s": 0.33021280000684783,
+   "mean_logprob": -0.006695017798719505,
+   "text": "But for the people in power like President Snow and all these people"
+  },
+  {
+   "wav": "edacc/indian/00512.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 16,
+   "seconds": 6.67,
+   "decode_s": 0.5272688000113703,
+   "mean_logprob": -0.10759364429003863,
+   "text": "He knew what it meant. And this is also why they basically killed Sina, like"
+  },
+  {
+   "wav": "edacc/indian/00513.wav",
+   "group": "indian",
+   "errors": 4,
+   "words": 7,
+   "seconds": 1.84,
+   "decode_s": 0.20313109998824075,
+   "mean_logprob": -0.27470883255809897,
+   "text": "Yeah, which is I think it's"
+  },
+  {
+   "wav": "edacc/indian/00515.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 15,
+   "seconds": 7.18,
+   "decode_s": 0.5282742999843322,
+   "mean_logprob": -0.04489923323645988,
+   "text": "Like even the reporter who used to like host the whole uh event."
+  },
+  {
+   "wav": "edacc/indian/00517.wav",
+   "group": "indian",
+   "errors": 7,
+   "words": 9,
+   "seconds": 3.67,
+   "decode_s": 0.297420599963516,
+   "mean_logprob": -0.4392331716492966,
+   "text": "Oh yeah, not remembering."
+  },
+  {
+   "wav": "edacc/indian/00519.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 19,
+   "seconds": 10.15,
+   "decode_s": 0.7195134999928996,
+   "mean_logprob": -0.054252911187555715,
+   "text": "So um even the host was very uh I don't know what to say, like she knew what questions to ask."
+  },
+  {
+   "wav": "edacc/indian/00521.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 12,
+   "seconds": 4.9,
+   "decode_s": 0.3860584000358358,
+   "mean_logprob": -0.15244278576028591,
+   "text": "We knew what questions to us and how to get information."
+  },
+  {
+   "wav": "edacc/indian/00523.wav",
+   "group": "indian",
+   "errors": 2,
+   "words": 20,
+   "seconds": 8.86,
+   "decode_s": 0.7380649000406265,
+   "mean_logprob": -0.10775519000103419,
+   "text": "Whenever uh Catness used to show up and she used to, you know, wear some the like some dress and something."
+  },
+  {
+   "wav": "edacc/indian/00525.wav",
+   "group": "indian",
+   "errors": 4,
+   "words": 19,
+   "seconds": 5.77,
+   "decode_s": 0.46205159998498857,
+   "mean_logprob": -0.10498448114970908,
+   "text": "Used call her out for that. She used to point, like she used to bring attention to that."
+  },
+  {
+   "wav": "edacc/indian/00528.wav",
+   "group": "indian",
+   "errors": 5,
+   "words": 9,
+   "seconds": 3.64,
+   "decode_s": 0.2874710999894887,
+   "mean_logprob": -0.20391821076180563,
+   "text": "And uh every drink its uh character, to be honest."
+  },
+  {
+   "wav": "edacc/indian/00529.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 12,
+   "seconds": 3.22,
+   "decode_s": 0.27864720002980903,
+   "mean_logprob": -0.15247961105924332,
+   "text": "Oh yeah, I like Hunger Games a lot. Like it was a very"
+  },
+  {
+   "wav": "edacc/indian/00531.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 4,
+   "seconds": 1.75,
+   "decode_s": 0.16434090002439916,
+   "mean_logprob": -0.06991872636717744,
+   "text": "Good book and movie."
+  },
+  {
+   "wav": "edacc/indian/00532.wav",
+   "group": "indian",
+   "errors": 3,
+   "words": 13,
+   "seconds": 6.31,
+   "decode_s": 0.4590957000036724,
+   "mean_logprob": -0.1024310860734469,
+   "text": "Yeah, like was one of the dystopian books done right?"
+  },
+  {
+   "wav": "edacc/indian/00534.wav",
+   "group": "indian",
+   "errors": 0,
+   "words": 25,
+   "seconds": 7.72,
+   "decode_s": 0.5574218999827281,
+   "mean_logprob": -0.050322074477305585,
+   "text": "The thing is like again like back to the ending. It was it's not like it was the perfect ending. It was a brilliant ending."
+  },
+  {
+   "wav": "edacc/indian/00536.wav",
+   "group": "indian",
+   "errors": 1,
+   "words": 14,
+   "seconds": 4.75,
+   "decode_s": 0.37019190000137314,
+   "mean_logprob": -0.07626930159229837,
+   "text": "It was just that it was so goddamn realistic that I didn't like."
+  },
+  {
+   "wav": "edacc/japanese/01352.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 6,
+   "seconds": 4.45,
+   "decode_s": 0.33007540000835434,
+   "mean_logprob": -0.17078700706505598,
+   "text": "Hi, my participant number is C."
+  },
+  {
+   "wav": "edacc/japanese/01354.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 4,
+   "seconds": 2.65,
+   "decode_s": 0.2236212000134401,
+   "mean_logprob": -0.2469331398772608,
+   "text": "Two six P two."
+  },
+  {
+   "wav": "edacc/japanese/01364.wav",
+   "group": "japanese",
+   "errors": 2,
+   "words": 13,
+   "seconds": 4.6,
+   "decode_s": 0.34794359997613356,
+   "mean_logprob": -0.17524544797116606,
+   "text": "I think you will tend to talk about personal things. Food."
+  },
+  {
+   "wav": "edacc/japanese/01366.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 14,
+   "seconds": 12.16,
+   "decode_s": 0.870491600013338,
+   "mean_logprob": -0.2734796806807236,
+   "text": "I can try. We have to have like a sign like"
+  },
+  {
+   "wav": "edacc/japanese/01368.wav",
+   "group": "japanese",
+   "errors": 10,
+   "words": 28,
+   "seconds": 11.41,
+   "decode_s": 0.7927540000528097,
+   "mean_logprob": -0.12159886725779263,
+   "text": "Because of my you know the entire covet thing, so my brain is or maybe because I love it in the island, tropical island, my brain moves super slow."
+  },
+  {
+   "wav": "edacc/japanese/01378.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 12,
+   "seconds": 9.01,
+   "decode_s": 0.6199004999944009,
+   "mean_logprob": -0.12130914320005104,
+   "text": "Uh I miss there is uh the market. We went to the weekend market."
+  },
+  {
+   "wav": "edacc/japanese/01380.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 16,
+   "seconds": 12.55,
+   "decode_s": 0.9083568000351079,
+   "mean_logprob": -0.11744499649419383,
+   "text": "Where you find you found the food that you don't see here in Japan, like uh rabbit."
+  },
+  {
+   "wav": "edacc/japanese/01382.wav",
+   "group": "japanese",
+   "errors": 5,
+   "words": 12,
+   "seconds": 6.58,
+   "decode_s": 0.4921881000045687,
+   "mean_logprob": -0.16221323768799525,
+   "text": "And exploring those food and eat uh stands. That was cool."
+  },
+  {
+   "wav": "edacc/japanese/01389.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 5,
+   "seconds": 1.99,
+   "decode_s": 0.1830572999897413,
+   "mean_logprob": -0.2126629179443366,
+   "text": "That will go back, but um"
+  },
+  {
+   "wav": "edacc/japanese/01391.wav",
+   "group": "japanese",
+   "errors": 6,
+   "words": 17,
+   "seconds": 5.89,
+   "decode_s": 0.43333750002784654,
+   "mean_logprob": -0.14112464727153756,
+   "text": "Cheese was good and um honey was good, everything was so good."
+  },
+  {
+   "wav": "edacc/japanese/01393.wav",
+   "group": "japanese",
+   "errors": 5,
+   "words": 14,
+   "seconds": 7.93,
+   "decode_s": 0.5819842000491917,
+   "mean_logprob": -0.12261878245174529,
+   "text": "Just whiskey's fine. Because I got the No, I shouldn't say the Japanese word."
+  },
+  {
+   "wav": "edacc/japanese/01403.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 11,
+   "seconds": 4.48,
+   "decode_s": 0.3534154000226408,
+   "mean_logprob": -0.06092196164345296,
+   "text": "So that's what I'm doing, but the flights are getting expensive."
+  },
+  {
+   "wav": "edacc/japanese/01405.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 11,
+   "seconds": 2.44,
+   "decode_s": 0.2011103000259027,
+   "mean_logprob": -0.09932727463248218,
+   "text": "So I don't know how how long I can do that."
+  },
+  {
+   "wav": "edacc/japanese/01407.wav",
+   "group": "japanese",
+   "errors": 4,
+   "words": 14,
+   "seconds": 8.59,
+   "decode_s": 0.6124967000214383,
+   "mean_logprob": -0.16464700828621814,
+   "text": "Uh so far um because there aren't many good restaurants in Miyako. So"
+  },
+  {
+   "wav": "edacc/japanese/01409.wav",
+   "group": "japanese",
+   "errors": 5,
+   "words": 26,
+   "seconds": 7.36,
+   "decode_s": 0.5426287000300363,
+   "mean_logprob": -0.16210950018445225,
+   "text": "Yeah, like I made the list, like I'm gonna eat here. I mean so I find out I pick the hotel depends on what I wanna eat."
+  },
+  {
+   "wav": "edacc/japanese/01411.wav",
+   "group": "japanese",
+   "errors": 5,
+   "words": 7,
+   "seconds": 2.59,
+   "decode_s": 0.21694750001188368,
+   "mean_logprob": -0.33886255566280205,
+   "text": "Last week and I spent in Rapungi."
+  },
+  {
+   "wav": "edacc/japanese/01413.wav",
+   "group": "japanese",
+   "errors": 6,
+   "words": 13,
+   "seconds": 6.58,
+   "decode_s": 0.464590199990198,
+   "mean_logprob": -0.22968912408247744,
+   "text": "Yeah, and it reminded me of the um that bike parking."
+  },
+  {
+   "wav": "edacc/japanese/01415.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 9,
+   "seconds": 3.37,
+   "decode_s": 0.2724451000103727,
+   "mean_logprob": -0.24232342034189824,
+   "text": "No, there are many foreigners in Rapunde anymore."
+  },
+  {
+   "wav": "edacc/japanese/01419.wav",
+   "group": "japanese",
+   "errors": 2,
+   "words": 13,
+   "seconds": 7.63,
+   "decode_s": 0.5780267000081949,
+   "mean_logprob": -0.17908700326416493,
+   "text": "That too and maybe the entire covet, yeah, work from home. Yeah, surprising."
+  },
+  {
+   "wav": "edacc/japanese/01421.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 12,
+   "seconds": 5.5,
+   "decode_s": 0.41064359998563305,
+   "mean_logprob": -0.13779144202140742,
+   "text": "Yeah. And maybe because I spent on the weekend. So probably that's why."
+  },
+  {
+   "wav": "edacc/japanese/01425.wav",
+   "group": "japanese",
+   "errors": 9,
+   "words": 28,
+   "seconds": 12.01,
+   "decode_s": 0.951865800016094,
+   "mean_logprob": -0.1047282282647367,
+   "text": "Today because one I wanna shop at the Pachica before I leave for and my mom is going to a trip tomorrow."
+  },
+  {
+   "wav": "edacc/japanese/01427.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 22,
+   "seconds": 6.4,
+   "decode_s": 0.5357018000213429,
+   "mean_logprob": -0.10335254649833753,
+   "text": "And I'm gonna meet up with my mom in Tokyo Station, which is walking distance from here. I'm I'm saying in Ginza."
+  },
+  {
+   "wav": "edacc/japanese/01429.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 1,
+   "seconds": 1.6,
+   "decode_s": 0.1538327000453137,
+   "mean_logprob": -0.602051341489035,
+   "text": "Yeah."
+  },
+  {
+   "wav": "edacc/japanese/01431.wav",
+   "group": "japanese",
+   "errors": 4,
+   "words": 6,
+   "seconds": 5.32,
+   "decode_s": 0.39706260000821203,
+   "mean_logprob": -0.24727980880394776,
+   "text": "Yeah, it just feels kinda adult."
+  },
+  {
+   "wav": "edacc/japanese/01435.wav",
+   "group": "japanese",
+   "errors": 4,
+   "words": 7,
+   "seconds": 6.64,
+   "decode_s": 0.4804757999954745,
+   "mean_logprob": -0.3213619090616703,
+   "text": "You know the boys"
+  },
+  {
+   "wav": "edacc/japanese/01437.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 3,
+   "seconds": 2.5,
+   "decode_s": 0.20734369999263436,
+   "mean_logprob": -0.3870923610437395,
+   "text": "Restaurants Yeah."
+  },
+  {
+   "wav": "edacc/japanese/01439.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 5,
+   "seconds": 1.51,
+   "decode_s": 0.14091809996170923,
+   "mean_logprob": -0.27076231808002504,
+   "text": "I you should come back."
+  },
+  {
+   "wav": "edacc/japanese/01443.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 15,
+   "seconds": 5.86,
+   "decode_s": 0.41447150002932176,
+   "mean_logprob": -0.10776973552674463,
+   "text": "Tell the other team that I work with are going to London next month."
+  },
+  {
+   "wav": "edacc/japanese/01445.wav",
+   "group": "japanese",
+   "errors": 4,
+   "words": 17,
+   "seconds": 5.8,
+   "decode_s": 0.4213801000150852,
+   "mean_logprob": -0.2195168794548105,
+   "text": "I was like, why? And why didn't you take me with them? Some little tests."
+  },
+  {
+   "wav": "edacc/japanese/01447.wav",
+   "group": "japanese",
+   "errors": 2,
+   "words": 32,
+   "seconds": 15.94,
+   "decode_s": 1.1282525999704376,
+   "mean_logprob": -0.12777525117529887,
+   "text": "I might go to London in September, though. Um there's like a do you remember silver week in oh is that November? Oh that's November, but there's like a two days off in a week."
+  },
+  {
+   "wav": "edacc/japanese/01449.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 23,
+   "seconds": 14.23,
+   "decode_s": 1.0045262000057846,
+   "mean_logprob": -0.10468397193163334,
+   "text": "My friend moved to London. So we were talking about visiting. And this is a guy actually who uh drunk my hiriki."
+  },
+  {
+   "wav": "edacc/japanese/01451.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 8,
+   "seconds": 4.99,
+   "decode_s": 0.37551459996029735,
+   "mean_logprob": -0.10175491546453941,
+   "text": "And he's in um he's in Scotland right now."
+  },
+  {
+   "wav": "edacc/japanese/01457.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 8,
+   "seconds": 2.68,
+   "decode_s": 0.20713609998347238,
+   "mean_logprob": -0.1577556411898008,
+   "text": "Mm-hmm. How long are you gonna be in US?"
+  },
+  {
+   "wav": "edacc/japanese/01467.wav",
+   "group": "japanese",
+   "errors": 4,
+   "words": 9,
+   "seconds": 3.67,
+   "decode_s": 0.27578989998437464,
+   "mean_logprob": -0.42176530489491093,
+   "text": "With E E starts with E."
+  },
+  {
+   "wav": "edacc/japanese/01469.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 7,
+   "seconds": 2.26,
+   "decode_s": 0.22973239998100325,
+   "mean_logprob": -0.25360272145397694,
+   "text": "The girl we were skiing in Whistler?"
+  },
+  {
+   "wav": "edacc/japanese/01477.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 1,
+   "seconds": 1.51,
+   "decode_s": 0.14265240001259372,
+   "mean_logprob": -0.4516198933124542,
+   "text": "Ah."
+  },
+  {
+   "wav": "edacc/japanese/01496.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 7,
+   "seconds": 2.32,
+   "decode_s": 0.198016699985601,
+   "mean_logprob": -0.03499642438449276,
+   "text": "Are you going to graduate this summer?"
+  },
+  {
+   "wav": "edacc/japanese/01500.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 14,
+   "seconds": 4.3,
+   "decode_s": 0.3266209000139497,
+   "mean_logprob": -0.08503516811970258,
+   "text": "Well, because you know, we discussed maybe you won't be there for that long."
+  },
+  {
+   "wav": "edacc/japanese/01502.wav",
+   "group": "japanese",
+   "errors": 2,
+   "words": 16,
+   "seconds": 5.35,
+   "decode_s": 0.41069779999088496,
+   "mean_logprob": -0.15692646029910148,
+   "text": "That was one of the option we when you were choosing what to do. So wow."
+  },
+  {
+   "wav": "edacc/japanese/01520.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 3,
+   "seconds": 2.23,
+   "decode_s": 0.1736940999981016,
+   "mean_logprob": -0.12563119853439275,
+   "text": "Uh and market hunting."
+  },
+  {
+   "wav": "edacc/japanese/01526.wav",
+   "group": "japanese",
+   "errors": 8,
+   "words": 13,
+   "seconds": 7.39,
+   "decode_s": 0.5138002000167035,
+   "mean_logprob": -0.39740821461686315,
+   "text": "Uh what is it? The Breadwich cheese. Uh"
+  },
+  {
+   "wav": "edacc/japanese/01532.wav",
+   "group": "japanese",
+   "errors": 9,
+   "words": 15,
+   "seconds": 7.06,
+   "decode_s": 0.5029361000051722,
+   "mean_logprob": -0.37153913467732813,
+   "text": "No no two guys took the guy at the camp. Yeah."
+  },
+  {
+   "wav": "edacc/japanese/01534.wav",
+   "group": "japanese",
+   "errors": 2,
+   "words": 3,
+   "seconds": 1.51,
+   "decode_s": 0.14361789997201413,
+   "mean_logprob": -0.17516065740492195,
+   "text": "Sandwich."
+  },
+  {
+   "wav": "edacc/japanese/01536.wav",
+   "group": "japanese",
+   "errors": 6,
+   "words": 25,
+   "seconds": 14.38,
+   "decode_s": 0.9994641999946907,
+   "mean_logprob": -0.10890379542000189,
+   "text": "I could eat it every day. I regret it. I visited the market like very late of my stay. I couldn't revisit."
+  },
+  {
+   "wav": "edacc/japanese/01538.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 17,
+   "seconds": 8.23,
+   "decode_s": 0.5840922999777831,
+   "mean_logprob": -0.16483320271527102,
+   "text": "Like that following day was Sunday, they were closed or something. And I hated myself."
+  },
+  {
+   "wav": "edacc/japanese/01539.wav",
+   "group": "japanese",
+   "errors": 2,
+   "words": 4,
+   "seconds": 2.32,
+   "decode_s": 0.19956029998138547,
+   "mean_logprob": -0.26504850429482757,
+   "text": "Oh and food."
+  },
+  {
+   "wav": "edacc/japanese/01541.wav",
+   "group": "japanese",
+   "errors": 5,
+   "words": 30,
+   "seconds": 14.23,
+   "decode_s": 0.9934822999639437,
+   "mean_logprob": -0.12402037151401847,
+   "text": "Because I've been having stuff lows, I couldn't taste much and that taste came back. So I'm so h everything tastes so good. So I've been thinking about food. Okay."
+  },
+  {
+   "wav": "edacc/japanese/01543.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 4,
+   "seconds": 4.15,
+   "decode_s": 0.3118450000183657,
+   "mean_logprob": -0.17825533331051702,
+   "text": "Yeah. This last weekend."
+  },
+  {
+   "wav": "edacc/japanese/01551.wav",
+   "group": "japanese",
+   "errors": 10,
+   "words": 25,
+   "seconds": 15.13,
+   "decode_s": 1.0917323000030592,
+   "mean_logprob": -0.25865118781199803,
+   "text": "It's a gin tonic and there must be some fine taste, right? Because it's a famous bar called Star Bar in Glea?"
+  },
+  {
+   "wav": "edacc/japanese/01553.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 6,
+   "seconds": 2.65,
+   "decode_s": 0.23268939997069538,
+   "mean_logprob": -0.1565747425573439,
+   "text": "Yeah. But I couldn't taste."
+  },
+  {
+   "wav": "edacc/japanese/01555.wav",
+   "group": "japanese",
+   "errors": 6,
+   "words": 27,
+   "seconds": 10.0,
+   "decode_s": 0.7032982999808155,
+   "mean_logprob": -0.14724583999380209,
+   "text": "Yeah, they're I they're famous or popular or something. They're all he said the bartender said he their ball was on the T T V show one time."
+  },
+  {
+   "wav": "edacc/japanese/01557.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 6,
+   "seconds": 4.87,
+   "decode_s": 0.36954269994748756,
+   "mean_logprob": -0.3340221697775026,
+   "text": "So I'm back."
+  },
+  {
+   "wav": "edacc/japanese/01559.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 3,
+   "seconds": 3.7,
+   "decode_s": 0.31493359996238723,
+   "mean_logprob": null,
+   "text": ""
+  },
+  {
+   "wav": "edacc/japanese/01563.wav",
+   "group": "japanese",
+   "errors": 3,
+   "words": 23,
+   "seconds": 15.13,
+   "decode_s": 1.1093349999864586,
+   "mean_logprob": -0.1979568590119375,
+   "text": "Okay, I don't even check. Uh but like I said, because I live in uh island, my brain is moving so slow. I'm serious."
+  },
+  {
+   "wav": "edacc/japanese/01565.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 10,
+   "seconds": 6.01,
+   "decode_s": 0.446264699974563,
+   "mean_logprob": -0.05482077006300803,
+   "text": "No, because like we don't really have a difficult conversation."
+  },
+  {
+   "wav": "edacc/japanese/01567.wav",
+   "group": "japanese",
+   "errors": 2,
+   "words": 13,
+   "seconds": 6.58,
+   "decode_s": 0.4726628999924287,
+   "mean_logprob": -0.12369156012135704,
+   "text": "Yeah, we talked about weather, food, but not like politics or anything."
+  },
+  {
+   "wav": "edacc/japanese/01569.wav",
+   "group": "japanese",
+   "errors": 0,
+   "words": 8,
+   "seconds": 5.41,
+   "decode_s": 0.39693299995269626,
+   "mean_logprob": -0.13957211223896593,
+   "text": "You know very uh less no stress at all."
+  },
+  {
+   "wav": "edacc/japanese/01571.wav",
+   "group": "japanese",
+   "errors": 1,
+   "words": 16,
+   "seconds": 10.42,
+   "decode_s": 0.7204597000381909,
+   "mean_logprob": -0.04288218242090187,
+   "text": "So I think my brain is not trying to work fast, not much pressure. So"
+  },
+  {
+   "wav": "edacc/japanese/01573.wav",
+   "group": "japanese",
+   "errors": 16,
+   "words": 33,
+   "seconds": 12.04,
+   "decode_s": 0.8528483000118285,
+   "mean_logprob": -0.11345668682184712,
+   "text": "When I was talking talking with you, you're like you're like And I have to read the sentence again and again to comprehend."
+  },
+  {
+   "wav": "edacc/japanese/01577.wav",
+   "group": "japanese",
+   "errors": 4,
+   "words": 12,
+   "seconds": 6.1299375,
+   "decode_s": 0.44863009999971837,
+   "mean_logprob": -0.22790539045602146,
+   "text": "By the way, uh tomorrow the uh we will accept toolists."
+  },
+  {
+   "wav": "edacc/russian/03366.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 5,
+   "seconds": 4.25,
+   "decode_s": 0.3278975000139326,
+   "mean_logprob": -0.10163992128509562,
+   "text": "I think it's recording now."
+  },
+  {
+   "wav": "edacc/russian/03368.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 10,
+   "seconds": 4.93,
+   "decode_s": 0.36098209995543584,
+   "mean_logprob": -0.08860174302753876,
+   "text": "Hi. My participant number is C fifty one P one."
+  },
+  {
+   "wav": "edacc/russian/03370.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 10,
+   "seconds": 3.01,
+   "decode_s": 0.2452346999780275,
+   "mean_logprob": -0.03581604983302147,
+   "text": "Nice to meet you. I will read the passage though."
+  },
+  {
+   "wav": "edacc/russian/03380.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 15,
+   "seconds": 4.42,
+   "decode_s": 0.346876900002826,
+   "mean_logprob": -0.10951779873225446,
+   "text": "Looks like all these words are just selected to to actually test some some personal"
+  },
+  {
+   "wav": "edacc/russian/03390.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 9,
+   "seconds": 3.0399375,
+   "decode_s": 0.23591429996304214,
+   "mean_logprob": -0.06498501550893045,
+   "text": "So we need to talk about our trip."
+  },
+  {
+   "wav": "edacc/russian/03394.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 37,
+   "seconds": 10.69,
+   "decode_s": 0.7613153000129387,
+   "mean_logprob": -0.025071800709040273,
+   "text": "I mean I think so I think uh it would be good if you like make some you know a tiny bit of progress because my friend is is just she likes planning things in advance and then"
+  },
+  {
+   "wav": "edacc/russian/03396.wav",
+   "group": "russian",
+   "errors": 6,
+   "words": 14,
+   "seconds": 6.04,
+   "decode_s": 0.44755360000999644,
+   "mean_logprob": -0.18435495808402216,
+   "text": "So uh she's unlike many other people. Uh in planning."
+  },
+  {
+   "wav": "edacc/russian/03400.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 57,
+   "seconds": 14.95,
+   "decode_s": 1.0648825999815017,
+   "mean_logprob": -0.048053465065373564,
+   "text": "Yeah, I think we can just ask her to do it. She I'm sure she'll be fine with that. Uh so we just need to figure out maybe what uh how many drivers she wants to add and what's the price difference. But I guess the the thing you could do is just to send her the link and"
+  },
+  {
+   "wav": "edacc/russian/03402.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 9,
+   "seconds": 2.17,
+   "decode_s": 0.18203909997828305,
+   "mean_logprob": -0.05900982073884128,
+   "text": "Maybe to suggest which car you think is"
+  },
+  {
+   "wav": "edacc/russian/03408.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 22,
+   "seconds": 5.86,
+   "decode_s": 0.4757035000366159,
+   "mean_logprob": -0.04393462979828655,
+   "text": "Well I guess for for one day or for two days it's one thing, but I think we'll probably have to"
+  },
+  {
+   "wav": "edacc/russian/03410.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 23,
+   "seconds": 5.8,
+   "decode_s": 0.4612226000172086,
+   "mean_logprob": -0.12549316851558032,
+   "text": "We'll probably have to do it. Yeah. It's unlikely that we get ungraded for a week if we actually don't book that, no?"
+  },
+  {
+   "wav": "edacc/russian/03412.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 4,
+   "seconds": 1.54,
+   "decode_s": 0.15342450002208352,
+   "mean_logprob": -0.0652142848903673,
+   "text": "Yeah, I don't know."
+  },
+  {
+   "wav": "edacc/russian/03414.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 38,
+   "seconds": 10.48,
+   "decode_s": 0.7287079999805428,
+   "mean_logprob": -0.04373201095549823,
+   "text": "But but I guess the question is do you do you want to be a driver or would you rather like two of them be drivers or something else? I don't know. Or you don't care absolutely."
+  },
+  {
+   "wav": "edacc/russian/03416.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 20,
+   "seconds": 6.55,
+   "decode_s": 0.5013755999971181,
+   "mean_logprob": -0.10151727509120224,
+   "text": "My friend runs pretty well, I think. She grew she she grew up in some mountainy area which is uh yeah."
+  },
+  {
+   "wav": "edacc/russian/03426.wav",
+   "group": "russian",
+   "errors": 6,
+   "words": 9,
+   "seconds": 4.3,
+   "decode_s": 0.3587384999846108,
+   "mean_logprob": -0.23561966932001338,
+   "text": "Oh, I don't know the question. My birthday uh you know."
+  },
+  {
+   "wav": "edacc/russian/03436.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 10,
+   "seconds": 2.02,
+   "decode_s": 0.2076431000023149,
+   "mean_logprob": -0.18108895951341505,
+   "text": "Okay, maybe just me I mentioned all that in the"
+  },
+  {
+   "wav": "edacc/russian/03438.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 31,
+   "seconds": 12.34,
+   "decode_s": 0.894058900012169,
+   "mean_logprob": -0.07902981759299348,
+   "text": "So that will be probably said. And uh we need to to to develop the route. I mean it's honestly it's mostly just on us, right? Like because they they don't know."
+  },
+  {
+   "wav": "edacc/russian/03442.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 48,
+   "seconds": 12.46,
+   "decode_s": 0.8870867000077851,
+   "mean_logprob": -0.060394210210900585,
+   "text": "If you have any uh I I haven't had time to check like what exactly I want to do, but I think there are some good hikes in the north. So I think you know the more we spend time in the north, the better it is for me. Uh"
+  },
+  {
+   "wav": "edacc/russian/03444.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 7,
+   "seconds": 3.4,
+   "decode_s": 0.2689937999821268,
+   "mean_logprob": -0.19821362277210547,
+   "text": "Right. Yeah. Okay, let's do that."
+  },
+  {
+   "wav": "edacc/russian/03450.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 26,
+   "seconds": 9.79,
+   "decode_s": 0.705487200000789,
+   "mean_logprob": -0.06350935690526906,
+   "text": "Oh okay. Uh uh let me see if I can if I can share this with you, otherwise I'm afraid we'll have to ask our friends."
+  },
+  {
+   "wav": "edacc/russian/03454.wav",
+   "group": "russian",
+   "errors": 7,
+   "words": 37,
+   "seconds": 16.9,
+   "decode_s": 1.3703033000347205,
+   "mean_logprob": -0.07773285126741156,
+   "text": "So I think they're arriving on uh fourteenth August in the I don't know, midday or evening, so they will sleep here one night and then we can leave any time in the morning, uh next day. So"
+  },
+  {
+   "wav": "edacc/russian/03458.wav",
+   "group": "russian",
+   "errors": 5,
+   "words": 26,
+   "seconds": 12.61,
+   "decode_s": 0.9532550000003539,
+   "mean_logprob": -0.09996864066845082,
+   "text": "And so it's there's gonna be fifteen, sixteen, seventeen, eighteen, nineteen, and then twenty it says drive to edit a logness. I'm not sure why."
+  },
+  {
+   "wav": "edacc/russian/03460.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 27,
+   "seconds": 12.82,
+   "decode_s": 0.9761253000469878,
+   "mean_logprob": -0.06825741655662991,
+   "text": "It seems so. Five full days and like I think. Yeah, one, two, three, four, five, six wait, six nights or what? Yeah, I think six nights."
+  },
+  {
+   "wav": "edacc/russian/03462.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 28,
+   "seconds": 8.14,
+   "decode_s": 0.5811143000028096,
+   "mean_logprob": -0.11216292873461498,
+   "text": "Oh yes, right. So it's it's it's five nights camping. So we can get back in the morning on the last day, which is uh always twenty then."
+  },
+  {
+   "wav": "edacc/russian/03466.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 30,
+   "seconds": 8.05,
+   "decode_s": 0.5919121000333689,
+   "mean_logprob": -0.0748155436121146,
+   "text": "Yeah, the question is like do you have do you already know of any places that you want to to see? Or we do do we like start from distilleries."
+  },
+  {
+   "wav": "edacc/russian/03470.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 10,
+   "seconds": 8.02,
+   "decode_s": 0.5828906000242569,
+   "mean_logprob": -0.13097136278025168,
+   "text": "Oh well Wait, but it's not on the map, is it?"
+  },
+  {
+   "wav": "edacc/russian/03478.wav",
+   "group": "russian",
+   "errors": 6,
+   "words": 24,
+   "seconds": 5.38,
+   "decode_s": 0.42717540002195165,
+   "mean_logprob": -0.10794583970242558,
+   "text": "Yeah, but so wait, if we if we get to drive to Auburn then we don't get to pass Glenkovelli, no?"
+  },
+  {
+   "wav": "edacc/russian/03484.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 8,
+   "seconds": 3.22,
+   "decode_s": 0.27604329999303445,
+   "mean_logprob": -0.07749867805293487,
+   "text": "Uh I guess two or three, I don't know. Um"
+  },
+  {
+   "wav": "edacc/russian/03486.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 31,
+   "seconds": 7.81,
+   "decode_s": 0.5877322999876924,
+   "mean_logprob": -0.04131093442505863,
+   "text": "I mean I'm sure they would be happy to do three. I don't like I don't feel like I need to do three, but I'm I'm okay unless they're super expensive."
+  },
+  {
+   "wav": "edacc/russian/03490.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 9,
+   "seconds": 2.47,
+   "decode_s": 0.21481159998802468,
+   "mean_logprob": -0.0659107696387967,
+   "text": "Wait, wait, wait. So there are no distilleries whatsoever?"
+  },
+  {
+   "wav": "edacc/russian/03492.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 10,
+   "seconds": 2.41,
+   "decode_s": 0.24699060001876205,
+   "mean_logprob": -0.16022255221214438,
+   "text": "Or just like no independent ones or no interesting."
+  },
+  {
+   "wav": "edacc/russian/03496.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 11,
+   "seconds": 2.8,
+   "decode_s": 0.3012311999918893,
+   "mean_logprob": -0.11004316075741372,
+   "text": "So how long is the drive from like Sky to Ula Pool?"
+  },
+  {
+   "wav": "edacc/russian/03498.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 3,
+   "seconds": 4.63,
+   "decode_s": 0.4264770000008866,
+   "mean_logprob": -0.5295414886204526,
+   "text": "Uh to Ula Pool."
+  },
+  {
+   "wav": "edacc/russian/03500.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 18,
+   "seconds": 5.14,
+   "decode_s": 0.5042354000033811,
+   "mean_logprob": -0.08674437463344652,
+   "text": "Oh it's not too bad, it's like say it's two hours twenty seven minutes from the middle of sky."
+  },
+  {
+   "wav": "edacc/russian/03502.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 10,
+   "seconds": 4.9,
+   "decode_s": 0.4183795000426471,
+   "mean_logprob": -0.08512356686161879,
+   "text": "So yeah, just about two hours uh from from the bridge."
+  },
+  {
+   "wav": "edacc/russian/03504.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 24,
+   "seconds": 5.86,
+   "decode_s": 0.4820826000068337,
+   "mean_logprob": -0.05909338264586335,
+   "text": "Yeah, maybe we can just like spend there one night and even that's gonna be fine. Or you know one and a half days."
+  },
+  {
+   "wav": "edacc/russian/03510.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 18,
+   "seconds": 7.27,
+   "decode_s": 0.5556792000425048,
+   "mean_logprob": -0.08329989870677916,
+   "text": "Yeah, that's the the I think that would be the best area for hiking, maybe plus sky, obviously. Uh"
+  },
+  {
+   "wav": "edacc/russian/03516.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 41,
+   "seconds": 13.12,
+   "decode_s": 0.9692811000277288,
+   "mean_logprob": -0.10414741800592528,
+   "text": "So I'm actually curious, what if we like drive there on the main like if you want to get to Ulapul, probably the most direct way is just to to drive, you know, via Inverness. And it might save us"
+  },
+  {
+   "wav": "edacc/russian/03518.wav",
+   "group": "russian",
+   "errors": 4,
+   "words": 13,
+   "seconds": 4.63,
+   "decode_s": 0.3893555999966338,
+   "mean_logprob": -0.13386528374446374,
+   "text": "Quite some time. Would it make sense or not?"
+  },
+  {
+   "wav": "edacc/russian/03522.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 27,
+   "seconds": 6.13,
+   "decode_s": 0.49315740005113184,
+   "mean_logprob": -0.10808170358592928,
+   "text": "Oh well we don't need to like drive directly there. We can like stop, you know, after inverness, for example, or I don't know, whatever is there."
+  },
+  {
+   "wav": "edacc/russian/03524.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 3,
+   "seconds": 2.26,
+   "decode_s": 0.21942460001446307,
+   "mean_logprob": -0.4100509732030332,
+   "text": "Uh like can but"
+  },
+  {
+   "wav": "edacc/russian/03528.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 13,
+   "seconds": 1.84,
+   "decode_s": 0.17015319998608902,
+   "mean_logprob": -0.026129965099351143,
+   "text": "They wanted to see it at least once, I think."
+  },
+  {
+   "wav": "edacc/russian/03532.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 29,
+   "seconds": 7.54,
+   "decode_s": 0.5592971000005491,
+   "mean_logprob": -0.033634695666455515,
+   "text": "Yeah, so I guess the question is what is what would be better to to drive because it's it's obviously easier to drive on the main road, right? So"
+  },
+  {
+   "wav": "edacc/russian/03534.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 28,
+   "seconds": 6.64,
+   "decode_s": 0.5379828999866731,
+   "mean_logprob": -0.059124204264901434,
+   "text": "It would save us some time. So do we want to save time in the beginning or on the way back? Because we can also do the reverse. Uh"
+  },
+  {
+   "wav": "edacc/russian/03540.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 9,
+   "seconds": 2.41,
+   "decode_s": 0.26678740000352263,
+   "mean_logprob": -0.20158156781716946,
+   "text": "Okay. Yeah, that uh happy to do that. Yeah."
+  },
+  {
+   "wav": "edacc/russian/03542.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 16,
+   "seconds": 4.81,
+   "decode_s": 0.3919986999826506,
+   "mean_logprob": -0.057314226412527446,
+   "text": "Okay, so how long would the drive from from Edinburgh to I don't know Inverness be?"
+  },
+  {
+   "wav": "edacc/russian/03544.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 11,
+   "seconds": 3.46,
+   "decode_s": 0.31999119999818504,
+   "mean_logprob": -0.06051841276028427,
+   "text": "Uh that's probably like pretty fast actually, right? It's like three hours."
+  },
+  {
+   "wav": "edacc/russian/03546.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 16,
+   "seconds": 4.42,
+   "decode_s": 0.35960540000814945,
+   "mean_logprob": -0.07133290972196846,
+   "text": "So and then we can turn our turn left to to Loch Ness and like"
+  },
+  {
+   "wav": "edacc/russian/03550.wav",
+   "group": "russian",
+   "errors": 1,
+   "words": 13,
+   "seconds": 2.65,
+   "decode_s": 0.21892590000061318,
+   "mean_logprob": -0.10762909632390012,
+   "text": "Yeah, yeah, we can even get to the place, you know, where the"
+  },
+  {
+   "wav": "edacc/russian/03568.wav",
+   "group": "russian",
+   "errors": 4,
+   "words": 10,
+   "seconds": 6.85,
+   "decode_s": 0.5166373000247404,
+   "mean_logprob": -0.4193989880815934,
+   "text": "In the locally Okay, so space it is actually closed. I see."
+  },
+  {
+   "wav": "edacc/russian/03570.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 17,
+   "seconds": 4.45,
+   "decode_s": 0.38114529999438673,
+   "mean_logprob": -0.10163365563639673,
+   "text": "Yeah, I mean you can I mean I'm I'm happy to do the er whatever you say."
+  },
+  {
+   "wav": "edacc/russian/03584.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 13,
+   "seconds": 4.06,
+   "decode_s": 0.326427899999544,
+   "mean_logprob": -0.05485971212328877,
+   "text": "Okay. Can we do that easily or is it like a big detour?"
+  },
+  {
+   "wav": "edacc/russian/03586.wav",
+   "group": "russian",
+   "errors": 4,
+   "words": 18,
+   "seconds": 6.61,
+   "decode_s": 0.5040612999582663,
+   "mean_logprob": -0.1513145018990534,
+   "text": "Yeah, it is actually there is actually even a a path from, you know, adding more to to that."
+  },
+  {
+   "wav": "edacc/russian/03588.wav",
+   "group": "russian",
+   "errors": 4,
+   "words": 11,
+   "seconds": 2.68,
+   "decode_s": 0.2304044999764301,
+   "mean_logprob": -0.11120128595782969,
+   "text": "So in fact we had just like half an hour at the tour."
+  },
+  {
+   "wav": "edacc/russian/03592.wav",
+   "group": "russian",
+   "errors": 0,
+   "words": 24,
+   "seconds": 6.37,
+   "decode_s": 0.4711756000178866,
+   "mean_logprob": -0.0698197826917554,
+   "text": "So we can do that. We can just like drive to the distillery and which means we are almost there, right? So from there."
+  },
+  {
+   "wav": "edacc/russian/03594.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 11,
+   "seconds": 3.13,
+   "decode_s": 0.2599693000083789,
+   "mean_logprob": -0.13934386395385445,
+   "text": "to interest into the camping place is is really easy."
+  },
+  {
+   "wav": "edacc/russian/03596.wav",
+   "group": "russian",
+   "errors": 3,
+   "words": 26,
+   "seconds": 7.81,
+   "decode_s": 0.5917971999733709,
+   "mean_logprob": -0.05805849855849172,
+   "text": "So we can slowly get there and know even if we get a car much much later than we plan for whatever circumstances we will still"
+  },
+  {
+   "wav": "edacc/russian/03600.wav",
+   "group": "russian",
+   "errors": 9,
+   "words": 22,
+   "seconds": 6.25,
+   "decode_s": 0.47195199999259785,
+   "mean_logprob": -0.20466390340187673,
+   "text": "I don't know, not necessarily maybe entering there because it if it's which day is it gonna be."
+  },
+  {
+   "wav": "edacc/russian/03602.wav",
+   "group": "russian",
+   "errors": 2,
+   "words": 34,
+   "seconds": 11.53,
+   "decode_s": 0.8365754000260495,
+   "mean_logprob": -0.14670481860011583,
+   "text": "Yeah, so so maybe we can like plan something like that, and then we get to distillery and then we drive to Inverness and to Loc Lomond. And yeah, just just camp there."
+  },
+  {
+   "wav": "edacc/russian/03608.wav",
+   "group": "russian",
+   "errors": 4,
+   "words": 9,
+   "seconds": 2.11,
+   "decode_s": 0.2329170999582857,
+   "mean_logprob": -0.1644887488335371,
+   "text": "Everyone that lost less and costs less."
+  },
+  {
+   "wav": "edacc/spanish/04068.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 54,
+   "seconds": 16.72,
+   "decode_s": 1.2579470000346191,
+   "mean_logprob": -0.04975420867784806,
+   "text": "I tried to have it because I had it with my institutional account, but every time I tried to change it, they said I need to change my email or link my personal email to change the Zoom account and this has been going for around a year since I joined the uni."
+  },
+  {
+   "wav": "edacc/spanish/04074.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 20,
+   "seconds": 9.07,
+   "decode_s": 0.6673016000422649,
+   "mean_logprob": -0.08698127584747063,
+   "text": "Yeah, that is not that easy to understand. Anyway. But I think teams is not that good sometimes, I guess."
+  },
+  {
+   "wav": "edacc/spanish/04076.wav",
+   "group": "spanish",
+   "errors": 6,
+   "words": 31,
+   "seconds": 7.09,
+   "decode_s": 0.5871403000201099,
+   "mean_logprob": -0.06718473329783592,
+   "text": "Oh I have some some people that said like no I kinda join teams I don't know how that works I literally just have to click the link"
+  },
+  {
+   "wav": "edacc/spanish/04078.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 4,
+   "seconds": 1.93,
+   "decode_s": 0.1975961000425741,
+   "mean_logprob": -0.2296554446220398,
+   "text": "So what they do?"
+  },
+  {
+   "wav": "edacc/spanish/04082.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 4,
+   "seconds": 1.66,
+   "decode_s": 0.17516869999235496,
+   "mean_logprob": -0.48122350312769413,
+   "text": "Even use email."
+  },
+  {
+   "wav": "edacc/spanish/04084.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 5,
+   "seconds": 4.45,
+   "decode_s": 0.39559460000600666,
+   "mean_logprob": -0.0962651238021408,
+   "text": "You said everything by post."
+  },
+  {
+   "wav": "edacc/spanish/04086.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 15,
+   "seconds": 6.25,
+   "decode_s": 0.4937313999980688,
+   "mean_logprob": -0.10785999227021856,
+   "text": "I mean you can still have post here, so that's a good thing. But no."
+  },
+  {
+   "wav": "edacc/spanish/04088.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 6,
+   "seconds": 2.26,
+   "decode_s": 0.2175097999861464,
+   "mean_logprob": -0.1427288464216802,
+   "text": "What? Sending the review by post?"
+  },
+  {
+   "wav": "edacc/spanish/04092.wav",
+   "group": "spanish",
+   "errors": 7,
+   "words": 26,
+   "seconds": 10.63,
+   "decode_s": 0.8427758999750949,
+   "mean_logprob": -0.15094226981153944,
+   "text": "Oh yeah, by paper based and not like the review of the manuscript that you're working on, sending it corrections by post. Handwriting things, yeah."
+  },
+  {
+   "wav": "edacc/spanish/04094.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 9,
+   "seconds": 5.8,
+   "decode_s": 0.4586268000421114,
+   "mean_logprob": -0.17551742191426456,
+   "text": "How not but I know that um my partner"
+  },
+  {
+   "wav": "edacc/spanish/04096.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 12,
+   "seconds": 6.85,
+   "decode_s": 0.5102308000205085,
+   "mean_logprob": -0.10791684159064768,
+   "text": "He has helped someone in the uni struggling with Excel."
+  },
+  {
+   "wav": "edacc/spanish/04098.wav",
+   "group": "spanish",
+   "errors": 4,
+   "words": 38,
+   "seconds": 11.71,
+   "decode_s": 0.8671145999687724,
+   "mean_logprob": -0.09393403296405163,
+   "text": "They send some sort of uh random email like please I need some help like just filtering stuff in Excel and stuff. And then they pay you. Just we I know that it's not just for doing this."
+  },
+  {
+   "wav": "edacc/spanish/04100.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 4,
+   "seconds": 1.75,
+   "decode_s": 0.17098160000750795,
+   "mean_logprob": -0.21004666710671568,
+   "text": "No they're not good."
+  },
+  {
+   "wav": "edacc/spanish/04102.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 35,
+   "seconds": 9.25,
+   "decode_s": 0.6794130999478512,
+   "mean_logprob": -0.08487013896601234,
+   "text": "But you can do filter in many other things instead of Excel. I don't know if you receive some sort of Excel on that kind of things and office when you were in high school?"
+  },
+  {
+   "wav": "edacc/spanish/04108.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 38,
+   "seconds": 12.34,
+   "decode_s": 0.9036720999865793,
+   "mean_logprob": -0.02629640493589136,
+   "text": "I used to have a course literally every every term or every year when I was in high school we got this computational skills course that you need to pass and you have like two hours of that."
+  },
+  {
+   "wav": "edacc/spanish/04110.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 7,
+   "seconds": 1.63,
+   "decode_s": 0.15946769999573007,
+   "mean_logprob": -0.29383338961218086,
+   "text": "It was more like filter."
+  },
+  {
+   "wav": "edacc/spanish/04112.wav",
+   "group": "spanish",
+   "errors": 7,
+   "words": 33,
+   "seconds": 11.35,
+   "decode_s": 0.8023426999570802,
+   "mean_logprob": -0.1074211243555689,
+   "text": "Yeah, yeah, but then I don't know if it was more advanced or not. The try to teach us how to use m macros or macros in Excel and how to use it."
+  },
+  {
+   "wav": "edacc/spanish/04114.wav",
+   "group": "spanish",
+   "errors": 7,
+   "words": 39,
+   "seconds": 12.16,
+   "decode_s": 0.8664404000155628,
+   "mean_logprob": -0.06182721479525418,
+   "text": "And there is another another software that I don't remember that it was really useful for big data sets that are not Excel, but it was purple. I just remember the icon that was purple. And"
+  },
+  {
+   "wav": "edacc/spanish/04116.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 11,
+   "seconds": 4.81,
+   "decode_s": 0.37774699996225536,
+   "mean_logprob": -0.08111661007547982,
+   "text": "No, no, no, no. Another one for really big data sets."
+  },
+  {
+   "wav": "edacc/spanish/04120.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 12,
+   "seconds": 2.53,
+   "decode_s": 0.21038240002235398,
+   "mean_logprob": -0.15762371919926307,
+   "text": "From a start. When I was born I was using her."
+  },
+  {
+   "wav": "edacc/spanish/04122.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 15,
+   "seconds": 5.2,
+   "decode_s": 0.394329100032337,
+   "mean_logprob": -0.018937364010153213,
+   "text": "I think you need to understand that you already speak two human languages."
+  },
+  {
+   "wav": "edacc/spanish/04126.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 8,
+   "seconds": 2.47,
+   "decode_s": 0.21907130000181496,
+   "mean_logprob": -0.24306132265746783,
+   "text": "Yeah, how many languages just does he think?"
+  },
+  {
+   "wav": "edacc/spanish/04128.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 35,
+   "seconds": 12.01,
+   "decode_s": 0.8685731000150554,
+   "mean_logprob": -0.05437748462337879,
+   "text": "I think it depends if you qualify and then you categorize how m much do you know from a language because no matter how many languages you speak, it doesn't matter. No how you speak. But"
+  },
+  {
+   "wav": "edacc/spanish/04130.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 5,
+   "seconds": 2.14,
+   "decode_s": 0.19355690001975745,
+   "mean_logprob": -0.10853268897864671,
+   "text": "Yes. How fluent you are."
+  },
+  {
+   "wav": "edacc/spanish/04134.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 12,
+   "seconds": 3.43,
+   "decode_s": 0.2811123999999836,
+   "mean_logprob": -0.06503010578787057,
+   "text": "The same with Python and all all the other languages, I guess."
+  },
+  {
+   "wav": "edacc/spanish/04138.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 23,
+   "seconds": 8.92,
+   "decode_s": 0.6404859000467695,
+   "mean_logprob": -0.09878941581189184,
+   "text": "yeah, there's many others that just have the bowl or disappeared or you know it, but it's a combination of many other languages."
+  },
+  {
+   "wav": "edacc/spanish/04146.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 8,
+   "seconds": 4.33,
+   "decode_s": 0.3452034000074491,
+   "mean_logprob": -0.1640197585860733,
+   "text": "I mean you could everything is online"
+  },
+  {
+   "wav": "edacc/spanish/04152.wav",
+   "group": "spanish",
+   "errors": 4,
+   "words": 39,
+   "seconds": 14.95,
+   "decode_s": 1.1073477999889292,
+   "mean_logprob": -0.1401027007531534,
+   "text": "But no, everyone that has got into PhD sometimes are like, Yeah, this is kind of the the thing. Travel and meet people, but we're not experienced anything throughout the pandemic. And I'm like, Oh okay, yeah."
+  },
+  {
+   "wav": "edacc/spanish/04156.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 6,
+   "seconds": 4.21,
+   "decode_s": 0.3391078999848105,
+   "mean_logprob": -0.24539732362512343,
+   "text": "Like experience the pandemic also daddy."
+  },
+  {
+   "wav": "edacc/spanish/04158.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 7,
+   "seconds": 2.35,
+   "decode_s": 0.20392509998055175,
+   "mean_logprob": -0.05120382504559906,
+   "text": "Yeah, yeah, that doesn't help at all."
+  },
+  {
+   "wav": "edacc/spanish/04160.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 8,
+   "seconds": 3.46,
+   "decode_s": 0.2861986000207253,
+   "mean_logprob": -0.04009454436524417,
+   "text": "Yeah, but I mean from the educational experience"
+  },
+  {
+   "wav": "edacc/spanish/04162.wav",
+   "group": "spanish",
+   "errors": 5,
+   "words": 26,
+   "seconds": 9.13,
+   "decode_s": 0.6762947000097483,
+   "mean_logprob": -0.0940298345253167,
+   "text": "Yeah, I'm a str a very strong believer that any some sort of commune communal or community experience based on the location and e even work."
+  },
+  {
+   "wav": "edacc/spanish/04164.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 14,
+   "seconds": 3.4,
+   "decode_s": 0.2815165999927558,
+   "mean_logprob": -0.06130554393360067,
+   "text": "Everything is just for the social interaction. Because you can work by your own."
+  },
+  {
+   "wav": "edacc/spanish/04166.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 16,
+   "seconds": 7.99,
+   "decode_s": 0.6371092000044882,
+   "mean_logprob": -0.05072730156851435,
+   "text": "No yet. We have still five minutes to go. Yes. What else we can talk about?"
+  },
+  {
+   "wav": "edacc/spanish/04168.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 17,
+   "seconds": 5.08,
+   "decode_s": 0.3985150999506004,
+   "mean_logprob": -0.07890828938547163,
+   "text": "Because they have problems like these things of what is the memory of your childhood?"
+  },
+  {
+   "wav": "edacc/spanish/04170.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 12,
+   "seconds": 3.55,
+   "decode_s": 0.3100199000327848,
+   "mean_logprob": -0.06039776456004562,
+   "text": "I mean some memories of your childhood to be fair."
+  },
+  {
+   "wav": "edacc/spanish/04172.wav",
+   "group": "spanish",
+   "errors": 4,
+   "words": 25,
+   "seconds": 9.22,
+   "decode_s": 0.7077238999772817,
+   "mean_logprob": -0.06385408757220527,
+   "text": "When were when you were a kid, what kinds of games did you used to play? Is there any one or one that you remember well?"
+  },
+  {
+   "wav": "edacc/spanish/04174.wav",
+   "group": "spanish",
+   "errors": 5,
+   "words": 13,
+   "seconds": 5.74,
+   "decode_s": 0.4502818000037223,
+   "mean_logprob": -0.2444873373018319,
+   "text": "Yeah. I prompted that question was like, did I use Tiplay?"
+  },
+  {
+   "wav": "edacc/spanish/04176.wav",
+   "group": "spanish",
+   "errors": 4,
+   "words": 7,
+   "seconds": 2.5,
+   "decode_s": 0.22438809997402132,
+   "mean_logprob": -0.25286020938074216,
+   "text": "You mounted the stairs."
+  },
+  {
+   "wav": "edacc/spanish/04178.wav",
+   "group": "spanish",
+   "errors": 6,
+   "words": 32,
+   "seconds": 10.6,
+   "decode_s": 0.7833814999903552,
+   "mean_logprob": -0.07801041303944556,
+   "text": "Probably yes, we're all estranged in our in our own way. Oh another one. Did you have a favorite book or film or TV show or cartoon as a child?"
+  },
+  {
+   "wav": "edacc/spanish/04180.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 21,
+   "seconds": 10.48,
+   "decode_s": 0.7614134000032209,
+   "mean_logprob": -0.05496836179837475,
+   "text": "Nice. I don't remember what I used to like. Oh Yeah, I used to watch a lot of Dragon Ball set."
+  },
+  {
+   "wav": "edacc/spanish/04182.wav",
+   "group": "spanish",
+   "errors": 6,
+   "words": 22,
+   "seconds": 5.74,
+   "decode_s": 0.4571352999773808,
+   "mean_logprob": -0.15488783235042847,
+   "text": "Because it's the o that was the only thing that passed it during the TV that repeated over and over and over again, literally."
+  },
+  {
+   "wav": "edacc/spanish/04184.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 8,
+   "seconds": 3.97,
+   "decode_s": 0.3554201999795623,
+   "mean_logprob": -0.08083964927535657,
+   "text": "Uh no, no, not at all. Because I didn't"
+  },
+  {
+   "wav": "edacc/spanish/04186.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 36,
+   "seconds": 9.82,
+   "decode_s": 0.7319548000232317,
+   "mean_logprob": -0.06834714815964983,
+   "text": "I didn't know that that was anime but that time, to be honest. We would just watch it with my brother because that was something that was playing on the TV on a Sunday morning. Instead"
+  },
+  {
+   "wav": "edacc/spanish/04188.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 32,
+   "seconds": 8.38,
+   "decode_s": 0.6192067000083625,
+   "mean_logprob": -0.06402034744198017,
+   "text": "Of watching the mask or people talking about many other things that we didn't understand. So we watched that cartoon because that was the only free cartoon that we can watch."
+  },
+  {
+   "wav": "edacc/spanish/04192.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 34,
+   "seconds": 10.09,
+   "decode_s": 0.7405059000011533,
+   "mean_logprob": -0.04531229581481823,
+   "text": "I think there is many cultural perspectives of why that's popular or not. But at least in Latin America, I don't know. We didn't know that it was anime, but I think"
+  },
+  {
+   "wav": "edacc/spanish/04194.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 20,
+   "seconds": 7.3,
+   "decode_s": 0.5439724999596365,
+   "mean_logprob": -0.14217011162168092,
+   "text": "It's a very different format, yes. And then you got this these these cartoons of I think is Dexter or"
+  },
+  {
+   "wav": "edacc/spanish/04196.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 6,
+   "seconds": 2.56,
+   "decode_s": 0.23492180003086105,
+   "mean_logprob": -0.5703797992318869,
+   "text": "The magical grand grand something?"
+  },
+  {
+   "wav": "edacc/spanish/04198.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 9,
+   "seconds": 2.23,
+   "decode_s": 0.20987060002516955,
+   "mean_logprob": -0.5588130520523171,
+   "text": "No no, there is another one that cartoons."
+  },
+  {
+   "wav": "edacc/spanish/04200.wav",
+   "group": "spanish",
+   "errors": 6,
+   "words": 17,
+   "seconds": 11.65,
+   "decode_s": 0.906133399985265,
+   "mean_logprob": -0.3116933182318462,
+   "text": "Or Bob Square Square Pants. SpongeBob. I know wait. It's Bob Square."
+  },
+  {
+   "wav": "edacc/spanish/04204.wav",
+   "group": "spanish",
+   "errors": 4,
+   "words": 6,
+   "seconds": 2.38,
+   "decode_s": 0.20777519996045157,
+   "mean_logprob": -0.4202787415124476,
+   "text": "But I meant."
+  },
+  {
+   "wav": "edacc/spanish/04206.wav",
+   "group": "spanish",
+   "errors": 1,
+   "words": 43,
+   "seconds": 13.63,
+   "decode_s": 0.9933298999676481,
+   "mean_logprob": -0.08255709147664367,
+   "text": "That kind of shows that there was the one that used to show on TV. Or Power Rangers. But that's not a cartoon. But I think that was pretty popular. I remember me and my brother squeezing just to see Power Rangers."
+  },
+  {
+   "wav": "edacc/spanish/04208.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 11,
+   "seconds": 4.54,
+   "decode_s": 0.34944629995152354,
+   "mean_logprob": -0.08861527536452438,
+   "text": "Yes, but that was quite annoying for me."
+  },
+  {
+   "wav": "edacc/spanish/04212.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 17,
+   "seconds": 14.56,
+   "decode_s": 1.1061899999622256,
+   "mean_logprob": -0.14039981035969373,
+   "text": "Look at that. No, no. Um probably I'm I was already like in middle school when Bob happened."
+  },
+  {
+   "wav": "edacc/spanish/04214.wav",
+   "group": "spanish",
+   "errors": 8,
+   "words": 31,
+   "seconds": 14.83,
+   "decode_s": 1.0873442000010982,
+   "mean_logprob": -0.08818661612589065,
+   "text": "Because I only remember the sensation of uh why the shows about the trains, I don't know if you know. Like there is a really creepy train"
+  },
+  {
+   "wav": "edacc/spanish/04218.wav",
+   "group": "spanish",
+   "errors": 2,
+   "words": 9,
+   "seconds": 5.98,
+   "decode_s": 0.4632006000028923,
+   "mean_logprob": -0.18172300562978685,
+   "text": "Yes. Hey Arnold. Hey Arnold was okay."
+  },
+  {
+   "wav": "edacc/spanish/04222.wav",
+   "group": "spanish",
+   "errors": 12,
+   "words": 25,
+   "seconds": 14.5,
+   "decode_s": 1.055346000008285,
+   "mean_logprob": -0.18659555185221338,
+   "text": "Identify information. That's the end of that's okay. Well, we're almost done. We met like 13 seconds. And then we'll do unhopped."
+  },
+  {
+   "wav": "edacc/spanish/04226.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 9,
+   "seconds": 4.03,
+   "decode_s": 0.32453679997706786,
+   "mean_logprob": -0.18140079299734713,
+   "text": "Oh no, it's not ten, yes. Fifteen. Fourteen. Thirteen."
+  },
+  {
+   "wav": "edacc/spanish/04230.wav",
+   "group": "spanish",
+   "errors": 3,
+   "words": 19,
+   "seconds": 13.71,
+   "decode_s": 0.9967056000023149,
+   "mean_logprob": -0.19059325201622257,
+   "text": "Ah no, but already it's ten past four, three, two, one. We did it That's it. That's it. Let's stop with the recording."
+  },
+  {
+   "wav": "edacc/spanish/08531.wav",
+   "group": "spanish",
+   "errors": 0,
+   "words": 13,
+   "seconds": 6.4,
+   "decode_s": 0.49380689999088645,
+   "mean_logprob": -0.10030791800803854,
+   "text": "Great. Great. Okay. Uh I like your accent. You have a a British accent."
+  }
+ ]
+}

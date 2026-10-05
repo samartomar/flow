@@ -255,20 +255,24 @@ def _native_transcriber():
     return NativeTranscriber()
 
 
-def _parakeet_transcriber(lexicon):
-    """Import late, so a launch without the `[parakeet]` extra never touches sherpa-onnx."""
-    from .parakeet import ParakeetTranscriber
+def _parakeet_transcriber(lexicon, variant: str | None = None):
+    """Import late, so a launch without the `[parakeet]` extra never touches onnx-asr.
 
-    return ParakeetTranscriber(lexicon=lexicon)
+    `variant` is the profile's `parakeet_model` ("auto", "fp32", "int8" or None), resolved
+    here to the build this launch will actually run.
+    """
+    from .parakeet import ParakeetTranscriber, resolve_variant
+
+    return ParakeetTranscriber(resolve_variant(variant), lexicon=lexicon)
 
 
-def _parakeet_engine() -> tuple[str, str]:
+def _parakeet_engine(variant: str | None = None) -> tuple[str, str]:
     """`--engine parakeet`: check the runtime, fetch the model if needed, or say why not.
 
     Fetching happens here, before the window, because the alternative to a download that
     fails is Whisper and only this point can still choose it. It says what it is doing and
-    how big it is first: 465 MB arriving behind a silent console would be indistinguishable
-    from a hang. Every refusal says why and names the fallback, like `--engine native`.
+    how big it is first: gigabytes arriving behind a silent console would be indistinguishable
+    from a hang. The build is the profile's choice (`variant`), or fp32 when nothing is here. Every refusal says why and names the fallback, like `--engine native`.
     """
     from . import parakeet
 
@@ -276,11 +280,11 @@ def _parakeet_engine() -> tuple[str, str]:
     if not ok:
         say(f"--engine parakeet unavailable: {why}; using whisper")
         return "whisper", ""
-    if not parakeet.model_present():
-        say(f"engine: the Parakeet model is not on this PC - downloading "
-            f"{parakeet.ARCHIVE_BYTES / 1024 ** 2:.0f} MB from github.com into "
-            f"{parakeet.MODELS_DIR} (once; unpacks to about "
-            f"{parakeet.UNPACKED_BYTES / 1024 ** 2:.0f} MB)")
+    key = parakeet.resolve_variant(variant)
+    if not parakeet.model_present(key):
+        say(f"engine: the Parakeet {key} model is not on this PC - downloading "
+            f"{parakeet.VARIANTS[key].bytes / 1024 ** 2:.0f} MB from huggingface.co into "
+            f"{parakeet.variant_dir(key)} (once)")
         shown = [-1]
 
         def progress(done: int, total: int) -> None:
@@ -291,19 +295,19 @@ def _parakeet_engine() -> tuple[str, str]:
                 say(f"  parakeet download {10 * tenth}%")
 
         try:
-            parakeet.fetch(progress=progress)
+            parakeet.fetch(key, progress=progress)
         except parakeet.NotAvailable as exc:
             say(f"--engine parakeet unavailable: {exc}; using whisper")
             return "whisper", ""
     return "parakeet", " (--engine parakeet)"
 
 
-def _saved_parakeet_engine() -> tuple[str, str]:
+def _saved_parakeet_engine(variant: str | None = None) -> tuple[str, str]:
     """The Parakeet the Models page chose last time, if this launch can run it.
 
     Unlike `--engine parakeet` this **never downloads**: a flag is somebody asking right
     now and is told what is happening; a remembered choice is a launch that must not sit
-    behind 465 MB before the pill appears. So a runtime or a model that has gone missing
+    behind gigabytes before the pill appears. So a runtime or a model that has gone missing
     is a line saying so and Whisper for this launch — the saved choice is left alone, so
     it takes effect again the moment the add-on or the model is back, and the Models page
     is where the download is offered.
@@ -314,16 +318,17 @@ def _saved_parakeet_engine() -> tuple[str, str]:
     if not ok:
         say(f"Parakeet was chosen on the Models page but {why}; using whisper this time")
         return "whisper", ""
-    if not parakeet.model_present():
-        say(f"Parakeet was chosen on the Models page but its model is not on this PC "
-            f"({parakeet.ARCHIVE_BYTES / 1024 ** 2:.0f} MB) - Flow Home > Models "
+    key = parakeet.resolve_variant(variant)
+    if not parakeet.model_present(key):
+        say(f"Parakeet was chosen on the Models page but its {key} model is not on this PC "
+            f"({parakeet.VARIANTS[key].bytes / 1024 ** 2:.0f} MB) - Flow Home > Models "
             f"downloads it; using whisper this time")
         return "whisper", ""
     return "parakeet", " (chosen on the Models page)"
 
 
 def _engine(args, partial_name: str, final_name: str,
-            saved: str = "whisper") -> tuple[str, str]:
+            saved: str = "whisper", variant: str | None = None) -> tuple[str, str]:
     """Which decoder this launch gets, and the clause explaining why.
 
     `--engine` decides when it is asked to. `auto` is the interesting one, and its rule
@@ -341,9 +346,10 @@ def _engine(args, partial_name: str, final_name: str,
 
     **`auto` never selects Parakeet on its own, on any platform, whatever is installed or
     on disk.** It is the most accurate engine a CPU can run here, and it still asks for a
-    93 MB runtime and a 465 MB model, has no hotword biasing, is one tier, hears
-    Japanese-accented English worse than `small.en`, and guards against invention with a
-    threshold that rests on one measured example. That is a trade a person makes by name:
+    ~7 MB runtime and a model of 640 MB or 2.4 GB from huggingface.co, has no hotword
+    biasing, is one tier, and guards against invention with a threshold that rests on three
+    measured examples (its int8 build is also a little behind `small.en` on Japanese-accented
+    English; fp32 is not). That is a trade a person makes by name:
     `--engine parakeet`, or choosing it on Flow Home's Models page, which is remembered in
     the profile as `saved`. `--engine auto` with a saved "parakeet" **is** that choice
     being honoured and not Flow deciding — a profile that is absent or says "whisper"
@@ -356,9 +362,9 @@ def _engine(args, partial_name: str, final_name: str,
     if args.engine == "whisper":
         return "whisper", ""
     if args.engine == "parakeet":
-        return _parakeet_engine()
+        return _parakeet_engine(variant)
     if args.engine == "auto" and saved == "parakeet":
-        return _saved_parakeet_engine()
+        return _saved_parakeet_engine(variant)
     if sys.platform != "darwin":
         if args.engine == "native":
             say("--engine native is macOS only; using whisper")
@@ -457,7 +463,7 @@ def main(argv: list[str] | None = None) -> int:
         "--engine", default="auto", choices=("auto", "whisper", "native", "parakeet"),
         help="which decoder: whisper (faster-whisper, needs model files), native "
              "(macOS on-device speech, no download at all) or parakeet (NVIDIA Parakeet "
-             "through sherpa-onnx: needs the [parakeet] extra and a 465 MB model it "
+             "through onnx-asr: needs the [parakeet] extra and a 640 MB or 2.4 GB model it "
              "downloads once; never chosen by auto). Default auto: whisper "
              "unless its models are missing and the native engine is ready",
     )
@@ -763,16 +769,19 @@ def main(argv: list[str] | None = None) -> int:
         partial_name, final_name, _lines = planned
     engine, engine_why = _engine(
         args, partial_name, final_name,
-        saved=profile.engine if profile is not None else "whisper")
+        saved=profile.engine if profile is not None else "whisper",
+        variant=profile.parakeet_model if profile is not None else None)
 
     def say_models() -> None:
         """The device and model lines, from a thread, after the pill is on screen."""
         if engine == "parakeet":
             # No `decoding on:` line: that one resolves CUDA, and this engine does not
             # use it, so naming a GPU here would be a false statement.
-            from .parakeet import MODEL_NAME, default_threads
+            from .parakeet import VARIANTS, default_threads, resolve_variant
 
-            say(f"engine: Parakeet ({MODEL_NAME}, sherpa-onnx) on the CPU, "
+            variant = VARIANTS[resolve_variant(
+                profile.parakeet_model if profile is not None else None)]
+            say(f"engine: Parakeet ({variant.name}, onnx-asr) on the CPU, "
                 f"{default_threads()} threads, for partials and finals both{engine_why}")
             return
         try:
@@ -939,7 +948,9 @@ def main(argv: list[str] | None = None) -> int:
         # The asked-for names, or None: the transcriber resolves a None to the tier
         # its device wants, the same answer `decode_plan` reaches for the startup line.
         asr=(_native_transcriber() if engine == "native"
-             else _parakeet_transcriber(lexicon) if engine == "parakeet"
+             else _parakeet_transcriber(
+                 lexicon, profile.parakeet_model if profile is not None else None)
+             if engine == "parakeet"
              else WhisperTranscriber(
                  asked_partial, asked_final, lexicon=lexicon,
                  baseline=profile.confidence if profile is not None else None,
@@ -955,14 +966,14 @@ def main(argv: list[str] | None = None) -> int:
         lite=lite,
         history=history,
     )
-    def make_engine(name: str):
+    def make_engine(name: str, variant: str | None = None):
         """What `Session.set_engine` builds a transcriber from, for the engine it has not run.
 
         Whisper's names are read **now**: a flag still wins, then whatever the Models page
         has since written to the profile — the same order the launch used.
         """
         if name == "parakeet":
-            return _parakeet_transcriber(lexicon)
+            return _parakeet_transcriber(lexicon, variant)
         return WhisperTranscriber(
             args.model or args.partial_model
             or (profile.partial_model if profile is not None else None),
