@@ -385,6 +385,19 @@ class TestWhatProducedAMeasurement(Temp):
         for version in self.record().values():
             self.assertNotEqual(version, REFUSED)
 
+    def test_a_speech_engine_that_is_not_whisper_adds_its_own_build(self):
+        # Parakeet has three builds; `models` only knows Whisper names. Without the
+        # engine's own account a Parakeet decode in the trace says nothing about which.
+        from flow.diag import record_identity
+
+        diag = Diag(self.path)
+        record_identity(diag, models=(), extra=[("engine", "parakeet-gpu"),
+                                                ("parakeet.cpp", "v0.5.0-cuda")])
+        got = {r["component"]: r["version"] for r in self.lines()}
+        self.assertEqual(got["engine"], "parakeet-gpu")
+        self.assertEqual(got["parakeet.cpp"], "v0.5.0-cuda")
+        self.assertIn("python", got)  # appended to, not instead of
+
     def test_a_broken_probe_cannot_stop_the_app_starting(self):
         from flow.diag import record_identity
 

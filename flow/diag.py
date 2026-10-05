@@ -424,10 +424,14 @@ def identity(models=()) -> list[tuple[str, str]]:
     return out
 
 
-def record_identity(diag, models=()) -> None:
-    """Write `identity()` into the trace. Best-effort, like everything else here."""
+def record_identity(diag, models=(), extra=()) -> None:
+    """Write `identity()` into the trace. Best-effort, like everything else here.
+
+    `extra` is what the speech engine says about itself when it is not Whisper — the
+    Parakeet build, its pinned model and its runtime — appended after the rest.
+    """
     try:
-        for component, version in identity(models):
+        for component, version in [*identity(models), *extra]:
             diag.write("identity", component=component, version=version)
     except Exception:
         pass

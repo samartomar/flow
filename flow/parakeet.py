@@ -883,6 +883,27 @@ class ParakeetTranscriber:
             out, self._drops = self._drops, []
             return out
 
+    def identity(self) -> list[tuple[str, str]]:
+        """What decides this build's numbers, as (component, version) for the trace.
+
+        The engine and build, the model at its pinned commit, and the runtime that ran it.
+        `diag.identity` records Whisper's model revisions; without this a Parakeet decode
+        in the trace would not say which of three builds produced it.
+        """
+        import importlib.metadata as md
+
+        # Values are tokens, because `diag` refuses anything else: the repo is implied by
+        # the model's name (each build has exactly one), so the commit alone pins it.
+        variant = VARIANTS[self.variant]
+        out = [("engine", f"parakeet-{self.variant}"),
+               (f"model:{variant.name}", variant.revision)]
+        for name in ("onnx-asr", "onnxruntime"):
+            try:
+                out.append((name, md.version(name)))
+            except md.PackageNotFoundError:
+                out.append((name, "absent"))
+        return out
+
     # -- the one method the protocol asks for ------------------------------
 
     def text(self, audio: np.ndarray, *, final: bool = False,
@@ -1219,6 +1240,20 @@ class ParakeetGpuTranscriber(ParakeetTranscriber):
         self._backend = backend
         #: Overridable so tests need no real executable: `starter(backend, model_dir)`.
         self._starter = starter or start_helper
+
+    def identity(self) -> list[tuple[str, str]]:
+        """The ONNX components replaced by the helper: its release, backend and exact
+        executable. The hash is the pinned one `verify_runtime` refuses to launch without,
+        so it names the binary that actually ran - its first 16 hex digits, because the
+        trace takes tokens of at most 40 characters and that is plenty to tell builds apart."""
+        variant = VARIANTS[self.variant]
+        out = [("engine", f"parakeet-{self.variant}"),
+               (f"model:{variant.name}", variant.revision)]
+        backend = self.backend
+        if backend in RUNTIMES:
+            out.append(("parakeet.cpp", f"{CPP_VERSION}-{backend}"))
+            out.append((SERVER_EXE, RUNTIMES[backend].exe_sha256[:16]))
+        return out
 
     @property
     def backend(self) -> str:
