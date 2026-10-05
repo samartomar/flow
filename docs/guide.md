@@ -276,7 +276,7 @@ hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | tap the pill to c
 | `--final-model X` | stronger model for the pasted text (default `small.en` on a CPU, `large-v3` on a GPU). Same as above: Models remembers it, the flag wins for one launch |
 | `--model X` | pin BOTH tiers to one model, for a low-memory machine |
 | `--decode-device {auto,cuda,cpu}` | where decoding runs (default `auto`: the GPU when there is a working one). Models remembers a choice; the flag wins for one launch |
-| `--engine {auto,whisper,native,parakeet}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all; `parakeet` is NVIDIA Parakeet through onnx-asr (extra `[parakeet]`, a model of 640 MB or 2.4 GB fetched once from huggingface.co into `~/.flow/models`) and is never chosen by `auto` — see [Parakeet](#parakeet-from-nvidia). Flow Home's Models page chooses it too, and remembers; the flag wins for one launch. Default `auto`: whisper unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface) |
+| `--engine {auto,whisper,native,parakeet}` | which decoder. `whisper` is faster-whisper and needs model files; `native` is macOS on-device speech, which needs no download at all; `parakeet` is NVIDIA Parakeet through onnx-asr (extra `[parakeet]`, a model of 640 MB or 2.4 GB fetched once from huggingface.co into `~/.flow/models`, or the GPU build: a 940 MB model and a helper from github.com, no add-on) and is never chosen by `auto` — see [Parakeet](#parakeet-from-nvidia). Flow Home's Models page chooses it too, and remembers; the flag wins for one launch. Default `auto`: whisper unless its models are not on the machine and the native engine is ready — see [Without HuggingFace](#without-huggingface) |
 | `--lexicon PATH` | personal terms file (default `~/.flow/lexicon.txt`) |
 | `--no-lexicon` | ignore that file without deleting it |
 | `--device N` | input device index; list them with `scripts/devices.py`. **Pinned**: if it goes away mid-session Flow retries *this* index and never substitutes another — see [When the microphone goes away](#if-the-microphone-goes-away-mid-session). Flow Home's Settings chooses a microphone by name instead, which is what most people want |
@@ -693,6 +693,17 @@ for while you are mid-sentence, a reply is playing or a decode is running is **q
 refused**: it happens the moment you stop, and the strip has a Cancel for the wait. The choice
 is remembered, and `--engine` on the command line beats it for one launch. Without the
 add-on installed the option is greyed out and says how to get it.
+
+**On the GPU.** A third version, **GPU**, runs the same model through
+[parakeet.cpp](https://github.com/mudler/parakeet.cpp) in a helper process: **14.5 errors per
+100 words** on the same clips — no accuracy lost to its 8-bit weights — at **50x** real time
+on a GTX 1070 through CUDA (28x through Vulkan), against 14x for the CPU builds. It needs no
+add-on: it is a 940 MB model plus a 36 MB (Vulkan) or 313 MB (CUDA) helper that Flow
+downloads, checks and keeps under `~/.flow/models/`. Flow uses CUDA when the `[cuda]` wheels
+are installed and an NVIDIA GPU is present, and Vulkan otherwise (any Vulkan GPU; the driver
+provides it). Windows only for now. The first CUDA load on an older card takes about half a
+minute while the driver compiles the kernels, and the strip says so; every load after is
+about a second. Switching away stops the helper and returns its video memory.
 
 What it costs: one model does the live preview *and* the pasted words, so there are no tiers
 to choose between; it cannot be steered toward command words (a mis-heard command is not

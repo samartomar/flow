@@ -61,6 +61,7 @@ makes the engine choice the most consequential decision on this platform.
 |---|---|---|---|
 | `small.en` / `large-v3-turbo` | faster-whisper, CPU (Accelerate) | 19.4 / 17.8 errors per 100 words on EdAcc (GTX 1070) | RTF on M-series; whether large is usable on CPU at all |
 | **Parakeet TDT 0.6B v3 int8** | sherpa-onnx, the `[parakeet]` extra (built 2026-10-05) | 17.3 errors per 100 words, RTF 0.070 on a Zen 2 CPU, a token log-prob gate; **Japanese worse (26.3)** | RTF on the CPU and with `provider="coreml"`; gate threshold on Mac room noise |
+| **Parakeet TDT 0.6B v3 GPU build** | parakeet.cpp server (`flow/parakeet.py`, Windows CUDA/Vulkan built 2026-10-05) | 14.5 errors per 100 words, 50x real time on a GTX 1070; parakeet.cpp ships a **Metal** build (up to ~5x its CPU on an M4, by its own numbers) | Not built here. The helper-process shape ports as is: a macOS release zip pin, `Variant` runtime `gpu`, backend `metal` in `_detect_backend`; word confidence gate already measured |
 | parakeet-redux (1.58-bit) | Photon, Metal/NEON | Vendor: 38× CPU / 43× GPU on an M2. Our run (dense path, Windows): 17.1 errors per 100 words, silent on 8/8 silence clips | Whether 1.1 GB of torch for a faster Parakeet earns an extra; confidence output |
 | Apple native | `flow_stt` helper | No `no_speech_prob`, no hotwords, one tier | Accuracy on EdAcc (first ever) |
 

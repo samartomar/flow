@@ -112,6 +112,23 @@ def parakeet_models_dir() -> Path:
     return parakeet.MODELS_DIR
 
 
+def _loaded_detail(live: dict) -> str:
+    """The Speech model row once something is loaded: the model, and where it runs."""
+    if live["engine"] == "parakeet":
+        return _parakeet_detail(live)
+    if not live["device"]:
+        return live["final"]
+    return f"{live['final']}, on the {'GPU' if live['device'] == 'cuda' else 'CPU'}"
+
+
+def _parakeet_detail(live: dict) -> str:
+    """The Speech model row for Parakeet: "Parakeet, on the CPU" or "...on the GPU (CUDA)"."""
+    device = live["device"]
+    if device in ("cuda", "vulkan"):
+        return f"Parakeet, on the GPU ({'CUDA' if device == 'cuda' else 'Vulkan'})"
+    return "Parakeet, on the CPU"
+
+
 ENGINE_NAMES = {"parakeet": "Parakeet", "native": "Apple speech"}
 
 #: Why the speech filter set words aside, as somebody reading History needs to hear it.
@@ -120,6 +137,7 @@ SET_ASIDE_WHY = {
     "filler": "what speech models write when they hear only the room",
     "unconfident": "Flow was not sure these were words",
     "unconfident-tokens": "Flow was not sure these were words",
+    "unconfident-words": "Flow was not sure these were words",
     "empty": "nothing but noise",
 }
 
@@ -378,6 +396,7 @@ class Api:
                 # engine with no tier names (Parakeet, Apple's) is named as itself.
                 "final": names[1] if isinstance(names, tuple)
                 else ENGINE_NAMES.get(engine, ""),
+                "backend": getattr(asr, "device", "") if engine == "parakeet" else "",
                 "engine": engine,
                 "device": getattr(asr, "device", "") if asr is not None else "",
                 "terms": terms,
@@ -393,10 +412,8 @@ class Api:
             {"id": "mic", "title": "Microphone", "done": bool(live["mic"]),
              "detail": live["mic"] or "no microphone found", "page": "settings"},
             {"id": "model", "title": "Speech model", "done": live["loaded"],
-             "detail": ((f"{live['final']}, on the {'GPU' if live['device'] == 'cuda' else 'CPU'}"
-                         if live["device"] else live["final"])
-                        if live["loaded"] else "loading" if live["loading"]
-                        else "not loaded yet"),
+             "detail": (_loaded_detail(live) if live["loaded"]
+                        else "loading" if live["loading"] else "not loaded yet"),
              "page": "models"},
             {"id": "agent", "title": "Ask and Refine", "done": bool(live["cli"]),
              "detail": (f"{live['cli']} found on this PC" if live["cli"]
@@ -624,7 +641,7 @@ class Api:
         name = body.get("engine")
         if name not in ENGINES:
             raise ApiError("the engine is " + " or ".join(ENGINES))
-        # Parakeet's build — "fp32" (accurate) or "int8" (light) — or None for the profile's.
+        # Parakeet's build - "fp32" (accurate), "int8" (light) or "gpu" - or None for the profile's.
         variant = body.get("variant")
         if variant is not None and variant not in parakeet.VARIANTS:
             raise ApiError("the Parakeet build is " + " or ".join(parakeet.VARIANTS))
@@ -636,11 +653,11 @@ class Api:
                     job.then_use = ""
         s = self.session
         if name == "parakeet":
-            ok, why = parakeet.runtime_installed()
-            if not ok:
-                raise ApiError("needs the Parakeet add-on: " + 'uv pip install -e ".[parakeet]"')
             asked = variant or self._call(lambda: getattr(s.profile, "parakeet_model", None))
             chosen = BY_VARIANT[parakeet.resolve_variant(asked)]
+            why = parakeet.missing_runtime(chosen.variant)
+            if why:
+                raise ApiError(why)
             if not parakeet.model_present(chosen.variant):
                 # Other build waiting on its download no longer is: this choice replaces it.
                 for spec in PARAKEET_SPECS:

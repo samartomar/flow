@@ -261,9 +261,9 @@ def _parakeet_transcriber(lexicon, variant: str | None = None):
     `variant` is the profile's `parakeet_model` ("auto", "fp32", "int8" or None), resolved
     here to the build this launch will actually run.
     """
-    from .parakeet import ParakeetTranscriber, resolve_variant
+    from .parakeet import make_transcriber
 
-    return ParakeetTranscriber(resolve_variant(variant), lexicon=lexicon)
+    return make_transcriber(variant, lexicon)
 
 
 def _parakeet_engine(variant: str | None = None) -> tuple[str, str]:
@@ -272,19 +272,20 @@ def _parakeet_engine(variant: str | None = None) -> tuple[str, str]:
     Fetching happens here, before the window, because the alternative to a download that
     fails is Whisper and only this point can still choose it. It says what it is doing and
     how big it is first: gigabytes arriving behind a silent console would be indistinguishable
-    from a hang. The build is the profile's choice (`variant`), or fp32 when nothing is here. Every refusal says why and names the fallback, like `--engine native`.
+    from a hang. The build is the profile's choice (`variant`), or fp32 when nothing is here.
+    Every refusal says why and names the fallback, like `--engine native`.
     """
     from . import parakeet
 
-    ok, why = parakeet.runtime_installed()
-    if not ok:
+    key = parakeet.resolve_variant(variant)
+    why = parakeet.missing_runtime(key)
+    if why:
         say(f"--engine parakeet unavailable: {why}; using whisper")
         return "whisper", ""
-    key = parakeet.resolve_variant(variant)
     if not parakeet.model_present(key):
         say(f"engine: the Parakeet {key} model is not on this PC - downloading "
-            f"{parakeet.VARIANTS[key].bytes / 1024 ** 2:.0f} MB from huggingface.co into "
-            f"{parakeet.variant_dir(key)} (once)")
+            f"{parakeet.download_size(key) / 1024 ** 2:.0f} MB from {parakeet.sources(key)} "
+            f"into {parakeet.variant_dir(key)} (once)")
         shown = [-1]
 
         def progress(done: int, total: int) -> None:
@@ -314,14 +315,14 @@ def _saved_parakeet_engine(variant: str | None = None) -> tuple[str, str]:
     """
     from . import parakeet
 
-    ok, why = parakeet.runtime_installed()
-    if not ok:
+    key = parakeet.resolve_variant(variant)
+    why = parakeet.missing_runtime(key)
+    if why:
         say(f"Parakeet was chosen on the Models page but {why}; using whisper this time")
         return "whisper", ""
-    key = parakeet.resolve_variant(variant)
     if not parakeet.model_present(key):
         say(f"Parakeet was chosen on the Models page but its {key} model is not on this PC "
-            f"({parakeet.VARIANTS[key].bytes / 1024 ** 2:.0f} MB) - Flow Home > Models "
+            f"({parakeet.download_size(key) / 1024 ** 2:.0f} MB) - Flow Home > Models "
             f"downloads it; using whisper this time")
         return "whisper", ""
     return "parakeet", " (chosen on the Models page)"

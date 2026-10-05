@@ -28,6 +28,8 @@ from flow.home import models as models_mod  # noqa: E402
 
 PK = "parakeet-tdt-0.6b-v3"
 PK8 = "parakeet-tdt-0.6b-v3-int8"
+PKG = "parakeet-tdt-0.6b-v3-gpu"
+PARAKEET_ROWS = (PK, PK8, PKG)
 
 
 class _Case(unittest.TestCase):
@@ -36,13 +38,16 @@ class _Case(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         # Which Parakeet builds are on disk: both, unless a test says otherwise.
-        self.state = {"runtime": (True, ""), "model": True, "fp32": True, "int8": True}
+        self.state = {"runtime": (True, ""), "model": True, "fp32": True, "int8": True,
+                      "gpu": False, "backend": ("", "no GPU with a CUDA or Vulkan driver")}
         patches = (
             mock.patch.object(parakeet, "runtime_installed",
                               side_effect=lambda: self.state["runtime"]),
             mock.patch.object(parakeet, "model_present",
                               side_effect=lambda key, model_dir=None:
                               self.state["model"] and self.state[key]),
+            mock.patch.object(parakeet, "gpu_backend",
+                              side_effect=lambda: self.state["backend"]),
             mock.patch.object(models_mod, "on_disk", return_value={}),
             mock.patch.object(models_mod, "complete", return_value=False),
             mock.patch.object(models_mod, "gpu", return_value=None),
@@ -97,7 +102,7 @@ class TestThePayload(_Case):
         self.assertEqual(row["speed_basis"], "CPU")
         self.assertFalse(row["blind"])
         self.assertEqual(row["size"], parakeet.VARIANTS["fp32"].bytes)  # the download, until here
-        self.assertEqual({n for n, r in rows.items() if r["speed_basis"]}, {PK, PK8})
+        self.assertEqual({n for n, r in rows.items() if r["speed_basis"]}, {PK, PK8})  # the GPU row has none
         self.assertEqual(rows["large-v3"]["family"], "Whisper")
 
     def test_a_row_whose_runtime_is_missing_is_not_offered_for_download(self):
@@ -105,7 +110,7 @@ class TestThePayload(_Case):
         self.state["runtime"] = (False, "no")
         rows = {r["name"]: r for r in self.page()["models"]}
         self.assertIn("Parakeet add-on", rows[PK]["blocked"])
-        self.assertTrue(all(r["blocked"] == "" for n, r in rows.items() if n not in (PK, PK8)))
+        self.assertTrue(all(r["blocked"] == "" for n, r in rows.items() if n not in PARAKEET_ROWS))
 
     def test_an_installed_parakeet_reports_its_size_on_disk(self):
         with mock.patch.object(parakeet, "installed_bytes", return_value=670_000_000):
@@ -311,7 +316,7 @@ class TestTheTwoBuilds(_Case):
         self.assertNotIn(PK8, models_mod.BY_NAME)  # still never a Whisper tier
 
     def test_neither_build_is_in_the_whisper_dropdowns_or_chosen_as_a_tier(self):
-        for name in (PK, PK8):
+        for name in PARAKEET_ROWS:
             status, _ = self.h.call("POST", "/api/models/use", {"final": name})
             self.assertEqual(status, 400)
 
@@ -319,7 +324,7 @@ class TestTheTwoBuilds(_Case):
         entry = {e["id"]: e for e in self.page()["engines"]}["parakeet"]
         self.assertEqual(entry["variant"], "fp32")
         self.assertEqual([(v["key"], v["label"], v["installed"]) for v in entry["variants"]],
-                         [("fp32", "Accurate", True), ("int8", "Light", True)])
+                         [("fp32", "Accurate", True), ("int8", "Light", True), ("gpu", "GPU", False)])
 
     def test_a_downloaded_build_switches_and_is_remembered(self):
         status, body = self.h.call("POST", "/api/models/engine",
@@ -522,9 +527,9 @@ class TestTheTableFollowsTheEngine(_Case):
 
     def test_the_rows_say_which_engine_they_are_for_the_page_to_filter_on(self):
         rows = {r["name"]: r for r in self.page()["models"]}
-        self.assertEqual({r["engine"] for n, r in rows.items() if n in (PK, PK8)},
+        self.assertEqual({r["engine"] for n, r in rows.items() if n in PARAKEET_ROWS},
                          {"parakeet"})
-        self.assertEqual({r["engine"] for n, r in rows.items() if n not in (PK, PK8)},
+        self.assertEqual({r["engine"] for n, r in rows.items() if n not in PARAKEET_ROWS},
                          {"whisper"})
 
     def test_the_use_button_picks_that_row_and_the_in_use_one_has_no_button(self):
@@ -547,6 +552,149 @@ class TestTheTableFollowsTheEngine(_Case):
     def test_the_old_sherpa_row_stays_under_parakeet(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         self.assertIn("legacy-delete", js)
+
+
+class TestTheGpuRow(_Case):
+    """The third Parakeet row: the GPU build, measured on the same card as the Whisper rows."""
+
+    def with_backend(self, backend="cuda"):
+        self.state["backend"] = (backend, "")
+        self.state["gpu"] = True
+
+    def rows(self):
+        return {r["name"]: r for r in self.page()["models"]}
+
+    def test_it_is_a_catalog_row_beside_the_other_two_and_never_a_whisper_tier(self):
+        self.assertIn(PKG, self.rows())
+        self.assertNotIn(PKG, models_mod.BY_NAME)
+        self.assertEqual(models_mod.BY_VARIANT["gpu"].name, PKG)
+        status, _ = self.h.call("POST", "/api/models/use", {"final": PKG})
+        self.assertEqual(status, 400)
+
+    def test_its_measurements_are_the_gtx_1070s_so_it_carries_no_cpu_marker(self):
+        self.with_backend("cuda")
+        row = self.rows()[PKG]
+        self.assertEqual(row["errors"], 14.5)
+        self.assertEqual(row["speed"], 50.0)  # 1 / 0.020, CUDA on the GTX 1070
+        self.assertEqual(row["speed_basis"], "")  # same basis as the Whisper rows
+        self.assertEqual(row["backend"], "CUDA")
+        self.assertFalse(row["blind"])
+        self.assertEqual((row["maker"], row["family"]), ("NVIDIA", "Parakeet"))
+
+    def test_the_speed_follows_the_backend_this_pc_would_use(self):
+        self.with_backend("vulkan")
+        row = self.rows()[PKG]
+        self.assertEqual(row["speed"], 27.8)  # 1 / 0.036
+        self.assertEqual(row["backend"], "Vulkan")
+
+    def test_the_cpu_rows_still_say_cpu_and_have_no_backend(self):
+        self.with_backend("cuda")
+        rows = self.rows()
+        for name in (PK, PK8):
+            self.assertEqual(rows[name]["speed_basis"], "CPU")
+            self.assertEqual(rows[name]["backend"], "")
+
+    def test_its_size_is_the_model_plus_the_helper_until_it_is_here(self):
+        self.with_backend("vulkan")
+        self.state["gpu"] = False
+        row = self.rows()[PKG]
+        self.assertEqual(row["size"], parakeet.VARIANTS["gpu"].bytes
+                         + parakeet.RUNTIMES["vulkan"].zip.size)
+        self.assertFalse(row["installed"])
+
+    def test_without_a_backend_it_is_blocked_with_the_reason_and_needs_no_addon(self):
+        self.state["runtime"] = (False, "no")  # the ONNX add-on is missing
+        self.state["backend"] = ("", "no GPU with a CUDA or Vulkan driver was found")
+        rows = self.rows()
+        self.assertIn("no GPU", rows[PKG]["blocked"])
+        self.assertIn("Parakeet add-on", rows[PK]["blocked"])
+        self.state["backend"] = ("vulkan", "")
+        rows = self.rows()
+        self.assertEqual(rows[PKG]["blocked"], "")  # the GPU build runs without the add-on
+        entry = {e["id"]: e for e in self.page()["engines"]}["parakeet"]
+        self.assertTrue(entry["available"])  # so Parakeet is not greyed out
+
+    def test_parakeet_is_unavailable_only_when_no_build_can_run(self):
+        self.state["runtime"] = (False, "no")
+        entry = {e["id"]: e for e in self.page()["engines"]}["parakeet"]
+        self.assertFalse(entry["available"])
+        self.assertIn("Parakeet add-on", entry["why"])
+        variants = {v["key"]: v for v in entry["variants"]}
+        self.assertIn("no GPU", variants["gpu"]["why"])
+        self.assertIn("Parakeet add-on", variants["fp32"]["why"])
+
+    def test_choosing_it_downloads_the_model_and_the_helper_first_then_switches(self):
+        self.with_backend("vulkan")
+        self.state["gpu"] = False
+        with mock.patch.object(models_mod.Downloader, "start") as start:
+            status, _ = self.h.call("POST", "/api/models/engine",
+                                    {"engine": "parakeet", "variant": "gpu"})
+        self.assertEqual(status, 200)
+        self.assertEqual(start.call_args.args[0].name, PKG)
+        self.assertEqual(start.call_args.kwargs.get("then_use"), "engine")
+        self.state["gpu"] = True
+        self.h.home._downloaded(models_mod.Download(PKG, state="done", then_use="engine"))
+        self.assertTrue(self.wait(lambda: self.h.session.engine_variant == "gpu"))
+
+    def test_a_download_for_it_goes_through_fetch_with_the_gpu_key(self):
+        got = []
+        self.with_backend("cuda")
+        self.state["gpu"] = False
+        with mock.patch.object(parakeet, "fetch",
+                               side_effect=lambda key, **kw: got.append(key)):
+            self.h.call("POST", "/api/models/download", {"name": PKG})
+            self.assertTrue(self.wait(lambda: got))
+        self.assertEqual(got, ["gpu"])
+
+    def test_choosing_it_without_a_backend_is_an_error_with_the_reason(self):
+        self.state["backend"] = ("", "no GPU with a CUDA or Vulkan driver was found")
+        status, body = self.h.call("POST", "/api/models/engine",
+                                   {"engine": "parakeet", "variant": "gpu"})
+        self.assertEqual(status, 400)
+        self.assertIn("no GPU", body["error"])
+
+    def test_the_running_gpu_build_marks_its_row_and_reports_the_gpu(self):
+        self.with_backend("cuda")
+        _s, body = self.h.call("POST", "/api/models/engine",
+                               {"engine": "parakeet", "variant": "gpu"})
+        sp = body["speech"]
+        self.assertEqual(self.rows()[PKG]["in_use"], ["partial", "final"])
+        self.assertEqual(sp["device"], "cuda")  # so the card at the top can say GPU
+        entry = {e["id"]: e for e in sp["engines"]}["parakeet"]
+        self.assertEqual((entry["variant"], entry["backend"]), ("gpu", "CUDA"))
+        step = next(s for s in self.h.call("GET", "/api/home")[1]["setup"] if s["id"] == "model")
+        self.assertEqual(step["detail"], "Parakeet, on the GPU (CUDA)")
+
+    def test_deleting_it_removes_the_model_and_the_helper(self):
+        root = Path(self.tmp.name)
+        model = root / "parakeet-tdt-0.6b-v3-gpu"
+        helper = root / "parakeet-cpp-v0.5.0-vulkan"
+        keep = root / "parakeet-cpp-v0.5.0-cuda"
+        for d in (model, helper, keep):
+            d.mkdir()
+            (d / "x").write_text("x")
+        self.with_backend("vulkan")
+        with mock.patch.object(parakeet, "MODELS_DIR", root):
+            status, _ = self.h.call("POST", "/api/models/delete", {"name": PKG})
+        self.assertEqual(status, 200)
+        self.assertFalse(model.exists())
+        self.assertFalse(helper.exists())
+        self.assertTrue(keep.exists())  # only the backend this PC uses
+
+    def test_the_page_says_what_each_row_was_measured_on_and_credits_the_makers(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn("the GPU version was measured on the same GTX 1070", js)
+        self.assertIn("The Accurate and Light versions were measured on a CPU with 8 threads", js)
+        self.assertIn('via ${esc(m.backend)}', js)
+        self.assertIn("CC-BY-4.0", js)
+        self.assertIn("parakeet.cpp (MIT)", js)
+        self.assertIn('sp.device === "cuda" || sp.device === "vulkan"', js)
+        self.assertIn("Parakeet is running on this GPU through parakeet.cpp", js)
+        self.assertIn('gpu: "GPU"', js)
+
+    def test_the_cuda_int8_badge_is_not_shown_under_parakeet(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('engine !== "parakeet" && sp.compute_types.includes("int8")', js)
 
 
 class TestTheOldSherpaFiles(_Case):

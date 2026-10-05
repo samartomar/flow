@@ -3854,12 +3854,13 @@ class Session:
         if name == "parakeet":
             from . import parakeet
 
-            ok, why = parakeet.runtime_installed()
-            if not ok:
-                return "needs the Parakeet add-on: " + 'uv pip install -e ".[parakeet]"'
             if variant is not None and variant not in parakeet.VARIANTS:
                 return "Flow does not know that Parakeet build"
-            if not parakeet.model_present(self._parakeet_variant(variant)):
+            key = self._parakeet_variant(variant)
+            why = parakeet.missing_runtime(key)
+            if why:
+                return why
+            if not parakeet.model_present(key):
                 return "the Parakeet model is not on this PC - download it first"
         return ""
 
@@ -4034,7 +4035,7 @@ class Session:
 
         def shape(state: str, name: str, want: str, reason: str = "") -> dict:
             return {"state": state, "engine": name, "variant": want, "reason": reason,
-                    "eta_sec": parakeet.LOAD_SEC.get(want) if name == "parakeet" else None}
+                    "eta_sec": parakeet.load_seconds(want) if name == "parakeet" else None}
 
         if self._switching_engine and self._switching_to is not None:
             return shape("loading", *self._switching_to)

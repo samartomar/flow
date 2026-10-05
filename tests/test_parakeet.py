@@ -117,7 +117,11 @@ class _TempCase(unittest.TestCase):
         self.models = self.tmp / "models"
         self.variants, self.contents = _tiny_variants()
         for patcher in (mock.patch.object(parakeet, "MODELS_DIR", self.models),
-                        mock.patch.dict(parakeet.VARIANTS, self.variants)):
+                        mock.patch.dict(parakeet.VARIANTS, self.variants),
+                        # No GPU backend unless a test says so: the machine running the suite
+                        # may well have one, and the answer must not depend on it.
+                        mock.patch.object(parakeet, "gpu_backend",
+                                          return_value=("", "no GPU in tests"))):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -395,7 +399,8 @@ class TestTheShippedTables(unittest.TestCase):
     def test_the_variant_names_are_the_catalog_names_and_the_choices_include_auto(self):
         self.assertEqual(parakeet.VARIANTS["fp32"].name, "parakeet-tdt-0.6b-v3")
         self.assertEqual(parakeet.VARIANTS["int8"].name, "parakeet-tdt-0.6b-v3-int8")
-        self.assertEqual(parakeet.VARIANT_CHOICES, ("auto", "fp32", "int8"))
+        self.assertEqual(parakeet.VARIANT_CHOICES, ("auto", "fp32", "int8", "gpu"))
+        self.assertEqual(parakeet.VARIANTS["gpu"].name, "parakeet-tdt-0.6b-v3-gpu")
 
 
 class TestTheVariants(_TempCase):
@@ -636,7 +641,9 @@ class TestAskingForParakeet(unittest.TestCase):
     def run_engine(self, installed=(True, ""), present=True, fetch=None, variant=None):
         said = []
         with mock.patch.object(parakeet, "runtime_installed", return_value=installed), \
-                mock.patch.object(parakeet, "model_present", return_value=present), \
+                mock.patch.object(parakeet, "gpu_backend", return_value=("", "none")), \
+                mock.patch.object(parakeet, "model_present",
+                                  side_effect=lambda key, model_dir=None: present and key != "gpu"), \
                 mock.patch.object(parakeet, "fetch", fetch or mock.Mock()) as fetching, \
                 mock.patch("flow.__main__.say", said.append):
             got = _engine(_args("parakeet"), "base.en", "small.en", variant=variant)
@@ -697,7 +704,9 @@ class TestThePrecedenceOfFlagProfileAndAuto(unittest.TestCase):
              whisper_here=True, native=(False, "no"), variant=None):
         said = []
         with mock.patch.object(parakeet, "runtime_installed", return_value=runtime), \
-                mock.patch.object(parakeet, "model_present", return_value=model), \
+                mock.patch.object(parakeet, "gpu_backend", return_value=("", "none")), \
+                mock.patch.object(parakeet, "model_present",
+                                  side_effect=lambda key, model_dir=None: model and key != "gpu"), \
                 mock.patch.object(parakeet, "fetch") as fetching, \
                 mock.patch.object(sys, "platform", platform), \
                 mock.patch("flow.__main__.say", said.append), \

@@ -287,7 +287,7 @@ ENGINES = ("whisper", "parakeet")
 #: Which build of Parakeet: "auto" is the most accurate one that is on this PC (fp32, else
 #: int8), and fp32 to be downloaded when neither is. Kept as a literal here so the profile
 #: never imports the engine; `flow.parakeet.VARIANT_CHOICES` is the same list.
-PARAKEET_MODELS = ("auto", "fp32", "int8")
+PARAKEET_MODELS = ("auto", "fp32", "int8", "gpu")
 
 #: How many model names the settings menu will remember. A ceiling rather than a
 #: judgement: this list is only ever appended to, by hand, one name at a time, and a menu

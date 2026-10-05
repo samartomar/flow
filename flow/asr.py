@@ -435,6 +435,7 @@ _REASON_WORDS = {
     # The Parakeet engine's rule (`clean.TOKEN_LOGPROB_MIN`), which has no silence
     # probability to be "quiet" against: it is the model's own doubt about the words.
     "unconfident-tokens": "that was too unclear to be sure of",
+    "unconfident-words": "that was too unclear to be sure of",
 }
 
 
@@ -461,12 +462,16 @@ class Drop(NamedTuple):
     no_speech_prob: float | None
     avg_logprob: float | None
     final: bool
+    #: Mean per-word confidence, for an engine that reports that instead of log-probs (the
+    #: Parakeet GPU build). None for every other engine.
+    conf: float | None = None
 
     def describe(self) -> str:
         ns = "?" if self.no_speech_prob is None else f"{self.no_speech_prob:.2f}"
         lp = "?" if self.avg_logprob is None else f"{self.avg_logprob:.2f}"
         kind = "final" if self.final else "partial"
-        return f"dropped {self.text.strip()!r} ({self.reason}, ns={ns} lp={lp}, {kind})"
+        conf = "" if self.conf is None else f" conf={self.conf:.2f}"
+        return f"dropped {self.text.strip()!r} ({self.reason}, ns={ns} lp={lp}{conf}, {kind})"
 
     def announce(self) -> str:
         """The same rejection, for a surface that reads it aloud or shows one line.

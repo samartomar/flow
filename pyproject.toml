@@ -51,6 +51,11 @@ dependencies = [
 cuda = [
     "nvidia-cublas-cu12>=12",
     "nvidia-cudnn-cu12>=9",
+    # `cudart64_12.dll`, which the GPU build of Parakeet's helper (`flow/parakeet.py`,
+    # parakeet.cpp's server) links beside cublas. ~3 MB, and the reason it is a wheel here
+    # rather than a DLL fetched with the helper: NVIDIA's runtime comes from NVIDIA's
+    # package index, not from a third party's zip.
+    "nvidia-cuda-runtime-cu12>=12",
 ]
 voice = [
     "piper-tts>=1.6",
@@ -58,7 +63,9 @@ voice = [
 # `parakeet` is the opt-in second speech engine, and an extra by the same reading of R16: a
 # default install still fetches three packages. `onnx-asr` is ~7 MB and the `cpu` extra of it
 # is what pulls `onnxruntime` (with the version exclusions onnx-asr itself knows about) —
-# no torch. The models it runs are separate downloads from huggingface.co, pinned to one
+# no torch. The GPU build of Parakeet needs none of it: it runs parakeet.cpp's server as a
+# helper process (Flow downloads and checks the helper itself), and needs only the `[cuda]`
+# extra below for the CUDA backend — or a Vulkan driver, which every GPU driver provides. The models it runs are separate downloads from huggingface.co, pinned to one
 # commit, that the Models page (or `flow --engine parakeet`) fetches into `~/.flow/models`:
 # `fp32` at 2.4 GB and `int8` at 640 MB. What it buys is measured in `flow/parakeet.py`:
 # 14.7 errors per 100 words on the accent slice for fp32 against 19.5 for `small.en` and

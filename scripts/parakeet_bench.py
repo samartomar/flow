@@ -6,9 +6,11 @@ Answers, for one variant at a time (`fp32` or `int8`, see `flow/parakeet.py`):
      `accent_bench.wer_counts`, the same scorer every other model in `flow/home/models.py`
      was scored with, on the same `manifest-edacc.jsonl` clips.
   2. Speed on the CPU: real-time factor, per-clip p50/p95, and load time.
-  3. The distribution of the **mean token log-probability** over those clips (p1/p5/p50,
-     and the share of clips below `clean.TOKEN_LOGPROB_MIN`) — what real speech looks like
-     to the hallucination gate, which is what the threshold has to stay clear of.
+  3. The distribution of the quality number the hallucination gate reads, over those clips
+     (p1/p5/p50, and the share below the bar): the **mean token log-probability** for the
+     onnx-asr builds (`clean.TOKEN_LOGPROB_MIN`), or the **mean word confidence** the GPU
+     helper reports (`clean.WORD_CONF_MIN`) — what real speech looks like to the gate, which
+     is what the threshold has to stay clear of.
   4. What the model says to silence and noise: the eight clips with nothing in them
      (four synthetic, four recorded in a room with a fan) and the four recorded with speech
      in them for contrast — and the mean log-probability of anything it invents.
@@ -18,6 +20,11 @@ this measures what Flow runs, thread count included. It needs the `[parakeet]` e
 
     uv run --extra parakeet python scripts/parakeet_bench.py fp32 [--model-dir DIR]
     uv run --extra parakeet python scripts/parakeet_bench.py int8 --threads 8 --limit 50
+    uv run python scripts/parakeet_bench.py gpu --backend vulkan --models-dir DIR
+
+The `gpu` variant starts parakeet.cpp's server (`--backend cuda` or `vulkan`) from the
+helper that `fetch("gpu")` installed under `--models-dir` (default `~/.flow/models`), and
+needs neither the extra nor onnx-asr; `cuda` needs the `[cuda]` wheels.
 
 Writes `.bench/accent/results-parakeet-<variant><tag>.json` (a few KB: per-clip numbers,
 no audio). `--model-dir` points at a directory of the variant's files when they are not
@@ -40,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from accent_bench import BENCH, load_wav, wer_counts  # noqa: E402
 from flow import parakeet  # noqa: E402
-from flow.clean import TOKEN_LOGPROB_MIN  # noqa: E402
+from flow.clean import TOKEN_LOGPROB_MIN, WORD_CONF_MIN  # noqa: E402
 from flow.diag import bench_identity  # noqa: E402
 
 SR = 16000
@@ -92,6 +99,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("variant", choices=sorted(parakeet.VARIANTS))
     ap.add_argument("--model-dir", default=None, help="the variant's files, if not installed")
+    ap.add_argument("--backend", choices=sorted(parakeet.RUNTIMES), default=None,
+                    help="gpu variant: which helper to run (default: what Flow would pick)")
+    ap.add_argument("--models-dir", default=None,
+                    help="where the helper and models were installed (default ~/.flow/models)")
     ap.add_argument("--threads", type=int, default=None,
                     help=f"intra-op threads (default {parakeet.default_threads()}, as Flow)")
     ap.add_argument("--manifest", default="manifest-edacc.jsonl")
@@ -99,32 +110,47 @@ def main() -> None:
     ap.add_argument("--tag", default="", help="suffix for the results file")
     args = ap.parse_args()
 
+    if args.models_dir:
+        parakeet.MODELS_DIR = Path(args.models_dir)
+    gpu = args.variant == "gpu"
+    backend = (args.backend or parakeet.gpu_backend()[0]) if gpu else ""
+    label = f"{args.variant}-{backend}" if gpu else args.variant
     threads = args.threads or parakeet.default_threads()
     t0 = time.perf_counter()
-    model = parakeet.load_model(args.variant, args.model_dir, threads)
+    model = parakeet.load_model(args.variant, args.model_dir, threads, backend or None)
     load_s = time.perf_counter() - t0
-    print(f"parakeet {args.variant}: load {load_s:.2f}s, {threads} threads", flush=True)
+    print(f"parakeet {label}: load {load_s:.2f}s"
+          + ("" if gpu else f", {threads} threads"), flush=True)
 
+    try:
+        run(args, model, label, gpu, backend, threads, load_s)
+    finally:
+        if gpu:
+            model.stop()
+
+
+def run(args, model, label, gpu, backend, threads, load_s) -> None:
     for _ in range(3):  # warm-up: kernel selection and allocator growth, off the clock
-        parakeet.decode(model, np.zeros(3 * SR, np.float32))
+        parakeet.decode_full(model, np.zeros(3 * SR, np.float32))
 
     quiet = []
     for name, (audio, expected_empty) in silence_cases().items():
-        text, lp = parakeet.decode(model, audio)
+        text, lp, conf = parakeet.decode_full(model, audio)
+        quality = lp if lp is not None else conf
         quiet.append({"name": name, "expected_empty": expected_empty, "text": text,
-                      "mean_logprob": lp})
-        shown = "-" if lp is None else f"{lp:.2f}"
+                      "mean_logprob": lp, "mean_word_conf": conf})
+        shown = "-" if quality is None else f"{quality:.2f}"
         print(f"[{'silence' if expected_empty else 'speech '}] {name:20} -> {text!r} "
-              f"(mean lp {shown})", flush=True)
+              f"({'conf' if gpu else 'mean lp'} {shown})", flush=True)
 
     rows = [json.loads(line) for line in (BENCH / args.manifest).open(encoding="utf-8")]
     rows = rows[:args.limit]
     groups: dict[str, dict] = {}
-    clips, latencies, logprobs = [], [], []
+    clips, latencies, logprobs, confs = [], [], [], []
     for row in rows:
         audio = load_wav(BENCH / row["wav"])
         t = time.perf_counter()
-        text, lp = parakeet.decode(model, audio)
+        text, lp, conf = parakeet.decode_full(model, audio)
         took = time.perf_counter() - t
         errors, words = wer_counts(row["ref"], text)
         g = groups.setdefault(row["group"], {"errors": 0, "words": 0, "audio": 0.0,
@@ -138,9 +164,11 @@ def main() -> None:
         latencies.append(took)
         if lp is not None:
             logprobs.append(lp)
+        if conf is not None:
+            confs.append(conf)
         clips.append({"wav": row["wav"], "group": row["group"], "errors": errors,
                       "words": words, "seconds": len(audio) / SR, "decode_s": took,
-                      "mean_logprob": lp, "text": text})
+                      "mean_logprob": lp, "mean_word_conf": conf, "text": text})
 
     print(f"\n{'group':12} {'errors/100':>10} {'clips':>6} {'words':>7} {'rtf':>6}")
     for name, g in sorted(groups.items()):
@@ -150,7 +178,8 @@ def main() -> None:
     words = sum(g["words"] for g in groups.values())
     audio_s = sum(g["audio"] for g in groups.values())
     decode_s = sum(g["decode"] for g in groups.values())
-    below = sum(lp < TOKEN_LOGPROB_MIN for lp in logprobs)
+    values, bar = (confs, WORD_CONF_MIN) if gpu else (logprobs, TOKEN_LOGPROB_MIN)
+    below = sum(v < bar for v in values)
     summary = {
         "errors_per_100": 100 * errors / words,
         "rtf": decode_s / audio_s,
@@ -158,30 +187,33 @@ def main() -> None:
         "p95_ms": 1000 * float(np.percentile(latencies, 95)),
         "load_s": load_s,
         "empty_clips": sum(g["empty"] for g in groups.values()),
-        "logprob_p1": percentile(logprobs, 1),
-        "logprob_p5": percentile(logprobs, 5),
-        "logprob_p50": percentile(logprobs, 50),
+        "quality": "mean_word_conf" if gpu else "mean_logprob",
+        "quality_p1": percentile(values, 1),
+        "quality_p5": percentile(values, 5),
+        "quality_p50": percentile(values, 50),
         "clips_below_threshold": below,
-        "threshold": TOKEN_LOGPROB_MIN,
+        "threshold": bar,
         "clips": len(clips),
     }
-    print(f"\nTOTAL parakeet {args.variant}: errors/100 words={summary['errors_per_100']:.1f} "
+    print(f"\nTOTAL parakeet {label}: errors/100 words={summary['errors_per_100']:.1f} "
           f"rtf={summary['rtf']:.3f} ({1 / summary['rtf']:.0f}x real time) "
           f"p50={summary['p50_ms']:.0f}ms p95={summary['p95_ms']:.0f}ms load={load_s:.2f}s "
           f"empty={summary['empty_clips']}")
-    print(f"mean token log-prob over {len(logprobs)} clips: p1={summary['logprob_p1']:.2f} "
-          f"p5={summary['logprob_p5']:.2f} p50={summary['logprob_p50']:.2f}; "
-          f"{below} below {TOKEN_LOGPROB_MIN}")
+    print(f"{'mean word conf' if gpu else 'mean token log-prob'} over {len(values)} clips: "
+          f"p1={summary['quality_p1']:.2f} p5={summary['quality_p5']:.2f} "
+          f"p50={summary['quality_p50']:.2f}; {below} below {bar}")
     invented = [q for q in quiet if q["expected_empty"] and q["text"]]
     print(f"silence/noise: {len(invented)} of "
           f"{sum(q['expected_empty'] for q in quiet)} empty clips invented text"
-          + "".join(f"\n  {q['name']}: {q['text']!r} (mean lp {q['mean_logprob']:.2f})"
+          + "".join(f"\n  {q['name']}: {q['text']!r} (quality "
+                    f"{(q['mean_logprob'] if q['mean_logprob'] is not None else q['mean_word_conf']):.2f})"
                     for q in invented))
 
-    out = BENCH / f"results-parakeet-{args.variant}{args.tag}.json"
+    out = BENCH / f"results-parakeet-{label}{args.tag}.json"
     payload = {
-        "identity": bench_identity(models=(f"parakeet-{args.variant}",), device="cpu"),
-        "variant": args.variant, "threads": threads, "summary": summary,
+        "identity": bench_identity(models=(f"parakeet-{label}",), device=backend or "cpu"),
+        "variant": args.variant, "backend": backend, "threads": None if gpu else threads,
+        "summary": summary,
         "groups": groups, "silence": quiet, "clips": clips}
     # `bench_identity` knows faster-whisper and the Hugging Face cache; this model is
     # neither, so what produced these numbers is added to the block: the runtime versions
@@ -189,9 +221,14 @@ def main() -> None:
     import importlib.metadata as md
 
     identity = payload["identity"]
-    for package in ("onnx-asr", "onnxruntime"):
-        identity[package] = md.version(package)
-    identity["models"][f"parakeet-{args.variant}"] = f"{parakeet.REPO}@{parakeet.REVISION}"
+    variant = parakeet.VARIANTS[args.variant]
+    if gpu:
+        identity["parakeet.cpp"] = f"{parakeet.CPP_REPO}@{parakeet.CPP_VERSION}"
+        identity["server-sha256"] = parakeet.RUNTIMES[backend].exe_sha256
+    else:
+        for package in ("onnx-asr", "onnxruntime"):
+            identity[package] = md.version(package)
+    identity["models"][f"parakeet-{label}"] = f"{variant.repo}@{variant.revision}"
     out.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     print(f"detail -> {out}")
 
