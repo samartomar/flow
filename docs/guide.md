@@ -683,12 +683,16 @@ uv pip install -e ".[parakeet]"        # onnx-asr, about 7 MB; onnxruntime is al
 uv run python -m flow --engine parakeet
 ```
 
-Or open **Flow Home ▸ Models**, choose **Parakeet · NVIDIA** above the model list, and pick a
-version: **Accurate** (2.4 GB, loads in about five seconds) or **Light** (640 MB). A version
-that is not on this PC downloads first, with a progress bar and a Cancel, then takes over —
-live, as long as you are not mid-sentence. The choice is remembered, and `--engine` on the
-command line beats it for one launch. Without the add-on installed the option is greyed out
-and says how to get it.
+Or open **Flow Home > Models** and choose **Parakeet · NVIDIA** above the list: the table
+below it then shows only Parakeet's two versions, **Accurate** (2.4 GB, loads in about five
+seconds) and **Light** (640 MB), each with a **Use this** button — or **Download & use** when
+it is not on this PC yet, with a progress bar and a Cancel. A strip under the engine control
+says what is happening, from Flow's own state, so it is the same after a reload: downloading
+(with bytes), waiting for you to finish talking, loading, and how it ended. A switch asked
+for while you are mid-sentence, a reply is playing or a decode is running is **queued, not
+refused**: it happens the moment you stop, and the strip has a Cancel for the wait. The choice
+is remembered, and `--engine` on the command line beats it for one launch. Without the
+add-on installed the option is greyed out and says how to get it.
 
 What it costs: one model does the live preview *and* the pasted words, so there are no tiers
 to choose between; it cannot be steered toward command words (a mis-heard command is not

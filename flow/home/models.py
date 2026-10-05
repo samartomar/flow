@@ -427,6 +427,28 @@ class ModelManager:
     def forget_scan(self) -> None:
         self._scan = (0.0, {})
 
+    def _switch(self, jobs: dict[str, "Download"]) -> dict | None:
+        """What is happening to the speech engine, for the status strip.
+
+        The session's own account first (waiting for idle, loading, how the last one
+        ended); otherwise the download a choice is waiting on, which is Flow Home's to
+        report because it holds the bytes. Server state, so it is the same after a reload
+        and in a second window.
+        """
+        read = getattr(self.session, "engine_switch", None)
+        status = read() if callable(read) else None
+        if status is not None:
+            return status
+        for spec in PARAKEET_SPECS:
+            job = jobs.get(spec.name)
+            if job is not None and job.state == "running" and job.then_use == "engine":
+                total = job.total or spec.size
+                return {"state": "downloading", "engine": "parakeet",
+                        "variant": spec.variant, "name": spec.name, "reason": "",
+                        "eta_sec": None, "done_bytes": job.done, "total_bytes": total,
+                        "pct": min(100, round(100 * job.done / total)) if total else 0}
+        return None
+
     def _parakeet_variant(self, asr) -> str:
         """The variant the page shows as chosen: the one running, else the profile's."""
         if getattr(asr, "engine", "whisper") == "parakeet" and getattr(asr, "variant", ""):
@@ -528,6 +550,7 @@ class ModelManager:
         return {
             "models": rows,
             "engine": getattr(asr, "engine", "whisper"),
+            "switch": self._switch(jobs),
             "engines": engine_list,
             "engine_switchable": callable(getattr(self.session, "set_engine", None)),
             "measured_on": MEASURED_ON,

@@ -150,6 +150,17 @@ p { margin: 0; }
 .seg button[aria-pressed="true"] { background: #30353F; color: var(--text); }
 .seg button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* What the speech engine is doing: downloading, waiting for you to stop talking, loading,
+   and how it ended. Server state, drawn wherever the Speech recognition card is. */
+.strip {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px;
+  border-radius: 10px; background: var(--chip); border: 1px solid var(--ring); font-size: 13px;
+}
+.strip .progress { width: 160px; }
+.strip.done { background: var(--green-bg); border-color: var(--green-line); }
+.strip.failed { background: var(--red-bg); border-color: #4A2F2D; color: var(--red-text); }
+.table-head { margin-top: 4px; }
+
 select, .input {
   height: 32px; border-radius: 8px; background-color: var(--chip); border: 1px solid var(--ring);
   color: var(--text); font-size: 13px; padding: 0 10px; min-width: 0;

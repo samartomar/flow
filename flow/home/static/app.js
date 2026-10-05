@@ -261,8 +261,17 @@
   }
 
   // ------------------------------------------------------------------ Models
-  function modelActions(m, busy) {
+  // What a switch is switching to, in the words the page uses for it.
+  const switchName = (s) => s.engine === "parakeet"
+    ? `Parakeet ${s.variant === "int8" ? "Light" : "Accurate"}` : "Whisper";
+
+  function modelActions(m, busy, sw) {
     if (!m.catalog) return "";
+    // Under Parakeet the rows ARE the choice: a Parakeet row picks its own version, and
+    // one that is not on this PC downloads first and then takes over.
+    const picks = m.engine === "parakeet";
+    const queued = sw && (sw.state === "waiting" || sw.state === "loading")
+      && sw.engine === m.engine && sw.variant === m.variant;
     const dl = m.download;
     if (dl && dl.state === "running") {
       const total = dl.total || 0;
@@ -276,13 +285,42 @@
       ? `<span class="note warn ellipsis" title="${esc(dl.error)}">${esc(dl.error)}</span>` : "";
     if (m.installed) {
       const using = m.in_use.length > 0;
-      return `${failed}<span class="note">on this PC</span>
+      const use = picks && !using
+        ? `<button type="button" class="btn sm primary" data-act="pk-use" data-value="${esc(m.variant)}" ${queued ? "disabled" : ""}>${queued ? "Switching&hellip;" : "Use this"}</button>` : "";
+      return `${failed}${use}<span class="note">on this PC</span>
         <button type="button" class="icon-btn" aria-label="Delete ${esc(m.name)}" title="${using ? "In use - choose another model first" : "Delete"}" data-act="delete" data-name="${esc(m.name)}" ${using || busy ? "disabled" : ""}>${icon("trash", using ? C.dim : C.soft, 16)}</button>`;
     }
     // A model whose engine cannot run here is not offered for download: gigabytes for
     // something the page would then refuse to switch to.
     const blocked = m.blocked ? `disabled title="${esc(m.blocked)}"` : "";
-    return `${failed}<button type="button" class="btn sm" data-act="download" ${blocked} data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
+    return picks
+      ? `${failed}<button type="button" class="btn sm primary" data-act="pk-use" data-value="${esc(m.variant)}" ${blocked}>${icon("download", "#15171C", 15)}${failed ? "Retry" : "Download &amp; use"}</button>`
+      : `${failed}<button type="button" class="btn sm" data-act="download" ${blocked} data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
+  }
+
+  // The strip that says what the speech engine is doing - from the server's own account
+  // (`speech.switch`), so it is the same after a reload and in a second window.
+  function switchStrip(sw) {
+    if (!sw) return "";
+    const name = esc(switchName(sw));
+    const bar = (pct) => `<div class="progress ${pct ? "" : "busy"}"><div data-w="${pct}"></div></div>`;
+    let tone = "", body = "";
+    if (sw.state === "downloading") {
+      body = `<span class="grow">Downloading ${name} &mdash; ${sw.pct}% (${human(sw.done_bytes)} of ${human(sw.total_bytes)}), then switching</span>${bar(sw.pct)}
+        <button type="button" class="btn ghost sm" data-act="cancel" data-name="${esc(sw.name)}">Cancel</button>`;
+    } else if (sw.state === "waiting") {
+      body = `<span class="grow"><span class="dot blue"></span> Waiting for you to finish talking, then switching to ${name}</span>
+        <button type="button" class="btn ghost sm" data-act="engine-cancel">Cancel</button>`;
+    } else if (sw.state === "loading") {
+      body = `<span class="grow"><span class="dot blue"></span> Loading ${name}&hellip;${sw.eta_sec ? ` (about ${sw.eta_sec} s)` : ""}</span>${bar(0)}`;
+    } else if (sw.state === "done") {
+      tone = "done";
+      body = `<span class="grow">${icon("circlecheck", C.green, 15)} ${name} is listening now</span>`;
+    } else {
+      tone = "failed";
+      body = `<span class="grow">Could not switch: ${esc(sw.reason || "unknown reason")}</span>`;
+    }
+    return `<div class="strip ${tone}" role="status" aria-live="polite">${body}</div>`;
   }
 
   function renderModels(d) {
@@ -304,6 +342,9 @@
     const option = (tier, chosen, auto) => [`<option value="" ${chosen ? "" : "selected"}>Automatic (${esc(auto)})</option>`]
       .concat(catalog.map((m) => `<option value="${esc(m.name)}" ${m.name === chosen ? "selected" : ""}>${esc(m.name)}${m.installed ? "" : " - downloads first"}${m.blind ? " - invents words in silence" : ""}</option>`))
       .join("");
+    const sstate = sp.switch || null;
+    // The engine control filters the table: Whisper shows Whisper's rows, Parakeet its two.
+    const shown = sp.models.filter((m) => (m.engine || "whisper") === (engine === "parakeet" ? "parakeet" : "whisper"));
     const now = sp.models.filter((m) => m.in_use.length);
     const finalNow = (now.find((m) => m.in_use.includes("final")) || {}).name || sp.automatic.final;
     const partialNow = (now.find((m) => m.in_use.includes("partial")) || {}).name || sp.automatic.partial;
@@ -311,7 +352,7 @@
     // silence; a blind model's lower number buys hallucinations, so it does not qualify.
     const guarded = sp.models.filter((m) => !m.blind && m.errors != null).map((m) => m.errors);
     const bestErrors = guarded.length ? Math.min(...guarded) : null;
-    const rows = sp.models.map((m) => {
+    const rows = shown.map((m) => {
       const tags = [];
       if (m.in_use.includes("final")) tags.push('<span class="badge green"><span class="dot green"></span>in use: pasted words</span>');
       if (m.in_use.includes("partial")) tags.push('<span class="badge green"><span class="dot green"></span>in use: live preview</span>');
@@ -323,7 +364,7 @@
         <div role="cell" class="note">${esc(m.size_text)}</div>
         <div role="cell">${m.errors != null ? `<span class="${!m.blind && m.errors === bestErrors ? "good" : ""}">${m.errors.toFixed(1)}</span>` : '<span class="fine">&ndash;</span>'}</div>
         <div role="cell" class="note">${m.speed != null ? `<div class="col"><span>${m.speed}&times;</span>${basis}</div>` : "&ndash;"}</div>
-        <div role="cell" class="acts">${modelActions(m, sp.loading)}</div></div>`;
+        <div role="cell" class="acts">${modelActions(m, sp.loading, sstate)}</div></div>`;
     }).join("");
     const clis = ag.available.length
       ? [["auto", "Automatic"]].concat(ag.available.map((n) => [n, n])).map(([v, t]) => `
@@ -392,10 +433,9 @@
           <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="${engine === "parakeet" ? "parakeet" : "models"}">${icon("folder", C.text, 14)}Open folder</button></div>
         <p class="note">These are Whisper models from OpenAI, smaller distil- copies of them, and Parakeet from NVIDIA, all downloaded from Hugging Face. They run on this PC; nothing you say is sent to any of them.</p>
         ${engineControl}
+        ${switchStrip(sstate)}
         ${engine === "parakeet"
-          ? `<div class="row wrap"><span class="note">Version</span>${seg((parakeet.variants || []).map((v) =>
-              [v.key, `${v.label} · ${v.size_text}${v.installed ? "" : " · downloads first"}`]), parakeet.variant, "pk-variant", "Which Parakeet build")}</div>
-            <p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. It runs on the CPU, ${esc(parakeet.threads || "")} threads, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : "The accurate version is the most accurate model measured here, Japanese-accented English included."}</p>`
+          ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. It runs on the CPU, ${esc(parakeet.threads || "")} threads, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : "The accurate version is the most accurate model measured here, Japanese-accented English included."}</p>`
           : `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>`}
         ${engine === "whisper" && sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
@@ -405,12 +445,15 @@
         </div>
         <div class="row"><button type="button" class="btn primary" data-act="use-models">Use these</button><p class="note">Applies now. A model that is not on this PC downloads first, then takes over.</p></div>`
         : engine === "parakeet" ? "" : '<p class="note">This speech engine has no models to choose between.</p>'}
-        ${sp.cache.legacy_bytes ? `<div class="row wrap"><p class="note grow">An earlier Flow left Parakeet files here that this version does not use (${esc(sp.cache.legacy_text)}).</p><button type="button" class="btn sm" data-act="legacy-delete">Remove them</button></div>` : ""}
-        <div class="table" role="table" aria-label="Speech models">
+        ${engine === "parakeet" && sp.cache.legacy_bytes ? `<div class="row wrap"><p class="note grow">An earlier Flow left Parakeet files here that this version does not use (${esc(sp.cache.legacy_text)}).</p><button type="button" class="btn sm" data-act="legacy-delete">Remove them</button></div>` : ""}
+        <h3 class="table-head">${engine === "parakeet" ? "Parakeet versions" : "Whisper models"}</h3>
+        <div class="table" role="table" aria-label="${engine === "parakeet" ? "Parakeet versions" : "Whisper models"}">
           <div class="tr head" role="row"><span class="label" role="columnheader">Model</span><span class="label" role="columnheader">Size</span><span class="label" role="columnheader">Errors / 100 words</span><span class="label" role="columnheader">Speed</span><span role="columnheader"></span></div>
           ${rows}
         </div>
-        <p class="fine">Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement. The marked models skip the silence signal Flow's filter relies on, so they hear &ldquo;thank you&rdquo; in an empty room.${sp.models.some((m) => m.speed_basis) ? " Parakeet&rsquo;s speed was measured on a CPU with 8 threads rather than the GPU, so it is not comparable to the speeds above it; its errors are on the same clips." : ""}</p>
+        <p class="fine">${engine === "parakeet"
+          ? "Errors per 100 words were measured on 300 clips of accented English (EdAcc), the same clips as the Whisper models; speed is how many times faster than you talk, measured on a CPU with 8 threads, not the GPU the Whisper speeds were measured on, so the two are not comparable. They compare the models - your own voice is its own measurement."
+          : `Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement.${shown.some((m) => m.blind) ? " The marked models skip the silence signal Flow's filter relies on, so they hear &ldquo;thank you&rdquo; in an empty room." : ""}`}</p>
       </section>
       <div class="split">
         <section class="card">
@@ -1274,9 +1317,10 @@
       run(() => api("models/delete", { name: el.dataset.name }), `Deleted ${el.dataset.name}`);
     },
     engine: (el) => run(() => api("models/engine", { engine: el.dataset.value }),
-      el.dataset.value === "parakeet" ? "Choosing Parakeet - the pill shows the load" : "Choosing Whisper - the pill shows the load"),
-    "pk-variant": (el) => run(() => api("models/engine", { engine: "parakeet", variant: el.dataset.value }),
-      "Choosing that Parakeet - the pill shows the load"),
+      el.dataset.value === "parakeet" ? "Choosing Parakeet" : "Choosing Whisper"),
+    "pk-use": (el) => run(() => api("models/engine", { engine: "parakeet", variant: el.dataset.value }),
+      "Choosing that Parakeet"),
+    "engine-cancel": () => run(() => api("models/engine/cancel", {}), "Cancelled"),
     "legacy-delete": () => {
       if (!confirm("Remove the old Parakeet files? This version does not use them.")) return;
       run(() => api("models/delete", { name: "sherpa-onnx-legacy" }), "Removed");
@@ -1492,7 +1536,7 @@
       // Models refreshes while something is moving on it; Voice while it is listening;
       // Home every few seconds.
       const moving = name === "models" && data && data.speech
-        && (data.speech.loading || data.speech.models.some((m) => m.download && m.download.state === "running")
+        && (data.speech.loading || data.speech.switch || data.speech.models.some((m) => m.download && m.download.state === "running")
           || packsBusy(data));
       const listening = voiceBusy(name);
       // Conversations re-reads when the live conversation moved under it: an answer on
