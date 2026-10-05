@@ -991,12 +991,22 @@ class TestADownloadedModelIsReadableByItsOwner(unittest.TestCase):
             self.assertTrue(scratch.name.startswith(".parakeet-"))
 
     @unittest.skipUnless(sys.platform == "win32", "Windows ACLs")
-    def test_it_inherits_the_parents_permissions(self):
+    def test_it_gets_the_same_permissions_as_any_folder_made_there(self):
+        # Compared with a plain `os.mkdir` beside it rather than against a fixed shape: what
+        # a new folder inherits is the machine's business (a GitHub runner's temp directory
+        # hands down no "(I)" entries at all), and Flow's only job is not to do worse than
+        # the default. Here, a `mkdtemp` folder's owner-only ACL differs from its sibling's.
         import subprocess
 
-        with tempfile.TemporaryDirectory() as root:
-            scratch = parakeet._scratch(Path(root) / "models")
-            acl = subprocess.run(["icacls", str(scratch)], capture_output=True,
+        def acl(path: Path) -> list[str]:
+            out = subprocess.run(["icacls", str(path)], capture_output=True,
                                  text=True, errors="replace").stdout
-            # "(I)" marks an inherited entry; a protected mkdtemp ACL has none.
-            self.assertIn("(I)", acl, acl)
+            return [line.replace(str(path), "").strip() for line in out.splitlines()
+                    if line.strip() and "processed" not in line]
+
+        with tempfile.TemporaryDirectory() as root:
+            models = Path(root) / "models"
+            scratch = parakeet._scratch(models)
+            control = models / "control"
+            os.mkdir(control)
+            self.assertEqual(acl(scratch), acl(control))

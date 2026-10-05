@@ -443,6 +443,10 @@ class TestTheColdStartHarnessCannotFlatterItself(unittest.TestCase):
 
         from flow import coldstart
 
+        if coldstart.origin() is None:
+            # macOS CPython exposes no `time._start_time` and there is no Windows branch to
+            # fall back to: the stage is absent there, which the harness reports as such.
+            self.skipTest("this platform does not expose a process start time")
         t0 = time.monotonic()
         marks = {coldstart.STAGE_IMPORT: coldstart.origin()}
         time.sleep(0.02)
