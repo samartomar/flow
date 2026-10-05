@@ -44,7 +44,10 @@ jobs:
       # whether it is specific to it.
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # macOS pinned to 26 (Tahoe, arm64): the version the owner's Mac will run, and what
+        # `macos-latest` resolved to when this was pinned (image macos-26-arm64,
+        # 2026-10-05). `latest` moves to the next macOS on GitHub's schedule, silently.
+        os: [windows-latest, macos-26]
         python: ["3.12"]
         include:
           - os: windows-latest
@@ -106,7 +109,7 @@ jobs:
   # answer and a useless test.
   helper:
     name: swift helper compiles
-    runs-on: macos-latest
+    runs-on: macos-26 # the same pin, and Tahoe's Swift toolchain
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 

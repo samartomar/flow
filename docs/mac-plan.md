@@ -15,7 +15,7 @@ native body has to beat.
 
 | Layer | Today | Verified on a Mac? |
 |---|---|---|
-| Brain (`session`, `clean`, `refine`, `lexicon`, `hold`) | Portable Python, no platform branch | CI only (`macos-latest` leg is green) |
+| Brain (`session`, `clean`, `refine`, `lexicon`, `hold`) | Portable Python, no platform branch | CI only (`macos-26` arm64 leg is green) |
 | Ear (`audio`, `sounddevice`) | Portable; PortAudio wheel ships for macOS | No |
 | Engines | Whisper (CPU only: CTranslate2 has no Metal), Apple native (`native.py` + `native/flow_stt.swift`) | Helper compiles and links in CI; **never recognised real speech** |
 | Hands: paste | `inject_mac.py`: clipboard + System Events Cmd-V through `osascript`, terminal guard, Accessibility-denied detection | No |

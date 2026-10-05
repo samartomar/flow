@@ -450,7 +450,7 @@ class TestTheSuiteGatesEveryPush(unittest.TestCase):
         # Item 34's law — the platform decides what imports, `lite` decides what
         # happens — is a claim about three operating systems, and it was only ever run
         # on one of them.
-        for runner in ("windows-latest", "macos-latest", "ubuntu-latest"):
+        for runner in ("windows-latest", "macos-26", "ubuntu-latest"):
             with self.subTest(runner=runner):
                 self.assertIn(runner, self.yml)
 
