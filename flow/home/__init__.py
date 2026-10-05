@@ -143,6 +143,12 @@ class Home:
             warm = getattr(self.session, "warm", None)
             if callable(warm):
                 self.session.post(warm)
+        if job.then_use == "engine":
+            # Parakeet was chosen before its model was here ("downloads first, then
+            # takes over", as the tier dropdowns do). Posted, so the session applies it —
+            # and refuses it, with a note, if the person is mid-sentence by now.
+            self.session.post(lambda: self.session.set_engine("parakeet"))
+            return
         pending = self.pending_models
         if not job.then_use or pending is None:
             return

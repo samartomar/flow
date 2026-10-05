@@ -639,6 +639,19 @@ class DecodeWorker:
                 or bool(self._rescues)
             )
 
+    def swap(self, asr: Transcriber) -> bool:
+        """Decode on `asr` from now on. False, and nothing changes, if work is queued or running.
+
+        Under the same lock the submitters and the decode loop take, so "nothing is in
+        flight" and "the transcriber changes" are one step: a decode can never start on the
+        old transcriber after this returns, nor be handed one that has been unloaded.
+        """
+        with self._cv:
+            if self._busy or self._partial is not None or self._finals or self._rescues:
+                return False
+            self._asr = asr
+            return True
+
     def submit_partial(self, audio: np.ndarray) -> None:
         with self._cv:
             self._partial = audio  # replaces any pending partial
@@ -956,6 +969,15 @@ class Session:
         self.mic = mic or Mic(device=device)
         self.gate = SpeechGate()
         self.worker = DecodeWorker(self.asr)
+        #: How `set_engine` makes a transcriber it has not built yet: `factory(name)`.
+        #: Set by `__main__`, which knows what each engine is built from (the asked-for
+        #: models, the lexicon, the speaker's baseline, the device). None means this
+        #: session cannot change engine live — a test's fake, or `--calibrate`.
+        self.engine_factory = None
+        #: Every transcriber this session has run, by engine name, so switching back
+        #: reuses the one that already holds the user's tier choice and baseline.
+        self._engines: dict[str, Transcriber] = {}
+        self._switching_engine = False
         self.draft = Draft()
         #: P6: what has already been sent. Send appends here instead of erasing, so a
         #: follow-up has something to follow.
@@ -3778,6 +3800,116 @@ class Session:
 
         threading.Thread(target=run, daemon=True, name="swap-models").start()
         self._emit("note", "switching speech models - the next words may wait on the load")
+        return True
+
+    @property
+    def engine(self) -> str:
+        """Which speech engine decodes now: "whisper", "parakeet" or "native"."""
+        return getattr(self.asr, "engine", "whisper")
+
+    def engine_refusal(self, name: str) -> str:
+        """Why the engine cannot change to `name` right now, or "" when it can.
+
+        Read by `set_engine` and by Flow Home, so the page can say the reason in the
+        same words the pill's note does. Refused while anything is using the transcriber
+        — the microphone open, speech being gated, a decode queued or running, a reply
+        playing — rather than waited for: the person is looking at the setting now, and a
+        switch that happened later on its own would look like the choice being ignored.
+        """
+        from .profile import ENGINES
+
+        if name not in ENGINES:
+            return "Flow does not know that speech engine"
+        if getattr(self, "_closed", False):
+            return "Flow is closing"
+        if self.engine_factory is None:
+            return "this session cannot switch speech engines"
+        if self._switching_engine:
+            return "already switching - wait for the load to finish"
+        if name == "parakeet":
+            from . import parakeet
+
+            ok, why = parakeet.runtime_installed()
+            if not ok:
+                return "needs the Parakeet add-on: " + 'uv pip install -e ".[parakeet]"'
+            if not parakeet.model_present():
+                return "the Parakeet model is not on this PC - download it first"
+        return self._engine_busy()
+
+    def _engine_busy(self) -> str:
+        if self.talking:
+            return "finish the reply first - switching engines would cut it off"
+        if self.capturing or self.gate.speaking:
+            return "stop listening first - the speech engine cannot change while you are talking"
+        if self.worker.busy:
+            return "wait for the words being decoded to land, then switch"
+        return ""
+
+    def set_engine(self, name: str) -> bool:
+        """Change the speech engine live, to "whisper" or "parakeet". True when it did.
+
+        Refused with a note when `engine_refusal` has a reason. Otherwise the new
+        transcriber is built and **loaded on a thread of its own** — Parakeet's 2 s, or
+        Whisper's models if this is the first time back — and only then swapped in on this
+        thread: `DecodeWorker.swap` re-checks that nothing is decoding, the new one
+        replaces `self.asr`, and the old one is unloaded last, so no decode is ever handed
+        a transcriber that is being torn down. If the person started talking while it
+        loaded, the switch is abandoned with a note and the loaded engine is released.
+        The choice is remembered in the profile only once it has happened.
+        """
+        why = self.engine_refusal(name)
+        if why:
+            self._emit("note", f"speech engine: {why}")
+            return False
+        if name == self.engine:
+            return True
+        try:
+            new = self._engines.get(name) or self.engine_factory(name)
+        except Exception as exc:
+            self._emit("note", f"speech engine: could not start {name} - {exc}")
+            return False
+        self._switching_engine = True
+        self._emit("note", f"switching to the {name} speech engine - loading it now")
+
+        def fail(text: str) -> None:
+            self._switching_engine = False
+            self._emit("note", f"speech engine: {text} - kept {self.engine}")
+
+        def finish() -> None:
+            if getattr(self, "_closed", False):
+                self._switching_engine = False
+                new.unload()
+                return
+            busy = self._engine_busy()
+            old = self.asr
+            if busy or not self.worker.swap(new):
+                new.unload()
+                fail(busy or "a decode started while it loaded")
+                return
+            self._switching_engine = False
+            self.asr = new
+            self._engines[getattr(old, "engine", "whisper")] = old
+            self._engines[name] = new
+            old.unload()
+            if self.profile is not None:
+                self.profile.engine = name
+                self.profile.save()
+            self._emit("note", f"speech engine: {name}")
+
+        def run() -> None:
+            try:
+                new.load()
+                warm = getattr(new, "warmup", None)
+                if callable(warm):
+                    warm()
+            except Exception as exc:
+                # Bound now: `exc` is deleted when this block ends, and the lambda runs later.
+                text = f"{name} did not load ({exc})"
+                self.post(lambda: fail(text))
+                return
+            self.post(finish)
+
+        threading.Thread(target=run, daemon=True, name="swap-engine").start()
         return True
 
     @property

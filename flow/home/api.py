@@ -42,7 +42,7 @@ from ..refine import EFFORTS, available, named
 from ..session import CONVERSE, DICTATE, REFINE, RECENT_ANSWERED, RECENT_ASKED
 from ..version import check_update, version
 from .bridge import Busy
-from .models import BY_NAME, human
+from .models import BY_NAME, PARAKEET, SPECS, human
 
 #: Session mode -> the word the pages use. The product has two sides, Dictate and Ask;
 #: Refine is Dictate with a polish step, and says so.
@@ -101,6 +101,9 @@ APP_NAMES = {
     "notepad.exe": "Notepad", "explorer.exe": "File Explorer", "obsidian.exe": "Obsidian",
     "notion.exe": "Notion", "claude.exe": "Claude", "chatgpt.exe": "ChatGPT",
 }
+
+#: What the Speech model row calls an engine that has no model names of its own.
+ENGINE_NAMES = {"parakeet": "Parakeet", "native": "Apple speech"}
 
 #: Why the speech filter set words aside, as somebody reading History needs to hear it.
 #: The reasons are `clean.invented_reason`'s.
@@ -205,6 +208,7 @@ class Api:
             ("POST", "/api/models/cancel"): self.model_cancel,
             ("POST", "/api/models/delete"): self.model_delete,
             ("POST", "/api/models/use"): self.model_use,
+            ("POST", "/api/models/engine"): self.model_engine,
             ("POST", "/api/agent"): self.agent,
             ("POST", "/api/replies"): self.replies,
             ("POST", "/api/replies/preview"): self.replies_preview,
@@ -320,6 +324,7 @@ class Api:
                 "workspace": getattr(s, "workspace", None),
                 "loading": loading,
                 "models": list(names) if isinstance(names, tuple) else None,
+                "engine": getattr(asr, "engine", "whisper"),
                 "mic": getattr(getattr(s, "mic", None), "device_name", "") or "",
                 "cli": getattr(s, "provider", "") or "",
                 "lent": getattr(s, "mic_on_loan", "") or "",
@@ -350,6 +355,7 @@ class Api:
             except Exception:
                 terms = 0
             names = getattr(asr, "names", None)
+            engine = getattr(asr, "engine", "whisper")
             return {
                 "recent": [{"kind": role, "text": text}
                            for role, text in list(getattr(s, "recent", []))[:8]],
@@ -358,7 +364,11 @@ class Api:
                 "mic": getattr(getattr(s, "mic", None), "device_name", "") or "",
                 "loaded": bool(getattr(asr, "loaded", False)),
                 "loading": bool(getattr(asr, "loading", False)),
-                "final": names[1] if isinstance(names, tuple) else "",
+                # The Speech model row's name, which reads ", on the CPU" after it: an
+                # engine with no tier names (Parakeet, Apple's) is named as itself.
+                "final": names[1] if isinstance(names, tuple)
+                else ENGINE_NAMES.get(engine, ""),
+                "engine": engine,
                 "device": getattr(asr, "device", "") if asr is not None else "",
                 "terms": terms,
                 "mode": MODE_KEYS.get(getattr(s, "mode", DICTATE), "dictate"),
@@ -373,7 +383,8 @@ class Api:
             {"id": "mic", "title": "Microphone", "done": bool(live["mic"]),
              "detail": live["mic"] or "no microphone found", "page": "settings"},
             {"id": "model", "title": "Speech model", "done": live["loaded"],
-             "detail": (f"{live['final']}, on the {'GPU' if live['device'] == 'cuda' else 'CPU'}"
+             "detail": ((f"{live['final']}, on the {'GPU' if live['device'] == 'cuda' else 'CPU'}"
+                         if live["device"] else live["final"])
                         if live["loaded"] else "loading" if live["loading"]
                         else "not loaded yet"),
              "page": "models"},
@@ -514,7 +525,7 @@ class Api:
 
     def _spec(self, body: dict):
         name = body.get("name")
-        spec = BY_NAME.get(name) if isinstance(name, str) else None
+        spec = SPECS.get(name) if isinstance(name, str) else None
         if spec is None:
             raise ApiError("Flow does not know that model")
         return spec
@@ -536,9 +547,9 @@ class Api:
         job = self.home.models.downloads.jobs().get(spec.name)
         if job is not None and job.state == "running":
             raise ApiError(f"{spec.name} is still downloading - cancel it first")
-        from .models import delete
+        from .models import remove
 
-        if not delete(spec.repo):
+        if not remove(spec):
             raise ApiError(f"{spec.name} is not on this PC")
         self.home.models.forget_scan()
         return self.models({})
@@ -572,6 +583,49 @@ class Api:
             # download's finish must not swap back to what was chosen before this.
             self.home.pending_models = None
             self._call(lambda: self.session.set_models(partial, final, device))
+        return self.models({})
+
+    def model_engine(self, body: dict) -> dict:
+        """Choose the speech engine: Whisper, or Parakeet from NVIDIA.
+
+        Consistent with the tier dropdowns' "downloads first, then takes over": Parakeet
+        with its model missing **starts the download and switches when it lands**, rather
+        than refusing or downloading silently on a click that said "use". Everything else
+        that can stop a switch — the runtime not installed, the microphone open, a decode
+        running, a reply playing — comes back as an error carrying the same sentence the
+        session's note would say, so the page shows why and nothing half-happens.
+        """
+        from ..profile import ENGINES
+
+        name = body.get("engine")
+        if name not in ENGINES:
+            raise ApiError("the engine is " + " or ".join(ENGINES))
+        # Choosing Whisper ends a Parakeet download that was only waiting to switch.
+        job = self.home.models.downloads.jobs().get(PARAKEET.name)
+        if job is not None and name != "parakeet":
+            job.then_use = ""
+        from .. import parakeet
+
+        if name == "parakeet":
+            ok, why = parakeet.runtime_installed()
+            if not ok:
+                raise ApiError("needs the Parakeet add-on: " + 'uv pip install -e ".[parakeet]"')
+            if not parakeet.model_present():
+                self.home.models.downloads.start(PARAKEET, then_use="engine")
+                return self.models({})
+        s = self.session
+
+        def change() -> str:
+            if getattr(s, "engine", "whisper") == name:
+                return ""
+            why = s.engine_refusal(name)
+            if not why:
+                s.set_engine(name)
+            return why
+
+        why = self._call(change)
+        if why:
+            raise ApiError(why)
         return self.models({})
 
     def agent(self, body: dict) -> dict:

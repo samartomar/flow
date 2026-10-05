@@ -111,6 +111,10 @@ class NotAvailable(RuntimeError):
     """
 
 
+class Cancelled(Exception):
+    """`fetch(cancelled=...)` was told to stop. Not a failure, so not a `NotAvailable`."""
+
+
 # -- is it here? ---------------------------------------------------------------
 
 
@@ -144,6 +148,15 @@ def model_present(model_dir: Path | None = None) -> bool:
                    for name in REQUIRED_FILES)
     except OSError:
         return False
+
+
+def installed_bytes(model_dir: Path | None = None) -> int:
+    """What the model takes on disk, for the Models page's size column. 0 when absent."""
+    root = Path(model_dir) if model_dir else MODEL_DIR
+    try:
+        return sum((root / name).stat().st_size for name in REQUIRED_FILES)
+    except OSError:
+        return 0
 
 
 def available(model_dir: Path | None = None) -> tuple[bool, str]:
@@ -209,7 +222,7 @@ def extract(archive: Path, into: Path) -> Path:
 
 
 def fetch(dest: Path | None = None, progress=None, url: str = URL,
-          expected_bytes: int | None = ARCHIVE_BYTES) -> Path:
+          expected_bytes: int | None = ARCHIVE_BYTES, cancelled=None) -> Path:
     """Download and unpack the model into `dest`, atomically. Returns `dest`.
 
     Downloaded and unpacked in a scratch directory *beside* `dest`, and moved into place
@@ -218,6 +231,11 @@ def fetch(dest: Path | None = None, progress=None, url: str = URL,
     launch simply tries again. `progress(done, total)` is called per chunk with byte
     counts (`total` is 0 when the server does not say); the caller decides how often to
     show it. Raises `NotAvailable`, with the reason, for every way this can fail.
+
+    `cancelled`, when given, is asked before each chunk and before the unpack and the
+    rename; true raises `Cancelled` and the scratch directory goes with it, so a cancel
+    leaves exactly what a failure does — nothing at `dest`. Cooperative, so it takes
+    effect within a chunk (1 MiB) of being set.
     """
     dest = Path(dest) if dest else MODEL_DIR
     parent = dest.parent
@@ -235,6 +253,8 @@ def fetch(dest: Path | None = None, progress=None, url: str = URL,
                     open(archive, "wb") as out:
                 total = int(answer.headers.get("Content-Length") or 0)
                 while True:
+                    if cancelled is not None and cancelled():
+                        raise Cancelled()
                     chunk = answer.read(_CHUNK)
                     if not chunk:
                         break
@@ -247,7 +267,11 @@ def fetch(dest: Path | None = None, progress=None, url: str = URL,
         if (total and done != total) or (expected_bytes and done != expected_bytes):
             raise NotAvailable(
                 f"download is {done} bytes, expected {expected_bytes or total}")
+        if cancelled is not None and cancelled():
+            raise Cancelled()
         root = extract(archive, scratch / "unpacked")
+        if cancelled is not None and cancelled():
+            raise Cancelled()
         if dest.exists():
             shutil.rmtree(dest, ignore_errors=True)
         try:
@@ -292,6 +316,9 @@ class ParakeetTranscriber:
     session reads that on Whisper's `avg_logprob` scale and this engine's numbers are not on
     it, so absent is the honest answer, as for `native.py`.
     """
+
+    #: Which engine this is, as `Session.engine`, the profile and the Models page name it.
+    engine = "parakeet"
 
     def __init__(self, model_dir: Path | None = None, threads: int | None = None,
                  lexicon: Lexicon | None = None) -> None:
