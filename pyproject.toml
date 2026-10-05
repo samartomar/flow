@@ -150,6 +150,10 @@ exclude = [
     # The compact design's seeded canvas, for the same reason — `design/compact/`
     # documents in its README that `flow-compact.html` is regenerated, never edited.
     "design/compact/flow-compact.html",
+    # The README's tour of Flow Home, 687,906 B — a third of the artifact on 2026-10-05,
+    # when the Parakeet engine's source took the sdist 3,811 B over the guard. It is shown
+    # by GitHub from the repository, and nothing an installing machine runs reads it.
+    "docs/flow.gif",
 ]
 
 [tool.uv]

@@ -381,6 +381,12 @@ IDLE_UNLOAD_SEC = 1800.0
 #: all. Sixty seconds covers press-hold-release-speak and then stops mattering.
 WARM_GRACE_SEC = 60.0
 
+#: How long the Models page keeps saying how a speech-engine switch ended. A success is a
+#: confirmation and not a fact worth keeping on screen; a failure stays long enough to be
+#: read and acted on, because the toast that carried it has gone by.
+ENGINE_DONE_SEC = 6.0
+ENGINE_FAILED_SEC = 30.0
+
 #: How long to wait between attempts to reopen a microphone that went away.
 #:
 #: Measured on this machine, not chosen. Terminating and re-initialising PortAudio so it
@@ -978,6 +984,11 @@ class Session:
         #: reuses the one that already holds the user's tier choice and baseline.
         self._engines: dict[str, Transcriber] = {}
         self._switching_engine = False
+        #: A switch waiting for idle, as (engine, variant) - see `set_engine`.
+        self._pending_engine: tuple[str, str | None] | None = None
+        #: What is loading now, as (engine, variant); and how the last switch ended.
+        self._switching_to: tuple[str, str] | None = None
+        self._engine_result: dict | None = None
         self.draft = Draft()
         #: P6: what has already been sent. Send appends here instead of erasing, so a
         #: follow-up has something to follow.
@@ -1874,6 +1885,7 @@ class Session:
         self._pump_refine()
         self._pump_ask()
         self._pump_linger()
+        self._pump_engine()
 
     def post(self, fn) -> None:
         """Run `fn` on the thread that pumps this session, at its next frame.
@@ -3823,14 +3835,13 @@ class Session:
     def _engine_key(name: str, variant: str) -> str:
         return f"{name}:{variant}" if variant else name
 
-    def engine_refusal(self, name: str, variant: str | None = None) -> str:
-        """Why the engine cannot change to `name` right now, or "" when it can.
+    def engine_hard_refusal(self, name: str, variant: str | None = None) -> str:
+        """Why the engine can never change to `name` *as things stand*, or "".
 
-        Read by `set_engine` and by Flow Home, so the page can say the reason in the
-        same words the pill's note does. Refused while anything is using the transcriber
-        — the microphone open, speech being gated, a decode queued or running, a reply
-        playing — rather than waited for: the person is looking at the setting now, and a
-        switch that happened later on its own would look like the choice being ignored.
+        The refusals that waiting would not cure: an engine Flow does not know, a session
+        that is closing or has no way to build one, the runtime not installed, a build that
+        is not on this PC (Flow Home answers that one by downloading first). Being busy is
+        deliberately not here - see `_engine_busy`, and `set_engine`, which queues it.
         """
         from .profile import ENGINES
 
@@ -3840,8 +3851,6 @@ class Session:
             return "Flow is closing"
         if self.engine_factory is None:
             return "this session cannot switch speech engines"
-        if self._switching_engine:
-            return "already switching - wait for the load to finish"
         if name == "parakeet":
             from . import parakeet
 
@@ -3852,64 +3861,108 @@ class Session:
                 return "Flow does not know that Parakeet build"
             if not parakeet.model_present(self._parakeet_variant(variant)):
                 return "the Parakeet model is not on this PC - download it first"
-        return self._engine_busy()
+        return ""
+
+    def engine_refusal(self, name: str, variant: str | None = None) -> str:
+        """Why the engine cannot change to `name` *this instant*, or "" when it can.
+
+        The hard refusals, then the busy ones. Flow Home reads `engine_hard_refusal` to
+        decide whether to error, because a busy session **queues** the choice (see
+        `set_engine`); this is the question "could it happen right now", for a caller that
+        needs exactly that.
+        """
+        return (self.engine_hard_refusal(name, variant)
+                or ("already switching - wait for the load to finish"
+                    if self._switching_engine else "")
+                or self._engine_busy())
 
     def _engine_busy(self) -> str:
+        """Why the transcriber is in use right now, or "" when nothing is.
+
+        Idle means nothing is *in flight*: no reply playing, no speech being gated or held
+        for decoding, nothing queued or running in the decoder. An armed microphone in a
+        quiet room is idle - requiring it to be closed would make a switch wait for the
+        person to disarm, which is not what anyone means by "when I am not talking".
+        """
         if self.talking:
             return "finish the reply first - switching engines would cut it off"
-        if self.capturing or self.gate.speaking:
-            return "stop listening first - the speech engine cannot change while you are talking"
+        if self.gate.speaking or self._utter:
+            return "waiting for you to finish talking"
         if self.worker.busy:
-            return "wait for the words being decoded to land, then switch"
+            return "waiting for the words being decoded to land"
         return ""
 
     def set_engine(self, name: str, variant: str | None = None) -> bool:
-        """Change the speech engine live, to "whisper" or "parakeet". True when it did.
+        """Change the speech engine live, to "whisper" or "parakeet". True when it is
+        happening or has been queued; False when refused.
 
         `variant` ("fp32" or "int8") picks Parakeet's build, and is how the same swap that
-        changes engine also changes build — a different variant is a different transcriber
+        changes engine also changes build - a different variant is a different transcriber
         and goes through exactly the same checks. None means the profile's choice.
 
-        Refused with a note when `engine_refusal` has a reason. Otherwise the new
-        transcriber is built and **loaded on a thread of its own** — Parakeet's 2 s, or
-        Whisper's models if this is the first time back — and only then swapped in on this
-        thread: `DecodeWorker.swap` re-checks that nothing is decoding, the new one
-        replaces `self.asr`, and the old one is unloaded last, so no decode is ever handed
-        a transcriber that is being torn down. If the person started talking while it
-        loaded, the switch is abandoned with a note and the loaded engine is released.
-        The choice is remembered in the profile only once it has happened.
+        **A hard refusal is a refusal; being busy is a queue.** Anything `engine_hard_refusal`
+        names is said in a note and returns False. If the only thing in the way is that the
+        transcriber is in use - a reply, speech, a decode, or another switch still loading -
+        the choice is remembered and applied by `pump_results` the moment the session is
+        idle: a newer choice replaces it, choosing the engine already running cancels it,
+        and `cancel_engine_switch` drops it. The earlier version refused instead, and the
+        person had to wait and ask again, with nothing on the page to say what they were
+        waiting for. `engine_switch()` is what the page shows.
+
+        When nothing is in the way, the new transcriber is built and **loaded on a thread
+        of its own** - Parakeet's 3 to 5 s, or Whisper's models if this is the first time
+        back - and only then swapped in on this thread: `DecodeWorker.swap` re-checks that
+        nothing is decoding, the new one replaces `self.asr`, and the old one is unloaded
+        last, so no decode is ever handed a transcriber that is being torn down. If the
+        person started talking while it loaded, the loaded engine is kept (not reloaded) and
+        the switch goes back to the queue. The choice is remembered in the profile only once
+        it has happened.
         """
-        why = self.engine_refusal(name, variant)
+        why = self.engine_hard_refusal(name, variant)
         if why:
+            self._pending_engine = None
             self._emit("note", f"speech engine: {why}")
             return False
         want = self._parakeet_variant(variant) if name == "parakeet" else ""
-        if name == self.engine and want == self.engine_variant:
+        label = f"{name} ({want})" if want else name
+        if self._switching_engine:
+            self._queue_engine(name, variant, want)
             return True
+        if name == self.engine and want == self.engine_variant:
+            # The engine already running: that is also the way to take back a queued choice.
+            self._pending_engine = None
+            self._engine_result = None
+            return True
+        if self._engine_busy():
+            self._queue_engine(name, variant, want)
+            return True
+        self._pending_engine = None
         key = self._engine_key(name, want)
         try:
             new = self._engines.get(key) or self.engine_factory(name, want)
         except Exception as exc:
-            self._emit("note", f"speech engine: could not start {name} - {exc}")
+            self._engine_failed(name, want, f"could not start {label} - {exc}")
             return False
         self._switching_engine = True
-        label = f"{name} ({want})" if want else name
+        self._switching_to = (name, want)
+        self._engine_result = None
         self._emit("note", f"switching to the {label} speech engine - loading it now")
 
         def fail(text: str) -> None:
             self._switching_engine = False
-            self._emit("note", f"speech engine: {text} - kept {self.engine}")
+            self._engine_failed(name, want, text)
 
         def finish() -> None:
             if getattr(self, "_closed", False):
                 self._switching_engine = False
                 new.unload()
                 return
-            busy = self._engine_busy()
             old = self.asr
-            if busy or not self.worker.swap(new):
-                new.unload()
-                fail(busy or "a decode started while it loaded")
+            if self._engine_busy() or not self.worker.swap(new):
+                # They started talking while it loaded. Keep what was loaded, and wait.
+                self._engines[key] = new
+                self._switching_engine = False
+                self._queue_engine(name, variant, want)
                 return
             self._switching_engine = False
             self.asr = new
@@ -3922,6 +3975,8 @@ class Session:
                 if variant is not None:
                     self.profile.parakeet_model = variant
                 self.profile.save()
+            self._engine_result = {"state": "done", "engine": name, "variant": want,
+                                   "reason": "", "at": time.monotonic()}
             self._emit("note", f"speech engine: {label}")
 
         def run() -> None:
@@ -3939,6 +3994,82 @@ class Session:
 
         threading.Thread(target=run, daemon=True, name="swap-engine").start()
         return True
+
+    def _queue_engine(self, name: str, variant: str | None, want: str) -> None:
+        """Remember a choice to apply when idle, replacing any earlier one, and say so."""
+        self._pending_engine = (name, variant)
+        self._engine_result = None
+        label = f"{name} ({want})" if want else name
+        self._emit("note", f"speech engine: will switch to {label} as soon as you are not talking")
+
+    def _engine_failed(self, name: str, want: str, text: str) -> None:
+        self._engine_result = {"state": "failed", "engine": name, "variant": want,
+                               "reason": text, "at": time.monotonic()}
+        self._emit("note", f"speech engine: {text} - kept {self.engine}")
+
+    def cancel_engine_switch(self) -> bool:
+        """Drop a queued switch. True when there was one.
+
+        A switch whose engine is already loading cannot be taken back - the load is on a
+        thread that cannot be interrupted - so this is only for the wait.
+        """
+        if self._pending_engine is None:
+            return False
+        self._pending_engine = None
+        self._engine_result = None
+        self._emit("note", "speech engine: switch cancelled")
+        return True
+
+    def engine_switch(self) -> dict | None:
+        """What the Models page shows about a switch, from this session's own state.
+
+        `None` when nothing is happening. Otherwise `{"state", "engine", "variant",
+        "reason", "eta_sec"}` where `state` is "waiting" (queued, until idle), "loading",
+        "done" (shown for `ENGINE_DONE_SEC`) or "failed" (shown for `ENGINE_FAILED_SEC`,
+        with the reason). Derived rather than remembered by the page, so it survives a
+        reload and tells the truth to a second window. The download that comes before a
+        switch is Flow Home's to report; it has the bytes.
+        """
+        from . import parakeet
+
+        def shape(state: str, name: str, want: str, reason: str = "") -> dict:
+            return {"state": state, "engine": name, "variant": want, "reason": reason,
+                    "eta_sec": parakeet.LOAD_SEC.get(want) if name == "parakeet" else None}
+
+        if self._switching_engine and self._switching_to is not None:
+            return shape("loading", *self._switching_to)
+        if self._pending_engine is not None:
+            name, variant = self._pending_engine
+            want = self._parakeet_variant(variant) if name == "parakeet" else ""
+            return shape("waiting", name, want)
+        result = self._engine_result
+        if result is not None:
+            ttl = ENGINE_DONE_SEC if result["state"] == "done" else ENGINE_FAILED_SEC
+            if time.monotonic() - result["at"] <= ttl:
+                return shape(result["state"], result["engine"], result["variant"],
+                             result["reason"])
+            self._engine_result = None
+        return None
+
+    def _pump_engine(self) -> None:
+        """Apply a queued switch the moment the session is idle.
+
+        Runs every frame from `pump_results`, which both surfaces already call - the same
+        place the decoder's results and the posted calls are collected - so "idle" is
+        noticed on the frame it happens, with no timer and no polling of its own. Cheap
+        when nothing is queued: one attribute test.
+        """
+        pending = getattr(self, "_pending_engine", None)
+        if pending is None or self._switching_engine or self._engine_busy():
+            return
+        name, variant = pending
+        self._pending_engine = None
+        why = self.engine_hard_refusal(name, variant)
+        if why:
+            want = self._parakeet_variant(variant) if name == "parakeet" else ""
+            self._engine_failed(name, want, why)
+            return
+        self.set_engine(name, variant)
 
     @property
     def mic_on_loan(self) -> str:

@@ -266,8 +266,11 @@ class FakeSession:
             try:
                 fn = self._posted.get_nowait()
             except queue.Empty:
-                return
+                break
             fn()
+        if self._pending is not None and not self.busy:
+            name, variant = self._pending
+            self.set_engine(name, variant)
 
     # -- what Home reads -------------------------------------------------------
 
@@ -385,20 +388,39 @@ class FakeSession:
     def engine_variant(self) -> str:
         return getattr(self.asr, "variant", "")
 
-    def engine_refusal(self, name, variant=None) -> str:
+    #: Why the pretend session is "busy" ("" is idle) - set it to see a switch queue, clear
+    #: it to see the queue apply. The real session derives this from the microphone, the
+    #: gate and the decoder; here it is a switch the demo's author flips.
+    busy = ""
+    _pending = None
+    _result = None
+
+    def engine_hard_refusal(self, name, variant=None) -> str:
         from ..profile import ENGINES
 
         return "" if name in ENGINES else "Flow does not know that speech engine"
 
-    def set_engine(self, name, variant=None) -> bool:
-        """Swap the pretend transcriber, keeping the one it leaves for the way back."""
-        if self.engine_refusal(name, variant):
-            return False
+    def engine_refusal(self, name, variant=None) -> str:
+        return self.engine_hard_refusal(name, variant) or self.busy
+
+    def _want(self, name, variant) -> str:
         want = (variant or getattr(self.profile, "parakeet_model", "auto")
                 if name == "parakeet" else "")
-        want = "fp32" if want == "auto" else want
+        return "fp32" if want == "auto" else want
+
+    def set_engine(self, name, variant=None) -> bool:
+        """Swap the pretend transcriber, or queue the swap while `busy`."""
+        if self.engine_hard_refusal(name, variant):
+            return False
+        want = self._want(name, variant)
         if name == self.engine and want == self.engine_variant:
+            self._pending = self._result = None
             return True
+        if self.busy:
+            self._pending = (name, variant)
+            self._result = None
+            return True
+        self._pending = None
         kept = getattr(self, "_kept", {})
         kept[(self.engine, self.engine_variant)] = self.asr
         self.asr = kept.get((name, want)) or (FakeParakeet(want) if name == "parakeet"
@@ -409,7 +431,23 @@ class FakeSession:
             if variant is not None:
                 self.profile.parakeet_model = variant
             self.profile.save()
+        self._result = {"state": "done", "engine": name, "variant": want, "reason": "",
+                        "at": time.monotonic()}
         return True
+
+    def cancel_engine_switch(self) -> bool:
+        had = self._pending is not None
+        self._pending = self._result = None
+        return had
+
+    def engine_switch(self):
+        if self._pending is not None:
+            name, variant = self._pending
+            return {"state": "waiting", "engine": name, "variant": self._want(name, variant),
+                    "reason": "", "eta_sec": 3 if name == "parakeet" else None}
+        if self._result is not None and time.monotonic() - self._result["at"] < 6:
+            return {**self._result, "eta_sec": None}
+        return None
 
     def set_microphone(self, name) -> bool:
         why = self.mic.use(name)

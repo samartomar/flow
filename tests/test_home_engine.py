@@ -174,7 +174,7 @@ class TestSwitching(_Case):
         self.assertEqual(job.then_use, "")
 
     def test_a_refusal_from_the_session_is_the_pages_error(self):
-        self.h.session.engine_refusal = lambda name, variant=None: "stop listening first"
+        self.h.session.engine_hard_refusal = lambda name, variant=None: "stop listening first"
         status, body = self.post("parakeet")
         self.assertEqual(status, 400)
         self.assertEqual(body["error"], "stop listening first")
@@ -384,6 +384,169 @@ class TestTheTwoBuilds(_Case):
     def test_the_footer_names_parakeet_whichever_build(self):
         self.h.call("POST", "/api/models/engine", {"engine": "parakeet", "variant": "int8"})
         self.assertEqual(self.h.call("GET", "/api/state")[1]["engine"], "parakeet")
+
+
+class TestTheStatusStrip(_Case):
+    """`speech.switch`: what the engine is doing, from the server, for the page to draw."""
+
+    def switch(self):
+        return self.page()["switch"]
+
+    def test_nothing_in_flight_is_null(self):
+        self.assertIsNone(self.switch())
+
+    def test_a_choice_made_while_busy_is_queued_and_says_waiting(self):
+        self.h.session.busy = "waiting for you to finish talking"
+        status, body = self.post("parakeet")
+        self.assertEqual(status, 200)  # not an error
+        sw = body["speech"]["switch"]
+        self.assertEqual((sw["state"], sw["engine"], sw["variant"]),
+                         ("waiting", "parakeet", "fp32"))
+        self.assertEqual(body["speech"]["engine"], "whisper")  # the footer's source: not yet
+        self.assertEqual(self.h.profile.engine, "whisper")
+
+    def test_it_applies_when_idle_and_then_says_done_briefly(self):
+        self.h.session.busy = "waiting for you to finish talking"
+        self.post("parakeet")
+        self.h.session.busy = ""
+        self.assertTrue(self.wait(lambda: self.h.session.engine == "parakeet"))
+        sw = self.switch()
+        self.assertEqual(sw["state"], "done")
+        self.assertEqual(self.page()["engine"], "parakeet")
+
+    def test_the_wait_can_be_cancelled_from_the_page(self):
+        self.h.session.busy = "waiting for you to finish talking"
+        self.post("parakeet")
+        status, body = self.h.call("POST", "/api/models/engine/cancel", {})
+        self.assertEqual(status, 200)
+        self.assertIsNone(body["speech"]["switch"])
+        self.h.session.busy = ""
+        time.sleep(0.1)
+        self.assertEqual(self.h.session.engine, "whisper")
+
+    def test_choosing_the_running_engine_cancels_it_too(self):
+        self.h.session.busy = "waiting for you to finish talking"
+        self.post("parakeet")
+        _s, body = self.post("whisper")
+        self.assertIsNone(body["speech"]["switch"])
+
+    def test_a_newer_choice_replaces_the_waiting_one(self):
+        self.h.session.busy = "waiting for you to finish talking"
+        self.post("parakeet")
+        _s, body = self.h.call("POST", "/api/models/engine",
+                               {"engine": "parakeet", "variant": "int8"})
+        self.assertEqual(body["speech"]["switch"]["variant"], "int8")
+
+    def test_a_hard_refusal_is_still_an_error_even_while_busy(self):
+        self.h.session.busy = "waiting for you to finish talking"
+        self.state["runtime"] = (False, "no")
+        status, body = self.post("parakeet")
+        self.assertEqual(status, 400)
+        self.assertIsNone(self.page()["switch"])
+
+    def test_a_download_for_a_choice_reports_bytes_and_percent(self):
+        gate = threading.Event()
+
+        def slow(key, progress=None, cancelled=None, **_kw):
+            progress(1_000_000, 4_000_000)
+            gate.wait(2)
+
+        self.state["fp32"] = self.state["int8"] = False  # "auto" then means fp32, to fetch
+        with mock.patch.object(parakeet, "fetch", side_effect=slow):
+            self.post("parakeet")
+            sw = {}
+
+            def moving():
+                nonlocal sw
+                sw = self.switch() or {}
+                return sw.get("done_bytes", 0) > 0
+
+            self.assertTrue(self.wait(moving))
+            self.assertEqual(sw["state"], "downloading")
+            self.assertEqual((sw["variant"], sw["name"]), ("fp32", PK))
+            self.assertEqual((sw["done_bytes"], sw["total_bytes"], sw["pct"]),
+                             (1_000_000, 4_000_000, 25))
+            gate.set()
+
+    def test_a_download_that_lands_while_busy_queues_instead_of_refusing(self):
+        self.h.session.busy = "waiting for you to finish talking"
+        self.h.home._downloaded(models_mod.Download(PK8, state="done", then_use="engine"))
+        self.assertTrue(self.wait(lambda: self.switch() is not None))
+        self.assertEqual(self.switch()["state"], "waiting")
+        self.assertEqual(self.switch()["variant"], "int8")
+        self.h.session.busy = ""
+        self.assertTrue(self.wait(lambda: self.h.session.engine_variant == "int8"))
+
+    def test_the_session_state_comes_before_a_running_download(self):
+        job = models_mod.Download(PK, then_use="engine", done=5, total=10)
+        self.h.session.busy = "x"
+        self.post("parakeet")
+        with mock.patch.object(models_mod.Downloader, "jobs", return_value={PK: job}):
+            self.assertEqual(self.switch()["state"], "waiting")
+
+    def test_the_page_draws_the_strip_and_its_buttons(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        for needle in ("function switchStrip", "Waiting for you to finish talking",
+                       "Downloading ${name}", "is listening now", "Could not switch",
+                       'data-act="engine-cancel"', "data.speech.switch"):
+            self.assertIn(needle, js)
+        css = (STATIC / "app.css").read_text(encoding="utf-8")
+        self.assertIn(".strip", css)
+
+
+class TestTheTableFollowsTheEngine(_Case):
+    def test_the_page_filters_rows_by_the_engine_and_headed_them(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('(m.engine || "whisper") === (engine === "parakeet" ? "parakeet" : "whisper")',
+                      js)
+        self.assertIn('"Parakeet versions" : "Whisper models"', js)
+        self.assertNotIn("pk-variant", js)  # the separate Version control is gone
+        self.assertNotIn('"Which Parakeet build"', js)
+
+    def test_each_parakeet_row_has_use_this_or_download_and_use(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('data-act="pk-use"', js)
+        self.assertIn("Use this", js)
+        self.assertIn("Download &amp; use", js)
+
+    def test_the_footnote_parts_are_only_under_their_own_engine(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        whisper_only = js.index("skip the silence signal")
+        parakeet_only = js.index("measured on a CPU with 8 threads")
+        self.assertGreater(whisper_only, 0)
+        self.assertGreater(parakeet_only, 0)
+        # Each sentence sits inside its own branch of the engine conditional.
+        branch = js[js.index('<p class="fine">${engine === "parakeet"'):]
+        self.assertLess(branch.index("measured on a CPU with 8 threads"),
+                        branch.index("skip the silence signal"))
+
+    def test_the_rows_say_which_engine_they_are_for_the_page_to_filter_on(self):
+        rows = {r["name"]: r for r in self.page()["models"]}
+        self.assertEqual({r["engine"] for n, r in rows.items() if n in (PK, PK8)},
+                         {"parakeet"})
+        self.assertEqual({r["engine"] for n, r in rows.items() if n not in (PK, PK8)},
+                         {"whisper"})
+
+    def test_the_use_button_picks_that_row_and_the_in_use_one_has_no_button(self):
+        self.h.call("POST", "/api/models/engine", {"engine": "parakeet", "variant": "int8"})
+        sp = self.page()
+        rows = {r["name"]: r for r in sp["models"]}
+        self.assertEqual(rows[PK8]["in_use"], ["partial", "final"])  # badge, no Use button
+        self.assertEqual(rows[PK]["in_use"], [])
+        # Using the other row is the same route the button posts to.
+        _s, body = self.h.call("POST", "/api/models/engine",
+                               {"engine": "parakeet", "variant": "fp32"})
+        rows = {r["name"]: r for r in body["speech"]["models"]}
+        self.assertEqual(rows[PK]["in_use"], ["partial", "final"])
+
+    def test_the_best_errors_highlight_is_still_the_lowest_non_blind_row(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn("bestErrors", js)
+        self.assertIn("!m.blind && m.errors === bestErrors", js)
+
+    def test_the_old_sherpa_row_stays_under_parakeet(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn("legacy-delete", js)
 
 
 class TestTheOldSherpaFiles(_Case):

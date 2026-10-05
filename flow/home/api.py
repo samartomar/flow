@@ -218,6 +218,7 @@ class Api:
             ("POST", "/api/models/delete"): self.model_delete,
             ("POST", "/api/models/use"): self.model_use,
             ("POST", "/api/models/engine"): self.model_engine,
+            ("POST", "/api/models/engine/cancel"): self.model_engine_cancel,
             ("POST", "/api/agent"): self.agent,
             ("POST", "/api/replies"): self.replies,
             ("POST", "/api/replies/preview"): self.replies_preview,
@@ -605,6 +606,10 @@ class Api:
     def model_engine(self, body: dict) -> dict:
         """Choose the speech engine: Whisper, or Parakeet from NVIDIA.
 
+        **Busy is a queue, not an error.** A choice made while you are talking, a reply is
+        playing or a decode is running is remembered and applied the moment the session is
+        idle; `speech.switch` in the Models payload is what says so.
+
         Consistent with the tier dropdowns' "downloads first, then takes over": Parakeet
         with its model missing **starts the download and switches when it lands**, rather
         than refusing or downloading silently on a click that said "use". Everything else
@@ -642,14 +647,16 @@ class Api:
                     other = self.home.models.downloads.jobs().get(spec.name)
                     if other is not None and spec is not chosen:
                         other.then_use = ""
+                # A newer choice replaces a switch that was only waiting for idle.
+                self._call(s.cancel_engine_switch)
                 self.home.models.downloads.start(chosen, then_use="engine")
                 return self.models({})
 
         def change() -> str:
-            if (getattr(s, "engine", "whisper") == name
-                    and (variant is None or getattr(s, "engine_variant", "") == variant)):
-                return ""
-            why = s.engine_refusal(name, variant)
+            # Only a refusal waiting cannot cure is an error. Busy is a queue: `set_engine`
+            # remembers the choice and applies it when the session is idle, and the page's
+            # status strip says so (`speech.switch`).
+            why = s.engine_hard_refusal(name, variant)
             if not why:
                 s.set_engine(name, variant)
             return why
@@ -657,6 +664,11 @@ class Api:
         why = self._call(change)
         if why:
             raise ApiError(why)
+        return self.models({})
+
+    def model_engine_cancel(self, _body: dict) -> dict:
+        """Take back a speech-engine switch that is waiting for the session to be idle."""
+        self._call(self.session.cancel_engine_switch)
         return self.models({})
 
     def agent(self, body: dict) -> dict:

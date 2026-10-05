@@ -225,15 +225,18 @@ class TestSwitchingBetweenBuilds(_Case):
         self.assertIn("does not know", notes(self.session)[-1])
         self.assertEqual(self.built, [])
 
-    def test_a_build_change_is_refused_while_decoding_like_any_engine_change(self):
+    def test_a_build_change_while_decoding_is_queued_not_refused(self):
         self.switch("parakeet", "fp32")
         with mock.patch.object(type(self.session.worker), "busy",
                                new_callable=mock.PropertyMock, return_value=True):
-            self.assertFalse(self.session.set_engine("parakeet", "int8"))
-        self.assertEqual(self.session.engine_variant, "fp32")
+            self.assertTrue(self.session.set_engine("parakeet", "int8"))
+        self.assertEqual(self.session.engine_variant, "fp32")  # not yet
+        self.assertEqual(self.session.engine_switch()["state"], "waiting")
 
 
-class TestRefusals(_Case):
+class TestHardRefusalsStillRefuse(_Case):
+    """What waiting would not cure is a refusal, with the reason."""
+
     def refused(self, why_part, name="parakeet"):
         self.assertFalse(self.session.set_engine(name))
         self.assertIn(why_part, notes(self.session)[-1])
@@ -241,25 +244,7 @@ class TestRefusals(_Case):
         self.assertIs(self.session.asr, self.whisper)
         self.assertEqual(self.whisper.calls, [])  # not unloaded, not touched
         self.assertEqual(self.profile.engine, "whisper")
-
-    def test_while_the_microphone_is_open(self):
-        with mock.patch.object(Session, "capturing", new_callable=mock.PropertyMock,
-                               return_value=True):
-            self.refused("stop listening")
-
-    def test_while_speech_is_being_gated(self):
-        self.session.gate.speaking = True
-        self.refused("stop listening")
-
-    def test_while_a_decode_is_queued(self):
-        with mock.patch.object(type(self.session.worker), "busy",
-                               new_callable=mock.PropertyMock, return_value=True):
-            self.refused("decoded")
-
-    def test_while_a_reply_is_playing(self):
-        with mock.patch.object(Session, "talking", new_callable=mock.PropertyMock,
-                               return_value=True):
-            self.refused("finish the reply")
+        self.assertIsNone(self.session._pending_engine)  # and never queued
 
     def test_an_unknown_engine(self):
         self.refused("does not know", name="deepgram")
@@ -277,20 +262,131 @@ class TestRefusals(_Case):
         parakeet.model_present.return_value = False
         self.refused("download it first")
 
-    def test_a_second_switch_while_one_is_loading(self):
-        self.gate = threading.Event()
-        self.assertTrue(self.session.set_engine("parakeet"))
-        self.assertFalse(self.session.set_engine("whisper"))
-        self.assertIn("already switching", notes(self.session)[-1])
-        self.gate.set()
-        self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
+    def test_a_refusal_even_while_busy_is_still_a_refusal_and_not_a_queue(self):
+        self.session.gate.speaking = True
+        parakeet.runtime_installed.return_value = (False, "missing")
+        self.refused("Parakeet add-on")
 
-    def test_whisper_is_always_allowed_when_idle(self):
+    def test_a_hard_refusal_takes_back_a_queued_choice(self):
+        self.session.gate.speaking = True
+        self.assertTrue(self.session.set_engine("parakeet"))
+        self.assertFalse(self.session.set_engine("deepgram"))
+        self.assertIsNone(self.session._pending_engine)
+
+    def test_whisper_is_allowed_when_idle(self):
         self.assertEqual(self.session.engine_refusal("whisper"), "")
 
+    def test_engine_refusal_still_answers_could_it_happen_right_now(self):
+        self.assertEqual(self.session.engine_hard_refusal("parakeet"), "")
+        self.session.gate.speaking = True
+        self.assertIn("finish talking", self.session.engine_refusal("parakeet"))
+        self.assertEqual(self.session.engine_hard_refusal("parakeet"), "")  # not hard
 
-class TestTheSwitchIsAbandonedIfTheyStartTalking(_Case):
-    def test_speech_during_the_load_keeps_the_old_engine_and_releases_the_new(self):
+
+class TestBusyIsAQueue(_Case):
+    """Being in use delays a switch; it does not refuse it."""
+
+    def busy(self, reason="talking"):
+        """Make the session busy for one reason; returns a function that clears it."""
+        if reason == "talking":
+            self.session.gate.speaking = True
+            return lambda: setattr(self.session.gate, "speaking", False)
+        if reason == "held":
+            self.session._utter = [np.zeros(10, dtype=np.float32)]
+            return lambda: setattr(self.session, "_utter", [])
+        if reason == "decoding":
+            patcher = mock.patch.object(type(self.session.worker), "busy",
+                                        new_callable=mock.PropertyMock, return_value=True)
+            patcher.start()
+            return patcher.stop
+        if reason == "reply":
+            patcher = mock.patch.object(Session, "talking", new_callable=mock.PropertyMock,
+                                        return_value=True)
+            patcher.start()
+            return patcher.stop
+        raise AssertionError(reason)
+
+    def test_each_kind_of_busy_queues_and_nothing_is_built(self):
+        for reason in ("talking", "held", "decoding", "reply"):
+            with self.subTest(reason=reason):
+                session = Session(asr=FakeEngine("whisper"), mic=FakeMic(),
+                                  profile=self.profile)
+                self.addCleanup(session.close)
+                session.engine_factory = self.session.engine_factory
+                self.session, saved = session, self.session
+                try:
+                    clear = self.busy(reason)
+                    self.assertTrue(session.set_engine("parakeet"))
+                    self.assertEqual(session.engine_switch()["state"], "waiting")
+                    self.assertEqual(session.engine, "whisper")
+                    self.assertEqual(self.built, [])
+                    self.assertIn("as soon as you are not talking", notes(session)[-1])
+                    clear()
+                finally:
+                    self.session = saved
+                self.built.clear()
+
+    def test_it_is_applied_on_the_frame_the_session_goes_idle(self):
+        clear = self.busy("talking")
+        self.assertTrue(self.session.set_engine("parakeet", "int8"))
+        self.session.pump_results()
+        self.session.pump_results()
+        self.assertEqual(self.built, [])  # still busy: never applied
+        clear()
+        self.session.pump_results()  # the frame the speech ended
+        self.assertEqual(self.session.engine_switch()["state"], "loading")
+        self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
+        self.assertEqual((self.session.engine, self.session.engine_variant),
+                         ("parakeet", "int8"))
+        self.assertEqual(reloaded(self.profile.path).parakeet_model, "int8")
+        self.assertEqual(self.session.engine_switch()["state"], "done")
+
+    def test_a_newer_choice_replaces_the_queued_one(self):
+        clear = self.busy("talking")
+        self.session.set_engine("parakeet", "int8")
+        self.session.set_engine("parakeet", "fp32")
+        self.assertEqual(self.session._pending_engine, ("parakeet", "fp32"))
+        clear()
+        self.assertTrue(pump(self.session, lambda: self.session.engine_variant == "fp32"))
+        self.assertEqual(len(self.built), 1)  # int8 was never built
+
+    def test_choosing_the_engine_already_running_cancels_it(self):
+        clear = self.busy("talking")
+        self.session.set_engine("parakeet")
+        self.assertTrue(self.session.set_engine("whisper"))
+        self.assertIsNone(self.session._pending_engine)
+        self.assertIsNone(self.session.engine_switch())
+        clear()
+        self.session.pump_results()
+        self.assertEqual(self.built, [])
+        self.assertEqual(self.session.engine, "whisper")
+
+    def test_it_can_be_cancelled_explicitly(self):
+        clear = self.busy("talking")
+        self.session.set_engine("parakeet")
+        self.assertTrue(self.session.cancel_engine_switch())
+        self.assertFalse(self.session.cancel_engine_switch())  # nothing left to cancel
+        self.assertIn("cancelled", notes(self.session)[-1])
+        clear()
+        self.session.pump_results()
+        self.assertEqual(self.built, [])
+
+    def test_nothing_queued_costs_nothing_per_frame(self):
+        self.session.pump_results()
+        self.assertEqual(self.built, [])
+        self.assertIsNone(self.session.engine_switch())
+
+    def test_a_switch_asked_while_another_loads_waits_for_it_then_applies(self):
+        self.gate = threading.Event()
+        self.assertTrue(self.session.set_engine("parakeet", "fp32"))
+        self.assertEqual(self.session.engine_switch()["state"], "loading")
+        self.assertTrue(self.session.set_engine("parakeet", "int8"))  # queued, not refused
+        self.assertEqual(self.session.engine_switch()["state"], "loading")
+        self.gate.set()
+        self.assertTrue(pump(self.session, lambda: self.session.engine_variant == "int8"))
+        self.assertEqual(len(self.built), 2)
+
+    def test_speech_during_the_load_goes_back_to_the_queue_keeping_what_loaded(self):
         self.gate = threading.Event()
         self.assertTrue(self.session.set_engine("parakeet"))
         new = self.built[0]
@@ -300,10 +396,74 @@ class TestTheSwitchIsAbandonedIfTheyStartTalking(_Case):
         self.assertIs(self.session.asr, self.whisper)
         self.assertTrue(self.whisper.loaded)
         self.assertNotIn("unload", self.whisper.calls)
-        self.assertEqual(new.calls[-1], "unload")
-        self.assertEqual(self.profile.engine, "whisper")
-        self.assertIn("kept whisper", notes(self.session)[-1])
+        self.assertNotIn("unload", new.calls)  # kept, so the retry does not reload it
+        self.assertEqual(self.session.engine_switch()["state"], "waiting")
+        self.session.gate.speaking = False
+        self.assertTrue(pump(self.session, lambda: self.session.engine == "parakeet"))
+        self.assertEqual(len(self.built), 1)
+        self.assertEqual(new.calls.count("load"), 2)  # idempotent in the real transcriber
 
+    def test_a_queued_switch_whose_runtime_vanished_fails_with_the_reason(self):
+        clear = self.busy("talking")
+        self.session.set_engine("parakeet")
+        parakeet.runtime_installed.return_value = (False, "gone")
+        clear()
+        self.session.pump_results()
+        status = self.session.engine_switch()
+        self.assertEqual(status["state"], "failed")
+        self.assertIn("Parakeet add-on", status["reason"])
+        self.assertEqual(self.session.engine, "whisper")
+
+    def test_an_engine_that_will_not_load_is_a_failure_the_page_can_read(self):
+        def boom(name, variant=None):
+            engine = FakeEngine(name)
+            engine.load = mock.Mock(side_effect=RuntimeError("no memory"))
+            return engine
+
+        self.session.engine_factory = boom
+        self.session.set_engine("parakeet", "int8")
+        self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
+        status = self.session.engine_switch()
+        self.assertEqual(status["state"], "failed")
+        self.assertIn("no memory", status["reason"])
+        self.assertEqual(status["variant"], "int8")
+
+
+class TestTheStatusTheModelsPageReads(_Case):
+    def test_nothing_is_going_on_by_default(self):
+        self.assertIsNone(self.session.engine_switch())
+
+    def test_loading_names_the_engine_and_how_long_it_usually_takes(self):
+        self.gate = threading.Event()
+        self.session.set_engine("parakeet", "int8")
+        status = self.session.engine_switch()
+        self.assertEqual((status["state"], status["engine"], status["variant"]),
+                         ("loading", "parakeet", "int8"))
+        self.assertEqual(status["eta_sec"], parakeet.LOAD_SEC["int8"])
+        self.gate.set()
+        self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
+
+    def test_done_is_shown_briefly_and_then_goes_away(self):
+        self.switch("parakeet", "fp32")
+        self.assertEqual(self.session.engine_switch()["state"], "done")
+        with mock.patch("flow.session.time.monotonic",
+                        return_value=time.monotonic() + 3600):
+            self.assertIsNone(self.session.engine_switch())
+        self.assertIsNone(self.session.engine_switch())  # and stays gone
+
+    def test_a_failure_outlives_a_success(self):
+        from flow.session import ENGINE_DONE_SEC, ENGINE_FAILED_SEC
+
+        self.assertGreater(ENGINE_FAILED_SEC, ENGINE_DONE_SEC)
+
+    def test_the_footer_engine_does_not_change_until_the_swap_has_happened(self):
+        self.session.gate.speaking = True
+        self.session.set_engine("parakeet")
+        self.assertEqual(self.session.engine, "whisper")
+        self.assertIs(self.session.asr, self.whisper)
+
+
+class TestTheSwapItself(_Case):
     def test_a_decode_queued_during_the_load_blocks_the_swap_itself(self):
         # The worker's own lock is the last line: even if the busy check were skipped, a
         # queued decode refuses the swap rather than being handed another transcriber.

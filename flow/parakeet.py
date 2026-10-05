@@ -151,6 +151,11 @@ VARIANTS: dict[str, Variant] = {
         *_SHARED)),
 }
 
+#: About how long `load()` takes, in seconds, for the page to say "(about 3 s)". Measured
+#: 2026-10-05 on this machine: fp32 4.4-4.9 s, int8 3.2-3.4 s. A promise of the order of
+#: magnitude, not of the second - a colder disk or a smaller CPU takes longer.
+LOAD_SEC = {"fp32": 5, "int8": 3}
+
 #: What the profile may hold: a variant, or "auto" — fp32 if it is here, else int8 if that
 #: is, else fp32 (which is what will be downloaded).
 VARIANT_CHOICES = ("auto", *VARIANTS)
