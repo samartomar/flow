@@ -3966,6 +3966,10 @@ class Session:
                 self._queue_engine(name, variant, want)
                 return
             self._switching_engine = False
+            # Done is recorded before the engine changes hands, so anything that sees the
+            # new engine also sees its status; the unload and the profile save come after.
+            self._engine_result = {"state": "done", "engine": name, "variant": want,
+                                   "reason": "", "at": time.monotonic()}
             self.asr = new
             self._engines[self._engine_key(getattr(old, "engine", "whisper"),
                                            getattr(old, "variant", ""))] = old
@@ -3976,8 +3980,6 @@ class Session:
                 if variant is not None:
                     self.profile.parakeet_model = variant
                 self.profile.save()
-            self._engine_result = {"state": "done", "engine": name, "variant": want,
-                                   "reason": "", "at": time.monotonic()}
             # The startup identity named the engine that was running then; every decode
             # after this point belongs to this one, so the trace says so where it changed.
             describe = getattr(new, "identity", None)
