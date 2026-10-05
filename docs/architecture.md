@@ -87,8 +87,15 @@ boundary is this:
   file's size and SHA-256. It does not go through `huggingface_hub`, and it does **not**
   avoid huggingface.co: an earlier build of this engine fetched from GitHub releases and
   did, and the native engine is now the only answer for a network that blocks the hub.
-  `flow/parakeet.py` is the one module besides `version.py` that holds a URL opener, and
-  `tests/test_version.py` counts it.
+  The **GPU build** adds a second source: the pinned `v0.5.0` release of
+  `github.com/mudler/parakeet.cpp` (a 36 MB Vulkan or 313 MB CUDA zip, each checked against
+  its SHA-256, of which only `parakeet-server.exe` and `LICENSE` are extracted) and a 940 MB
+  GGUF from `huggingface.co/mudler/parakeet-cpp-gguf` at one commit. The executable's own
+  SHA-256 is pinned too and **checked before every launch**; it is started bound to
+  `127.0.0.1` and tied to Flow with a Windows Job Object, so it listens on nothing else and
+  cannot outlive a hard kill. Still no user content: what is sent to it is audio, over
+  loopback. `flow/parakeet.py` is the one module besides `version.py` that holds a URL
+  opener, and `tests/test_version.py` counts it.
 - **A local port, and only while Flow Home has been opened.** `flow/home/server.py`
   binds `127.0.0.1` — never another interface — the first time the window is opened, and
   closes with Flow. It answers its own host, its own origin and a token made per launch,

@@ -262,8 +262,9 @@
 
   // ------------------------------------------------------------------ Models
   // What a switch is switching to, in the words the page uses for it.
+  const PK_LABEL = { fp32: "Accurate", int8: "Light", gpu: "GPU" };
   const switchName = (s) => s.engine === "parakeet"
-    ? `Parakeet ${s.variant === "int8" ? "Light" : "Accurate"}` : "Whisper";
+    ? `Parakeet ${PK_LABEL[s.variant] || "Accurate"}` : "Whisper";
 
   function modelActions(m, busy, sw) {
     if (!m.catalog) return "";
@@ -328,7 +329,8 @@
     const ag = d.agent;
     const vo = d.voice;
     const gpu = sp.gpu;
-    const onGpu = sp.device === "cuda";
+    // Whisper reports "cuda"; the Parakeet GPU build reports the backend it runs on.
+    const onGpu = sp.device === "cuda" || sp.device === "vulkan";
     // The tier dropdowns are Whisper's: Parakeet is an engine, chosen by the control above.
     const catalog = sp.models.filter((m) => m.catalog && m.engine === "whisper");
     const engine = sp.engine || "whisper";
@@ -358,7 +360,10 @@
       if (m.in_use.includes("partial")) tags.push('<span class="badge green"><span class="dot green"></span>in use: live preview</span>');
       if (m.name === sp.automatic.final && !m.in_use.includes("final")) tags.push('<span class="badge">recommended here</span>');
       if (m.blind) tags.push(`<span class="badge amber">${icon("warn", C.amber, 12)}invents words in silence</span>`);
-      const basis = m.speed_basis ? `<span class="fine">on ${esc(m.speed_basis)}</span>` : "";
+      // Where the speed was measured when it is not the GTX 1070 the Whisper rows were: the
+      // two ONNX builds on a CPU. The GPU build is on that same card, and says which backend.
+      const basis = m.speed_basis ? `<span class="fine">on ${esc(m.speed_basis)}</span>`
+        : m.backend ? `<span class="fine">via ${esc(m.backend)}</span>` : "";
       return `<div class="tr ${m.in_use.length ? "using" : ""}" role="row">
         <div class="col" role="cell"><div class="name"><span class="mono">${esc(m.name)}</span>${tags.join("")}</div>${m.maker ? `<span class="fine">${esc(m.family || "Whisper")}, by ${esc(m.maker)}</span>` : ""}${m.note ? `<span class="fine">${esc(m.note)}</span>` : ""}</div>
         <div role="cell" class="note">${esc(m.size_text)}</div>
@@ -423,19 +428,19 @@
         <div class="col grow">
           <div class="row wrap"><b>${esc(gpu ? gpu.name : "No NVIDIA GPU found")}</b>${gpu && gpu.memory_mb ? `<span class="note">${Math.round(gpu.memory_mb / 1024)} GB video memory</span>` : ""}
             <span class="badge ${onGpu ? "green" : ""}">${onGpu ? '<span class="dot green"></span>speech runs on the GPU' : "speech runs on the CPU"}</span>
-            ${sp.compute_types.includes("int8") && onGpu && !sp.compute_types.includes("float16") ? '<span class="badge">int8</span>' : ""}</div>
-          <p class="note">${engine === "parakeet" ? "Parakeet runs on the CPU whatever graphics card this PC has; the card matters only to Whisper." : onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
+            ${engine !== "parakeet" && sp.compute_types.includes("int8") && onGpu && !sp.compute_types.includes("float16") ? '<span class="badge">int8</span>' : ""}</div>
+          <p class="note">${engine === "parakeet" ? (parakeet.variant === "gpu" ? `Parakeet is running on this GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}.` : "The Accurate and Light versions of Parakeet run on the CPU whatever graphics card this PC has; the card matters only to Whisper and the GPU version.") : onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
             : esc(sp.why_cpu || "The CPU runs the smaller models in time; the large ones need a GPU.")}</p>
         </div>
       </div></section>
       <section class="card">
         <div class="row wrap"><h2 class="grow">Speech recognition</h2>${sp.loading ? '<span class="badge"><span class="dot blue"></span>loading a model</span>' : ""}
           <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="${engine === "parakeet" ? "parakeet" : "models"}">${icon("folder", C.text, 14)}Open folder</button></div>
-        <p class="note">These are Whisper models from OpenAI, smaller distil- copies of them, and Parakeet from NVIDIA, all downloaded from Hugging Face. They run on this PC; nothing you say is sent to any of them.</p>
+        <p class="note">These are Whisper models from OpenAI, smaller distil- copies of them, and Parakeet from NVIDIA, downloaded from Hugging Face (the Parakeet GPU helper, parakeet.cpp, from GitHub). They run on this PC; nothing you say is sent to any of them.</p>
         ${engineControl}
         ${switchStrip(sstate)}
         ${engine === "parakeet"
-          ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. It runs on the CPU, ${esc(parakeet.threads || "")} threads, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : "The accurate version is the most accurate model measured here, Japanese-accented English included."}</p>`
+          ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. ${parakeet.variant === "gpu" ? `It runs on the GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}` : `It runs on the CPU, ${esc(parakeet.threads || "")} threads`}, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : parakeet.variant === "gpu" ? "The GPU version is as accurate as the accurate one, and several times faster." : "The accurate version is the most accurate model measured here, Japanese-accented English included."}</p>`
           : `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>`}
         ${engine === "whisper" && sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
@@ -452,7 +457,7 @@
           ${rows}
         </div>
         <p class="fine">${engine === "parakeet"
-          ? "Errors per 100 words were measured on 300 clips of accented English (EdAcc), the same clips as the Whisper models; speed is how many times faster than you talk, measured on a CPU with 8 threads, not the GPU the Whisper speeds were measured on, so the two are not comparable. They compare the models - your own voice is its own measurement."
+          ? "Errors per 100 words were measured on 300 clips of accented English (EdAcc), the same clips as the Whisper models; speed is how many times faster than you talk. The Accurate and Light versions were measured on a CPU with 8 threads, so they are not comparable to the Whisper speeds; the GPU version was measured on the same GTX 1070 as the Whisper speeds, through CUDA or Vulkan as marked. They compare the models - your own voice is its own measurement. Parakeet is NVIDIA's model (CC-BY-4.0), run through onnx-asr and parakeet.cpp (MIT)."
           : `Errors per 100 words and speed were measured on ${esc(sp.measured_on)}; speed is how many times faster than you talk. They compare the models - your own voice is its own measurement.${shown.some((m) => m.blind) ? " The marked models skip the silence signal Flow's filter relies on, so they hear &ldquo;thank you&rdquo; in an empty room." : ""}`}</p>
       </section>
       <div class="split">

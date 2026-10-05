@@ -109,9 +109,10 @@ CATALOG: tuple[Spec, ...] = (
 
 BY_NAME = {spec.name: spec for spec in CATALOG}
 
-#: Parakeet TDT 0.6B v3, in the two builds `flow/parakeet.py` ships, measured 2026-10-05 on
-#: the same 300 EdAcc clips (`scripts/parakeet_bench.py`) — the real-time factor on a **CPU
-#: with 8 threads**, not the GTX 1070, hence `basis`. `repo` is the directory name under
+#: Parakeet TDT 0.6B v3, in the three builds `flow/parakeet.py` ships, measured 2026-10-05
+#: on the same 300 EdAcc clips (`scripts/parakeet_bench.py`) — the two ONNX builds' real-time
+#: factor on a **CPU with 8 threads**, not the GTX 1070, hence `basis`; the GPU build's on the
+#: GTX 1070 itself, **the same basis as the Whisper rows**, so it carries none. `repo` is the directory name under
 #: `~/.flow/models`, not a Hugging Face repo, and `variant` is `parakeet.VARIANTS`' key.
 PARAKEET = Spec(
     "parakeet-tdt-0.6b-v3", parakeet.VARIANTS["fp32"].name, parakeet.VARIANTS["fp32"].bytes,
@@ -122,7 +123,18 @@ PARAKEET_INT8 = Spec(
     parakeet.VARIANTS["int8"].bytes, 16.9, 0.067, engine="parakeet", basis="CPU",
     variant="int8",
     note="the light one: a quarter of the size, a little behind on Japanese-accented English")
-PARAKEET_SPECS = (PARAKEET, PARAKEET_INT8)
+#: The GPU build: 14.5 errors per 100 words (CUDA and Vulkan agree to a tenth), and a speed
+#: that depends on the backend this PC would use - `GPU_RTF`. `rtf` here is CUDA's, shown
+#: only when no backend can be told.
+PARAKEET_GPU = Spec(
+    "parakeet-tdt-0.6b-v3-gpu", parakeet.VARIANTS["gpu"].name, parakeet.VARIANTS["gpu"].bytes,
+    14.5, 0.020, engine="parakeet", variant="gpu",
+    note="runs on the GPU through parakeet.cpp; 8-bit weights, no accuracy lost")
+PARAKEET_SPECS = (PARAKEET, PARAKEET_INT8, PARAKEET_GPU)
+
+#: Real-time factor of the GPU build on the GTX 1070, 300 EdAcc clips, by backend. CUDA
+#: 0.020 (50x real time, p50 107 ms), Vulkan 0.036 (27x, p50 211 ms).
+GPU_RTF = {"cuda": 0.020, "vulkan": 0.036}
 
 #: Every row the page lists. `BY_NAME` stays Whisper-only on purpose — see the docstring.
 SPECS = {**BY_NAME, **{spec.name: spec for spec in PARAKEET_SPECS}}
@@ -204,6 +216,11 @@ def remove(spec: Spec) -> bool:
     if not root.exists():
         return False
     shutil.rmtree(root, ignore_errors=True)
+    if spec.variant == "gpu":
+        # The helper goes with it: it is 36 or 313 MB that nothing else here uses.
+        backend = parakeet.gpu_backend()[0]
+        if backend in parakeet.RUNTIMES:
+            shutil.rmtree(parakeet.runtime_dir(backend), ignore_errors=True)
     return not root.exists()
 
 
@@ -497,34 +514,41 @@ class ModelManager:
         if not device or device == "auto":
             device = resolve_device(asked_device)
         engine_list = engines(self._parakeet_variant(asr))
-        runtime_why = next(e["why"] for e in engine_list if e["id"] == "parakeet")
+        backend = parakeet.gpu_backend()[0]
         rows = []
         for spec in SPECS.values():
             here = is_here(spec)
             job = jobs.get(spec.name)
             if spec.engine == "parakeet":
                 have = parakeet.installed_bytes(spec.variant)
+                # What a download would fetch here: for the GPU build, with its helper.
+                size = parakeet.download_size(spec.variant)
             else:
                 have = sizes.get(spec.repo)
+                size = spec.size
+            rtf = GPU_RTF.get(backend, spec.rtf) if spec.variant == "gpu" else spec.rtf
             rows.append({
                 "name": spec.name,
                 "catalog": True,
                 "engine": spec.engine,
                 "variant": spec.variant,
-                "size": (have or spec.size) if here else spec.size,
-                "size_text": human(have or spec.size),
+                "size": (have or size) if here else size,
+                "size_text": human(have or size),
                 "installed": here,
                 "errors": spec.errors,
-                "speed": round(1 / spec.rtf, 1) if spec.rtf else None,
+                "speed": round(1 / rtf, 1) if rtf else None,
                 # What the speed was measured on when it was not the GPU the page's
-                # footnote names: "" for the Whisper rows, "CPU, 8 threads" for Parakeet.
+                # footnote names: "" for the Whisper rows and the GPU build, "CPU" for the
+                # two ONNX builds.
                 "speed_basis": spec.basis,
+                # Which GPU backend the speed is for ("CUDA" or "Vulkan"), for the GPU row.
+                "backend": parakeet.BACKEND_LABEL.get(backend, "") if spec.variant == "gpu" else "",
                 "note": spec.note,
                 "maker": spec.maker,
                 "family": spec.family,
                 # Why this row cannot be downloaded for use here: its engine's runtime is
                 # not installed. "" for every row that can.
-                "blocked": runtime_why if spec.engine == "parakeet" else "",
+                "blocked": parakeet.missing_runtime(spec.variant) if spec.engine == "parakeet" else "",
                 "blind": spec.blind,
                 "in_use": using.get(spec.name, []),
                 "download": job.public() if job is not None and
@@ -535,7 +559,7 @@ class ModelManager:
         for name, roles in using.items():
             if name not in SPECS:
                 rows.append({"name": name, "catalog": False, "engine": "whisper", "variant": "",
-                             "speed_basis": "", "family": "Whisper",
+                             "speed_basis": "", "backend": "", "family": "Whisper",
                              "size": None, "size_text": "",
                              "installed": True, "blocked": "",
                              "errors": None, "speed": None, "note": "chosen outside Flow Home", "maker": "",
@@ -581,22 +605,27 @@ def engines(variant: str = "fp32") -> list[dict]:
     download is a separate step the page offers — and `why` is what to say when it is not.
     Parakeet also carries its two builds and which one is chosen.
     """
-    ok, why = parakeet.runtime_installed()
+    variants = [{"key": spec.variant, "name": spec.name,
+                 "label": {"fp32": "Accurate", "int8": "Light", "gpu": "GPU"}[spec.variant],
+                 "installed": parakeet.model_present(spec.variant),
+                 "why": parakeet.missing_runtime(spec.variant),
+                 "size_text": human(parakeet.download_size(spec.variant)),
+                 "errors": spec.errors}
+                for spec in PARAKEET_SPECS]
+    ok = any(not v["why"] for v in variants)
     return [
         {"id": "whisper", "label": "Whisper", "maker": "OpenAI",
          "available": True, "why": "", "installed": True},
         {"id": "parakeet", "label": "Parakeet", "maker": "NVIDIA",
+         # Usable when any build can run: the GPU build needs no add-on, and the ONNX
+         # builds need nothing else.
          "available": ok,
-         "why": "" if ok else ("needs the Parakeet add-on: "
-                               'uv pip install -e ".[parakeet]"'),
+         "why": "" if ok else parakeet.ADDON_HINT,
          "installed": bool(parakeet.installed_variants()),
          "threads": parakeet.default_threads(),
          "variant": variant,
-         "variants": [{"key": spec.variant, "name": spec.name,
-                       "label": "Accurate" if spec.variant == "fp32" else "Light",
-                       "installed": parakeet.model_present(spec.variant),
-                       "size_text": human(spec.size), "errors": spec.errors}
-                      for spec in PARAKEET_SPECS]},
+         "backend": parakeet.BACKEND_LABEL.get(parakeet.gpu_backend()[0], ""),
+         "variants": variants},
     ]
 
 

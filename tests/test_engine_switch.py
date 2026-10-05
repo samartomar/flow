@@ -115,9 +115,12 @@ class _Case(unittest.TestCase):
 
         self.session.engine_factory = factory
         # Parakeet is installed and downloaded, unless a test says otherwise.
-        for target, value in (("runtime_installed", (True, "")),
-                              ("model_present", True)):
-            patch = mock.patch.object(parakeet, target, return_value=value)
+        for target, kwargs in (
+                ("runtime_installed", {"return_value": (True, "")}),
+                # Every build is downloaded except the GPU one, which needs a backend.
+                ("model_present", {"side_effect": lambda key, model_dir=None: key != "gpu"}),
+                ("gpu_backend", {"return_value": ("vulkan", "")})):
+            patch = mock.patch.object(parakeet, target, **kwargs)
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -234,6 +237,76 @@ class TestSwitchingBetweenBuilds(_Case):
         self.assertEqual(self.session.engine_switch()["state"], "waiting")
 
 
+class TestTheGpuBuild(_Case):
+    """The GPU build goes through exactly the same swap, queue and refusals."""
+
+    def installed(self, gpu=True):
+        parakeet.model_present.side_effect = lambda key, model_dir=None: gpu or key != "gpu"
+
+    def test_it_switches_and_is_remembered_like_any_other_build(self):
+        self.installed()
+        self.switch("parakeet", "gpu")
+        self.assertEqual((self.session.engine, self.session.engine_variant),
+                         ("parakeet", "gpu"))
+        self.assertEqual(reloaded(self.profile.path).parakeet_model, "gpu")
+        self.assertEqual(self.built[0].variant, "gpu")
+
+    def test_the_old_engine_is_unloaded_only_after_the_swap(self):
+        # The GPU build is loaded while Whisper still holds its memory, and Whisper is
+        # released last: a load that runs out of video memory then fails with a reason
+        # and leaves the engine that was working.
+        self.installed()
+        self.switch("parakeet", "gpu")
+        self.assertEqual(self.whisper.calls[-1], "unload")
+        self.assertEqual(self.built[0].calls[:1], ["load"])
+
+    def test_a_load_that_fails_keeps_the_working_engine_and_says_why(self):
+        self.installed()
+
+        def no_memory(name, variant=None):
+            engine = FakeEngine(name, variant=variant or "")
+            engine.load = mock.Mock(side_effect=parakeet.NotAvailable(
+                "not enough video memory for Parakeet on this GPU"))
+            return engine
+
+        self.session.engine_factory = no_memory
+        self.session.set_engine("parakeet", "gpu")
+        self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
+        self.assertIs(self.session.asr, self.whisper)
+        self.assertTrue(self.whisper.loaded)
+        status = self.session.engine_switch()
+        self.assertEqual(status["state"], "failed")
+        self.assertIn("not enough video memory", status["reason"])
+
+    def test_it_is_refused_with_the_backends_reason_when_there_is_none(self):
+        self.installed()
+        with mock.patch.object(parakeet, "gpu_backend",
+                               return_value=("", "no GPU with a CUDA or Vulkan driver")):
+            self.assertFalse(self.session.set_engine("parakeet", "gpu"))
+        self.assertIn("no GPU with a CUDA or Vulkan driver", notes(self.session)[-1])
+        self.assertNotIn("add-on", notes(self.session)[-1])  # it needs none
+
+    def test_it_needs_no_addon_so_a_missing_one_does_not_refuse_it(self):
+        self.installed()
+        parakeet.runtime_installed.return_value = (False, "missing")
+        self.assertTrue(self.session.set_engine("parakeet", "gpu"))
+        self.assertFalse(self.session.set_engine("parakeet", "fp32"))
+        self.assertIn("Parakeet add-on", notes(self.session)[-1])
+
+    def test_it_must_be_downloaded_first(self):
+        self.installed(gpu=False)
+        self.assertFalse(self.session.set_engine("parakeet", "gpu"))
+        self.assertIn("download it first", notes(self.session)[-1])
+
+    def test_a_busy_gpu_switch_queues_and_the_status_names_the_first_load(self):
+        self.installed()
+        self.session.gate.speaking = True
+        self.assertTrue(self.session.set_engine("parakeet", "gpu"))
+        status = self.session.engine_switch()
+        self.assertEqual((status["state"], status["variant"]), ("waiting", "gpu"))
+        self.assertEqual(status["eta_sec"], parakeet.load_seconds("gpu"))
+
+
 class TestHardRefusalsStillRefuse(_Case):
     """What waiting would not cure is a refusal, with the reason."""
 
@@ -259,7 +332,7 @@ class TestHardRefusalsStillRefuse(_Case):
         self.assertIn('.[parakeet]', notes(self.session)[-1])
 
     def test_parakeet_without_its_model_says_to_download_it(self):
-        parakeet.model_present.return_value = False
+        parakeet.model_present.side_effect = lambda key, model_dir=None: False
         self.refused("download it first")
 
     def test_a_refusal_even_while_busy_is_still_a_refusal_and_not_a_queue(self):

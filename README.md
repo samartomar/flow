@@ -186,3 +186,11 @@ scripted session, so it can be re-shot whenever the app changes.
 MIT. Flow is built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and
 OpenAI's [Whisper](https://github.com/openai/whisper) models, and reads answers aloud with
 [Piper](https://github.com/OHF-Voice/piper1-gpl) if you add it.
+
+The opt-in Parakeet engine runs NVIDIA's
+[Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (CC-BY-4.0,
+converted and quantised copies by [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx)
+and [mudler](https://huggingface.co/mudler/parakeet-cpp-gguf)) through
+[onnx-asr](https://github.com/istupakov/onnx-asr) and, on the GPU,
+[parakeet.cpp](https://github.com/mudler/parakeet.cpp) (MIT; its `LICENSE` is kept beside the
+helper Flow downloads).

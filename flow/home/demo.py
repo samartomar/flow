@@ -54,13 +54,17 @@ class FakeParakeet:
     """The pretend Parakeet: one model, on the CPU, with no tiers to choose between."""
 
     engine = "parakeet"
-    device = "cpu"
     loading = False
     loaded = True
     lexicon = None
 
     def __init__(self, variant: str = "fp32") -> None:
         self.variant = variant
+
+    @property
+    def device(self) -> str:
+        """Where it runs: the GPU build reports its backend, the others the CPU."""
+        return "cuda" if self.variant == "gpu" else "cpu"
 
     def text(self, audio, *, final: bool = False, hotwords: str = "") -> str:
         return ""
@@ -673,6 +677,7 @@ def main(argv=None) -> int:
         from .. import parakeet
 
         parakeet.runtime_installed = lambda: (True, "")
+        parakeet.gpu_backend = lambda: ("cuda", "")
         parakeet.model_present = lambda key, model_dir=None: True
     home, _session = build(kept=args.history)
     page = "start" if args.first_run else "home"

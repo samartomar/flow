@@ -68,6 +68,20 @@ CONFIDENCE_MARGIN = -0.5
 #: dropped real word cannot be recovered.
 TOKEN_LOGPROB_MIN = -0.8
 
+#: The same bar for the Parakeet **GPU** build, whose helper reports a **mean word
+#: confidence** (NeMo's `max_prob`, aggregated per word with `min`) instead of token
+#: log-probabilities. parakeet.cpp v0.5.0, q8_0, CUDA and Vulkan, 2026-10-05
+#: (`scripts/parakeet_bench.py gpu`), 300 EdAcc clips: p1 0.52-0.53, p5 0.68, p50 0.89, and
+#: the only clips under 0.5 are two one-or-three-word fragments ("Okay." 0.39, "So" 0.43)
+#: that the filler list drops anyway; the lowest non-filler clip is 0.51. **Zero inventions on
+#: the 8 silence/noise clips, on either backend** - so, unlike the bars above, this one has no
+#: invention to be checked against at all. 0.45 is `exp(TOKEN_LOGPROB_MIN)` (0.449), which is
+#: the same geometric-mean confidence the log-prob bar encodes, carried over by translation
+#: rather than calibrated: it sits clear under every real non-filler clip, and what it catches
+#: is the weak kind of invention the sibling builds produced ("Ha ha", "It is."). Provisional;
+#: re-measure when this engine invents something, and relax before tightening.
+WORD_CONF_MIN = 0.45
+
 
 def confidence_floor(baseline: float | None) -> float:
     """The unconfident bar for this speaker.
@@ -263,6 +277,7 @@ def invented_reason(
     avg_logprob: float | None = None,
     baseline: float | None = None,
     mean_token_logprob: float | None = None,
+    mean_word_conf: float | None = None,
 ) -> str | None:
     """Which rule rejects this segment, or None to keep it.
 
@@ -289,6 +304,8 @@ def invented_reason(
             return "filler"
         if mean_token_logprob is not None and mean_token_logprob < TOKEN_LOGPROB_MIN:
             return "unconfident-tokens"
+        if mean_word_conf is not None and mean_word_conf < WORD_CONF_MIN:
+            return "unconfident-words"
         return None
 
     if no_speech_prob <= NO_SPEECH_MAX:
@@ -322,6 +339,7 @@ def is_invented(
     avg_logprob: float | None = None,
     baseline: float | None = None,
     mean_token_logprob: float | None = None,
+    mean_word_conf: float | None = None,
 ) -> bool:
     """True if this segment looks like the model talking to itself.
 
@@ -330,4 +348,4 @@ def is_invented(
     `no_speech_prob` is the exception, and `TOKEN_LOGPROB_MIN` says why it is allowed.)
     """
     return invented_reason(text, no_speech_prob, avg_logprob, baseline,
-                           mean_token_logprob) is not None
+                           mean_token_logprob, mean_word_conf) is not None
