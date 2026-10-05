@@ -3978,6 +3978,15 @@ class Session:
                 self.profile.save()
             self._engine_result = {"state": "done", "engine": name, "variant": want,
                                    "reason": "", "at": time.monotonic()}
+            # The startup identity named the engine that was running then; every decode
+            # after this point belongs to this one, so the trace says so where it changed.
+            describe = getattr(new, "identity", None)
+            try:
+                for component, version in (describe() if callable(describe)
+                                           else [("engine", name)]):
+                    self.diag.write("identity", component=component, version=version)
+            except Exception:
+                pass
             self._emit("note", f"speech engine: {label}")
 
         def run() -> None:

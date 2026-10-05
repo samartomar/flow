@@ -618,3 +618,27 @@ class TestTheEngineIsAProfileSetting(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)
+
+
+class TestTheTraceNamesTheEngineThatTookOver(_Case):
+    """The startup identity names the engine running then. After a live switch every
+    decode belongs to another one, so the switch writes the new engine's identity."""
+
+    def test_a_switch_records_what_the_new_engine_says_about_itself(self):
+        from flow.diag import Diag
+
+        path = Path(self._tmp.name) / "diag.jsonl"
+        self.session.diag = Diag(path)
+
+        def factory(name, variant=None):
+            engine = FakeEngine(name, None, variant or "")
+            engine.identity = lambda: [("engine", f"{name}-{variant}"),
+                                       ("model:x", "abc123")]
+            return engine
+
+        self.session.engine_factory = factory
+        self.switch("parakeet", "fp32")
+        got = {r["component"]: r["version"]
+               for r in map(json.loads, path.read_text(encoding="utf-8").splitlines())
+               if r.get("kind") == "identity"}
+        self.assertEqual(got, {"engine": "parakeet-fp32", "model:x": "abc123"})

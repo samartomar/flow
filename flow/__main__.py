@@ -1176,7 +1176,8 @@ def main(argv: list[str] | None = None) -> int:
         def go() -> None:
             asr_names = getattr(session.asr, "names", None)
             names = tuple(asr_names) if isinstance(asr_names, tuple) else ()
-            record_identity(diag, names)
+            describe = getattr(session.asr, "identity", None)
+            record_identity(diag, names, describe() if callable(describe) else ())
 
         _threading.Thread(target=go, daemon=True, name="identity").start()
 

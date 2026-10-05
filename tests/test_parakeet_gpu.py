@@ -898,3 +898,36 @@ class TestParakeetGpuReal(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)
+
+
+class TestEachBuildSaysWhatItIs(unittest.TestCase):
+    """What the trace records about a Parakeet decode: build, pinned model, runtime."""
+
+    def test_the_cpu_builds_name_their_pinned_model_and_runtime(self):
+        for key in ("fp32", "int8"):
+            got = dict(parakeet.ParakeetTranscriber(key).identity())
+            self.assertEqual(got["engine"], f"parakeet-{key}")
+            variant = parakeet.VARIANTS[key]
+            self.assertEqual(got[f"model:{variant.name}"],
+                             variant.revision)
+            self.assertIn("onnx-asr", got)
+            self.assertIn("onnxruntime", got)
+
+    def test_the_gpu_build_names_the_helper_that_actually_runs(self):
+        got = dict(parakeet.ParakeetGpuTranscriber(backend="cuda").identity())
+        self.assertEqual(got["engine"], "parakeet-gpu")
+        self.assertEqual(got["parakeet.cpp"], f"{parakeet.CPP_VERSION}-cuda")
+        # The pinned hash `verify_runtime` refuses to launch without: the binary that ran.
+        self.assertEqual(got[parakeet.SERVER_EXE], parakeet.RUNTIMES["cuda"].exe_sha256[:16])
+        self.assertNotIn("onnx-asr", got)
+
+    def test_every_value_survives_the_traces_redaction_guard(self):
+        # `diag` writes only short tokens; anything else lands as <refused>, which would
+        # make the record exist and say nothing.
+        from flow.diag import _TOKEN
+
+        for t in (parakeet.ParakeetTranscriber("fp32"), parakeet.ParakeetTranscriber("int8"),
+                  parakeet.ParakeetGpuTranscriber(backend="cuda"),
+                  parakeet.ParakeetGpuTranscriber(backend="vulkan")):
+            for component, version in t.identity():
+                self.assertRegex(version, _TOKEN, f"{component}={version!r}")
