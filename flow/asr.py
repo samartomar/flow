@@ -432,6 +432,9 @@ _REASON_WORDS = {
     "empty": "that was the model talking, not you",
     "filler": "that was not speech",
     "unconfident": "that was too quiet to be sure of",
+    # The Parakeet engine's rule (`clean.TOKEN_LOGPROB_MIN`), which has no silence
+    # probability to be "quiet" against: it is the model's own doubt about the words.
+    "unconfident-tokens": "that was too unclear to be sure of",
 }
 
 

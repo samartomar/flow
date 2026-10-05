@@ -255,6 +255,49 @@ def _native_transcriber():
     return NativeTranscriber()
 
 
+def _parakeet_transcriber(lexicon):
+    """Import late, so a launch without the `[parakeet]` extra never touches sherpa-onnx."""
+    from .parakeet import ParakeetTranscriber
+
+    return ParakeetTranscriber(lexicon=lexicon)
+
+
+def _parakeet_engine() -> tuple[str, str]:
+    """`--engine parakeet`: check the runtime, fetch the model if needed, or say why not.
+
+    Fetching happens here, before the window, because the alternative to a download that
+    fails is Whisper and only this point can still choose it. It says what it is doing and
+    how big it is first: 465 MB arriving behind a silent console would be indistinguishable
+    from a hang. Every refusal says why and names the fallback, like `--engine native`.
+    """
+    from . import parakeet
+
+    ok, why = parakeet.runtime_installed()
+    if not ok:
+        say(f"--engine parakeet unavailable: {why}; using whisper")
+        return "whisper", ""
+    if not parakeet.model_present():
+        say(f"engine: the Parakeet model is not on this PC - downloading "
+            f"{parakeet.ARCHIVE_BYTES / 1024 ** 2:.0f} MB from github.com into "
+            f"{parakeet.MODELS_DIR} (once; unpacks to about "
+            f"{parakeet.UNPACKED_BYTES / 1024 ** 2:.0f} MB)")
+        shown = [-1]
+
+        def progress(done: int, total: int) -> None:
+            # A line per tenth, not a line per megabyte: this is a console, not a bar.
+            tenth = int(10 * done / total) if total else 0
+            if tenth != shown[0] and tenth < 10:
+                shown[0] = tenth
+                say(f"  parakeet download {10 * tenth}%")
+
+        try:
+            parakeet.fetch(progress=progress)
+        except parakeet.NotAvailable as exc:
+            say(f"--engine parakeet unavailable: {exc}; using whisper")
+            return "whisper", ""
+    return "parakeet", " (--engine parakeet)"
+
+
 def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
     """Which decoder this launch gets, and the clause explaining why.
 
@@ -271,11 +314,20 @@ def _engine(args, partial_name: str, final_name: str) -> tuple[str, str]:
     network that blocks huggingface.co, where the alternative is not a worse engine but
     no dictation at all.
 
+    **`auto` never selects Parakeet, on any platform, whatever is installed or on disk.**
+    It is the most accurate engine a CPU can run here, and it still asks for a 93 MB
+    runtime and a 465 MB model, has no hotword biasing, is one tier, hears Japanese-accented
+    English worse than `small.en`, and guards against invention with a threshold that
+    rests on one measured example. That is a trade a person makes by typing
+    `--engine parakeet`, and `--engine` is the only way to make it.
+
     Every path returns a clause for the startup line, because the engine decides what
     Flow can hear and a silent choice would be the one thing nobody could check.
     """
     if args.engine == "whisper":
         return "whisper", ""
+    if args.engine == "parakeet":
+        return _parakeet_engine()
     if sys.platform != "darwin":
         if args.engine == "native":
             say("--engine native is macOS only; using whisper")
@@ -371,9 +423,11 @@ def main(argv: list[str] | None = None) -> int:
              "Flow Home remembers a choice)",
     )
     ap.add_argument(
-        "--engine", default="auto", choices=("auto", "whisper", "native"),
-        help="which decoder: whisper (faster-whisper, needs model files) or native "
-             "(macOS on-device speech, no download at all). Default auto: whisper "
+        "--engine", default="auto", choices=("auto", "whisper", "native", "parakeet"),
+        help="which decoder: whisper (faster-whisper, needs model files), native "
+             "(macOS on-device speech, no download at all) or parakeet (NVIDIA Parakeet "
+             "through sherpa-onnx: needs the [parakeet] extra and a 465 MB model it "
+             "downloads once; never chosen by auto). Default auto: whisper "
              "unless its models are missing and the native engine is ready",
     )
     ap.add_argument(
@@ -680,6 +734,14 @@ def main(argv: list[str] | None = None) -> int:
 
     def say_models() -> None:
         """The device and model lines, from a thread, after the pill is on screen."""
+        if engine == "parakeet":
+            # No `decoding on:` line: that one resolves CUDA, and this engine does not
+            # use it, so naming a GPU here would be a false statement.
+            from .parakeet import MODEL_NAME, default_threads
+
+            say(f"engine: Parakeet ({MODEL_NAME}, sherpa-onnx) on the CPU, "
+                f"{default_threads()} threads, for partials and finals both{engine_why}")
+            return
         try:
             partial, final, lines = planned or decode_plan()
         except Exception as exc:
@@ -843,11 +905,13 @@ def main(argv: list[str] | None = None) -> int:
     session = Session(
         # The asked-for names, or None: the transcriber resolves a None to the tier
         # its device wants, the same answer `decode_plan` reaches for the startup line.
-        asr=(_native_transcriber() if engine == "native" else WhisperTranscriber(
-            asked_partial, asked_final, lexicon=lexicon,
-            baseline=profile.confidence if profile is not None else None,
-            device=decode_device,
-        )),
+        asr=(_native_transcriber() if engine == "native"
+             else _parakeet_transcriber(lexicon) if engine == "parakeet"
+             else WhisperTranscriber(
+                 asked_partial, asked_final, lexicon=lexicon,
+                 baseline=profile.confidence if profile is not None else None,
+                 device=decode_device,
+             )),
         device=mic_index,
         speaker=speaker,
         profile=profile,

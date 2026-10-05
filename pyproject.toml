@@ -55,6 +55,24 @@ cuda = [
 voice = [
     "piper-tts>=1.6",
 ]
+# `parakeet` is the opt-in second speech engine, and an extra by the same reading of R16: a
+# default install still fetches three packages. `sherpa-onnx` is ~93 MB with no torch, and
+# the model it runs (NVIDIA Parakeet TDT 0.6B v3 int8) is a separate 465 MB download from
+# GitHub releases that `flow --engine parakeet` fetches once into `~/.flow/models`. What it
+# buys is measured in `flow/parakeet.py`: 17.3 errors per 100 words on the accent slice
+# against 19.5 for `small.en`, at 14x real time on a CPU where `small.en` manages ~2x. It
+# is never selected by `--engine auto`, so installing this changes nothing until it is asked
+# for by name.
+#
+#     uv pip install -e ".[parakeet]"
+#     flow --engine parakeet
+#
+# Not pinned tighter than 1.13, the first version tested: what this depends on is
+# `OfflineRecognizer.from_transducer` and `result.ys_log_probs`, which `TestParakeetReal`
+# checks against whatever is actually installed rather than against a version number.
+parakeet = [
+    "sherpa-onnx>=1.13",
+]
 # `edge` is the one part of Flow that sends anything off the machine, which is why it is
 # an extra you have to ask for and why `flow/edge.py` says so in its first paragraph. It
 # reaches the natural voices Windows installs for Narrator and then makes unreachable —

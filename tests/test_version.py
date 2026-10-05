@@ -343,12 +343,15 @@ class TestNothingChecksOnItsOwn(unittest.TestCase):
     def test_and_nothing_else_in_the_package_opens_a_url(self):
         # `flow/edge.py` reaches Microsoft's speech service through `edge-tts`, which is
         # an extra you have to install and a voice you have to choose; it is enumerated
-        # in the same document. Nothing else in the package holds a URL opener at all.
+        # in the same document. Beyond `version.py`, one other module holds a URL opener:
+        # `flow/parakeet.py`, which fetches the Parakeet model from GitHub releases —
+        # only for `--engine parakeet`, never from `auto`, never any user content, and
+        # enumerated in the same document under "Network, but never user content".
         openers = {
             path.name for path in (ROOT / "flow").glob("*.py")
             if "urlopen" in path.read_text(encoding="utf-8")
         }
-        self.assertEqual(openers, {"version.py"})
+        self.assertEqual(openers, {"version.py", "parakeet.py"})
 
 
 class TestEveryLineSurvivesALegacyConsole(unittest.TestCase):
