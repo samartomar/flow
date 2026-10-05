@@ -2045,6 +2045,7 @@ NOTEPAD, BROWSER = 0x42, 0x99
 TASKBAR, MAIL = 0x10, 0x77
 
 
+@unittest.skipUnless(sys.platform == "win32", "flow.hotkey is RegisterHotKey: Win32 at import")
 class TestOnePressIsTheGesture(unittest.TestCase):
     """The shipped gesture, asserted where it is decided rather than only in `hold.py`.
 

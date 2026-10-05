@@ -84,7 +84,16 @@ FAKE_SERVER = textwrap.dedent('''
             self.end_headers()
             self.wfile.write(reply.encode())
 
-    server = HTTPServer((opt["--host"], int(opt["--port"])), Handler)
+    class Server(HTTPServer):
+        # HTTPServer.server_bind asks `socket.getfqdn` for a name, a reverse-DNS lookup
+        # that stalls for tens of seconds on GitHub's macOS runners - longer than the
+        # start timeout. The real parakeet-server does no such thing.
+        def server_bind(self):
+            import socketserver
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = self.server_address[:2]
+
+    server = Server((opt["--host"], int(opt["--port"])), Handler)
     print(f"parakeet-server: listening on http://{opt['--host']}:{opt['--port']} (model: {model})", flush=True)
     server.serve_forever()
 ''')
