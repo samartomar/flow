@@ -197,6 +197,8 @@ class History:
         if self.choice == KEEP:
             # Read at launch, on the writer, so the first Send never waits on it.
             self._start()
+        elif self.choice == OFF:
+            self._sweep()
 
     # -- the choice ----------------------------------------------------------------
 
@@ -366,6 +368,25 @@ class History:
             return True
 
         return self._call(wipe)
+
+    def _sweep(self) -> None:
+        """Delete a file that "off" left behind. Run at launch, when the choice is off.
+
+        Choosing off deletes the file and saves the choice as two steps, and either can
+        go wrong on its own: the delete can hit a locked file, and a save that timed out
+        on the bridge still runs later. Once the choice reads off every method here
+        returns early, so nothing would touch the file again — last month's words kept
+        forever by somebody who chose not to keep them (decisions.md 2026-11-08). So the
+        promise is kept here too, every launch. Inline rather than on the writer: there
+        is no writer when nothing is kept, and an unlink is not a rewrite.
+        """
+        for doomed in (self.path, self.path.with_suffix(".tmp")):
+            try:
+                doomed.unlink(missing_ok=True)
+            except OSError as exc:
+                # Said on the page rather than raised: a launch must not fail over this,
+                # and the next one tries again.
+                self.error = f"could not delete {doomed}: {exc}"
 
     def flush(self, wait: float = 1.0) -> bool:
         """Wait for everything queued to reach the file. For the quit path and tests."""

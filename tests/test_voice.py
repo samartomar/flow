@@ -601,6 +601,53 @@ class TestEdgeVoices(unittest.TestCase):
              mock.patch("flow.edge._fetch", side_effect=AssertionError("no network")):
             self.assertEqual(edge.voices(refresh=True), [])
 
+    def test_a_cold_cache_opens_no_socket(self):
+        # The launch path: `all_voices` reads this without `refresh`, and on a frozen
+        # download with no cache it used to ask Microsoft for its catalogue before anyone
+        # had chosen anything.
+        from flow import edge
+
+        with mock.patch("flow.edge._CACHE", None), \
+             mock.patch("flow.edge.available", return_value=True), \
+             mock.patch("flow.edge._cached", return_value=[]), \
+             mock.patch("flow.edge._fetch", side_effect=AssertionError("no network")):
+            self.assertEqual(edge.voices(), [])
+
+    def test_the_startup_path_does_not_fetch_without_a_natural_voice_chosen(self):
+        from flow import speak
+
+        with mock.patch("flow.speak._CACHE", None), \
+             mock.patch("flow.speak._ALL", None), \
+             mock.patch("flow.edge._CACHE", None), \
+             mock.patch("flow.edge.available", return_value=True), \
+             mock.patch("flow.edge._cached", return_value=[]), \
+             mock.patch("flow.edge._fetch",
+                        side_effect=AssertionError("no network")), \
+             mock.patch("flow.piper.voices", return_value=[]), \
+             mock.patch("flow.speak._sapi_voices",
+                        return_value=[Voice("Microsoft Zira", "Female", "en-US")]):
+            # What `__main__`'s speech warm-up calls, in its order.
+            self.assertEqual(speak.pick("Microsoft Zira"), "Microsoft Zira")
+            self.assertIsNone(speak.default_voice())
+            speak.installed_voices()
+
+    def test_naming_a_natural_voice_is_what_allows_the_fetch(self):
+        from flow import speak
+
+        with mock.patch("flow.speak._CACHE", None), \
+             mock.patch("flow.speak._ALL", None), \
+             mock.patch("flow.edge._CACHE", None), \
+             mock.patch("flow.edge.CACHE_PATH", mock.MagicMock()), \
+             mock.patch("flow.edge.available", return_value=True), \
+             mock.patch("flow.edge._cached", return_value=[]), \
+             mock.patch("flow.edge._system_locale", return_value="en-US"), \
+             mock.patch("flow.edge._fetch", return_value=self.PAYLOAD) as fetch, \
+             mock.patch("flow.piper.voices", return_value=[]), \
+             mock.patch("flow.speak._sapi_voices", return_value=[]):
+            self.assertEqual(speak.pick("Natural en-US-AvaNeural"),
+                             "Natural en-US-AvaNeural")
+        fetch.assert_called_once()
+
     def test_rate_maps_onto_the_percentage_the_service_takes(self):
         from flow.edge import rate_percent
 
@@ -709,6 +756,37 @@ class TestLegacyVoicesAreHidden(unittest.TestCase):
         tagged = [self.PIPER[0]._replace(name="Piper en_GB-cori-high", gender="Female")]
         with self._machine(piper_voices=tagged):
             self.assertEqual(pick("female"), "Piper en_GB-cori-high")
+
+    EDGE = [Voice("Natural en-US-AvaNeural", "Female", "en-US", engine="edge",
+                  path="en-US-AvaNeural", sample_rate=24000)]
+
+    def test_natural_voices_alone_are_never_the_default(self):
+        # The frozen download ships the `edge` extra to everyone, so having it says
+        # nothing about wanting replies sent to Microsoft (decisions.md 2026-11-08).
+        from flow.speak import default_voice
+
+        with self._machine(edge_voices=self.EDGE):
+            self.assertIsNone(default_voice())
+
+    def test_natural_voices_alone_do_not_hide_windows(self):
+        from flow.speak import installed_voices
+
+        with self._machine(edge_voices=self.EDGE):
+            names = [v.name for v in installed_voices(refresh=True)]
+        self.assertIn("Microsoft Zira", names)
+        self.assertIn("Natural en-US-AvaNeural", names)
+
+    def test_with_piper_too_the_default_is_piper(self):
+        from flow.speak import default_voice
+
+        with self._machine(piper_voices=self.PIPER, edge_voices=self.EDGE):
+            self.assertEqual(default_voice(), "Piper en_GB-cori-high")
+
+    def test_a_gender_request_prefers_windows_over_the_network(self):
+        from flow.speak import pick
+
+        with self._machine(edge_voices=self.EDGE):
+            self.assertEqual(pick("female"), "Microsoft Zira")
 
     def test_a_hidden_voice_is_still_reachable_by_name(self):
         # Hidden from the menu is not withdrawn: a profile written last month, or a

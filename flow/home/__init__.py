@@ -106,7 +106,13 @@ class Home:
             if window.focus():
                 return ""
         url = self.url(page)
-        if window.launch(url):
+        how = window.launch(url)
+        if how == window.SHARED:
+            # Opened, but not apart from the person's browsing: said on the pill and the
+            # console, not left for somebody to notice (decisions.md 2026-11-08).
+            print(f"Flow Home: {window.SHARED_NOTICE}", flush=True)
+            return window.SHARED_NOTICE
+        if how:
             return ""
         # The whole address, token and all, on the console — the one place long enough
         # for it — so a machine with no browser Flow can start is not a dead end.

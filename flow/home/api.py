@@ -322,6 +322,30 @@ class Api:
     def _call(self, fn):
         return self.home.bridge.call(fn)
 
+    #: Whether this process has already asked Microsoft for its natural-voice catalogue.
+    _edge_asked = False
+
+    def _edge_catalogue_once(self) -> None:
+        """Fetch the Edge voice catalogue the first time someone opens the voice list.
+
+        `edge.voices()` no longer fetches on a cold cache, so a fresh download - which
+        ships the edge extra - would list no natural voices at all and nobody could
+        choose one (decisions.md 2026-11-08). Opening the voice list in Flow Home is
+        something a person did, which is the rule `edge.voices` keeps for asking the
+        service; it is asked once per process and only while the cache is empty. The
+        request carries no reply text: it is the catalogue, not speech.
+        """
+        if Api._edge_asked:
+            return
+        Api._edge_asked = True
+        try:
+            from .. import edge, speak
+
+            if edge.available() and not edge.voices():
+                speak.voices_changed("edge")
+        except Exception:
+            pass  # an offline machine still lists Windows' voices
+
     def _save(self) -> None:
         """Save the profile on the session's thread, and say so when it cannot."""
         if self.profile is None:
@@ -517,6 +541,7 @@ class Api:
         voices = []
         if live["speaks"]:
             try:
+                self._edge_catalogue_once()
                 listed = list(self.session.voices())
                 # The voice in use stays in the list even when the list stopped offering
                 # its engine — the 2013 voices leave it once a better one is here, and a
@@ -1094,11 +1119,16 @@ class Api:
             profile.history = choice
             return profile.save()
 
+        # Delete first, then save "off". The other order kept the file for good when the
+        # save timed out on the bridge (which still runs it later) or the delete failed:
+        # once "off" is saved every History method returns early, so nothing tried again.
+        # Failing this way round leaves "keep" with nothing kept, which a press retries;
+        # `History._sweep` covers whatever still slips past (decisions.md 2026-11-08).
+        if choice == OFF and not h.forget():
+            raise ApiError(h.error or "could not delete the history file")
         if not self._call(apply):
             raise ApiError(f"could not save {profile.path}")
         h.paused = False
-        if choice == OFF and not h.forget():
-            raise ApiError(h.error or "could not delete the history file")
         return self.history_page({})
 
     def history_days(self, body: dict) -> dict:

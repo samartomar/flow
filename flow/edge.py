@@ -195,29 +195,37 @@ _CACHE: list[Voice] | None = None
 def voices(refresh: bool = False) -> list[Voice]:
     """The English natural voices, as `speak.Voice` rows the menu can render.
 
-    The cache is preferred over the service, which is deliberate and is what keeps this
-    off the startup path: the list is fetched once, written to `~/.flow/edge-voices.json`,
-    and read from there forever after unless `refresh=True`. So a session that has run
-    before opens its menu with no socket at all, and a machine that is offline today still
-    shows the voices it found yesterday.
+    Without `refresh=True` this never opens a socket: it reads `~/.flow/edge-voices.json`
+    and nothing else. Only `refresh=True` asks the service, and the callers that pass it
+    are each something a person did — adding the engine from Flow Home, or naming one of
+    these voices (`speak.voices_changed`, `speak.pick`). So a session that has run before
+    opens its menu with no socket at all, and a machine that is offline today still shows
+    the voices it found yesterday.
 
-    Empty — not an error — when the extra is absent, or on the very first run with no
-    network. `speak.installed_voices` concatenates this with the other engines.
+    It used to fetch on a cold cache too, and that put a request to Microsoft on the
+    launch path of every frozen download — which ships this extra — before anybody had
+    chosen anything (decisions.md 2026-08-06, 2026-11-08). The catalogue request carries
+    no reply text, but it is still a connection nobody asked for.
+
+    Empty — not an error — when the extra is absent, or when nothing has asked for the
+    catalogue yet. `speak.installed_voices` concatenates this with the other engines.
     """
     global _CACHE
     if _CACHE is not None and not refresh:
         return _CACHE
     found: list[Voice] = []
     if available():
-        raw = [] if refresh else _cached()
-        if not raw:
-            raw = _fetch()
-            if raw:
-                try:
-                    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                    CACHE_PATH.write_text(json.dumps(raw), encoding="utf-8")
-                except OSError:
-                    pass  # A cache that cannot be written is slow, not broken.
+        raw = _fetch() if refresh else []
+        if raw:
+            try:
+                CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                CACHE_PATH.write_text(json.dumps(raw), encoding="utf-8")
+            except OSError:
+                pass  # A cache that cannot be written is slow, not broken.
+        else:
+            # Not asked to refresh, or asked while offline: what the last fetch found is
+            # still the best answer, and reading it opens no socket.
+            raw = _cached()
         order = [loc for loc in (_system_locale(),) if loc.startswith(LOCALE_PREFIX)]
         order += [loc for loc in PREFERRED_LOCALES if loc not in order]
 

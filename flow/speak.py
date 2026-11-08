@@ -276,13 +276,12 @@ def installed_voices(refresh: bool = False) -> list[Voice]:
     if _CACHE is not None and not refresh:
         return _CACHE
     every = all_voices(refresh=refresh)
-    modern = [v for v in every if v.engine != "sapi"]
     # The 2013 voices are offered only when nothing better is installed. They are not
     # removed outright, and the difference is the whole point: a default install declares
     # three dependencies and has neither extra, so SAPI is the only thing it can speak
     # with — dropping it unconditionally would make converse mode silent for everyone who
-    # never opted in. Once a Piper model or a natural voice exists, nobody should be
-    # offered a voice from 2013, so they disappear from the menu.
+    # never opted in. Once a Piper model exists, nobody should be offered a voice from
+    # 2013, so they disappear from the menu. A natural voice does not count: see `_offered`.
     #
     # Disappearing from the *menu* is not the same as becoming unreachable: `pick`
     # resolves against `all_voices`, so a profile or a `--voice` that names a Windows
@@ -290,8 +289,23 @@ def installed_voices(refresh: bool = False) -> list[Voice]:
     # From the rows `all_voices` already holds, not a second `_sapi_voices()`: that was
     # a second PowerShell start-up — 439 ms measured — on the launch path of every
     # machine without a better engine, to list the same three voices again.
-    _CACHE = modern or [v for v in every if v.engine == "sapi"]
+    _CACHE = _offered(every)
     return _CACHE
+
+
+def _offered(every: list[Voice]) -> list[Voice]:
+    """What the menu shows, from every voice: the rule `installed_voices` explains.
+
+    Only a *local* better voice hides the 2013 ones. Natural voices alone used to hide
+    them too, and with the frozen download shipping the `edge` extra that left a machine
+    with no Piper model offering only voices that send each reply to Microsoft — the
+    local engine it had all along was gone from the menu (decisions.md 2026-11-08).
+    Adding is not choosing, so the natural voices join the list beside Windows' rather
+    than in place of them.
+    """
+    if any(v.engine == "piper" for v in every):
+        return [v for v in every if v.engine != "sapi"]
+    return list(every)
 
 
 _ALL: list[Voice] | None = None
@@ -334,9 +348,8 @@ def voices_changed(engine: str) -> None:
     sapi = ([v for v in _ALL if v.engine == "sapi"] if _ALL is not None
             else _sapi_voices())
     every = edge.voices() + piper.voices() + sapi
-    modern = [v for v in every if v.engine != "sapi"]
     _ALL = every
-    _CACHE = modern or sapi
+    _CACHE = _offered(every)
 
 
 def _sapi_voices() -> list[Voice]:
@@ -375,9 +388,13 @@ def default_voice() -> str | None:
     returns None and the behaviour is what it always was — a default install has no extras
     and must not have its engine default taken away.
 
-    On a machine with both extras that means **Piper**, never a natural voice, because
-    `_legacy` ranks the local engine first on purpose. Nothing should start sending spoken
-    replies to Microsoft because a package was installed; see `_legacy` for the rule.
+    **Never a natural voice**, on any machine. With both extras that means Piper; with
+    only `edge` — which every frozen download is — it means None, so Windows speaks. This
+    used to hand an edge-only machine its best natural voice, on the theory that
+    installing the extra said which voices you wanted; the download ships the extra to
+    everyone, so it said nothing, and every reply went to Microsoft without anybody
+    choosing (decisions.md 2026-08-06, 2026-11-08). Sending a reply off the machine takes
+    a choice, and a fallback is by definition not one.
 
     Deliberately *not* saved to the profile. It is a fallback, not a choice, and writing it
     down would turn "the best available voice" into "this specific voice", which would then
@@ -386,7 +403,8 @@ def default_voice() -> str | None:
     offered = installed_voices()
     if not offered or any(v.engine == "sapi" for v in offered):
         return None
-    return min(offered, key=_legacy).name
+    local = [v for v in offered if v.engine != "edge"]
+    return min(local, key=_legacy).name if local else None
 
 
 def _legacy(v: Voice) -> int:
@@ -410,14 +428,13 @@ def _legacy(v: Voice) -> int:
     way, `pip install -e ".[edge]"` would have silently made the next spoken reply — and
     every one after it — a network round trip that nobody asked for.
 
-    Two honest limits on that. Sorting last among the *offered* engines is not the same as
-    being unreachable: with only `[edge]` installed it is what `default_voice` returns, and
-    that is right, because installing only the natural voices says which voices you want.
-    And `--voice female` can still land on one, because no Piper model declares a gender
-    (`piper._gender` explains why it will not guess), so a gendered request has nothing
-    local to match. The guarantee that holds without exception is the narrower one:
-    *nothing at all was asked for* never selects the network engine while a local one
-    exists. Naming a voice always gets that voice, from any engine.
+    Since 2026-11-08 the natural voices sort below the Windows ones as well, so they are
+    last of all. A gendered request is not a choice of engine: `--voice female` on a
+    machine with Zira and Ava gets Zira, and reaches a natural voice only when nothing
+    local matches at all. `default_voice` never returns one, whatever is installed —
+    installing the extra was taken to say which voices you wanted, until the frozen
+    download began shipping it to everyone. *Nothing at all was asked for* never selects
+    the network engine. Naming a voice always gets that voice, from any engine.
 
     This only decides a request that names no voice, like `--voice female`. Asking for
     one by name always gets that one.
@@ -425,7 +442,7 @@ def _legacy(v: Voice) -> int:
     if v.engine == "piper":
         return 0
     if v.engine == "edge":
-        return 1
+        return 4
     return 3 if v.name.strip().lower().endswith("desktop") else 2
 
 
@@ -450,7 +467,19 @@ def pick(want: str | None, voices: list[Voice] | None = None) -> str | None:
     # better engine hides the Windows ones from the menu. A profile written last month,
     # or a `--voice george` typed from habit, resolves to the voice it names. The
     # preference below is unaffected — the hidden voices sort last anyway.
-    voices = all_voices() if voices is None else voices
+    if voices is None:
+        voices = all_voices()
+        # A profile or `--voice` naming a natural voice that the cached catalogue does not
+        # hold — first run, or the cache was deleted. Naming one is the choice that
+        # allows the request, so this is the one launch-path caller that may ask the
+        # service; nothing else on the way up does (`edge.voices`).
+        if want and want.strip().lower().startswith("natural ") and not any(
+                v.name.lower() == want.strip().lower() for v in voices):
+            from . import edge
+
+            if edge.available():
+                voices_changed("edge")
+                voices = all_voices()
     if not want or not voices:
         return None
     wanted = want.strip().lower()
