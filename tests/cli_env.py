@@ -110,3 +110,57 @@ def no_cli_on_path():
 
     with mock.patch("shutil.which", which), no_off_path_installs():
         yield
+
+
+class _Blocks:
+    """A pipe end that has nothing to say until the process it belongs to is ended."""
+
+    def __init__(self) -> None:
+        import threading
+        self.released = threading.Event()
+
+    def read(self, _n: int = -1) -> str:
+        self.released.wait(10.0)
+        return ""
+
+
+def fake_cli_proc(stdout: str = "", returncode: int = 0, stderr: str = "", *,
+                  hang: bool = False):
+    """A `Popen` with the surface `_invoke` uses, and nothing else.
+
+    `_invoke` reads the child's stdout and stderr from threads of its own and writes the
+    prompt to its stdin (`refine._Streams`), so those are what this carries: two readable
+    streams, a stdin that records what was written, and an exit code. `hang=True` gives
+    streams that stay silent until the call is waited on or killed, which is how a
+    timeout is reproduced without a real process. `poll` reports an exit either way, so
+    the guard that kills a live tree is not asked to kill a mock; what it does to a real
+    tree is measured in `test_lifecycle.py`.
+    """
+    import io
+    proc = mock.Mock(returncode=returncode, pid=0)
+    if hang:
+        out, err = _Blocks(), _Blocks()
+
+        def release(*_a, **_k):
+            out.released.set()
+            err.released.set()
+            return returncode
+
+        proc.wait.side_effect = release
+        proc.kill.side_effect = release
+        proc.stdout, proc.stderr = out, err
+    else:
+        # A fresh stream on every read of the attribute, because a test may hand the
+        # same fake to two calls and each must hear the whole answer, as it did when
+        # this was a `communicate` that returned the same pair every time.
+        type(proc).stdout = mock.PropertyMock(side_effect=lambda: io.StringIO(stdout))
+        type(proc).stderr = mock.PropertyMock(side_effect=lambda: io.StringIO(stderr))
+        proc.wait.return_value = returncode
+    proc.poll.return_value = returncode
+    return proc
+
+
+def stdin_sent(proc) -> str | None:
+    """Everything `_invoke` wrote to the fake's stdin, or None if it never wrote."""
+    calls = proc.stdin.write.call_args_list
+    return "".join(c.args[0] for c in calls) if calls else None

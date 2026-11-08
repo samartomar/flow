@@ -20,15 +20,12 @@ from flow.audio import BLOCK  # noqa: E402
 from flow.edits import plan  # noqa: E402
 from flow.refine import _POLISH_PROMPT, refine  # noqa: E402
 from flow.session import Session, State  # noqa: E402
-from cli_env import cli_on_path  # noqa: E402
+from cli_env import cli_on_path, fake_cli_proc, stdin_sent  # noqa: E402
 
 
 def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
-    """A `Popen` with the surface `_invoke` uses: one `communicate` and an exit code."""
-    proc = mock.Mock(returncode=returncode, pid=0)
-    proc.communicate.return_value = (stdout, stderr)
-    proc.poll.return_value = returncode
-    return proc
+    """A `Popen` with the surface `_invoke` uses - see `cli_env.fake_cli_proc`."""
+    return fake_cli_proc(stdout, returncode, stderr)
 
 
 def prompt_sent(popen, proc) -> str:
@@ -40,7 +37,7 @@ def prompt_sent(popen, proc) -> str:
     assertion became "the framing is not in `-`", which is true of every prompt ever
     written and proves nothing.
     """
-    piped = proc.communicate.call_args.kwargs.get("input")
+    piped = stdin_sent(proc)
     return piped if piped is not None else popen.call_args.args[0][-1]
 
 

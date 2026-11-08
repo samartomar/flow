@@ -18,7 +18,9 @@ import math
 import os
 import re
 import shutil
+import signal
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -229,6 +231,10 @@ class Cli:
     #: subcommands and a flag before them belongs to a different parser. So each entry
     #: says where its own flags start, which is immediately after its subcommand.
     tune_at: int = 1
+    #: True means this CLI is launched from an empty directory of its own rather than from
+    #: the workspace. See `CANDIDATES`, where kiro-cli is the one entry that sets it, for
+    #: the finding that made it necessary.
+    neutral_cwd: bool = False
 
 
 #: Order is the preference order — codex first, per R10.
@@ -306,6 +312,19 @@ class Cli:
 #: What no flag on either offers: filesystem and network sandboxing of the CLI itself,
 #: and any say over what the vendor sends where. That residue is in NEEDS_YOU with its
 #: shapes, not worked around here.
+#:
+#: **kiro-cli runs from an empty directory, not the workspace (2026-11-08).** The 35.8 s
+#: above was the visible half of a worse fact: the MCP servers kiro-cli starts on every
+#: `chat` are *executables the workspace names*, launched before `--trust-tools=` is ever
+#: consulted. An empty trust list stops kiro's own tools; it does not stop a cloned
+#: repository's `.kiro/settings/mcp.json` from running whatever command it lists, as the
+#: user, every time Flow asks kiro anything there. No kiro flag skips that startup and
+#: Flow does not rewrite other tools' settings, so the door Flow owns is the `cwd`:
+#: `neutral_cwd` launches kiro-cli from a fresh temporary directory. What kiro loses is
+#: the workspace's own `.kiro` steering, which is the same project customisation the
+#: codex and claude flags above already refuse; with an empty trust list its tools could
+#: not read the project anyway. The user's own global kiro settings still apply - those
+#: are theirs, not a repository's - and kiro goes back to the 4.3 s bare-directory figure.
 CANDIDATES: tuple[Cli, ...] = (
     Cli("codex", ("codex", "exec", "--skip-git-repo-check", "-s", "read-only",
                   "-c", "project_doc_max_bytes=0", "-"), stdin_ok=True,
@@ -314,7 +333,7 @@ CANDIDATES: tuple[Cli, ...] = (
         model_flag="--model", effort_flag="--effort"),
     Cli("kiro-cli", ("kiro-cli", "chat", "--no-interactive", "--trust-tools="),
         probe=(r"%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe",),
-        timeout_sec=60.0, marker="kiro",
+        timeout_sec=60.0, marker="kiro", neutral_cwd=True,
         model_flag="--model", effort_flag="--effort", tune_at=2),
     Cli("opencode", ("opencode",), verified=False),
     Cli("copilot", ("copilot",), verified=False),
@@ -693,6 +712,130 @@ def _system_tool(name: str) -> str:
     return os.path.join(os.environ.get("SystemRoot") or "C:\\Windows", "System32", name)
 
 
+#: Environment variables an agent CLI is not handed, by exact name or by prefix.
+#:
+#: **A deny list, not an allow list, and that is the point.** An allow list was considered
+#: and parked (NEEDS_YOU, residue item 1) because it fails silently: a CLI whose login
+#: needed one variable nobody listed answers "not logged in", and nothing says which one.
+#: codex in particular lets a provider name *any* variable as its key (`env_key`). So what
+#: is removed is only what no agent CLI Flow runs reads for its own login - publishing,
+#: forge and cloud tokens that a model steered into running `env` has no business seeing.
+#: Everything else - PATH, locale, HOME/APPDATA and every vendor's own credential - passes
+#: through unchanged. This changes only the child Flow starts: the user's shell, Windows'
+#: own environment and every other program are untouched.
+_SECRET_NAMES = frozenset({
+    "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+    "GITLAB_TOKEN", "CI_JOB_TOKEN", "BITBUCKET_TOKEN",
+    "NPM_TOKEN", "NODE_AUTH_TOKEN", "PYPI_TOKEN", "UV_PUBLISH_TOKEN", "UV_PUBLISH_PASSWORD",
+    "TWINE_PASSWORD", "CARGO_REGISTRY_TOKEN", "NUGET_API_KEY",
+    "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "DOCKER_PASSWORD", "DOCKERHUB_TOKEN",
+    "CLOUDFLARE_API_TOKEN", "DIGITALOCEAN_ACCESS_TOKEN", "HEROKU_API_KEY",
+    "VERCEL_TOKEN", "NETLIFY_AUTH_TOKEN", "SLACK_BOT_TOKEN", "SLACK_TOKEN",
+    "STRIPE_SECRET_KEY", "SENTRY_AUTH_TOKEN", "AZURE_CLIENT_SECRET",
+    "AZURE_DEVOPS_EXT_PAT", "ARM_CLIENT_SECRET",
+})
+_SECRET_PREFIXES = ("GITHUB_PAT", "AWS_")
+
+#: AWS credentials stay for the CLIs that log in with them: kiro-cli is AWS's own, and
+#: claude reads them only when the user has pointed it at Bedrock, which it says with
+#: this variable.
+_KEEPS_AWS = "kiro-cli"
+_CLAUDE_BEDROCK = "CLAUDE_CODE_USE_BEDROCK"
+
+
+def _agent_env(cli: Cli, base: dict[str, str] | None = None) -> dict[str, str]:
+    """Flow's environment minus the secrets no agent CLI needs. See `_SECRET_NAMES`."""
+    env = dict(os.environ if base is None else base)
+    keep_aws = cli.name == _KEEPS_AWS or (
+        cli.name == "claude" and env.get(_CLAUDE_BEDROCK, "").strip() not in ("", "0"))
+    for name in list(env):
+        upper = name.upper()
+        if upper.startswith("AWS_") and keep_aws:
+            continue
+        if upper in _SECRET_NAMES or upper.startswith(_SECRET_PREFIXES):
+            del env[name]
+    return env
+
+
+#: The most a CLI may write before the call is stopped, per stream, in characters.
+#:
+#: Everything a CLI said used to be buffered whole by `communicate` and only then cut to
+#: `MAX_CHARS`/`ASK_MAX_CHARS`/`ASK_ARTIFACT_MAX_CHARS`, so a CLI that looped, or was
+#: steered into printing a file, could grow Flow's memory until the timeout (audit
+#: AGENT-03). The biggest legitimate answer is an Ask artifact at 12 000 characters; one
+#: million is far past that and past the 200 000 the pipe-buffer test writes, and still a
+#: number, which is what matters. stderr carries banners and traces, never the answer.
+OUTPUT_MAX_CHARS = 1_000_000
+STDERR_MAX_CHARS = 256_000
+_READ_CHARS = 8192
+
+
+class _Streams:
+    """The child's stdin, stdout and stderr, each served by a thread of its own.
+
+    Threads because the pipes must be drained while the call is waited on, or a full one
+    blocks the child - the reason this used to be `communicate`, which drains them but
+    keeps everything. Each reader stops at its stream's limit and says so, and the caller
+    then kills the call instead of reading on. The prompt is written from a thread too: a
+    child that never reads stdin must not be able to wedge the write.
+    """
+
+    def __init__(self, proc: subprocess.Popen, prompt: str | None) -> None:
+        self.over = ""
+        self._parts: dict[str, list[str]] = {"out": [], "err": []}
+        self._threads = [
+            self._start(self._read, proc.stdout, "out", OUTPUT_MAX_CHARS),
+            self._start(self._read, proc.stderr, "err", STDERR_MAX_CHARS),
+        ]
+        if prompt is not None:
+            self._start(self._write, proc.stdin, prompt)
+
+    @staticmethod
+    def _start(target, *args) -> threading.Thread:
+        t = threading.Thread(target=target, args=args, name="cli-io", daemon=True)
+        t.start()
+        return t
+
+    @staticmethod
+    def _write(stream, prompt: str) -> None:
+        try:
+            stream.write(prompt)
+            stream.close()
+        except (OSError, ValueError):
+            pass  # the child closed stdin or died; its exit code will say why
+
+    def _read(self, stream, key: str, limit: int) -> None:
+        parts, total = self._parts[key], 0
+        try:
+            while True:
+                chunk = stream.read(_READ_CHARS)
+                if not chunk:
+                    return
+                if total + len(chunk) > limit:
+                    parts.append(chunk[:limit - total])
+                    self.over = self.over or ("stdout" if key == "out" else "stderr")
+                    return
+                parts.append(chunk)
+                total += len(chunk)
+        except (OSError, ValueError):
+            return
+        finally:
+            try:
+                stream.close()
+            except (OSError, ValueError, AttributeError):
+                pass
+
+    def done(self, timeout: float) -> bool:
+        """Wait up to `timeout` for both readers to reach the end of their streams."""
+        end = time.monotonic() + timeout
+        for t in self._threads:
+            t.join(max(0.0, end - time.monotonic()))
+        return not any(t.is_alive() for t in self._threads)
+
+    def text(self) -> tuple[str, str]:
+        return "".join(self._parts["out"]), "".join(self._parts["err"])
+
+
 def _kill_tree(proc: subprocess.Popen) -> None:
     """End the call and everything it started.
 
@@ -711,7 +854,17 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     """
     if proc.poll() is not None:
         return
-    if os.name == "nt":
+    if os.name != "nt":
+        # POSIX does have the group Windows lacks: `_invoke` starts each call in a session
+        # of its own, so the launcher's pid is the group's id and one signal reaches the
+        # `node` under it too. A pid of 0 would name *our own* group, so only a real
+        # child's pid gets here.
+        if isinstance(proc.pid, int) and proc.pid > 0:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (OSError, AttributeError):
+                pass  # already gone, or not ours; the direct kill below still runs
+    else:
         try:
             subprocess.run(
                 [_system_tool("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
@@ -726,13 +879,17 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
-def _abandon(proc: subprocess.Popen, reason: str) -> tuple[None, str]:
+def _abandon(proc: subprocess.Popen, reason: str,
+             streams: _Streams | None = None) -> tuple[None, str]:
     """Kill a call and reap it, so no thread of ours is left waiting on a dead pipe."""
     _kill_tree(proc)
+    end = time.monotonic() + ABANDON_SEC
     try:
-        proc.communicate(timeout=ABANDON_SEC)
+        proc.wait(timeout=ABANDON_SEC)
     except subprocess.TimeoutExpired:
         pass
+    if streams is not None:
+        streams.done(max(0.0, end - time.monotonic()))
     return None, reason
 
 
@@ -753,8 +910,8 @@ def _invoke(
     child nobody was waiting for, and its own child after that.
 
     `cancel` is polled rather than waited on. The child's output has to be drained
-    while we wait or a full pipe blocks it, and `communicate` is what drains it, so
-    the wait has to be the one `communicate` is already doing.
+    while we wait or a full pipe blocks it; `_Streams` drains it, within a limit, and
+    the wait is on its readers reaching the end.
 
     `timeout` is the caller's budget and `cli.timeout_sec` is this CLI's floor under it,
     so what is actually waited is the larger of the two — see `Cli.timeout_sec` for why it
@@ -789,6 +946,22 @@ def _invoke(
             f"Install the native {cli.name} build rather than npm -g."
         )
 
+    # A CLI that must not see the workspace gets an empty directory of its own, made per
+    # call and removed after it, so nothing one call leaves there reaches the next.
+    scratch = (tempfile.TemporaryDirectory(prefix="flow-cli-", ignore_cleanup_errors=True)
+               if cli.neutral_cwd else None)
+    try:
+        return _run(cli, executable, prompt, timeout=timeout,
+                    cwd=scratch.name if scratch is not None else cwd,
+                    cancel=cancel, cap=cap)
+    finally:
+        if scratch is not None:
+            scratch.cleanup()
+
+
+def _run(cli: Cli, executable: str, prompt: str, *, timeout: float, cwd: str | None,
+         cancel: threading.Event | None, cap: float | None) -> tuple[str | None, str]:
+    """The process half of `_invoke`: start it, feed it, wait for it within limits."""
     try:
         proc = subprocess.Popen(
             # The prompt leaves the argv entirely when it travels on stdin. Sending it
@@ -801,8 +974,12 @@ def _invoke(
             stdin=subprocess.PIPE if cli.stdin_ok else subprocess.DEVNULL,
             text=True,
             cwd=cwd,
+            env=_agent_env(cli),
             encoding="utf-8",
             errors="replace",
+            # Its own session on POSIX, so `_kill_tree` can end the whole group. Windows
+            # reaches the tree through `taskkill /T` instead.
+            start_new_session=os.name != "nt",
         )
     except OSError as exc:
         return None, f"{cli.name} failed to start: {exc}"
@@ -815,23 +992,28 @@ def _invoke(
         # has already spent.
         wait = min(wait, cap)
     deadline = time.monotonic() + wait
-    # `communicate` is what pipes, writes and closes stdin — and it may carry `input`
-    # exactly once: a second call with it raises "Cannot send input after starting
-    # communication". Since this polls, the prompt goes on the first pass and the rest of
-    # the loop waits. A defect that would only ever appear on a slow call.
-    to_send: str | None = prompt if cli.stdin_ok else None
+    streams = _Streams(proc, prompt if cli.stdin_ok else None)
     while True:
+        if streams.over:
+            break
         if cancel is not None and cancel.is_set():
-            return _abandon(proc, f"{cli.name} was cancelled")
+            return _abandon(proc, f"{cli.name} was cancelled", streams)
         left = deadline - time.monotonic()
         if left <= 0:
-            return _abandon(proc, f"{cli.name} timed out after {wait:.0f}s")
-        try:
-            out, err = proc.communicate(input=to_send, timeout=min(_POLL_SEC, left))
-        except subprocess.TimeoutExpired:
-            to_send = None
-            continue  # retrying communicate loses no output; the docs promise that
-        break
+            return _abandon(proc, f"{cli.name} timed out after {wait:.0f}s", streams)
+        if streams.done(min(_POLL_SEC, left)):
+            break
+    if streams.over:
+        limit = OUTPUT_MAX_CHARS if streams.over == "stdout" else STDERR_MAX_CHARS
+        return _abandon(proc, f"{cli.name} wrote more than {limit:,} characters to "
+                              f"{streams.over} and was stopped", streams)
+    try:
+        # Both streams are at their end, so the child has exited or is about to; one that
+        # closed them and kept running is a hang by another name.
+        proc.wait(timeout=max(0.1, min(ABANDON_SEC, deadline - time.monotonic())))
+    except subprocess.TimeoutExpired:
+        return _abandon(proc, f"{cli.name} timed out after {wait:.0f}s", streams)
+    out, err = streams.text()
 
     if proc.returncode != 0:
         return None, f"{cli.name} exited {proc.returncode}: {_why(err, out)}"

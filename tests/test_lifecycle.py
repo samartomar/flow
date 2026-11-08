@@ -509,3 +509,43 @@ class TestCloseOwnsEverythingStartOpened(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOutputIsBoundedWhileItArrives(Temp):
+    """A CLI that never stops talking is stopped, not buffered until the timeout."""
+
+    def test_a_flood_on_stdout_ends_the_call_with_a_reason(self):
+        from flow.refine import OUTPUT_MAX_CHARS
+        flood = Cli("flood", (sys.executable, "-c",
+                              "import sys\nwhile True: sys.stdout.write('y' * 65536)"))
+        started = time.perf_counter()
+        out, reason = _invoke(flood, "prompt", timeout=30.0)
+        self.assertIsNone(out)
+        self.assertIn("was stopped", reason)
+        self.assertIn(f"{OUTPUT_MAX_CHARS:,}", reason)
+        self.assertLess(time.perf_counter() - started, 20.0)
+
+    def test_a_flood_on_stderr_alongside_does_not_deadlock(self):
+        both = Cli("both", (sys.executable, "-c",
+                            "import sys\nwhile True:\n sys.stderr.write('z' * 65536)\n"
+                            " sys.stdout.write('y' * 65536)"))
+        out, reason = _invoke(both, "prompt", timeout=30.0)
+        self.assertIsNone(out)
+        self.assertIn("was stopped", reason)
+
+
+@unittest.skipIf(sys.platform == "win32", "POSIX process groups; Windows uses taskkill /T")
+class TestPosixKillReachesTheGroup(Temp):
+    def test_a_cancel_ends_the_grandchild_too_on_posix(self):
+        started, done = self.path("started"), self.path("done")
+        cli = Cli("launcher", (sys.executable, "-c", _LAUNCHER, str(started),
+                               _GRANDCHILD, str(CHILD_SEC), str(done)))
+        cancel = threading.Event()
+        t = threading.Thread(target=lambda: _invoke(cli, "prompt", timeout=30.0,
+                                                    cancel=cancel))
+        t.start()
+        self.assertTrue(wait_for(started.exists))
+        cancel.set()
+        t.join(10.0)
+        time.sleep(CHILD_SEC + PATIENCE_SEC)
+        self.assertFalse(done.exists(), "the grandchild outlived the cancel")

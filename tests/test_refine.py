@@ -28,7 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flow.__main__ as main_mod  # noqa: E402
-from cli_env import cli_on_path, fake_exe, no_off_path_installs  # noqa: E402
+from cli_env import (cli_on_path, fake_cli_proc, fake_exe,  # noqa: E402
+                     no_off_path_installs, stdin_sent)
 from flow.refine import MAX_CHARS, Cli, _split_tail, refine  # noqa: E402
 from flow.session import Session  # noqa: E402
 
@@ -42,20 +43,8 @@ CLI = Cli("codex", ("codex", "exec"))
 
 def fake_proc(stdout: str = "", returncode: int = 0, stderr: str = "", *,
               hang: bool = False):
-    """A `Popen` with the surface `_invoke` uses, and nothing else.
-
-    `hang=True` never completes, which is how a timeout is reproduced without waiting
-    for one. `poll` reports an exit either way, so the guard that kills a live tree is
-    not asked to kill a mock. What that guard does to a real process tree is measured
-    in `test_lifecycle.py`, which is the only place a real one is started.
-    """
-    proc = mock.Mock(returncode=returncode, pid=0)
-    if hang:
-        proc.communicate.side_effect = subprocess.TimeoutExpired("codex", 0)
-    else:
-        proc.communicate.return_value = (stdout, stderr)
-    proc.poll.return_value = returncode
-    return proc
+    """See `cli_env.fake_cli_proc`, which this used to be and which the others share."""
+    return fake_cli_proc(stdout, returncode, stderr, hang=hang)
 
 
 #: Exactly what `claude --safe-mode -p` wrote to stdout on 2026-09-03, exit 1, with
@@ -1050,7 +1039,7 @@ class TestStdinIsACapabilityAndNotAGuess(unittest.TestCase):
         argv = started.call_args.args[0]
         self.assertEqual(argv, ["C:/npm/shimmed.cmd", "run"])
         self.assertEqual(started.call_args.kwargs["stdin"], subprocess.PIPE)
-        self.assertEqual(proc.communicate.call_args.kwargs.get("input"), "a\nprompt")
+        self.assertEqual(stdin_sent(proc), "a\nprompt")
 
     def test_kiro_cli_is_not_the_exception(self):
         # The newest verified entry is a native exe and takes its prompt on the argv like
@@ -1066,7 +1055,7 @@ class TestStdinIsACapabilityAndNotAGuess(unittest.TestCase):
             refine_mod._invoke(Cli("codex", ("codex", "exec")), "a\nprompt", timeout=30)
         self.assertEqual(started.call_args.args[0][-1], "a\nprompt")
         self.assertEqual(started.call_args.kwargs["stdin"], subprocess.DEVNULL)
-        self.assertIsNone(proc.communicate.call_args.kwargs.get("input"))
+        self.assertIsNone(stdin_sent(proc))
 
 
 def in_planted_workspace(snippet: str, *, guarded: bool) -> str:
@@ -1600,7 +1589,7 @@ class TestThePromptLeavesTheProcessListing(unittest.TestCase):
                 self.assertNotIn("the SECRET is marmalade", argv)
                 self.assertEqual(started.call_args.kwargs["stdin"], subprocess.PIPE)
                 self.assertEqual(
-                    proc.communicate.call_args.kwargs.get("input"),
+                    stdin_sent(proc),
                     "the SECRET is marmalade")
 
     def test_the_one_that_was_not_measured_still_carries_it_on_the_argv(self):
@@ -1701,3 +1690,65 @@ class TestTuning(unittest.TestCase):
             self.assertIn("gpt-5", argv)
             self.assertIn("max", argv)
 
+
+
+class TestAgentProcessBoundary(unittest.TestCase):
+    """What an agent CLI is launched *with*: its directory and its environment.
+
+    Security findings of 2026-11-08. kiro-cli started the MCP servers a workspace's
+    `.kiro` settings declare - executables a cloned repository names - before its empty
+    trust list was consulted; and every CLI inherited Flow's whole environment, forge and
+    cloud tokens included.
+    """
+
+    def launch(self, cli, *, cwd=None, env=None):
+        proc = fake_proc("ok")
+        with mock.patch("shutil.which", resolves_to(fake_exe(cli.argv[0]))), \
+                mock.patch("subprocess.Popen", return_value=proc) as started, \
+                mock.patch.dict(os.environ, env or {}, clear=False):
+            out, why = refine_mod._invoke(cli, "a prompt", timeout=30, cwd=cwd)
+        self.assertEqual((out, why), ("ok", ""))
+        return started.call_args.kwargs
+
+    def test_kiro_does_not_start_in_the_workspace(self):
+        workspace = tempfile.mkdtemp(prefix="flow-ws-")
+        self.addCleanup(shutil.rmtree, workspace, True)
+        settings = Path(workspace) / ".kiro" / "settings"
+        settings.mkdir(parents=True)
+        (settings / "mcp.json").write_text('{"mcpServers": {"x": {"command": "evil"}}}')
+        kw = self.launch(refine_mod.named("kiro-cli"), cwd=workspace)
+        self.assertNotEqual(os.path.realpath(kw["cwd"]), os.path.realpath(workspace))
+        self.assertFalse(Path(kw["cwd"]).exists(), "the scratch directory outlived the call")
+
+    def test_codex_and_claude_still_start_in_the_workspace(self):
+        # The workshop as cwd is the product for these two; their flags close the doors.
+        workspace = tempfile.mkdtemp(prefix="flow-ws-")
+        self.addCleanup(shutil.rmtree, workspace, True)
+        for name in ("codex", "claude"):
+            with self.subTest(cli=name):
+                self.assertEqual(self.launch(refine_mod.named(name), cwd=workspace)["cwd"],
+                                 workspace)
+
+    def test_forge_and_cloud_tokens_are_not_inherited(self):
+        kw = self.launch(refine_mod.named("codex"), env={
+            "GITHUB_TOKEN": "x", "GH_TOKEN": "x", "AWS_SECRET_ACCESS_KEY": "x",
+            "NPM_TOKEN": "x", "OPENAI_API_KEY": "kept", "FLOW_HARMLESS": "kept"})
+        env = kw["env"]
+        for gone in ("GITHUB_TOKEN", "GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "NPM_TOKEN"):
+            self.assertNotIn(gone, env)
+        self.assertEqual(env["OPENAI_API_KEY"], "kept")
+        self.assertEqual(env["FLOW_HARMLESS"], "kept")
+        self.assertIn("PATH", {k.upper() for k in env})
+
+    def test_aws_stays_for_the_clis_that_log_in_with_it(self):
+        aws = {"AWS_PROFILE": "p", "AWS_SECRET_ACCESS_KEY": "s", "GITHUB_TOKEN": "x"}
+        kiro = refine_mod._agent_env(refine_mod.named("kiro-cli"), aws)
+        self.assertEqual((kiro["AWS_PROFILE"], "GITHUB_TOKEN" in kiro), ("p", False))
+        claude = refine_mod.named("claude")
+        self.assertNotIn("AWS_PROFILE", refine_mod._agent_env(claude, aws))
+        bedrock = refine_mod._agent_env(claude, {**aws, "CLAUDE_CODE_USE_BEDROCK": "1"})
+        self.assertEqual(bedrock["AWS_SECRET_ACCESS_KEY"], "s")
+
+    def test_posix_calls_get_a_process_group_of_their_own(self):
+        kw = self.launch(refine_mod.named("codex"))
+        self.assertEqual(kw["start_new_session"], os.name != "nt")
