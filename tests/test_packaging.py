@@ -268,6 +268,27 @@ class TestTheReleaseWorkflow(unittest.TestCase):
         build = self.yml.index("pyinstaller --noconfirm")
         self.assertLess(gate, build)
 
+    def test_the_build_tool_comes_from_the_lock(self):
+        # The release job holds `contents: write`. `uv run --with pyinstaller` resolved
+        # PyInstaller from PyPI on every run, outside uv.lock and unhashed; the `build`
+        # group is pinned and hash-checked, and `--locked` refuses a stale lock.
+        # Commands only: the comment above the step is allowed to say what it replaced.
+        commands = [line for line in self.yml.splitlines()
+                    if not line.strip().startswith("#")]
+        self.assertFalse([line for line in commands if "--with" in line])
+        self.assertIn("--group build", self.yml)
+        for line in commands:
+            if line.strip().startswith("run: uv run") and "--no-project" not in line:
+                self.assertIn("--locked", line, line)
+
+    def test_and_the_build_group_is_opt_in_and_exact(self):
+        # A default group would put PyInstaller in every dev venv; an unpinned one would
+        # move on the next `uv lock` without anyone choosing that.
+        meta = pyproject()
+        build = meta["dependency-groups"]["build"]
+        self.assertTrue(all("==" in req for req in build), build)
+        self.assertNotIn("default-groups", meta.get("tool", {}).get("uv", {}))
+
     def test_the_version_is_read_rather_than_typed(self):
         # The tag and pyproject have to be the same number, and the workflow is where
         # that is enforced — hand-typing it into the workflow is the mistake this

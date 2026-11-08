@@ -108,6 +108,18 @@ flow = "flow.__main__:main"
 Repository = "https://github.com/samartomar/flow"
 Listing = "https://github.com/samartomar/ai-harness"
 
+# PyInstaller, as a PEP 735 group rather than `uv run --with pyinstaller`. `--with`
+# resolved it fresh on every release run, outside `uv.lock` — so the one job holding
+# `contents: write` ran whatever PyPI served that minute, unhashed. A group is locked
+# and hash-verified like everything else, and it stays out of the venv Flow runs in:
+# uv's `default-groups` is `["dev"]` unless set, and it is not set here, so `uv sync`
+# and `uv run` never pull `build` in — only `--group build` does. Not a runtime
+# dependency either, so R16's count is unchanged.
+[dependency-groups]
+build = [
+    "pyinstaller==6.22.3",
+]
+
 # R16 is about *runtime* dependencies, and this does not touch them: hatchling is fetched
 # into an isolated build environment and never enters the venv Flow runs in. Checked, not
 # assumed — the installed distribution count is unchanged by this block.
