@@ -658,10 +658,13 @@ BRACKETED_PASTE = {
 #: So these get the half of P7 that costs an editor nothing: the trailing newline is
 #: always stripped, the way it is for a terminal. A source file loses one newline the
 #: user can press for; a terminal panel no longer runs the line. Interior newlines stay,
-#: because refusing every multi-line paste would take dictation into the editor away —
-#: and the integrated terminals in both families bracket pastes (xterm.js, JediTerm), so
-#: the interior lines arrive as text rather than as commands. What they do *not* get is
-#: an automatic Enter after a multi-line block; see `paste`.
+#: because refusing every multi-line paste would take dictation into the editor away.
+#: That leaves a residue, stated rather than hidden: the terminals in both families
+#: (xterm.js, JediTerm) deliver interior lines as text only when the shell has turned on
+#: bracketed paste, which modern PowerShell and bash do and cmd.exe never does. VS Code
+#: also asks before a multi-line paste into its terminal by default
+#: (`terminal.integrated.enableMultiLinePasteWarning`); JetBrains has not been measured.
+#: What none of them gets is an automatic Enter after a multi-line block; see `paste`.
 #:
 #: Matched by process name, lowercase like the tables above. A missing fork costs the
 #: guarantee for that one editor; an extra entry costs a trailing newline in an editor.

@@ -1740,8 +1740,29 @@ class TestAgentProcessBoundary(unittest.TestCase):
         self.assertEqual(env["FLOW_HARMLESS"], "kept")
         self.assertIn("PATH", {k.upper() for k in env})
 
+    def claude_home(self, settings):
+        home = tempfile.mkdtemp(prefix="flow-claude-")
+        self.addCleanup(shutil.rmtree, home, True)
+        if settings is not None:
+            Path(home, "settings.json").write_text(settings, encoding="utf-8")
+        return home
+
+    def test_bedrock_named_in_claudes_own_settings_keeps_aws(self):
+        aws = {"AWS_PROFILE": "p", "CLAUDE_CONFIG_DIR": self.claude_home(
+            '{"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}}')}
+        env = refine_mod._agent_env(refine_mod.named("claude"), aws)
+        self.assertEqual(env["AWS_PROFILE"], "p")
+
+    def test_a_settings_file_without_bedrock_does_not_keep_aws(self):
+        for text in ('{"env": {}}', "not json", None):
+            with self.subTest(settings=text):
+                aws = {"AWS_PROFILE": "p", "CLAUDE_CONFIG_DIR": self.claude_home(text)}
+                self.assertNotIn("AWS_PROFILE",
+                                 refine_mod._agent_env(refine_mod.named("claude"), aws))
+
     def test_aws_stays_for_the_clis_that_log_in_with_it(self):
-        aws = {"AWS_PROFILE": "p", "AWS_SECRET_ACCESS_KEY": "s", "GITHUB_TOKEN": "x"}
+        aws = {"AWS_PROFILE": "p", "AWS_SECRET_ACCESS_KEY": "s", "GITHUB_TOKEN": "x",
+               "CLAUDE_CONFIG_DIR": self.claude_home(None)}
         kiro = refine_mod._agent_env(refine_mod.named("kiro-cli"), aws)
         self.assertEqual((kiro["AWS_PROFILE"], "GITHUB_TOKEN" in kiro), ("p", False))
         claude = refine_mod.named("claude")
