@@ -5,11 +5,13 @@ A spec file is a measurement of a dependency tree, not a scratch artifact — ev
 below is something the bundle was observed to need, so it is committed and it explains
 itself. Built with:
 
-    uv run --with pyinstaller pyinstaller --noconfirm packaging/flow.spec
+    uv run --locked --extra voice --extra edge --group build pyinstaller --noconfirm packaging/flow.spec
 
-`--with` rather than a dependency: PyInstaller is a build tool and never enters the venv
-Flow runs in, which is the same argument `pyproject.toml` makes for hatchling. R16's
-three runtime dependencies are unchanged by anything in this file.
+A dependency group rather than a dependency: PyInstaller is a build tool and never enters
+the venv Flow runs in unless `--group build` asks for it, which is the same argument
+`pyproject.toml` makes for hatchling. A group rather than `--with`, because `--with`
+resolved PyInstaller outside uv.lock on every run; the group is lock-pinned and
+hash-verified. R16's three runtime dependencies are unchanged by anything in this file.
 
 **onedir, never onefile.** A onefile exe unpacks itself into a temp directory on every
 launch — a cost paid at every start for a download that is the same size — and it is the
