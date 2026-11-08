@@ -9,7 +9,7 @@ Both were extras somebody installed from a terminal. Models ▸ Better voices ad
 a press:
 
 - **The engine** — `piper-tts` or `edge-tts`, installed into the environment this Flow
-  runs from, with the same specs `pyproject.toml` declares as the `voice` and `edge`
+  runs from, at the exact versions `uv.lock` resolved for the `voice` and `edge`
   extras: `uv pip install` when uv is here, `python -m pip` when pip is, and neither in the
   Windows download, which ships both engines instead of installing them. The default
   install still declares three dependencies (R16): an engine arrives when somebody asks.
@@ -44,11 +44,20 @@ from .models import human
 #: PyPI: piper-tts 1.8.0's Windows wheel is 34.1 MB (onnxruntime, which it runs on,
 #: already came with faster-whisper); edge-tts 7.2.8 and aiohttp with its eight small
 #: dependencies are about 2 MB.
+#:
+#: `pin` is what is actually installed: the exact version `uv.lock` resolved for that
+#: extra (a test holds them equal). The range alone let a press of "Add" fetch whatever
+#: PyPI served that minute — the newest upload, which is the one most likely to be a
+#: hijacked account (`exclude-newer` in pyproject.toml makes the same argument for the
+#: lock). Pinned here rather than read out of `uv.lock` at install time, because the
+#: documented install is `uv tool install git+…`, and that wheel carries no lock to read:
+#: a constant works for a checkout and an installed tool alike. Only the engine itself is
+#: exact; what it depends on is resolved by the installer, as `uv tool install` does.
 ENGINES = {
-    "piper": {"spec": "piper-tts>=1.6", "module": "piper", "extra": "voice",
-              "size": 34_119_688},
-    "edge": {"spec": "edge-tts>=7.2", "module": "edge_tts", "extra": "edge",
-             "size": 2_000_000},
+    "piper": {"spec": "piper-tts>=1.6", "pin": "piper-tts==1.6.0", "module": "piper",
+              "extra": "voice", "size": 34_119_688},
+    "edge": {"spec": "edge-tts>=7.2", "pin": "edge-tts==7.2.8", "module": "edge_tts",
+             "extra": "edge", "size": 2_000_000},
 }
 
 #: How long an install may take before it is given up on. A slow connection and a cold
@@ -222,7 +231,7 @@ class VoicePacks:
 
     def _install(self, engine: str, job: Job) -> None:
         about = ENGINES[engine]
-        command, why = self._installer(about["spec"])
+        command, why = self._installer(about["pin"])
         if command is None:
             job.state, job.error = "failed", why
             return

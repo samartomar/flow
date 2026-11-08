@@ -131,19 +131,25 @@ REVISION = "8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce"
 
 @dataclass(frozen=True)
 class File:
-    """One file of a model: its size, and its SHA-256 where the hub publishes one."""
+    """One file of a model: its size, and its SHA-256 - required, never blank."""
 
     name: str
     size: int
-    sha256: str = ""
+    sha256: str
 
 
 #: Files both variants need: the feature extractor graph, the vocabulary, the config.
 _SHARED = (
     File("nemo128.onnx", 139_764,
          "a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f"),
-    File("vocab.txt", 93_939),
-    File("config.json", 97),
+    # The hub publishes no SHA-256 for files small enough to skip LFS, so these two were
+    # downloaded at REVISION on 2026-11-08 and hashed here; each file's git blob id was
+    # checked against the hub's tree listing for that commit first. They used to be
+    # blank, which let a swapped vocabulary through - it is read as model input.
+    File("vocab.txt", 93_939,
+         "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"),
+    File("config.json", 97,
+         "666903c76b9798caf2c210afd4f6cd60b08a8dbf9800ec8d7a3bc0d2148ac466"),
 )
 
 
@@ -634,7 +640,9 @@ def _download(url: str, out: Path, file: File, before: int, total: int,
         raise NotAvailable(f"download failed: {exc}") from exc
     if got != file.size:
         raise NotAvailable(f"{file.name} is {got} bytes, expected {file.size}")
-    if file.sha256 and digest.hexdigest() != file.sha256:
+    # No "if file.sha256": a blank checksum is a download nobody verified, so it fails
+    # here rather than passing as if it had matched.
+    if digest.hexdigest() != file.sha256:
         raise NotAvailable(f"{file.name} failed its checksum")
 
 
