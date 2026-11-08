@@ -18,23 +18,36 @@ from unittest import mock
 import flow.inject_mac as inject_mac
 
 
+def is_query(script: str) -> bool:
+    """The frontmost query, as opposed to the keystroke script.
+
+    Not "mentions frontmost" any more: since v0.8.1 the keystroke script asks the same
+    question itself, as the guard against the window changing before the Cmd-V.
+    """
+    return "frontmost" in script and "keystroke" not in script
+
+
 class Ran:
     """Records the child processes `paste` would start, and answers for them."""
 
     def __init__(self, front="TextEdit", clipboard="old text", fail=None, reason="",
-                 bundle="com.apple.TextEdit"):
+                 bundle="com.apple.TextEdit", typed=None):
         self.calls: list[tuple[list[str], str | None]] = []
         self.front, self.clipboard, self.bundle = front, clipboard, bundle
         self.fail, self.reason = fail, reason
+        #: stderr for the keystroke script alone, so the query still answers.
+        self.typed = typed
 
     def __call__(self, argv, stdin=None):
         self.calls.append((argv, stdin))
         tool = argv[0]
         if self.fail is not None and self.fail in " ".join(argv):
             return False, self.reason
+        if self.typed is not None and tool == "osascript" and not is_query(argv[-1]):
+            return False, self.typed
         if tool == "pbpaste":
             return True, self.clipboard
-        if tool == "osascript" and "frontmost" in argv[-1]:
+        if tool == "osascript" and is_query(argv[-1]):
             return True, f"{self.front}|{self.bundle}"
         return True, ""
 
@@ -45,7 +58,7 @@ class Ran:
     def script(self) -> str:
         """The keystroke script, which is the last osascript that is not the query."""
         for argv, _stdin in reversed(self.calls):
-            if argv[0] == "osascript" and "frontmost" not in argv[-1]:
+            if argv[0] == "osascript" and not is_query(argv[-1]):
                 return argv[-1]
         return ""
 
@@ -84,7 +97,7 @@ class Paste(unittest.TestCase):
         # costs no clipboard at all.
         copied = next(i for i, t in enumerate(ran.tools) if t == "pbcopy")
         typed = next(i for i, (argv, _s) in enumerate(ran.calls)
-                     if argv[0] == "osascript" and "frontmost" not in argv[-1])
+                     if argv[0] == "osascript" and not is_query(argv[-1]))
         self.assertLess(copied, typed)
 
     def test_submit_presses_return_by_key_code_and_not_as_a_character(self):
@@ -263,8 +276,8 @@ class TestATerminalNeverRunsWhatWasDictated(unittest.TestCase):
         self.assertFalse(inject_mac.is_terminal("Notes", "com.apple.Notes"))
 
     def test_multiple_lines_into_a_terminal_are_reported(self):
-        # Warned rather than refused: Windows refuses on a *measured* list of which
-        # terminals bracket pastes, and nothing here has measured a single macOS one.
+        # The sentence `paste` refuses with. Still "may": nothing here has measured which
+        # macOS terminals bracket pastes, so it does not claim which one this is.
         _payload, why = inject_mac.prepare("a\nb\n", "iTerm2", "com.googlecode.iterm2")
         self.assertIn("iTerm2", why)
         self.assertIn("each line", why)
@@ -294,6 +307,127 @@ class TestATerminalNeverRunsWhatWasDictated(unittest.TestCase):
         with mock.patch.object(inject_mac, "_run", ran):
             self.assertFalse(inject_mac.paste("\n"))
         self.assertEqual(ran.copied(), [])
+
+
+class TestAMultiLineDraftIntoATerminalIsRefused(unittest.TestCase):
+    """The Mac half of DESKTOP-01, found the same way the Windows half was.
+
+    `prepare` named the hazard and `paste` warned and then sent Cmd-V anyway, so in a
+    terminal that does not bracket pastes the first line ran before the bubble painted
+    the warning about it. Refused now, after the clipboard write, which is the recovery.
+    """
+
+    def setUp(self):
+        inject_mac.take_warnings()
+        self.addCleanup(inject_mac.take_warnings)
+
+    def _paste(self, text, **kw):
+        ran = Ran(front="Terminal", bundle="com.apple.Terminal")
+        with mock.patch.object(inject_mac, "_run", ran), \
+                mock.patch.object(inject_mac, "_restore_later") as later:
+            ok = inject_mac.paste(text, **kw)
+        return ok, ran, later, inject_mac.take_warnings()
+
+    def test_no_keystroke_script_runs(self):
+        ok, ran, _later, _warnings = self._paste("a\nb")
+        self.assertFalse(ok)
+        self.assertEqual(ran.script(), "")
+
+    def test_the_text_is_left_on_the_clipboard(self):
+        _ok, ran, later, warnings = self._paste("a\nb")
+        self.assertEqual(ran.copied(), ["a\nb"])
+        later.assert_not_called()  # a restore would take away what the hand needs
+        self.assertIn("not pasted", warnings[0])
+        self.assertIn("each line", warnings[0])
+        self.assertIn("Cmd-V", warnings[0])
+
+    def test_submit_does_not_change_that(self):
+        ok, ran, _later, _warnings = self._paste("a\nb\n", submit=True)
+        self.assertFalse(ok)
+        self.assertEqual(ran.script(), "")
+
+    def test_one_line_still_pastes(self):
+        ok, ran, _later, warnings = self._paste("ls\n")
+        self.assertTrue(ok)
+        self.assertIn('keystroke "v"', ran.script())
+        self.assertEqual(warnings, [])
+
+    def test_an_editor_keeps_its_lines_and_its_paste(self):
+        ran = Ran(front="TextEdit", bundle="com.apple.TextEdit")
+        with mock.patch.object(inject_mac, "_run", ran), \
+                mock.patch.object(inject_mac, "_restore_later"):
+            self.assertTrue(inject_mac.paste("a\nb\n"))
+        self.assertEqual(ran.copied(), ["a\nb\n"])
+
+
+class TestTheTargetIsAskedAgainInsideTheKeystrokeScript(unittest.TestCase):
+    """The front app was asked two process launches before the Cmd-V.
+
+    `pbpaste` and `pbcopy` sit between the question and the keystroke, and the answer
+    decided the payload. So the keystroke script asks again itself, where nothing else
+    can come between the check and the key.
+    """
+
+    def setUp(self):
+        inject_mac.take_warnings()
+        self.addCleanup(inject_mac.take_warnings)
+
+    def _paste(self, ran, **kw):
+        with mock.patch.object(inject_mac, "_run", ran), \
+                mock.patch.object(inject_mac, "_restore_later") as later:
+            ok = inject_mac.paste("hello", **kw)
+        return ok, later, inject_mac.take_warnings()
+
+    def test_the_guard_names_the_classified_app_before_the_keystroke(self):
+        ran = Ran()
+        self._paste(ran)
+        script = ran.script()
+        guard = 'if bundle identifier of p is not "com.apple.TextEdit" then error number 9001'
+        self.assertIn(guard, script)
+        self.assertLess(script.index(guard), script.index('keystroke "v"'))
+
+    def test_the_return_is_guarded_too(self):
+        ran = Ran()
+        self._paste(ran, submit=True)
+        script = ran.script()
+        self.assertIn("error number 9002", script)
+        self.assertLess(script.index("9002"), script.index("key code 36"))
+
+    def test_a_changed_window_is_a_refusal(self):
+        ran = Ran(typed="execution error: An error of type 9001 has occurred. (9001)")
+        ok, later, warnings = self._paste(ran)
+        self.assertFalse(ok)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("not pasted: the target window changed before Send", warnings[0])
+        later.assert_not_called()
+
+    def test_a_window_changed_after_the_paste_only_loses_the_return(self):
+        ran = Ran(typed="execution error: An error of type 9002 has occurred. (9002)")
+        ok, _later, warnings = self._paste(ran, submit=True)
+        self.assertTrue(ok, "the text did land; only the Return was declined")
+        self.assertIn("not submitted", warnings[0])
+
+    def test_an_identifier_that_could_escape_the_literal_is_refused(self):
+        ran = Ran(bundle='com.evil" then beep\nkeystroke "x')
+        ok, _later, warnings = self._paste(ran)
+        self.assertFalse(ok)
+        self.assertEqual(ran.copied(), [])
+        self.assertEqual(ran.script(), "")
+        self.assertIn("not pasted", warnings[0])
+
+    def test_only_reverse_dns_characters_pass(self):
+        self.assertTrue(inject_mac._safe_bundle("com.apple.Terminal"))
+        self.assertTrue(inject_mac._safe_bundle("dev.warp.Warp-Stable"))
+        for bad in ("", "com.x\"y", "com.x\\y", "a b", "com.x\ny", "missing value"):
+            with self.subTest(bad=bad):
+                self.assertFalse(inject_mac._safe_bundle(bad))
+
+    def test_no_identifier_means_no_guard_so_the_permission_note_survives(self):
+        # A failed query is almost always the Accessibility refusal, and the keystroke
+        # script is what reports it with the path through System Settings.
+        ok, _later, warnings = self._paste(Ran(fail="System Events", reason="(-1719)"))
+        self.assertFalse(ok)
+        self.assertIn("Accessibility", warnings[0])
 
 
 class TestTheFrontmostQuery(unittest.TestCase):

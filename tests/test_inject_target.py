@@ -39,6 +39,7 @@ import flow.inject as inject  # noqa: E402
 from flow.inject import (  # noqa: E402
     BRACKETED_PASTE,
     CF_UNICODETEXT,
+    EDITOR_HOSTS,
     TERMINAL_CLASSES,
     TERMINAL_PROCESSES,
     Target,
@@ -66,7 +67,10 @@ def tearDownModule():
 WT = Target("CASCADIA_HOSTING_WINDOW_CLASS", "WindowsTerminal.exe")
 CMD = Target("ConsoleWindowClass", "cmd.exe")
 BASH = Target("mintty", "mintty.exe")
-EDITOR = Target("Chrome_WidgetWin_1", "Code.exe")
+EDITOR = Target("Notepad", "notepad.exe")
+#: An editor that hosts a terminal (`EDITOR_HOSTS`). It was `EDITOR` until v0.8.1, which
+#: is how the suite pinned "VS Code is an ordinary editor" as a guarantee.
+VSCODE = Target("Chrome_WidgetWin_1", "Code.exe")
 UNKNOWN = Target()
 FLOW = Target("TkTopLevel", "python.exe", is_flow=True)
 
@@ -117,7 +121,8 @@ class TestClassification(unittest.TestCase):
         self.assertFalse(CMD.brackets_paste)
 
     def test_the_tables_are_lowercase_so_matching_works(self):
-        for table in (TERMINAL_CLASSES, TERMINAL_PROCESSES, BRACKETED_PASTE):
+        for table in (TERMINAL_CLASSES, TERMINAL_PROCESSES, BRACKETED_PASTE,
+                      EDITOR_HOSTS):
             for entry in table:
                 self.assertEqual(entry, entry.lower(), entry)
 
@@ -230,7 +235,7 @@ class TestTheTargetIsRevalidatedAtPasteTime(unittest.TestCase):
     def test_the_refusal_names_what_actually_has_the_focus(self):
         # So the note can say where the words would have gone, not just that they did
         # not go where they were meant to.
-        self.assertEqual(self._resolve(EDITOR, tracked=0x22).process, "Code.exe")
+        self.assertEqual(self._resolve(EDITOR, tracked=0x22).process, "notepad.exe")
 
     def test_paste_refuses_and_says_the_target_changed(self):
         take_warnings()
@@ -593,7 +598,7 @@ class TestTheTargetIsCheckedAgainBeforeEnter(unittest.TestCase):
 
     def test_the_refusal_names_who_took_the_focus(self):
         _ok, _sent, warnings = self._submit_with(0x22, 0x33)
-        self.assertIn("Code.exe", warnings[0])
+        self.assertIn("notepad.exe", warnings[0])
 
     def test_the_window_staying_put_submits(self):
         ok, sent, warnings = self._submit_with(0x22, 0x22)
@@ -1344,3 +1349,84 @@ class TestAPinnedWindowIsBroughtForward(unittest.TestCase):
             self.assertFalse(inject.window_alive(self.PINNED, 6))
             self.assertTrue(inject.window_alive(self.PINNED))
         self.assertFalse(inject.window_alive(0))
+
+
+class TestAnEditorThatHostsATerminalNeverRunsTheLastLine(unittest.TestCase):
+    """VS Code and the JetBrains IDEs classified as editors, terminal panel and all.
+
+    The top-level window belongs to the editor process wherever the caret is, so a
+    dictated "ls" plus newline into the integrated terminal kept its newline and ran. The
+    owner's rule for `EDITOR_HOSTS`: the trailing newline always goes, interior ones stay
+    so dictating into the editor still works, and a multi-line block is never followed by
+    Flow's own Enter.
+    """
+
+    def _paste(self, text, target, **kw):
+        take_warnings()
+        with mock.patch("flow.inject.resolve", return_value=target), \
+                mock.patch("flow.inject.get_clipboard_text", return_value=None), \
+                mock.patch("flow.inject.set_clipboard_text",
+                           return_value=True) as put, \
+                mock.patch("flow.inject._send", side_effect=all_inserted) as sent:
+            from flow.inject import paste
+
+            ok = paste(text, restore_clipboard=False, **kw)
+        written = put.call_args.args[0] if put.call_args else None
+        return ok, written, sent, take_warnings()
+
+    def test_it_is_not_a_terminal_but_it_hosts_one(self):
+        self.assertFalse(VSCODE.is_terminal)
+        self.assertTrue(VSCODE.hosts_terminal)
+        self.assertFalse(EDITOR.hosts_terminal)
+
+    def test_the_named_editors_are_all_recognised(self):
+        for process in ("Code.exe", "Cursor.exe", "VSCodium.exe", "Windsurf.exe",
+                        "idea64.exe", "pycharm64.exe", "webstorm64.exe", "rider64.exe",
+                        "goland64.exe", "clion64.exe", "phpstorm64.exe",
+                        "rubymine64.exe", "datagrip64.exe", "studio64.exe"):
+            with self.subTest(process=process):
+                self.assertTrue(Target("SunAwtFrame", process).hosts_terminal)
+
+    def test_a_multi_line_draft_loses_only_its_trailing_newline(self):
+        ok, written, sent, warnings = self._paste("ls\nrm x\n", VSCODE)
+        self.assertTrue(ok, "refusing multi-line would take dictation into the editor away")
+        self.assertEqual(written, "ls\nrm x")
+        self.assertEqual(sent.call_count, 1)
+        self.assertEqual(warnings, [])
+
+    def test_a_single_line_loses_its_trailing_newline(self):
+        _ok, written, _sent, _warnings = self._paste("dir\n", VSCODE)
+        self.assertEqual(written, "dir")
+
+    def test_crlf_goes_too(self):
+        self.assertEqual(prepare("dir\r\n", VSCODE), ("dir", ""))
+
+    def test_an_ordinary_editor_is_unchanged(self):
+        ok, written, sent, warnings = self._paste("ls\nrm x\n", EDITOR)
+        self.assertTrue(ok)
+        self.assertEqual(written, "ls\nrm x\n")
+        self.assertEqual(sent.call_count, 1)
+        self.assertEqual(warnings, [])
+
+    def test_a_multi_line_block_is_not_submitted(self):
+        # The Enter is what would run every bracketed line in a terminal panel, and Flow
+        # cannot see which panel has the caret.
+        ok, _written, sent, warnings = self._paste("ls\nrm x\n", VSCODE, submit=True)
+        self.assertTrue(ok, "the text did land; only the submit was declined")
+        self.assertEqual(sent.call_count, 1, "Enter followed a multi-line block")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("not submitted", warnings[0])
+        self.assertIn("Code.exe", warnings[0])
+
+    def test_a_single_line_still_submits(self):
+        ok, written, sent, warnings = self._paste("dir\n", VSCODE, submit=True)
+        self.assertTrue(ok)
+        self.assertEqual(written, "dir")
+        self.assertEqual(sent.call_count, 2)
+        self.assertEqual(warnings, [])
+
+    def test_an_ordinary_editor_still_submits_a_block(self):
+        ok, _written, sent, warnings = self._paste("a\nb", EDITOR, submit=True)
+        self.assertTrue(ok)
+        self.assertEqual(sent.call_count, 2)
+        self.assertEqual(warnings, [])

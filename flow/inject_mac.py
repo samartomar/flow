@@ -171,11 +171,15 @@ def prepare(text: str, name: str, bundle: str) -> tuple[str, str]:
     Return, which in a shell runs it. The trailing newline is stripped for a terminal;
     the user presses Return when they mean to.
 
-    **Say when the lines may run on arrival.** Windows knows which terminals implement
-    bracketed paste, from a measured list, and refuses outright for the ones that do not.
-    Nothing here has measured a single macOS terminal, so this warns rather than refuses
-    and does not claim which behaviour this one has — a refusal built on a guess would
-    block a paste that was always safe.
+    **Refuse when the lines may run on arrival.** This used to warn rather than refuse,
+    on the grounds that nothing here has measured which macOS terminals bracket pastes
+    and a refusal built on a guess would block a paste that was always safe. That had the
+    asymmetry backwards, and it is the same mistake Windows corrected on 2026-08-03: the
+    warning reaches the bubble after the Cmd-V, so in a terminal that does not bracket,
+    the first line has already run by the time anybody reads it. A guess that refuses
+    costs one Cmd-V by hand; a guess that proceeds costs a command. So the sentence below
+    is now the reason `paste` declines, after the clipboard write — still worded "may",
+    because it still does not claim which behaviour this terminal has.
     """
     if not is_terminal(name, bundle):
         return text, ""
@@ -186,6 +190,32 @@ def prepare(text: str, name: str, bundle: str) -> tuple[str, str]:
             "not bracket pastes"
         )
     return payload, ""
+
+
+#: What a bundle identifier may contain before Flow will spell it into AppleScript.
+_BUNDLE_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+)
+
+
+def _safe_bundle(bundle: str) -> bool:
+    """Whether `bundle` can go inside an AppleScript string literal as it is. No quote,
+    no backslash, no line break — nothing that could end the literal early."""
+    return bool(bundle) and all(ch in _BUNDLE_CHARS for ch in bundle)
+
+
+def _guard(bundle: str, number: int) -> list[str]:
+    """AppleScript lines that stop the script unless `bundle` is still frontmost.
+
+    Empty when there is no identifier to compare against — see `paste` for why that one
+    case proceeds unguarded. Callers have already refused any id `_safe_bundle` rejects.
+    """
+    if not bundle:
+        return []
+    return [
+        "set p to first process whose frontmost is true",
+        f'if bundle identifier of p is not "{bundle}" then error number {number}',
+    ]
 
 
 def get_clipboard_text() -> str | None:
@@ -256,28 +286,68 @@ def paste(
     # paste into a shell, it runs. Classified before the clipboard is touched, the same
     # order `inject.paste` uses and for the same reason.
     text, hazard = prepare(text, name, bundle)
-    if hazard:
-        _warn(hazard)
     if not text:
+        return False
+
+    # The bundle id is about to be spelled into AppleScript source, so it is checked
+    # before anything is touched. Real identifiers are reverse-DNS — letters, digits,
+    # dots and hyphens — and anything else is either not an identifier at all or a
+    # string that could close the literal and keep going. Refused rather than escaped:
+    # escaping is a second parser to be right about, and an app whose id fails this is
+    # not one Flow can name in the guard below. Empty is the exception, and it is the
+    # frontmost query failing — almost always the Accessibility refusal, which the
+    # keystroke script then reports properly with `permission_note`. Refusing on it here
+    # would replace that note with a less useful one.
+    if bundle and not _safe_bundle(bundle):
+        _warn(f"not pasted: Flow could not identify {name or 'the window in front'} "
+              f"safely enough to aim at it")
         return False
 
     previous = get_clipboard_text() if restore_clipboard else None
     if not set_clipboard_text(text):
         return False
 
+    if hazard:
+        # Refused after the clipboard write, and that write is the whole recovery: the
+        # Cmd-V Flow declines to synthesise is the one the user can press deliberately.
+        # `inject.paste`'s reasoning, word for word. No restore, for the same reason —
+        # it would take away the thing the hand needs.
+        _warn(f"not pasted: {hazard} - the text is on the clipboard, so Cmd-V is yours")
+        return False
+
     # One script rather than two calls: each `osascript` is a process launch, and the gap
     # between a Cmd-V and a Return is exactly where another window could come forward and
     # take the Return.
-    keys = ['keystroke "v" using command down']
+    #
+    # And the target is asked again *inside* that script, because the question above was
+    # asked two process launches ago (`pbpaste`, `pbcopy`) and its answer decided the
+    # payload. A window that came forward in between would receive a paste prepared for
+    # somebody else — the newline kept for an editor, landing in a terminal. Same check
+    # `inject.resolve` makes on Windows, done where no further launch can separate it
+    # from the keystroke. 9001 means nothing was pasted; 9002 is the same question asked
+    # again before the Return, after the paste did land.
+    guard = _guard(bundle, 9001)
+    keys = [*guard, 'keystroke "v" using command down']
     if submit:
         # `key code 36` is Return. Spelled as a code because `keystroke return` sends the
         # character, and an app that tells them apart gets a newline instead of a send.
         # The delay lets the paste land first — without it both events arrive in the same
         # turn of the target's run loop and the Return can win.
-        keys += ["delay 0.05", "key code 36"]
+        keys += ["delay 0.05", *_guard(bundle, 9002), "key code 36"]
     script = chr(10).join(['tell application "System Events"', *keys, "end tell"])
     ok, reason = _run(["osascript", "-e", script])
     if not ok:
+        if "9002" in reason:
+            # The text is in the window; only the Return was declined. Not "not pasted",
+            # which would send the user looking for text already in front of them.
+            _warn("pasted, but not submitted: the window changed after the paste")
+            if restore_clipboard:
+                _restore_later(previous)
+            return True
+        if "9001" in reason:
+            _warn("not pasted: the target window changed before Send"
+                  " - the text is on the clipboard, so Cmd-V puts it in")
+            return False
         _warn(permission_note() if denied(reason) else f"not pasted: {reason}")
         return False
 

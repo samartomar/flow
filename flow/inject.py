@@ -564,8 +564,21 @@ def paste(
         # `SendInput` round trip. A window arriving inside that gap would receive a bare
         # Enter with nothing pasted under it, which is the same defect the count above
         # catches reached by a different road.
+        #
+        # And one case is declined on the payload rather than the window: a multi-line
+        # block in an editor that hosts a terminal (`EDITOR_HOSTS`). Under bracketed
+        # paste the block sat inert, and this Enter is the keystroke that would run all
+        # of it — or, in a source file, add one line break the user did not need. Flow
+        # cannot tell which panel has the caret, so the block is left where it landed and
+        # the user presses Enter if it was a command. A single line still submits: that
+        # is a chat box or a prompt, and a send is what was asked for.
         again = resolve(hwnd)
-        if again.is_flow:
+        if target.hosts_terminal and "\n" in payload:
+            _warn(
+                f"pasted, but not submitted: {target.process} may have a terminal "
+                f"focused, and Enter would run every line - press it yourself"
+            )
+        elif again.is_flow:
             _warn("pasted, but not submitted: Flow took the focus back")
         elif again.stale:
             _warn(
@@ -634,6 +647,36 @@ BRACKETED_PASTE = {
     "wezterm-gui.exe", "kitty.exe", "hyper.exe", "conemu64.exe", "conemu.exe",
 }
 
+#: Editors that also host a terminal inside the same top-level window: VS Code and its
+#: forks, and the JetBrains IDEs. Classification here reads the top-level window, and
+#: that window belongs to the editor process whether the caret is in a source file or in
+#: the integrated terminal panel — so for the life of P7 these classified as editors and
+#: a dictated "ls\n" pasted with its newline, which in that panel is an Enter that runs
+#: the line. Telling the two apart means identifying the focused child through UI
+#: Automation, which is the dependency-shaped decision R16 keeps out.
+#:
+#: So these get the half of P7 that costs an editor nothing: the trailing newline is
+#: always stripped, the way it is for a terminal. A source file loses one newline the
+#: user can press for; a terminal panel no longer runs the line. Interior newlines stay,
+#: because refusing every multi-line paste would take dictation into the editor away —
+#: and the integrated terminals in both families bracket pastes (xterm.js, JediTerm), so
+#: the interior lines arrive as text rather than as commands. What they do *not* get is
+#: an automatic Enter after a multi-line block; see `paste`.
+#:
+#: Matched by process name, lowercase like the tables above. A missing fork costs the
+#: guarantee for that one editor; an extra entry costs a trailing newline in an editor.
+EDITOR_HOSTS = {
+    # VS Code and its forks
+    "code.exe", "code - insiders.exe", "codium.exe", "vscodium.exe", "cursor.exe",
+    "windsurf.exe", "positron.exe", "trae.exe",
+    # JetBrains, 64-bit launchers and the plain names some installs use
+    "idea64.exe", "idea.exe", "pycharm64.exe", "pycharm.exe", "webstorm64.exe",
+    "webstorm.exe", "rider64.exe", "rider.exe", "goland64.exe", "goland.exe",
+    "clion64.exe", "clion.exe", "phpstorm64.exe", "phpstorm.exe", "rubymine64.exe",
+    "rubymine.exe", "datagrip64.exe", "datagrip.exe", "dataspell64.exe",
+    "rustrover64.exe", "aqua64.exe", "fleet.exe", "studio64.exe", "studio.exe",
+}
+
 
 #: The taskbar and the notification area's own windows. Clicking the tray icon makes the
 #: taskbar the foreground for a moment, and a pill that tracked it would aim the next
@@ -669,6 +712,12 @@ class Target:
             self.window_class.lower() in TERMINAL_CLASSES
             or self.process.lower() in TERMINAL_PROCESSES
         )
+
+    @property
+    def hosts_terminal(self) -> bool:
+        """An editor whose window may have an integrated terminal focused inside it.
+        Not `is_terminal`, deliberately: see `EDITOR_HOSTS` for what each one changes."""
+        return self.process.lower() in EDITOR_HOSTS
 
     @property
     def brackets_paste(self) -> bool:
@@ -815,7 +864,15 @@ def prepare(text: str, target: Target) -> tuple[str, str]:
     Flow still does not rewrite the text to make it safe. Adding bracket markers to the
     clipboard would be doubly wrong — the terminal adds its own — and stripping interior
     newlines would be Flow editing a draft to fit a window.
+
+    **An editor that hosts a terminal gets the first rule only** (`EDITOR_HOSTS`): Flow
+    cannot see whether the caret is in a file or in the integrated terminal, so the
+    trailing newline goes as it would for a terminal, and the interior ones stay so that
+    dictating a paragraph into the editor still works. Silent, because there is nothing
+    to warn about — a stripped newline is not a hazard in either place.
     """
+    if target.hosts_terminal and not target.is_terminal:
+        return text.rstrip("\r\n"), ""
     if not target.is_terminal:
         return text, ""
     payload = text.rstrip("\r\n")
