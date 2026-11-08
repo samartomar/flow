@@ -147,6 +147,30 @@ class TestNothingIsKeptUntilSomebodyChooses(unittest.TestCase):
         h.flush()
         self.assertFalse(h.path.exists())
 
+    def test_off_at_launch_sweeps_a_file_left_behind(self):
+        # "Off" saved but the delete never happened — a locked file, or a save that ran
+        # late on the bridge. Every method returns early once off, so this is the only
+        # place the file can still go (decisions.md 2026-11-08).
+        where = folder(self)
+        path = where / "history.jsonl"
+        path.write_text(json.dumps(make_entry(DICTATED, "last month")) + "\n",
+                        encoding="utf-8")
+        path.with_suffix(".tmp").write_text("half a rewrite", encoding="utf-8")
+        profile = Profile(where / "profile.json")
+        profile.history = OFF
+        h = History(path, profile)
+        self.assertFalse(path.exists())
+        self.assertFalse(path.with_suffix(".tmp").exists())
+        self.assertEqual(h.error, "")
+
+    def test_not_chosen_at_launch_leaves_the_file_alone(self):
+        # Only "off" is a promise about the disk; an unchosen profile deletes nothing.
+        where = folder(self)
+        path = where / "history.jsonl"
+        path.write_text("{}\n", encoding="utf-8")
+        History(path, Profile(where / "profile.json"))
+        self.assertTrue(path.exists())
+
     def test_forget_deletes_the_file(self):
         h = kept(self)
         h.add(DICTATED, "words")
@@ -587,6 +611,26 @@ class TestTheHistoryPage(unittest.TestCase):
         self.assertTrue(h.session.history.path.exists())
         code, page = h.call("/api/history/choice", {"choice": "off"})
         self.assertEqual((code, page["choice"]), (200, "off"))
+        self.assertFalse(h.session.history.path.exists())
+
+    def test_off_deletes_even_when_the_save_times_out_and_lands_later(self):
+        # The bridge raises Busy but the posted save still runs when the pill pumps again.
+        # Saved first, that left "off" on disk and the file with it, for good.
+        h = Pumped(self, choice=KEEP)
+        h.session.delivered("words")
+        h.session.history.flush()
+        self.assertTrue(h.session.history.path.exists())
+        h._stop.set()  # the pill stops pumping: nothing posted runs
+        time.sleep(0.02)
+        bridge = h.home.bridge
+        quick = type(bridge).call  # the real call, with a timeout a test can wait out
+        with mock.patch.object(bridge, "call",
+                               side_effect=lambda fn, timeout=0: quick(bridge, fn, 0.05)):
+            code, _page = h.call("/api/history/choice", {"choice": "off"})
+        self.assertEqual(code, 503)
+        self.assertFalse(h.session.history.path.exists())
+        h.session.run_posted()  # the save lands late
+        self.assertEqual(Profile(h.profile.path).history, OFF)
         self.assertFalse(h.session.history.path.exists())
 
     def test_a_choice_that_is_neither_is_refused(self):

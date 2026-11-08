@@ -634,11 +634,40 @@ class TestTheWindowIsEdgeInAppMode(unittest.TestCase):
     def test_it_keeps_a_profile_apart_from_the_persons_browsing(self):
         self.assertEqual(window_mod.PROFILE_DIR, Path.home() / ".flow" / "home")
 
-    def test_no_edge_opens_the_browser_instead(self):
+    def test_no_chromium_at_all_opens_the_browser_and_says_so(self):
         with mock.patch.object(window_mod, "find_edge", return_value=None), \
+                mock.patch.object(window_mod, "_other_candidates", return_value=[]), \
+                mock.patch.object(window_mod.subprocess, "Popen") as popen, \
                 mock.patch.object(window_mod.webbrowser, "open", return_value=True) as open_:
-            self.assertTrue(window_mod.launch("http://127.0.0.1:1/"))
+            self.assertEqual(window_mod.launch("http://127.0.0.1:1/"), window_mod.SHARED)
         open_.assert_called_once_with("http://127.0.0.1:1/")
+        popen.assert_not_called()
+
+    def test_no_edge_but_chrome_gets_the_same_isolated_window(self):
+        # The token rides in the fragment, and an everyday browser's extensions can read
+        # it; Chrome takes the same profile-of-its-own flags Edge does (2026-11-08).
+        with tempfile.TemporaryDirectory() as tmp:
+            chrome = Path(tmp) / "chrome.exe"
+            chrome.write_bytes(b"")
+            with mock.patch.object(window_mod, "find_edge", return_value=None), \
+                    mock.patch.object(window_mod, "_other_candidates",
+                                      return_value=[("chrome", str(chrome))]), \
+                    mock.patch.object(window_mod, "PROFILE_DIR", Path(tmp) / "home"), \
+                    mock.patch.object(window_mod.subprocess, "Popen") as popen, \
+                    mock.patch.object(window_mod.webbrowser, "open") as open_:
+                self.assertEqual(window_mod.launch("http://127.0.0.1:1/#token=t"),
+                                 window_mod.ISOLATED)
+            open_.assert_not_called()
+            args = popen.call_args.args[0]
+            self.assertEqual(args[0], str(chrome))
+            self.assertIn("--disable-extensions", args)
+            self.assertIn(f"--user-data-dir={Path(tmp) / 'home-chrome'}", args)
+            self.assertIn("--app=http://127.0.0.1:1/#token=t", args)
+
+    def test_the_default_browser_fallback_is_said_on_the_pill(self):
+        h = Pumped(self)
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.SHARED):
+            self.assertEqual(h.home.open(), window_mod.SHARED_NOTICE)
 
 
 # ------------------------------------------------------------------------------ session
@@ -1061,3 +1090,28 @@ class TestTheSettingsPageNeverSaysCpuWhileTheGpuIsLoading(unittest.TestCase):
         self.assertEqual(out["device_asked"], "cuda")
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEdgeCatalogueIsAskedOnlyWhenSomeoneLooks(unittest.TestCase):
+    """The voice list asks for Edge's catalogue once, and only with an empty cache."""
+
+    def setUp(self) -> None:
+        from flow.home.api import Api
+        self.Api = Api
+        Api._edge_asked = False
+        self.addCleanup(setattr, Api, "_edge_asked", False)
+
+    def test_an_empty_cache_is_filled_once(self):
+        with mock.patch("flow.edge.available", return_value=True), \
+                mock.patch("flow.edge.voices", return_value=[]), \
+                mock.patch("flow.speak.voices_changed") as changed:
+            self.Api._edge_catalogue_once(mock.Mock())
+            self.Api._edge_catalogue_once(mock.Mock())
+        changed.assert_called_once_with("edge")
+
+    def test_a_cached_catalogue_is_not_asked_again(self):
+        with mock.patch("flow.edge.available", return_value=True), \
+                mock.patch("flow.edge.voices", return_value=["cached"]), \
+                mock.patch("flow.speak.voices_changed") as changed:
+            self.Api._edge_catalogue_once(mock.Mock())
+        changed.assert_not_called()
