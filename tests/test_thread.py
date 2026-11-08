@@ -21,7 +21,7 @@ from flow.edits import plan  # noqa: E402
 from flow.refine import refine  # noqa: E402
 from flow.session import Session  # noqa: E402
 from flow.thread import CONTEXT_CHARS, MAX_CHARS, MAX_TURNS, Thread  # noqa: E402
-from cli_env import cli_on_path  # noqa: E402
+from cli_env import cli_on_path, fake_cli_proc, stdin_sent  # noqa: E402
 
 
 def prompt_sent(popen, proc) -> str:
@@ -30,16 +30,13 @@ def prompt_sent(popen, proc) -> str:
     codex and claude take the prompt on stdin as of 2026-08-03, so reading the last
     argv element would be asserting about `-`.
     """
-    piped = proc.communicate.call_args.kwargs.get("input")
+    piped = stdin_sent(proc)
     return piped if piped is not None else popen.call_args.args[0][-1]
 
 
 def fake_popen(stdout: str = "", returncode: int = 0, stderr: str = ""):
-    """A `Popen` with the surface `_invoke` uses: one `communicate` and an exit code."""
-    proc = mock.Mock(returncode=returncode, pid=0)
-    proc.communicate.return_value = (stdout, stderr)
-    proc.poll.return_value = returncode
-    return proc
+    """A `Popen` with the surface `_invoke` uses - see `cli_env.fake_cli_proc`."""
+    return fake_cli_proc(stdout, returncode, stderr)
 
 
 class TestThreadStore(unittest.TestCase):
