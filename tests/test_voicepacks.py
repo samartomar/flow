@@ -64,6 +64,20 @@ class TestAEnginesAreTheExtrasOwn(unittest.TestCase):
             with self.subTest(engine=name):
                 self.assertIn(about["spec"], extras[about["extra"]])
 
+    def test_what_is_installed_is_the_version_uv_lock_resolved(self):
+        # A range let "Add" fetch PyPI's newest upload; the pin is the locked one, and it
+        # still satisfies the extra's own range, so the two cannot drift apart unnoticed.
+        lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+        locked = {p["name"]: p["version"] for p in lock["package"]}
+        for name, about in ENGINES.items():
+            with self.subTest(engine=name):
+                package, version = about["pin"].split("==")
+                self.assertEqual(package, about["spec"].split(">=")[0])
+                self.assertEqual(version, locked[package])
+                floor = about["spec"].split(">=")[1]
+                self.assertGreaterEqual(tuple(map(int, version.split("."))),
+                                        tuple(map(int, floor.split("."))))
+
     def test_the_default_install_still_declares_three(self):
         deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
             "project"]["dependencies"]
@@ -123,7 +137,8 @@ class TestCAnInstallIsJudgedByTheImport(unittest.TestCase):
         packs = self._run(then_have="piper")
         job = _wait(packs.install("piper"))
         self.assertEqual(job.state, "done")
-        self.assertEqual(self.command[-1], "piper-tts>=1.6")
+        # The exact version the lock resolved, never the extra's open range.
+        self.assertEqual(self.command[-1], "piper-tts==1.6.0")
         self.assertEqual(self.kwargs["timeout"], vp.INSTALL_TIMEOUT_SEC)
         self.changed.assert_called_once_with("piper")
 

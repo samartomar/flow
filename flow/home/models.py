@@ -40,6 +40,7 @@ import time
 from dataclasses import dataclass
 
 from .. import parakeet
+from ..asr import WHISPER_PINS, WHISPER_REVISIONS
 
 #: The files faster-whisper downloads for a model, and nothing else — the same list
 #: `faster_whisper.utils.download_model` asks for, so a model fetched here is one it
@@ -74,6 +75,19 @@ class Spec:
     basis: str = ""
     #: Which build of the model, for the Parakeet rows: `parakeet.VARIANTS`' key.
     variant: str = ""
+
+    @property
+    def revision(self) -> str:
+        """The Hugging Face commit a Whisper row downloads and loads; "" for Parakeet.
+
+        Read from `asr.WHISPER_PINS`, the table the load path uses, rather than typed a
+        second time here: a download pinned to one commit and a load pinned to another
+        would fetch a model and then not find it.
+        """
+        if self.engine != "whisper":
+            return ""
+        pin = WHISPER_PINS.get(self.name)
+        return pin[1] if pin and pin[0] == self.repo else ""
 
     @property
     def maker(self) -> str:
@@ -181,11 +195,17 @@ def on_disk() -> dict[str, int]:
 
 def complete(repo: str) -> bool:
     """Whether a finished copy of `repo` is in the cache — `model.bin` is the last file a
-    download writes into the snapshot, so its presence means the rest is there too."""
+    download writes into the snapshot, so its presence means the rest is there too.
+
+    At the pinned commit, when the repo has one. A download by commit hash writes no
+    `refs/main`, so the default lookup would call a pinned download missing; and an older
+    unpinned copy at some other commit is not the model the load path will open.
+    """
     try:
         from huggingface_hub import try_to_load_from_cache
 
-        return isinstance(try_to_load_from_cache(repo, "model.bin"), str)
+        return isinstance(try_to_load_from_cache(
+            repo, "model.bin", revision=WHISPER_REVISIONS.get(repo)), str)
     except Exception:
         return False
 
@@ -385,7 +405,9 @@ class Downloader:
             else:
                 from huggingface_hub import snapshot_download
 
-                snapshot_download(spec.repo, allow_patterns=ALLOW_PATTERNS,
+                # The commit `asr` loads, so the copy fetched here is the one it opens.
+                snapshot_download(spec.repo, revision=spec.revision or None,
+                                  allow_patterns=ALLOW_PATTERNS,
                                   tqdm_class=_progress_class(job))
             job.state = "done"
             if job.total and job.done < job.total:

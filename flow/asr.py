@@ -125,6 +125,53 @@ def reports_no_speech(name: str) -> bool:
     base = name.rsplit("/", 1)[-1].lower()
     return not any(base.startswith(p) or p in base for p in _NO_SPEECH_BLIND)
 
+
+#: Which commit of each Whisper model Flow loads: name -> (Hugging Face repo, commit).
+#: The same reason `parakeet.REVISION` gives — a branch can be re-uploaded under every
+#: user, a commit hash cannot. Declined twice while Flow had no public release; reversed
+#: once the downloads became strangers' (decisions.md 2026-11-08). Each is the repo's `main`
+#: as `huggingface.co/api/models/<repo>` reported it on 2026-11-08, and every one of them
+#: is older than that by a year or more — so a model downloaded unpinned before this is
+#: almost certainly this exact snapshot already, and loads from the cache without a byte
+#: fetched. The repo ids are faster-whisper's own (`faster_whisper.utils._MODELS`), which
+#: is what names the cache folder; `mobiuslabsgmbh/...` now redirects to
+#: `dropbox-dash/...`, which the hub follows, and the commit is the same history.
+#: `flow/home/models.py` reads its `Spec.revision` from here so there is one table.
+WHISPER_PINS: dict[str, tuple[str, str]] = {
+    "large-v3": ("Systran/faster-whisper-large-v3",
+                 "edaa852ec7e145841d8ffdb056a99866b5f0a478"),
+    "small.en": ("Systran/faster-whisper-small.en",
+                 "d1d751a5f8271d482d14ca55d9e2deeebbae577f"),
+    "small": ("Systran/faster-whisper-small",
+              "536b0662742c02347bc0e980a01041f333bce120"),
+    "base.en": ("Systran/faster-whisper-base.en",
+                "3d3d5dee26484f91867d81cb899cfcf72b96be6c"),
+    # Retired from the page (models.RETIRED) but still loadable from a profile or a flag.
+    "large-v2": ("Systran/faster-whisper-large-v2",
+                 "f0fe81560cb8b68660e564f55dd99207059c092e"),
+    "distil-large-v3.5": ("distil-whisper/distil-large-v3.5-ct2",
+                          "9793ccc07920e0f830e1dba0343efcdf0ef8c903"),
+    "large-v3-turbo": ("mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+                       "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"),
+    "distil-large-v3": ("Systran/faster-distil-whisper-large-v3",
+                        "c3058b475261292e64a0412df1d2681c06260fab"),
+    "medium.en": ("Systran/faster-whisper-medium.en",
+                  "a29b04bd15381511a9af671baec01072039215e3"),
+}
+
+#: The same commits by repo id, for the cache checks that only know a repo.
+WHISPER_REVISIONS: dict[str, str] = {repo: rev for repo, rev in WHISPER_PINS.values()}
+
+
+def whisper_revision(name: str) -> str | None:
+    """The pinned commit for model `name`, or None for anything Flow does not pin.
+
+    None is what faster-whisper reads as "main": a local directory or a repo id somebody
+    passed with `--model` is theirs to choose, and is loaded exactly as before.
+    """
+    pin = WHISPER_PINS.get(name)
+    return pin[1] if pin else None
+
 #: Where a decode runs. "auto" means CUDA when this machine has a working one and CPU
 #: otherwise — see `cuda_ready()` for what "working" has to mean on Windows, and
 #: `CUDA_MODEL` above for what the GPU buys. CPU stays a first-class configuration:
@@ -614,9 +661,13 @@ class WhisperTranscriber:
                 try:
                     name = self.names[tier]
                     try:
+                        # `revision` pins a catalog name to its commit; a path or
+                        # an unpinned repo id gets None, which is faster-whisper's own
+                        # default. Already-cached snapshots of that commit load offline.
                         model = WhisperModel(
                             name, device=self.device,
                             compute_type=self._compute_type,
+                            revision=whisper_revision(name),
                         )
                     except Exception:
                         # A GPU that will not build a model is a GPU this session does
@@ -634,6 +685,7 @@ class WhisperTranscriber:
                         model = WhisperModel(
                             name, device="cpu",
                             compute_type=self._compute_type,
+                            revision=whisper_revision(name),
                         )
                     with self._lock:
                         self._models[tier] = model

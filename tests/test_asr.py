@@ -375,5 +375,38 @@ class TestTheCpuFallbackSaysWhichCheckFailed(unittest.TestCase):
             why.encode("ascii")
 
 
+class TestTheModelsArePinned(unittest.TestCase):
+    """Every Whisper name Flow offers loads one commit, not whatever `main` is today.
+
+    A branch can be re-uploaded under every user; a commit hash cannot. A path or a repo
+    id somebody passes with `--model` is theirs, so it gets faster-whisper's default.
+    """
+
+    def test_every_pin_is_a_full_commit_hash(self):
+        from flow.asr import WHISPER_PINS
+
+        for name, (repo, revision) in WHISPER_PINS.items():
+            with self.subTest(name=name):
+                self.assertIn("/", repo)
+                self.assertRegex(revision, r"^[0-9a-f]{40}$")
+
+    def test_the_load_hands_faster_whisper_the_pinned_commit(self):
+        from flow.asr import WHISPER_PINS
+
+        fake = mock.Mock()
+        fake.transcribe.return_value = ([], None)
+        with mock.patch("faster_whisper.WhisperModel", return_value=fake) as ctor:
+            WhisperTranscriber("base.en", "small.en", device="cpu").load()
+        got = {c.args[0]: c.kwargs["revision"] for c in ctor.call_args_list}
+        self.assertEqual(got, {"base.en": WHISPER_PINS["base.en"][1],
+                               "small.en": WHISPER_PINS["small.en"][1]})
+
+    def test_a_path_or_an_unknown_repo_is_left_to_faster_whisper(self):
+        fake = mock.Mock()
+        with mock.patch("faster_whisper.WhisperModel", return_value=fake) as ctor:
+            WhisperTranscriber("C:/models/mine", "someone/else", device="cpu").load()
+        self.assertEqual([c.kwargs["revision"] for c in ctor.call_args_list], [None, None])
+
+
 if __name__ == "__main__":
     unittest.main()

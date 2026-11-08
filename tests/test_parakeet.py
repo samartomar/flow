@@ -383,13 +383,16 @@ class TestTheShippedTables(unittest.TestCase):
         self.assertEqual(parakeet.VARIANTS["int8"].bytes,
                          652_183_999 + 18_202_004 + 139_764 + 93_939 + 97)
 
-    def test_every_large_file_has_a_checksum_and_the_small_ones_are_sized(self):
-        for key, variant in parakeet.VARIANTS.items():
-            for f in variant.files:
-                with self.subTest(key=key, file=f.name):
-                    self.assertGreater(f.size, 0)
-                    if f.size > 1_000_000:
-                        self.assertEqual(len(f.sha256), 64)
+    def test_every_file_has_a_size_and_a_checksum_however_small(self):
+        # vocab.txt and config.json were blank once, on the theory that the hub only
+        # publishes SHA-256 for LFS files; a blank one skipped the check entirely, and
+        # the vocabulary is read as model input. Every file is hashed now, the runtimes too.
+        files = [(key, f) for key, v in parakeet.VARIANTS.items() for f in v.files]
+        files += [(key, r.zip) for key, r in parakeet.RUNTIMES.items()]
+        for key, f in files:
+            with self.subTest(key=key, file=f.name):
+                self.assertGreater(f.size, 0)
+                self.assertRegex(f.sha256, r"^[0-9a-f]{64}$")
 
     def test_the_names_are_plain_so_no_path_can_escape_the_directory(self):
         for variant in parakeet.VARIANTS.values():
@@ -541,6 +544,16 @@ class TestFetch(_TempCase):
             parakeet.fetch("int8", url_for=url_for)
         self.assertIn("checksum", str(raised.exception))
         self.assertFalse(parakeet.variant_dir("int8").exists())
+
+    def test_a_file_with_no_checksum_is_refused_rather_than_trusted(self):
+        # The old `if file.sha256 and ...` let a blank checksum pass as a match.
+        out = self.tmp / "out.bin"
+        src = self.tmp / "src.bin"
+        src.write_bytes(b"abcd")
+        with self.assertRaises(parakeet.NotAvailable) as raised:
+            parakeet._download(src.as_uri(), out, parakeet.File("src.bin", 4, ""),
+                               0, 4, None, None)
+        self.assertIn("checksum", str(raised.exception))
 
     def test_a_server_that_is_not_there_is_a_reason_not_a_traceback(self):
         with self.assertRaises(parakeet.NotAvailable) as raised:
