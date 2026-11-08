@@ -1102,7 +1102,15 @@ class TestEdgeCatalogueIsAskedOnlyWhenSomeoneLooks(unittest.TestCase):
         self.addCleanup(setattr, Api, "_edge_asked", False)
 
     def test_an_empty_cache_is_filled_once(self):
-        with mock.patch("flow.edge.available", return_value=True), \
+        class Now:  # runs the background fetch in place, so the test can see it
+            def __init__(self, target, **_):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        with mock.patch("flow.home.api.threading.Thread", Now), \
+                mock.patch("flow.edge.available", return_value=True), \
                 mock.patch("flow.edge.voices", return_value=[]), \
                 mock.patch("flow.speak.voices_changed") as changed:
             self.Api._edge_catalogue_once(mock.Mock())

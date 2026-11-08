@@ -549,3 +549,18 @@ class TestPosixKillReachesTheGroup(Temp):
         t.join(10.0)
         time.sleep(CHILD_SEC + PATIENCE_SEC)
         self.assertFalse(done.exists(), "the grandchild outlived the cancel")
+
+    def test_a_launcher_that_already_exited_still_has_its_group_killed(self):
+        # The case the group kill exists for: the launcher is gone and its child holds
+        # the pipe. `_kill_tree` must not take "the launcher exited" as "nothing to do".
+        started, done = self.path("started"), self.path("done")
+        orphaner = ("import pathlib, subprocess, sys\n"
+                    "subprocess.Popen([sys.executable, '-c', sys.argv[2], sys.argv[3],"
+                    " sys.argv[4]])\n"
+                    "pathlib.Path(sys.argv[1]).write_text('x')\n")
+        cli = Cli("orphaner", (sys.executable, "-c", orphaner, str(started),
+                               _GRANDCHILD, "3", str(done)))
+        out, reason = _invoke(cli, "prompt", timeout=1.0)
+        self.assertIn("timed out", reason)
+        time.sleep(3 + PATIENCE_SEC)
+        self.assertFalse(done.exists(), "the orphaned grandchild outlived the timeout")

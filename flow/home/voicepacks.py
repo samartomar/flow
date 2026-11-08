@@ -41,7 +41,8 @@ from .models import human
 #: The two engines, by the name the page and the voice list use. `spec` is the extra's own
 #: requirement in `pyproject.toml` (a test holds them equal), `module` what has to import
 #: for the engine to be there, `size` what the install fetches, measured 2026-09-23 on
-#: PyPI: piper-tts 1.8.0's Windows wheel is 34.1 MB (onnxruntime, which it runs on,
+#: PyPI (for piper-tts 1.8.0; the pinned 1.6.0 below is the same order of size): its
+#: Windows wheel is 34.1 MB (onnxruntime, which it runs on,
 #: already came with faster-whisper); edge-tts 7.2.8 and aiohttp with its eight small
 #: dependencies are about 2 MB.
 #:

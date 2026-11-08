@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -341,10 +342,20 @@ class Api:
         try:
             from .. import edge, speak
 
-            if edge.available() and not edge.voices():
-                speak.voices_changed("edge")
+            if not (edge.available() and not edge.voices()):
+                return
         except Exception:
-            pass  # an offline machine still lists Windows' voices
+            return
+
+        def fetch() -> None:
+            try:
+                speak.voices_changed("edge")
+            except Exception:
+                pass  # an offline machine still lists Windows' voices
+
+        # In the background: the page must not wait on Microsoft's service to draw. The
+        # natural voices appear on the next refresh of the list.
+        threading.Thread(target=fetch, name="edge-catalogue", daemon=True).start()
 
     def _save(self) -> None:
         """Save the profile on the session's thread, and say so when it cannot."""

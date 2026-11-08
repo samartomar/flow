@@ -743,11 +743,34 @@ _KEEPS_AWS = "kiro-cli"
 _CLAUDE_BEDROCK = "CLAUDE_CODE_USE_BEDROCK"
 
 
+def _claude_on_bedrock(env: dict[str, str]) -> bool:
+    """Whether claude is set up for Bedrock - in the environment, or in its own settings.
+
+    People often set the flag under `env` in `~/.claude/settings.json` rather than in
+    their shell, while the AWS profile or region still comes from the shell. Reading only
+    the environment would strip those and leave claude answering "not logged in".
+    """
+    def on(value) -> bool:
+        return str(value or "").strip().lower() not in ("", "0", "false")
+
+    if on(env.get(_CLAUDE_BEDROCK)):
+        return True
+    import json
+
+    home = env.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    try:
+        with open(os.path.join(home, "settings.json"), encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, ValueError):
+        return False
+    block = settings.get("env") if isinstance(settings, dict) else None
+    return isinstance(block, dict) and on(block.get(_CLAUDE_BEDROCK))
+
+
 def _agent_env(cli: Cli, base: dict[str, str] | None = None) -> dict[str, str]:
     """Flow's environment minus the secrets no agent CLI needs. See `_SECRET_NAMES`."""
     env = dict(os.environ if base is None else base)
-    keep_aws = cli.name == _KEEPS_AWS or (
-        cli.name == "claude" and env.get(_CLAUDE_BEDROCK, "").strip() not in ("", "0"))
+    keep_aws = cli.name == _KEEPS_AWS or (cli.name == "claude" and _claude_on_bedrock(env))
     for name in list(env):
         upper = name.upper()
         if upper.startswith("AWS_") and keep_aws:
@@ -852,19 +875,21 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     `trusted()` closes one process along — with the difference that this one would be
     handed the cwd the *call* was made in, which is the workshop by construction.
     """
-    if proc.poll() is not None:
-        return
     if os.name != "nt":
         # POSIX does have the group Windows lacks: `_invoke` starts each call in a session
         # of its own, so the launcher's pid is the group's id and one signal reaches the
-        # `node` under it too. A pid of 0 would name *our own* group, so only a real
-        # child's pid gets here.
+        # `node` under it too. Signalled *before* asking whether the launcher is still
+        # alive, because the case this exists for is a launcher that has exited while its
+        # child holds the pipe - the group outlives its leader. A pid of 0 would name
+        # *our own* group, so only a real child's pid gets here.
         if isinstance(proc.pid, int) and proc.pid > 0:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except (OSError, AttributeError):
                 pass  # already gone, or not ours; the direct kill below still runs
-    else:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
         try:
             subprocess.run(
                 [_system_tool("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
