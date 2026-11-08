@@ -2411,3 +2411,69 @@ matters: "so prompt are grounded as well … and we also know what we are sendin
 properly." Spec'd as LOOP_PLAN item 23, which includes the P9 rewrite in
 `docs/product.md` — the build follows the definition, and the definition follows the
 evidence.
+
+### 2026-11-08 — Model revision pinning: adopted for Whisper; the release build tool joins the lock
+
+Reverses 2026-08-01, "Model revision pinning: declined again". That entry weighed a pin
+against benchmarks on one machine whose HF cache was already the pin; since then Flow has
+public releases, and every first run on a stranger's PC downloads Whisper from `main` of a
+third-party repo — a re-upload there would change what they all get, with nothing here to
+notice. So `asr.WHISPER_PINS` names one commit per catalog and retired model (each repo's
+`main` on 2026-11-08, all a year or more old, so existing caches are almost certainly that
+snapshot already and load without a download), `WhisperModel` and Flow Home's
+`snapshot_download` both receive it, and `models.complete` looks for it. `--model` with a
+path or an unlisted repo id stays unpinned, as the old entry argued it must. The Parakeet
+vocabulary and config, the two files the 2026-10-05 table left without SHA-256, are hashed
+too, and a blank checksum is now a failed download rather than a skipped check.
+
+Same day, same reasoning: the release job built with `uv run --with pyinstaller`, which
+resolved PyInstaller outside `uv.lock` in the one job holding `contents: write`. It is now
+an opt-in `build` dependency group (`pyinstaller==6.22.3`), installed with `--locked`.
+
+**Reopens if** a pinned commit disappears from the hub, or a model needs an upstream fix —
+a pin moves by editing the table, never by following `main`.
+
+### 2026-11-08 — A natural voice is never the default, and listing them opens no socket
+
+Fulfils 2026-08-06 (nothing is sent unless somebody installed the extra *and* chose one of
+its voices) and 2026-09-23's "Adding is not choosing", which the frozen download had
+quietly broken: it ships the `edge` extra, so with no Piper model `installed_voices` hid
+Windows' voices behind the natural ones and `default_voice` picked one — every reply went
+to Microsoft with nobody choosing. Now `default_voice` never returns an `edge` voice
+(Piper, else None for Windows' default), only a Piper model hides the 2013 voices, and
+`_legacy` ranks the natural voices last, so `--voice female` prefers Zira. `edge.voices`
+reads only its cache unless asked to refresh; the catalogue is fetched when the engine is
+added from Home, or when a profile or `--voice` names a `Natural ...` voice the cache lacks
+— not at launch — and the first time Flow Home's voice list is opened with an empty
+cache, which is a person looking for one (`Api._edge_catalogue_once`). The catalogue
+request carries no reply text.
+
+### 2026-11-08 — "Off" deletes before it saves, and every launch sweeps
+
+Fulfils 2026-09-23 "History": "off" is a promise about the disk. `history_choice` saved
+"off" and then deleted, so a bridge timeout (the save still lands later) or a failed delete
+left `history.jsonl` for good — every History method returns early once off. It now deletes
+first, then saves; and `History` built over an "off" profile deletes any file still there.
+
+### 2026-11-08 — Flow Home's isolated window comes from any Chromium browser
+
+Extends 2026-09-22 "Flow Home": only Edge got the own-profile, no-extensions window, and
+without it the `#token=` address went to the default browser, where its extensions can read
+it. `window.find_browser` now tries Edge, then Chrome, Brave and Chromium (Windows install
+folders and App Paths, `/Applications` on macOS, `PATH` on Linux), each with its own
+profile beside `~/.flow/home`. The default browser is the last resort, and the pill says so.
+
+### 2026-11-08 — The agent CLI's process is bounded: directory, environment, output, group
+
+Answers AGENT-01/02/03 (audit 2026-08-02) and NEEDS_YOU's residue items, after an outside
+scan rated the first one high. kiro-cli launched in the workspace starts the MCP servers
+that workspace's `.kiro` settings name, before `--trust-tools=` is consulted - a cloned
+repository could run a command as the user. It now starts from an empty per-call directory
+(`Cli.neutral_cwd`); codex and claude keep the workspace, whose doors their flags close.
+Every CLI now gets Flow's environment minus forge, registry and cloud tokens no agent CLI
+logs in with (`refine._SECRET_NAMES`): a deny list, not the parked allow list, because an
+allow list fails as a silent "not logged in". AWS credentials stay for kiro-cli, and for
+claude when `CLAUDE_CODE_USE_BEDROCK` is set. Output is read by bounded reader threads
+(`OUTPUT_MAX_CHARS`), not buffered whole by `communicate`, and POSIX calls get a session of
+their own so a timeout or cancel kills the group. **Still not Flow's:** filesystem and
+network sandboxing of the CLI itself.
