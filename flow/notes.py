@@ -24,6 +24,7 @@ converse question and already works.
 
 from __future__ import annotations
 
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -177,6 +178,24 @@ def render(notes: list[Note], workspace: str = "", now: float | None = None) -> 
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _refuse_redirect(folder: Path, workspace: str) -> None:
+    """Raise `OSError` when `folder` leads somewhere other than inside `workspace`.
+
+    The workspace is a repository, and a repository is something people clone from
+    strangers: a committed `flow-notes` symlink — or a junction, which on Windows needs no
+    privilege to make — would have Flow write somebody's dictated notes wherever it
+    points, outside the folder they chose. So the folder has to be a real directory, and
+    its resolved path has to sit under the resolved workspace. The workspace itself may be
+    a link; only the step from it into `flow-notes` is checked. An `OSError`, because
+    that is what the caller already says aloud and keeps the buffer on.
+    """
+    if os.path.islink(folder) or folder.is_junction():
+        raise OSError(f"{folder} is a link - not writing notes through it")
+    root = Path(workspace).resolve()
+    if not folder.resolve().is_relative_to(root):
+        raise OSError(f"{folder} resolves outside {root} - not writing notes there")
+
+
 def write(text: str, workspace: str, now: float | None = None) -> Path:
     """Write the document under `workspace`, in a file named for the minute.
 
@@ -187,6 +206,7 @@ def write(text: str, workspace: str, now: float | None = None) -> Path:
     now = time.time() if now is None else now
     folder = Path(workspace) / NOTES_DIR
     folder.mkdir(parents=True, exist_ok=True)
+    _refuse_redirect(folder, workspace)
     base = _stamp(now, "%Y-%m-%d-%H%M")
     for n in range(1, MAX_FILENAME_TRIES + 1):
         path = folder / (f"{base}.md" if n == 1 else f"{base}-{n}.md")
