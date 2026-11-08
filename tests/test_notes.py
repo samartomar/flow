@@ -11,6 +11,7 @@ writes a file unless a human said so twice — because the standing stance is th
 words are never stored, and this is the one deliberate exception to it.
 """
 
+import os
 import sys
 import tempfile
 import unittest
@@ -198,6 +199,33 @@ class TestWrite(unittest.TestCase):
             self.assertNotEqual(first, second)
             self.assertEqual(first.read_text(encoding="utf-8"), "first\n")
             self.assertEqual(second.name, "2026-08-05-1407-2.md")
+
+    # A cloned repository can commit `flow-notes` as a link to anywhere; the notes would
+    # follow it out of the folder the user chose. Both kinds are refused, nothing written.
+
+    def _refused_through(self, make_link):
+        with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as away:
+            try:
+                make_link(Path(ws) / NOTES_DIR, away)
+            except (OSError, NotImplementedError, AttributeError) as exc:
+                self.skipTest(f"cannot make the link here: {exc}")
+            with self.assertRaises(OSError):
+                write("private\n", ws, now=WHEN)
+            self.assertEqual(list(Path(away).iterdir()), [])
+
+    def test_a_symlinked_notes_folder_is_refused(self):
+        self._refused_through(lambda link, target: os.symlink(
+            target, link, target_is_directory=True))
+
+    @unittest.skipUnless(sys.platform == "win32", "junctions are Windows'")
+    def test_a_junctioned_notes_folder_is_refused(self):
+        # No privilege needed to make one on Windows, unlike a symlink, so this is the
+        # case that runs on a stock machine. `_winapi.CreateJunction` is what CPython's
+        # own suite makes them with.
+        import _winapi
+
+        self._refused_through(lambda link, target: _winapi.CreateJunction(
+            str(target), str(link)))
 
 
 class TestGrammar(unittest.TestCase):

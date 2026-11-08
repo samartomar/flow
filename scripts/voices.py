@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import re
 import subprocess
 import sys
 import time
@@ -39,17 +40,40 @@ SAMPLE = (
 OUT = Path(__file__).resolve().parent.parent / ".bench" / "voices"
 
 
+def _b64(text: str) -> str:
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def wav_name(voice: str) -> str:
+    """A file name for `voice` made only of [A-Za-z0-9._-], so it is safe anywhere.
+
+    A voice name is whatever an installed engine registered, and a path inside a
+    PowerShell string is code if it carries a quote — this keeps the name boring even
+    before the path is base64'd below.
+    """
+    stem = re.sub(r"[^A-Za-z0-9._-]", "-", voice).strip(".-") or "voice"
+    return stem + ".wav"
+
+
 def to_wav(name: str, path: Path) -> bool:
-    """Speak `SAMPLE` in `name` to a WAV, without touching the speakers."""
-    b64 = base64.b64encode(SAMPLE.encode("utf-8")).decode("ascii")
-    nb64 = base64.b64encode(name.encode("utf-8")).decode("ascii")
+    """Speak `SAMPLE` in `name` to a WAV, without touching the speakers.
+
+    Every value from outside the script — the sentence, the voice name, the output path —
+    reaches PowerShell base64'd and decoded there, never spliced into a quoted literal.
+    The path was spliced raw once, inside `'...'`: a checkout under a folder with an
+    apostrophe in its name would end the string and run the rest as a command.
+    """
+    b64 = _b64(SAMPLE)
+    nb64 = _b64(name)
+    pb64 = _b64(str(path))
     script = (
         "Add-Type -AssemblyName System.Speech;"
         "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
         "try{$s.SelectVoice([Text.Encoding]::UTF8.GetString("
         f"[Convert]::FromBase64String('{nb64}')))}}catch{{exit 1}};"
         "$s.Rate=1;"
-        f"$s.SetOutputToWaveFile('{path}');"
+        "$s.SetOutputToWaveFile([Text.Encoding]::UTF8.GetString("
+        f"[Convert]::FromBase64String('{pb64}')));"
         "$s.Speak([Text.Encoding]::UTF8.GetString("
         f"[Convert]::FromBase64String('{b64}')));"
         "$s.Dispose();"
@@ -90,7 +114,7 @@ def main() -> None:
         OUT.mkdir(parents=True, exist_ok=True)
         print(f"\nwriting to {OUT}", flush=True)
         for v in voices:
-            path = OUT / (v.name.replace(" ", "-") + ".wav")
+            path = OUT / wav_name(v.name)
             print(f"  {'ok  ' if to_wav(v.name, path) else 'FAIL'} {path.name}",
                   flush=True)
         return
