@@ -891,12 +891,27 @@ Three things now hold, and they are independent on purpose:
    anything, so the description still has a caller; two copies of the rule would drift
    the day a terminal joins `BRACKETED_PASTE`.
 
-   **What this does not decide**, and the boundary is deliberate: VS Code and JetBrains
-   integrated terminals classify as *editors* here, because the top-level window belongs
-   to the editor process. They are neither refused nor warned. Failing closed on an
-   ambiguous target would refuse every ordinary editor paste, and telling the two apart
-   means identifying the focused child through UI Automation — a dependency-shaped
-   decision against R16. It is in NEEDS_YOU with both shapes, and it is the owner's.
+   **Editors that host a terminal** (v0.8.1): VS Code and its forks (Cursor, VSCodium,
+   Windsurf…) and the JetBrains IDEs still classify as *editors*, because the top-level
+   window belongs to the editor process wherever the caret is — telling the file from
+   the integrated terminal means identifying the focused child through UI Automation, a
+   dependency-shaped decision against R16. Until v0.8.1 that meant a dictated `ls` plus
+   newline ran in their terminal panel. The owner's decision is the half of P7 that costs
+   an editor nothing: `inject.EDITOR_HOSTS` names them by process, and for those the
+   trailing CR/LF is always stripped, silently. Interior newlines stay and multi-line is
+   not refused, so dictating a paragraph into the editor still works — both families'
+   integrated terminals bracket pastes, so those lines arrive as text. What they do not
+   get is Flow's own Enter after a multi-line block: with `submit` the paste lands and
+   the Enter is declined with "pasted, but not submitted", since in a terminal panel it
+   would run every line. A single line still submits.
+
+   **macOS** follows the same rule since v0.8.1: a multi-line draft into a recognised
+   terminal is refused after the clipboard write rather than warned and pasted, and the
+   keystroke script re-checks that the classified bundle identifier is still frontmost
+   (`error number 9001`, "not pasted: the target window changed before Send"; 9002
+   before the Return) because `pbpaste`/`pbcopy` sit between the first look and the
+   Cmd-V. A bundle identifier outside `[A-Za-z0-9.-]` is not spelled into AppleScript at
+   all; the paste is refused instead.
 
 ### Correcting a Type paste
 
