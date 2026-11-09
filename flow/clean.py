@@ -70,7 +70,8 @@ TOKEN_LOGPROB_MIN = -0.8
 
 #: The same bar for the Parakeet **GPU** build, whose helper reports a **mean word
 #: confidence** (NeMo's `max_prob`, aggregated per word with `min`) instead of token
-#: log-probabilities. parakeet.cpp v0.5.0, q8_0, CUDA and Vulkan, 2026-10-05
+#: log-probabilities. parakeet.cpp v0.5.0, q8_0, CUDA and Vulkan, 2026-10-05, and v0.6.1 on CUDA,
+#: 2026-11-08, which gave the same distribution to two decimals
 #: (`scripts/parakeet_bench.py gpu`), 300 EdAcc clips: p1 0.52-0.53, p5 0.68, p50 0.89, and
 #: the only clips under 0.5 are two one-or-three-word fragments ("Okay." 0.39, "So" 0.43)
 #: that the filler list drops anyway; the lowest non-filler clip is 0.51. **Zero inventions on

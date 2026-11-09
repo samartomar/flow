@@ -583,7 +583,7 @@ class TestTheGpuRow(_Case):
         self.with_backend("cuda")
         row = self.rows()[PKG]
         self.assertEqual(row["errors"], 14.5)
-        self.assertEqual(row["speed"], 50.0)  # 1 / 0.020, CUDA on the GTX 1070
+        self.assertEqual(row["speed"], 62.5)  # 1 / 0.016, CUDA on the GTX 1070
         self.assertEqual(row["speed_basis"], "")  # same basis as the Whisper rows
         self.assertEqual(row["backend"], "CUDA")
         self.assertNotIn("blind", row)
@@ -676,8 +676,8 @@ class TestTheGpuRow(_Case):
     def test_deleting_it_removes_the_model_and_the_helper(self):
         root = Path(self.tmp.name)
         model = root / "parakeet-tdt-0.6b-v3-gpu"
-        helper = root / "parakeet-cpp-v0.5.0-vulkan"
-        keep = root / "parakeet-cpp-v0.5.0-cuda"
+        helper = root / "parakeet-cpp-v0.6.1-vulkan"
+        keep = root / "parakeet-cpp-v0.6.1-cuda"
         for d in (model, helper, keep):
             d.mkdir()
             (d / "x").write_text("x")

@@ -136,11 +136,11 @@ class _Case(unittest.TestCase):
     def make_zip(self, extra=None, exe=None) -> bytes:
         out = io.BytesIO()
         with zipfile.ZipFile(out, "w") as zf:
-            zf.writestr("parakeet-v0.5.0-bin-win-vulkan-x64/parakeet-server.exe",
+            zf.writestr("parakeet-v0.6.1-bin-win-vulkan-x64/parakeet-server.exe",
                         exe if exe is not None else self.exe_bytes)
-            zf.writestr("parakeet-v0.5.0-bin-win-vulkan-x64/LICENSE", "MIT\n")
-            zf.writestr("parakeet-v0.5.0-bin-win-vulkan-x64/README.md", "readme")
-            zf.writestr("parakeet-v0.5.0-bin-win-vulkan-x64/parakeet-cli.exe", b"cli")
+            zf.writestr("parakeet-v0.6.1-bin-win-vulkan-x64/LICENSE", "MIT\n")
+            zf.writestr("parakeet-v0.6.1-bin-win-vulkan-x64/README.md", "readme")
+            zf.writestr("parakeet-v0.6.1-bin-win-vulkan-x64/parakeet-cli.exe", b"cli")
             for name, data in (extra or {}).items():
                 zf.writestr(name, data)
         return out.getvalue()
@@ -715,9 +715,9 @@ class TestTheDownloads(_Case):
 
     def test_the_default_sources_are_the_pinned_tag_and_commit(self):
         self.assertEqual(
-            parakeet.release_url("parakeet-v0.5.0-bin-win-cuda-x64.zip"),
-            "https://github.com/mudler/parakeet.cpp/releases/download/v0.5.0/"
-            "parakeet-v0.5.0-bin-win-cuda-x64.zip")
+            parakeet.release_url("parakeet-v0.6.1-bin-win-cuda-x64.zip"),
+            "https://github.com/mudler/parakeet.cpp/releases/download/v0.6.1/"
+            "parakeet-v0.6.1-bin-win-cuda-x64.zip")
         v = parakeet.VARIANTS["gpu"]
         self.assertEqual(parakeet.hub_url("m.gguf", v.repo, v.revision),
                          f"https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/{v.revision}/m.gguf")
@@ -752,17 +752,17 @@ class TestTheShippedGpuTables(unittest.TestCase):
                          "4d69a4a6683f4f2d952bad794c1357ca6eb628027695b4699c5a9ad4cd07d757")
         self.assertEqual(gpu.revision, "741158ae71e64ef5c89385862c18f777d07a97a1")
         self.assertEqual(gpu.runtime, "gpu")
-        self.assertEqual(parakeet.RUNTIMES["cuda"].zip.size, 312_914_549)
-        self.assertEqual(parakeet.RUNTIMES["vulkan"].zip.size, 35_828_324)
+        self.assertEqual(parakeet.RUNTIMES["cuda"].zip.size, 313_314_291)
+        self.assertEqual(parakeet.RUNTIMES["vulkan"].zip.size, 36_194_416)
         self.assertEqual(parakeet.RUNTIMES["cuda"].zip.sha256,
-                         "0c90f619a368e67418596231470e916fda60118180879e4334d29d9b0df93b21")
+                         "561880a4392048b169522d35545d03282f6baf2964c0f5ada77efed4074ed389")
         self.assertEqual(parakeet.RUNTIMES["vulkan"].zip.sha256,
-                         "717c416fab299755e8140137e3a0115121ce1acb6379d13c60f2f0613f6c13a3")
-        self.assertEqual(parakeet.CPP_VERSION, "v0.5.0")
+                         "1b9adfb041394ebd016865a15699614a3c095876e07e7c3d67669d5a00cdda86")
+        self.assertEqual(parakeet.CPP_VERSION, "v0.6.1")
 
     def test_the_helpers_live_beside_the_models_under_a_versioned_name(self):
-        self.assertEqual(parakeet.RUNTIMES["cuda"].dirname, "parakeet-cpp-v0.5.0-cuda")
-        self.assertEqual(parakeet.RUNTIMES["vulkan"].dirname, "parakeet-cpp-v0.5.0-vulkan")
+        self.assertEqual(parakeet.RUNTIMES["cuda"].dirname, "parakeet-cpp-v0.6.1-cuda")
+        self.assertEqual(parakeet.RUNTIMES["vulkan"].dirname, "parakeet-cpp-v0.6.1-vulkan")
 
     def test_the_one_url_opener_is_still_this_module(self):
         # tests/test_version.py counts modules that hold one; this file is why it is two.

@@ -149,13 +149,15 @@ PARAKEET_INT8 = Spec(
 #: only when no backend can be told.
 PARAKEET_GPU = Spec(
     "parakeet-tdt-0.6b-v3-gpu", parakeet.VARIANTS["gpu"].name, parakeet.VARIANTS["gpu"].bytes,
-    14.5, 0.020, engine="parakeet", variant="gpu",
+    14.5, 0.016, engine="parakeet", variant="gpu",
     note="runs on the GPU through parakeet.cpp; 8-bit weights, no accuracy lost")
 PARAKEET_SPECS = (PARAKEET, PARAKEET_INT8, PARAKEET_GPU)
 
 #: Real-time factor of the GPU build on the GTX 1070, 300 EdAcc clips, by backend. CUDA
-#: 0.020 (50x real time, p50 107 ms), Vulkan 0.036 (27x, p50 211 ms).
-GPU_RTF = {"cuda": 0.020, "vulkan": 0.036}
+#: 0.016 (63x real time, p50 88 ms) on parakeet.cpp v0.6.1, 2026-11-08 - it was 0.020 (p50
+#: 107 ms) on v0.5.0, with the same 14.5 errors. Vulkan 0.036 (27x, p50 211 ms) is still
+#: v0.5.0's: not re-measured on v0.6.1, so if anything it understates the speed.
+GPU_RTF = {"cuda": 0.016, "vulkan": 0.036}
 
 #: Every row the page lists. `BY_NAME` stays Whisper-only on purpose — see the docstring.
 SPECS = {**BY_NAME, **{spec.name: spec for spec in PARAKEET_SPECS}}

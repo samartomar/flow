@@ -41,7 +41,7 @@ from .models import human
 #: The two engines, by the name the page and the voice list use. `spec` is the extra's own
 #: requirement in `pyproject.toml` (a test holds them equal), `module` what has to import
 #: for the engine to be there, `size` what the install fetches, measured 2026-09-23 on
-#: PyPI (for piper-tts 1.8.0; the pinned 1.6.0 below is the same order of size): its
+#: PyPI for piper-tts 1.8.0, the version pinned below: its
 #: Windows wheel is 34.1 MB (onnxruntime, which it runs on,
 #: already came with faster-whisper); edge-tts 7.2.8 and aiohttp with its eight small
 #: dependencies are about 2 MB.
@@ -55,7 +55,7 @@ from .models import human
 #: a constant works for a checkout and an installed tool alike. Only the engine itself is
 #: exact; what it depends on is resolved by the installer, as `uv tool install` does.
 ENGINES = {
-    "piper": {"spec": "piper-tts>=1.6", "pin": "piper-tts==1.6.0", "module": "piper",
+    "piper": {"spec": "piper-tts>=1.6", "pin": "piper-tts==1.8.0", "module": "piper",
               "extra": "voice", "size": 34_119_688},
     "edge": {"spec": "edge-tts>=7.2", "pin": "edge-tts==7.2.8", "module": "edge_tts",
              "extra": "edge", "size": 2_000_000},

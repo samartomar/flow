@@ -716,7 +716,7 @@ add-on installed the option is greyed out and says how to get it.
 
 **On the GPU.** A third version, **GPU**, runs the same model through
 [parakeet.cpp](https://github.com/mudler/parakeet.cpp) in a helper process: **14.5 errors per
-100 words** on the same clips — no accuracy lost to its 8-bit weights — at **50x** real time
+100 words** on the same clips — no accuracy lost to its 8-bit weights — at **63x** real time
 on a GTX 1070 through CUDA (28x through Vulkan), against 14x for the CPU builds. It needs no
 add-on: it is a 940 MB model plus a 36 MB (Vulkan) or 313 MB (CUDA) helper that Flow
 downloads, checks and keeps under `~/.flow/models/`. Flow uses CUDA when the `[cuda]` wheels
