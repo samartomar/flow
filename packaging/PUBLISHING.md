@@ -14,10 +14,11 @@ The files are written and committed:
 | `packaging/winget/SamarTomar.Flow.locale.en-US.yaml` | winget en-US description |
 
 **Scoop has shipped since 2026-09-24**, through Flow's own bucket,
-[`samartomar/scoop-flow`](https://github.com/samartomar/scoop-flow). **winget has not:**
-the v0.6.1 submission,
-[microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220), was
-closed unmerged on 2026-11-01 (step 3), and the package is to be submitted again as new.
+[`samartomar/scoop-flow`](https://github.com/samartomar/scoop-flow). **winget is submitted
+as a new package**, v0.8.2, in
+[microsoft/winget-pkgs#475250](https://github.com/microsoft/winget-pkgs/pull/475250)
+(2026-11-09), and is waiting for review (step 3). The first attempt, v0.6.1, was closed
+unmerged.
 **The manifests are ready to send whenever they carry
 a real checksum** rather than the literal string `FILL-ME-SHA256`, which holds the place
 between a version bump and that version's release (step 5). The first was v0.6.0's,
@@ -108,62 +109,73 @@ and reads the hash from the `.sha256` asset rather than downloading the zip to c
 it. So a release needs nothing done there. The bucket's own `.\bin\checkver.ps1 flow
 -Update` is the same run by hand.
 
-## 3. winget: not in the repository yet
+## 3. winget: submitted as a new package, waiting for review
 
-**The first submission did not land.** v0.6.1 was
+**v0.8.2 is [microsoft/winget-pkgs#475250](https://github.com/microsoft/winget-pkgs/pull/475250)**,
+opened on 2026-11-09 from the fork `samartomar/winget-pkgs`, branch
+`SamarTomar.Flow-0.8.2`, with the three files at `manifests/s/SamarTomar/Flow/0.8.2/` on
+schema 1.28.0. Until it is merged, `SamarTomar.Flow` is not in winget.
+
+**The first attempt did not land.** v0.6.1 was
 [microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220),
-opened on 2026-09-24 from a fork under the owner's account, with the three files at
-`manifests/s/SamarTomar/Flow/0.6.1/`. The CLA was accepted the same day and validation
-passed, and then it sat in the queue for a community moderator, who never reviewed it. On
-2026-10-30 the repository's automation marked it `Manifest-Version-Deprecated` ("Please use
-version `1.28.0`") and `Needs-Author-Feedback`, and it was closed unmerged on 2026-11-01.
-The fork is gone too. So `SamarTomar.Flow` does not exist in winget, and the next
-submission is a **new package** again, not an update.
+opened on 2026-09-24. The CLA was accepted the same day and validation passed, and then it
+sat in the queue for a community moderator, who never reviewed it. On 2026-10-30 the
+repository's automation marked it `Manifest-Version-Deprecated` ("Please use version
+`1.28.0`") and `Needs-Author-Feedback`, and it was closed unmerged on 2026-11-01.
 
-What carries over:
+What holds for any submission:
 - The moniker is `flow-dictation`. `flow` belongs to MadrasCheck.flow, and monikers are
   unique. The command on PATH is still `flow`.
-- The CLA is signed for the account, so the bot will not ask again.
-- The manifests here are now on **schema 1.28.0** (moved 2026-11-08; `winget validate`
-  passes). The repository retires old schema versions while submissions wait, so check the
-  newest one under `doc/manifest/schema` in winget-pkgs before sending, and move to it if
-  this has fallen behind.
+- The CLA is signed for the account, so the bot does not ask again.
+- The repository retires old schema versions while submissions wait. Before sending, check
+  the newest one under `doc/manifest/schema` in winget-pkgs, and move these files to it if
+  they have fallen behind.
+- A first package from a new publisher is reviewed by a person, a volunteer, and the first
+  attempt waited more than five weeks. **Watch the pull request and answer the bot
+  quickly:** a label like `Needs-Author-Feedback` closes the pull request if it goes
+  unanswered, and that is how the first attempt ended.
 
-**To submit**, from the repository root, with a GitHub token that has `public_repo`. It
-forks winget-pkgs under the owner's account and opens the pull request:
+### Submitting a new package
+
+**`wingetcreate submit` cannot do it.** wingetcreate 1.12.13, the newest release on
+2026-11-09, only knows schemas up to 1.12.0, and it refuses the 1.28.0 header ("The schema
+header URL does not match the expected pattern"). komac knows 1.28.0, but it has no
+command that submits manifests that already exist: `komac new` builds one from prompts.
+So the new package was submitted with `gh`, which is all `wingetcreate submit` does
+underneath. The repository is several GB, and none of this clones it:
+
+1. Copy the three files to a scratch directory, without this directory's explanatory
+   comments. Keep the schema header on line 1, and keep the blank lines *inside*
+   `Description`, which separate its paragraphs. Check that each copy still parses to the
+   same data as the original, then run `winget validate --manifest <that directory>`.
+2. Fork and branch from upstream `master`:
+
+   ```powershell
+   gh repo fork microsoft/winget-pkgs --clone=false --default-branch-only
+   $sha = gh api repos/microsoft/winget-pkgs/commits/master -q .sha
+   gh api -X POST repos/samartomar/winget-pkgs/git/refs -f ref=refs/heads/SamarTomar.Flow-<version> -f sha=$sha
+   ```
+
+3. Put each file at `manifests/s/SamarTomar/Flow/<version>/<file>` on that branch with
+   `gh api -X PUT repos/samartomar/winget-pkgs/contents/<path>`, passing `branch`, a
+   `message` and the base64 `content`.
+4. Open the pull request titled `New package: SamarTomar.Flow version <version>`, with
+   the repository's template filled in honestly. `winget install --manifest` needs the
+   `LocalManifestFiles` admin setting, so leave that box unticked unless it was run.
+
+### Every version after it is merged
+
+Each later version is an update, and **komac** builds it from the release (it computes
+the checksum from the URL, and writes 1.28.0):
 
 ```powershell
-winget validate --manifest packaging\winget
-wingetcreate submit packaging\winget --token <github-token>
+komac update SamarTomar.Flow --version 0.8.3 --urls https://github.com/samartomar/flow/releases/download/v0.8.3/flow-windows-x64.zip --submit
 ```
 
-The first submission went without this directory's explanatory comments. They are YAML
-comments, so validation does not mind them, but a reviewer reads less with them gone.
-
-A first package from a new publisher is reviewed by a person, a volunteer, and the last
-one waited more than five weeks. **Watch the pull request and answer the bot quickly:** a
-label like `Needs-Author-Feedback` closes the pull request if it goes unanswered, and that
-is how the first one ended.
-
-idation then installs the package on a
-clean VM, and a first package from a new publisher is reviewed by a person.
-
-**Once the package is in**, each later version is an update, which wingetcreate builds from
-the release. It needs a
-GitHub token with `public_repo`:
-
-```powershell
-wingetcreate update SamarTomar.Flow --version 0.6.2 --urls https://github.com/samartomar/flow/releases/download/v0.6.2/flow-windows-x64.zip --submit --token <github-token>
-```
-
-komac does the same job and computes the checksum itself, from the URL:
-
-```powershell
-komac update SamarTomar.Flow --version 0.6.2 --urls https://github.com/samartomar/flow/releases/download/v0.6.2/flow-windows-x64.zip --submit
-```
-
-Its flags move between major versions more than wingetcreate's do, so check
-`komac --help` if it argues.
+It reads a classic token with `public_repo` from `GITHUB_TOKEN`, or one stored with
+`komac token update`. Install it with `winget install --id RussellBanks.Komac --exact`. Its
+flags move between major versions, so check `komac --help` if it argues. `wingetcreate
+update` would work once a version of it knows 1.28.0.
 
 ## 4. The binary is unsigned, and that does not change here
 
