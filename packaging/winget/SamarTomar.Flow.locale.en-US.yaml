@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.28.0.schema.json
 
 # The text a stranger reads in `winget show SamarTomar.Flow` and in the Store listing that
 # mirrors this repository. Every claim below is one the README already makes, written in
@@ -45,4 +45,4 @@ Tags:
   - voice
   - hotkey
 ManifestType: defaultLocale
-ManifestVersion: 1.12.0
+ManifestVersion: 1.28.0

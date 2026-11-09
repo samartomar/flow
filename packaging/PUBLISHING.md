@@ -13,9 +13,11 @@ The files are written and committed:
 | `packaging/winget/SamarTomar.Flow.installer.yaml` | winget installer manifest |
 | `packaging/winget/SamarTomar.Flow.locale.en-US.yaml` | winget en-US description |
 
-**Submitted on 2026-09-24, as v0.6.1:** Scoop through Flow's own bucket,
-[`samartomar/scoop-flow`](https://github.com/samartomar/scoop-flow), and winget as
-[microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220).
+**Scoop has shipped since 2026-09-24**, through Flow's own bucket,
+[`samartomar/scoop-flow`](https://github.com/samartomar/scoop-flow). **winget has not:**
+the v0.6.1 submission,
+[microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220), was
+closed unmerged on 2026-11-01 (step 3), and the package is to be submitted again as new.
 **The manifests are ready to send whenever they carry
 a real checksum** rather than the literal string `FILL-ME-SHA256`, which holds the place
 between a version bump and that version's release (step 5). The first was v0.6.0's,
@@ -106,23 +108,48 @@ and reads the hash from the `.sha256` asset rather than downloading the zip to c
 it. So a release needs nothing done there. The bucket's own `.\bin\checkver.ps1 flow
 -Update` is the same run by hand.
 
-## 3. winget: submitted
+## 3. winget: not in the repository yet
 
-**v0.6.1 is [microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220)**,
+**The first submission did not land.** v0.6.1 was
+[microsoft/winget-pkgs#440220](https://github.com/microsoft/winget-pkgs/pull/440220),
 opened on 2026-09-24 from a fork under the owner's account, with the three files at
-`manifests/s/SamarTomar/Flow/0.6.1/`. Two things changed on the way in:
+`manifests/s/SamarTomar/Flow/0.6.1/`. The CLA was accepted the same day and validation
+passed, and then it sat in the queue for a community moderator, who never reviewed it. On
+2026-10-30 the repository's automation marked it `Manifest-Version-Deprecated` ("Please use
+version `1.28.0`") and `Needs-Author-Feedback`, and it was closed unmerged on 2026-11-01.
+The fork is gone too. So `SamarTomar.Flow` does not exist in winget, and the next
+submission is a **new package** again, not an update.
+
+What carries over:
 - The moniker is `flow-dictation`. `flow` belongs to MadrasCheck.flow, and monikers are
   unique. The command on PATH is still `flow`.
-- The manifests moved to schema 1.12.0, which the pull request template asks for.
+- The CLA is signed for the account, so the bot will not ask again.
+- The manifests here are now on **schema 1.28.0** (moved 2026-11-08; `winget validate`
+  passes). The repository retires old schema versions while submissions wait, so check the
+  newest one under `doc/manifest/schema` in winget-pkgs before sending, and move to it if
+  this has fallen behind.
 
-They were sent without this directory's explanatory comments, and `winget validate`
-passed on the exact files sent.
+**To submit**, from the repository root, with a GitHub token that has `public_repo`. It
+forks winget-pkgs under the owner's account and opens the pull request:
 
-Microsoft's bot asks the owner to accept its CLA on the pull request, by replying
-`@microsoft-github-policy-service agree`. Validation then installs the package on a
+```powershell
+winget validate --manifest packaging\winget
+wingetcreate submit packaging\winget --token <github-token>
+```
+
+The first submission went without this directory's explanatory comments. They are YAML
+comments, so validation does not mind them, but a reviewer reads less with them gone.
+
+A first package from a new publisher is reviewed by a person, a volunteer, and the last
+one waited more than five weeks. **Watch the pull request and answer the bot quickly:** a
+label like `Needs-Author-Feedback` closes the pull request if it goes unanswered, and that
+is how the first one ended.
+
+idation then installs the package on a
 clean VM, and a first package from a new publisher is reviewed by a person.
 
-**For the next version**, wingetcreate builds the update from the release. It needs a
+**Once the package is in**, each later version is an update, which wingetcreate builds from
+the release. It needs a
 GitHub token with `public_repo`:
 
 ```powershell
