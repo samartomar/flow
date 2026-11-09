@@ -284,7 +284,7 @@ def runtime_installed() -> tuple[bool, str]:
 #: tag and not a branch, and each zip is pinned by SHA-256 below — the digests GitHub itself
 #: publishes for the assets, which match the ones computed from the downloads.
 CPP_REPO = "mudler/parakeet.cpp"
-CPP_VERSION = "v0.5.0"
+CPP_VERSION = "v0.6.1"
 SERVER_EXE = "parakeet-server.exe"
 
 #: What `LOAD_SEC` is for the GPU build, by backend. Steady state is about a second and a
@@ -318,14 +318,14 @@ class Runtime:
 RUNTIMES: dict[str, Runtime] = {
     "cuda": Runtime(
         "cuda",
-        File(f"parakeet-{CPP_VERSION}-bin-win-cuda-x64.zip", 312_914_549,
-             "0c90f619a368e67418596231470e916fda60118180879e4334d29d9b0df93b21"),
-        "2621da65562a53fd26bfc6ab601fdf8133032516d7b31fb0617d7f6064e8c682", 169_658_880),
+        File(f"parakeet-{CPP_VERSION}-bin-win-cuda-x64.zip", 313_314_291,
+             "561880a4392048b169522d35545d03282f6baf2964c0f5ada77efed4074ed389"),
+        "719d9400d498e77c6eb84d04489ac11266d56a19cbfa69d8697fb6a27bc3daac", 169_806_848),
     "vulkan": Runtime(
         "vulkan",
-        File(f"parakeet-{CPP_VERSION}-bin-win-vulkan-x64.zip", 35_828_324,
-             "717c416fab299755e8140137e3a0115121ce1acb6379d13c60f2f0613f6c13a3"),
-        "5b2da797198ee0ef9ce4438f2be71cf77fa7089efe7617d956cb6fb75ec54f73", 59_147_776),
+        File(f"parakeet-{CPP_VERSION}-bin-win-vulkan-x64.zip", 36_194_416,
+             "1b9adfb041394ebd016865a15699614a3c095876e07e7c3d67669d5a00cdda86"),
+        "0c834c36dfc2ceab0d25ade2633b7605b314ef0869dee45aa9716c7919e7b715", 59_278_848),
 }
 
 #: What the CUDA helper links beside the system: the runtime and cuBLAS, both from NVIDIA's

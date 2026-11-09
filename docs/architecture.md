@@ -92,7 +92,7 @@ boundary is this:
   file's size and SHA-256. It does not go through `huggingface_hub`, and it does **not**
   avoid huggingface.co: an earlier build of this engine fetched from GitHub releases and
   did, and the native engine is now the only answer for a network that blocks the hub.
-  The **GPU build** adds a second source: the pinned `v0.5.0` release of
+  The **GPU build** adds a second source: the pinned `v0.6.1` release of
   `github.com/mudler/parakeet.cpp` (a 36 MB Vulkan or 313 MB CUDA zip, each checked against
   its SHA-256, of which only `parakeet-server.exe` and `LICENSE` are extracted) and a 940 MB
   GGUF from `huggingface.co/mudler/parakeet-cpp-gguf` at one commit. The executable's own

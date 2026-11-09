@@ -138,7 +138,7 @@ class TestCAnInstallIsJudgedByTheImport(unittest.TestCase):
         job = _wait(packs.install("piper"))
         self.assertEqual(job.state, "done")
         # The exact version the lock resolved, never the extra's open range.
-        self.assertEqual(self.command[-1], "piper-tts==1.6.0")
+        self.assertEqual(self.command[-1], "piper-tts==1.8.0")
         self.assertEqual(self.kwargs["timeout"], vp.INSTALL_TIMEOUT_SEC)
         self.changed.assert_called_once_with("piper")
 
