@@ -10,6 +10,7 @@ A fake cache and a pretend session, as in `test_whisper_catalog.py`: no network,
 """
 
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -86,9 +87,13 @@ class TestTheStepShowsTheGpuBuild(_Case):
     def test_pressing_download_reuses_the_running_job(self):
         self.h.home.gpu_auto = "fetch"
         job = self.job()
-        with mock.patch("threading.Thread") as thread:
+        with mock.patch("threading.Thread", wraps=threading.Thread) as thread:
             self.h.call("POST", "/api/start/models", {"action": "download"})
-        thread.assert_not_called()  # `Downloader.start` returned the running job
+        # `Downloader.start` returned the running job, so no download thread was started.
+        # Only threads named `download-…` count: the patch is process-wide, and Home's
+        # server or a job left by another test may start a thread of its own meanwhile.
+        names = [c.kwargs.get("name") or "" for c in thread.call_args_list]
+        self.assertEqual([n for n in names if n.startswith("download-")], [])
         self.assertIs(self.h.home.models.downloads.jobs()[GPU.name], job)
 
     def test_download_with_nothing_running_starts_the_gpu_build_to_switch_when_it_lands(self):
