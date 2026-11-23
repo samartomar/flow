@@ -29,11 +29,15 @@ words wherever you were typing: your editor, a terminal, Slack, a browser tab. I
 something wrong, hold the keys again and say *"change Tuesday to Thursday"* or *"scratch
 that"*, and it fixes the text it just pasted.
 
-Flow sits in a small pill at the bottom of the screen, and the pill has two more modes. In
-Refine, what you say is rewritten to suit the window you're in: a prompt in a terminal or an
-editor, an email in Outlook or Gmail, a chat message in Slack or Teams, and anywhere else
-your own words tidied up. In Ask, your question goes to the agent CLI you already use
-(`codex` or `claude`) and the answer is read back to you.
+Want it written properly? Hold again and say *"make it an email"*, *"polish that"* or
+*"make it shorter"*, or press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>. The agent CLI
+you already use (`codex` or `claude`) rewrites what Flow just pasted to suit the window
+you're in: a prompt in a terminal or an editor, an email in Outlook or Gmail, a chat
+message in Slack or Teams, and anywhere else your own words tidied up. The rewrite goes
+where the words were. Hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Win</kbd> to ask that CLI a
+question instead, and the answer is read back to you.
+
+Flow sits in a small pill at the bottom of the screen, which shows what it is doing.
 
 I made Flow for people whose English has an accent that speech recognition keeps tripping
 over, often enough that they give up and type. Spanish, Indian, Russian and Japanese
@@ -85,13 +89,18 @@ spoken corrections work without either. [The guide](docs/guide.md#install) has t
 
 ## Using it
 
-1. Hold <kbd>Ctrl</kbd>+<kbd>Win</kbd> (or hold the pill) and talk.
+1. Hold <kbd>Ctrl</kbd>+<kbd>Win</kbd> (or hold the pill) and talk. The line under the
+   pill says it is listening and shows your words as it hears them.
 2. Let go, and the text is pasted where your cursor was.
 3. Heard you wrong? Hold again and say *"change Tuesday to Thursday"* or *"scratch that"*.
    Flow can fix its last paste until you type or click there.
-4. Pasted into the wrong window? Click the right one and press
+4. Want it written properly? Hold again and say *"make it an email"*, *"polish that"* or
+   *"make it shorter"*, or press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>. Flow rewrites
+   what it just pasted, where it is. *"Scratch that"*, or that window's own undo, puts
+   your words back.
+5. Pasted into the wrong window? Click the right one and press
    <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>.
-5. Want an answer rather than text? Hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Win</kbd> and
+6. Want an answer rather than text? Hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Win</kbd> and
    ask.
 
 Those last two are Wispr Flow's keys on Windows as well, so if you've used it, your hands
@@ -102,23 +111,28 @@ your voice, and whether to keep a history. You can skip any step.
 
 ## Type, Refine, Ask
 
-Tap the pill to cycle through its three modes. Its colour tells you which one it's in.
+The pill has three modes, and its colour tells you which one it's in. It starts in Type,
+and most of the time that is where it stays, because a rewrite can be asked for after the
+words are in. Change mode from the pill's right-click menu or with
+<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd>.
 
 | Mode | Pill | When you let go |
 |:---|:---|:---|
 | Type | white | The words are pasted. |
-| Refine | gold | `codex` or `claude` rewrites them for the window in front: a prompt, an email, a chat message, or the same words tidied. Nothing is pasted until you press Send. |
-| Ask | violet | The question goes to your agent CLI. The answer appears above the pill and is read aloud, and **Continue in Flow** opens the conversation in a window. |
+| Refine | gold | `codex` or `claude` rewrites them for the window in front (a prompt, an email, a chat message, or the same words tidied) and the rewrite is pasted. If the CLI doesn't answer, your words go in as you said them. |
+| Ask | violet | The question goes to your agent CLI. The pill says it is waiting, then the answer comes up on a card above the pill and is read aloud. The card stays until you close it, with **Copy** and **Continue in Flow**, which opens the conversation in a window. |
 
-Tapping the pill says what the mode you landed on will do, such as *Refine - writes an
-email for OUTLOOK, then you press Send*. If Refine picked the wrong kind, hold the mic at
-the result and say *"make it an email"* (or a prompt, a message, *"tidy it up"*), or tell
-Flow what a program is for in Flow Home ▸ Settings ▸ What Refine writes. Holding again
-with more to say adds it to what you already said.
+Nothing rises above the pill while you talk, and nothing waits for a Send. What Refine
+pastes can be changed the way a Type paste can: in the next hold say *"scratch that"*,
+*"make it shorter"*, or *"make it an email"* (or a prompt, a message, *"tidy it up"*) if it
+picked the wrong kind. To settle the kind for a program once, use Flow Home ▸ Settings ▸
+What Refine writes.
 
 Point Refine and Ask at a project folder (Flow Home ▸ Settings ▸ Workspaces, or `--cwd`)
 and the answers are about your code. If you'd rather correct a draft by voice before
-anything is sent, switch to the Classic pill in Settings.
+anything is sent, switch to the Classic pill in Settings. The panel that used to hold a
+Refine until you pressed Send is still there too: Settings ▸ The pill ▸ *Show a panel
+while I refine and ask*.
 
 ## Flow Home
 
@@ -137,7 +151,9 @@ voice profile all stay local, and no API key is read, stored or passed anywhere 
 A few things do go out, and only when you use them:
 
 - A draft you refine or a question you ask goes to that agent CLI's cloud, along with your
-  workspace path if you set one. To choose what kind of writing a Refine is, Flow reads
+  workspace path if you set one. On your PC, `codex` and `claude` are told to keep no
+  record of the call and to leave your hooks out of it; `kiro-cli` has no switch for
+  keeping no record. To choose what kind of writing a Refine is, Flow reads
   the name and title of the window in front. That is used on your PC at that moment and is
   never stored or sent.
 - Pasting puts the text on the Windows clipboard for a moment, where clipboard managers

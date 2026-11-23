@@ -207,7 +207,7 @@
     // Ask's own hold (decisions.md 2026-09-23): the hand picks the side, so the tint
     // is the second way in, not the first.
     const askHow = sc.ask
-      ? `Works whatever the pill is on${sc.dictate ? `, and ${keys(sc.dictate)} goes back to dictating` : ""}. Or tap the pill until its mic is violet, then hold the pill.`
+      ? `Hold, ask, let go - whatever you were doing${sc.dictate ? `, and ${keys(sc.dictate)} goes back to dictating` : ""}.`
       : sc.mode
         ? `Tap the pill until its mic is violet, or press ${keys(sc.mode)}, then hold to talk.`
         : "Tap the pill until its mic is violet, then hold to talk.";
@@ -227,13 +227,13 @@
             ${s.all_words != null ? `<div class="stat"><b>${Number(s.all_words).toLocaleString()}</b><span>words all time</span></div>` : ""}
           </div>
           <hr class="rule">
-          <div class="row">${glyph(C.refine, 0.8)}<p class="note">Tap the pill to gold for <b class="warn">Refine</b>: what you say is rewritten for the window you are in &ndash; an email in mail, a message in chat, a prompt in a terminal &ndash; and waits for you to press Send. <a href="#/settings">What Refine writes</a></p></div>
+          <div class="row">${glyph(C.refine, 0.8)}<p class="note grow">Want it written properly? Hold again and say <b>make it an email</b>, <b>polish that</b> or <b>make it shorter</b>${sc.rewrite ? ", or press the keys" : ""}. Flow rewrites what it just pasted, for the window you are in. <a href="#/settings">What Refine writes</a></p>${keys(sc.rewrite)}</div>
           ${sc.corrects ? `<div class="row">${icon("pencil", C.soft, 15)}<p class="note grow">Said it wrong? Hold again and say <b>scratch that</b>, or <b>change Tuesday to Thursday</b>. Flow fixes what it just pasted, until you type or click.</p></div>` : ""}
           ${sc.paste_last ? `<div class="row">${icon("copy", C.soft, 15)}<p class="note grow">Pasted in the wrong window? <b>Paste last</b> puts it in the one in front.</p>${keys(sc.paste_last)}</div>` : ""}
         </section>
         <section class="card side-card">
           <div class="row"><span class="disc">${glyph(C.ask, 1.15)}</span><h2 class="grow">Ask</h2>${d.mode === "ask" ? '<span class="badge violet">the pill is on Ask</span>' : ""}${keys(sc.ask)}<span class="fine">${sc.ask ? "hold, ask, let go" : ""}</span></div>
-          <p class="lead">Ask anything, like ChatGPT. With a workspace set, the answer knows your code.</p>
+          <p class="lead">Ask anything, like ChatGPT. With a workspace set, the answer knows your code. It is read to you and stays above the pill until you close it; Continue in Flow has the whole conversation.</p>
           <p class="note">${askHow}</p>
           <hr class="rule">
           <div class="row">${icon("folder", d.workspace ? C.green : C.soft, 16)}<span class="mono grow ellipsis">${esc(d.workspace || "no workspace - answers are about anything")}</span><a class="btn ghost sm" href="#/settings">Change</a></div>
@@ -559,6 +559,7 @@
           <section class="card">
             <h2>The pill</h2>
             <div class="setting"><div class="text"><b>Design</b><span class="note">Switches now, keeping what you were saying.</span></div>${seg(d.design.options.map((o) => [o.name, o.label]), d.design.current, "design", "Pill design")}</div>
+            <div class="setting"><div class="text"><b>Show a panel while I refine and ask</b><span class="note">The earlier flow: a panel rises above the pill and a rewrite waits there for Send. Off, a rewrite goes straight where you were typing and an answer shows on a card.</span></div>${sw(d.flows.panel, "panel-flows", "Show a panel while I refine and ask")}</div>
             <div class="setting"><div class="text"><b>Classic panel</b><span class="note">Width and place of the Classic pill's panel, from its next start.</span></div>
               <select data-change="panel" aria-label="Panel width">${d.classic.panels.map((p) => `<option ${p === d.classic.panel ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
               <select data-change="place" aria-label="Where the pill sits">${d.classic.places.map((p) => `<option ${p === d.classic.place ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></div>
@@ -979,7 +980,7 @@
           : `<span class="row">${k.mode ? keys(k.mode) : ""}<span class="note">${k.mode ? "then hold" : "tap the pill to violet, then hold"}</span></span>`}
           <span class="note">the answer rises above the pill, like ChatGPT</span></div>
       </div>
-      <div class="row">${glyph(C.refine, 0.9)}<p class="note grow">And when the words need work first: tap the pill until its mic is gold for <b class="warn">Refine</b>. Say an email the way you would say it to a person &ndash; <i>&ldquo;tell Priya the release moves to Tuesday and say sorry for the late notice&rdquo;</i> &ndash; and it comes back as the email, to read before you send it.</p></div>
+      <div class="row">${glyph(C.refine, 0.9)}<p class="note grow">And when the words need work: say them the way you would to a person &ndash; <i>&ldquo;tell Priya the release moves to Tuesday and say sorry for the late notice&rdquo;</i> &ndash; then hold again and say <b>make it an email</b>. Flow rewrites what it just typed, where it stands.</p></div>
       <p class="fine">${icon("shield", C.soft, 13)} Speech is recognised on this PC. No account, no API key.</p>`;
   }
 
@@ -1473,6 +1474,7 @@
     // so there is nothing optimistic to do here.
     "check-update": (el) => run(() => api("settings/check-update", { on: el.getAttribute("aria-checked") !== "true" }), "Saved"),
     design: (el) => run(() => api("settings/design", { name: el.dataset.value }), "Switching the pill"),
+    "panel-flows": (el) => run(() => api("settings/flows", { panel: el.getAttribute("aria-checked") !== "true" }), "Saved"),
     "app-add": () => {
       const exe = (value("app-exe") || "").trim(), instruction = (value("app-text") || "").trim();
       const kind = value("app-kind") || "auto";

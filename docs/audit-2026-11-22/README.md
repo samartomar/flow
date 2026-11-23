@@ -58,6 +58,10 @@ Measured end to end through the real `Session` and the real CLIs, on the machine
 second hold 5.6 s (codex not tried), spoken restyle 6.2 s, tidy 5.8 s, a grounded
 question 10.3 s.
 
+*Correction, 2026-11-23:* "cannot answer" was true of the codex a development shell
+found (0.163.0). The shell Flow is normally started from finds 0.171.0, which answers;
+there a rewrite takes about ten seconds through codex. See decisions.md of that date.
+
 An independent review of the change, run before this was written up, found three
 things that were then fixed and tested: a Send that did not begin with a hold could still
 be read as more of a result closed earlier, sending old words in front of new ones; the
@@ -140,6 +144,20 @@ None of these was touched this round. The first three are in NEEDS_YOU as decisi
    this round's Settings card and Home line have put out of date.
 5. **Sign the build**, then an installer, then the machine policy — in that order,
    because each needs the one before it — if Flow is going to a company.
+
+## Later the same day: the flows between the two good screens
+
+The owner's answer to this round was that the resting pill and Flow Home are right, and
+that switching to Refine or Ask and clicking through them is where the experience falls
+apart. That became a second round, recorded in [decisions.md](../decisions.md) as "The
+pill is an indicator". In one paragraph: **you dictate, and the words land; a rewrite is
+one more sentence ("make it an email", "polish that") or one key (`alt+shift+X`), and it
+replaces what landed; a question shows nothing but the pill until the answer comes up
+on a card that stays.** No panel rises while you talk, nothing waits for a Send, and a
+tap on the pill no longer changes mode. The earlier flow is a setting, off.
+
+It also changes item 1 of the list above: select-and-say was specced against a panel
+that held the result, and has to be re-argued for a flow where the result lands.
 
 ## How to see it
 

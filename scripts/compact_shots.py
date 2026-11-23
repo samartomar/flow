@@ -35,6 +35,18 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   failed    a failure, said under its flash
   needs-cli a tap with no agent CLI: what the other two modes need
 
+Everything above the last six is the panel flow, which since 2026-11-22 is a setting
+(`Profile.panel_flows`) and is photographed with it on. The last six are the product:
+
+  flow-rewriting  "make it an email", said after the words landed: the pill, and
+                  under it what is being written and for how long
+  flow-landed     it went in where the words were, and the way back
+  flow-fallback   the CLI did not answer: the words as said went in instead
+  flow-asking     a question out: the pill and a line, nothing risen
+  flow-answer     the answer card: the question, the answer, Copy and the way to
+                  the conversation - up until it is closed
+  flow-keys       a tap on the pill, with keys to hold: what the keys are
+
 The gestures (tap cycles, hold talks) are logic, pinned headless in
 `tests/test_ui_compact.py`; what only pixels can prove is that the ring, the
 tint and the meter land where `design/compact/Main.dc.html` says they do.
@@ -257,6 +269,64 @@ def main() -> None:
     # product when Flow Home took its three lines, and this step went on
     # calling `_open_setup` into an AttributeError the walk swallowed.)
 
+    def flow(on: bool):
+        """Which flow the pill is in for the steps that follow (see the docstring)."""
+        def fn():
+            pill.panel_flows = on
+        return fn
+
+    def flow_rewriting():
+        # Type, the words already on the page, and "make it an email" out with the
+        # CLI. `_pump_waiting` puts the line there on the pill's own frames.
+        pill._close_panel()
+        sess.mode, sess.state = DICTATE, State.REFINING
+        sess.target_app, sess.refine_kind = "OUTLOOK.EXE", kinds.EMAIL
+        sess.refine_doing = kinds.KINDS[kinds.EMAIL].doing
+        sess.waited = 4.3
+        pill.armed = False
+
+    def flow_landed():
+        sess.state, sess.waited = State.IDLE, 0.0
+        pill._say(f"{kinds.KINDS[kinds.EMAIL].tag} - {kinds.UNDO_HINT}")
+
+    def flow_fallback():
+        pill._flash = FLASH_FRAMES
+        pill._say(uc._clip("no rewrite - your words went in as you said them: "
+                           "claude timed out after 20s"), uc.ERROR_FRAMES)
+
+    def flow_asking():
+        pill._flash = 0
+        sess.mode, sess.state, sess.waited = CONVERSE, State.ASKING, 9.4
+        pill.armed = False
+
+    def flow_answer():
+        # Driven the way the app drives it: the release, then the reply event.
+        sess.state, sess.waited = State.IDLE, 0.0
+        pill._panel_mode = CONVERSE
+        pill._panel_failed = False
+        pill._panel_heard = "which file decides what kind of writing refine produces"
+        pill._panel_heard_final = True
+        pill._panel_result = ("That is flow/kinds.py: resolve() takes your own choice "
+                              "for a program first, then your default, then reads "
+                              "the window. flow/refine.py holds the brief each kind "
+                              "is written from.")
+        pill._open_panel()
+
+    def flow_keys():
+        from types import SimpleNamespace as NS
+
+        pill._close_panel()
+        sess.mode, sess.state = DICTATE, State.IDLE
+        pill.hotkeys = NS(chord=NS(describe=lambda: "ctrl+win"),
+                          ask_chord=NS(describe=lambda: "ctrl+alt+win"),
+                          drain=lambda: [], hook=None)
+        pill._tap()
+
+    def flow_done():
+        pill.hotkeys = None
+        pill._notice = 0
+        pill._sync_shell()
+
     PRIYA = ("hey so um I need to write to Priya about the the release we were "
              "supposed to ship on Thursday but uh the migration is not done so "
              "I think we should move it to next Tuesday and also can you ask "
@@ -402,6 +472,8 @@ def main() -> None:
             del sess._provider
 
     steps = [
+        # The panel flow, for every picture down to the last six.
+        (0, flow(True)),
         (900, state(State.IDLE, armed=False)),
         (600, lambda: shot(pill, "01-compact-rest")),
         (0, state(State.LISTENING)),
@@ -473,6 +545,23 @@ def main() -> None:
         (0, reset_fallbacks),
         (0, needs_cli),
         (500, lambda: shot(pill, "27-compact-needs-cli")),
+        (0, reset_fallbacks),
+        # The product's flow, 2026-11-22: nothing rises while you talk.
+        (0, flow(False)),
+        (0, flow_rewriting),
+        (700, lambda: shot(pill, "30-flow-rewriting")),
+        (0, flow_landed),
+        (400, lambda: shot(pill, "31-flow-landed")),
+        (0, flow_fallback),
+        (300, lambda: shot(pill, "32-flow-fallback")),
+        (0, flow_asking),
+        (700, lambda: shot(pill, "33-flow-asking")),
+        (0, flow_answer),
+        (700, lambda: shot(pill, "34-flow-answer")),
+        (0, flow_keys),
+        (500, lambda: shot(pill, "35-flow-keys")),
+        (0, flow_done),
+        (0, flow(True)),
         (0, reset_fallbacks),
         (0, lambda: setattr(sess, "target_app", "claude.exe")),
         (0, state(State.IDLE, armed=False)),

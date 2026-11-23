@@ -57,6 +57,7 @@ HOTKEY_LABELS = {
     "cancel": "Cancel",
     "mode": "Switch mode",
     "paste_last": "Paste last",
+    "rewrite": "Rewrite what I just said",
     "quit": "Quit Flow",
 }
 
@@ -325,6 +326,7 @@ class Api:
             ("POST", "/api/settings/classic"): self.set_classic,
             ("POST", "/api/settings/apps"): self.set_app,
             ("POST", "/api/settings/writing"): self.set_writing,
+            ("POST", "/api/settings/flows"): self.set_flows,
             ("POST", "/api/update"): self.update,
             ("POST", "/api/open"): self.open_folder,
         }
@@ -557,6 +559,8 @@ class Api:
             "mode": (getattr(hotkeys, "chosen", {}) or {}).get("mode", "")
             if hotkeys is not None else "",
             "paste_last": (getattr(hotkeys, "chosen", {}) or {}).get("paste_last", "")
+            if hotkeys is not None else "",
+            "rewrite": (getattr(hotkeys, "chosen", {}) or {}).get("rewrite", "")
             if hotkeys is not None else "",
         }
 
@@ -1724,6 +1728,9 @@ class Api:
                 "current": self.home.design,
                 "options": [{"name": n, "label": label} for n, label in DESIGN_LABELS.items()],
             },
+            # Whether Refine and Ask raise a panel while you talk (the earlier flow).
+            "flows": {"panel": bool(getattr(profile, "panel_flows", False)) is True
+                      if profile is not None else False},
             "classic": {
                 "panel": getattr(profile, "panel", "") if profile else "",
                 "panels": panels,
@@ -1971,6 +1978,29 @@ class Api:
             surface.after(0, lambda: surface.switch_design(name))
 
         self._call(apply)
+        return self.settings({})
+
+    def set_flows(self, body: dict) -> dict:
+        """Turn the earlier panel flow on or off, now: the pill on screen is told as
+        well as the profile, so the next hold is already the flow that was chosen."""
+        profile = self._need_profile()
+        panel = body.get("panel")
+        if not isinstance(panel, bool):
+            raise ApiError("say true or false")
+        surface = self.home.surface
+        session = self.session
+
+        def apply() -> None:
+            profile.panel_flows = panel
+            # Only a surface that has the flow is told. The shipped surface has no
+            # such attribute and keeps its own.
+            if surface is not None and hasattr(type(surface), "panel_flows"):
+                surface.panel_flows = panel
+                session.refine_says_more = panel
+                session.refine_lands = not panel
+
+        self._call(apply)
+        self._save()
         return self.settings({})
 
     def set_classic(self, body: dict) -> dict:

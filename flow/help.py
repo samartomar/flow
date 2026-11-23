@@ -126,6 +126,7 @@ _ACTIONS = {
     "mode": "switch between dictate and converse",
     "quit": "close Flow",
     "paste_last": "paste the last thing Flow pasted, again",
+    "rewrite": "write what you just dictated properly, where it is",
 }
 
 #: The draft the examples below are aimed at, shown in the sheet rather than implied.

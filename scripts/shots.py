@@ -224,6 +224,8 @@ class FakeSession:
         #: reason - a shot of the default is not a picture of the feature.
         self.refine_kind = kinds.PROMPT
         self.waited = 0.0
+        #: What the rewrite in flight is doing, as the real session words it.
+        self.refine_doing = kinds.KINDS[kinds.PROMPT].doing
         self.target_title = ""
         self.title_probe = None
         #: Read by `_pump_talk` while a paste is waiting.

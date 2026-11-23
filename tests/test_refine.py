@@ -1595,6 +1595,143 @@ class TestThePromptLeavesTheProcessListing(unittest.TestCase):
     def test_the_one_that_was_not_measured_still_carries_it_on_the_argv(self):
         self.assertFalse(refine_mod.named("kiro-cli").stdin_ok)
 
+
+class TestTheCourierLeavesNoRecordBehind(unittest.TestCase):
+    """Flow's History setting never reached the CLI that answers.
+
+    Each agent CLI keeps its own history of what it is asked. With Flow's History off,
+    every rewrite and every question was still on disk in a folder that is not Flow's:
+    claude wrote a session file per call under `~/.claude/projects/` (about 310 KB
+    each), and codex a rollout file under `~/.codex/sessions/` plus rows in two of its
+    databases, where the prompt is the session's title in codex's own picker - even for
+    a call the server refused. Found on 2026-11-23, by having to clean up after a test
+    run of this app that had carried something it should not have.
+
+    Both vendors ship a switch, and both were measured through `_invoke` before they
+    were written down: a multi-line prompt carrying a random marker, then every file
+    either CLI had changed searched for it. claude 2.1.330 with
+    `--no-session-persistence`: answered in 6.0 s at exit 0, no file held the marker,
+    session files 795 -> 795; without it, one new session file that did. codex-cli
+    0.171.0 with `--ephemeral`: answered in 8.7 s, no rollout and no row; without it,
+    one new rollout, one new `threads` row, and the marker in three files. The same
+    pair on 0.163.0, for a call the server refused.
+
+    A unit test cannot run either CLI. What these hold is that the measured switches are
+    still in the argv a process is started with, and that nothing was invented for a
+    CLI that has none.
+    """
+
+    def started_with(self, name: str, **tuning) -> list[str]:
+        proc = fake_proc("ok")
+        with mock.patch("shutil.which", resolves_to(fake_exe(name))), \
+                mock.patch("subprocess.Popen", return_value=proc) as started:
+            refine_mod._invoke(refine_mod.tuned(refine_mod.named(name), **tuning),
+                               "what was dictated", timeout=30)
+        return list(started.call_args.args[0])
+
+    def test_claude_is_told_not_to_save_the_session(self):
+        self.assertIn("--no-session-persistence", self.started_with("claude"))
+
+    def test_claudes_switch_is_given_in_the_only_mode_it_works_in(self):
+        # "only works with --print", by claude's own help. A claude started any other
+        # way would take the switch and save the session regardless.
+        self.assertIn("-p", self.started_with("claude"))
+
+    def test_codex_is_told_to_keep_no_session_on_disk(self):
+        self.assertIn("--ephemeral", self.started_with("codex"))
+
+    def test_codexs_switch_belongs_to_exec_and_sits_where_exec_reads_it(self):
+        # After the subcommand, because a flag before `exec` belongs to another parser;
+        # before the `-`, because anything after that is read as the prompt.
+        argv = self.started_with("codex")
+        self.assertLess(argv.index("exec"), argv.index("--ephemeral"))
+        self.assertLess(argv.index("--ephemeral"), argv.index("-"))
+        self.assertEqual(argv[-1], "-")
+
+    def test_choosing_a_model_and_an_effort_does_not_cost_the_switch(self):
+        # `tuned` builds a new argv around `tune_at`. The switch has to survive that,
+        # because Flow Home's Models page is how most calls are made.
+        for name, switch in (("codex", "--ephemeral"),
+                             ("claude", "--no-session-persistence")):
+            with self.subTest(cli=name):
+                argv = self.started_with(name, model="some-model", effort="high")
+                self.assertIn(switch, argv)
+                self.assertIn("some-model", argv)
+
+    def test_nothing_was_invented_for_a_cli_that_has_no_such_switch(self):
+        # kiro-cli 3.1.0's `chat --help` offers `--resume` and `--list-sessions` and no
+        # way not to save. Borrowing another vendor's flag would exit 2 on every call.
+        kiro = refine_mod.named("kiro-cli").argv
+        for borrowed in ("--ephemeral", "--no-session-persistence"):
+            self.assertNotIn(borrowed, kiro)
+        for cli in refine_mod.CANDIDATES:
+            if not cli.verified:
+                with self.subTest(cli=cli.name):
+                    self.assertEqual(cli.argv, (cli.name,))
+
+
+class TestCodexRunsNobodysHooksOnTheCall(unittest.TestCase):
+    """What somebody dictates is not handed to the hooks their codex is set up to run.
+
+    codex runs its user's hooks on every `exec`, and a call from Flow is an `exec`. On
+    the machine this was built on that meant a memory plugin's three programs - session
+    start, prompt, stop - and the one on the prompt is handed the prompt: the dictated
+    sentence, on every rewrite and every question. It also cost about four seconds of a
+    wait the user is watching. The owner was shown both numbers and chose to switch
+    them off for Flow's calls (2026-11-23).
+
+    `--disable hooks` is codex's own switch for one invocation, read from `exec --help`
+    and `codex features list` on 0.171.0, and then measured from the repository: with
+    it 5.5 s and 5.6 s and no `hook:` line on stderr; without it 9.9 s and 9.8 s and
+    eight. It changes nothing in the user's codex settings.
+
+    A unit test cannot run codex. What these hold is that the measured pair is still in
+    the argv a process is started with, intact and where `exec` reads it.
+    """
+
+    started_with = TestTheCourierLeavesNoRecordBehind.started_with
+
+    def assertSwitchedOff(self, argv):
+        self.assertIn("--disable", argv)
+        self.assertEqual(argv[argv.index("--disable") + 1], "hooks")
+
+    def test_codex_is_told_to_run_no_hooks(self):
+        self.assertSwitchedOff(self.started_with("codex"))
+
+    def test_the_feature_is_named_once_and_nothing_else_is_switched_off(self):
+        # `--disable` is repeatable and takes any feature name. One, and this one.
+        argv = self.started_with("codex")
+        self.assertEqual(argv.count("--disable"), 1)
+        self.assertEqual(argv.count("hooks"), 1)
+
+    def test_the_pair_sits_where_exec_reads_it(self):
+        # After the subcommand and before the `-` that says the prompt is on stdin.
+        argv = self.started_with("codex")
+        self.assertLess(argv.index("exec"), argv.index("--disable"))
+        self.assertLess(argv.index("hooks"), argv.index("-"))
+        self.assertEqual(argv[-1], "-")
+
+    def test_choosing_a_model_and_an_effort_does_not_come_between_the_two(self):
+        # `tuned` inserts at `tune_at`. A model name landing between `--disable` and
+        # `hooks` would switch off a feature called after the model and exit 1.
+        argv = self.started_with("codex", model="some-model", effort="high")
+        self.assertSwitchedOff(argv)
+        self.assertIn("some-model", argv)
+
+    def test_it_did_not_cost_the_switch_that_keeps_no_record(self):
+        self.assertIn("--ephemeral", self.started_with("codex"))
+
+    def test_claude_is_covered_by_its_own_switch_and_not_given_codexs(self):
+        # `--safe-mode` disables claude's hooks, by its own help. `--disable` is not a
+        # claude flag.
+        argv = self.started_with("claude")
+        self.assertIn("--safe-mode", argv)
+        self.assertNotIn("--disable", argv)
+
+    def test_nothing_was_borrowed_for_kiro(self):
+        self.assertNotIn("--disable", refine_mod.named("kiro-cli").argv)
+
+
 class TestTuning(unittest.TestCase):
     """`tuned`, which is how a model and an effort level reach the CLI.
 

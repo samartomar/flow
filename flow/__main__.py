@@ -1286,8 +1286,16 @@ def main(argv: list[str] | None = None) -> int:
             # A compact user has no other route to it.
             hands_free = (f" | tap {chord.describe()} for hands-free"
                           if chord is not None and chord.gesture == "hold" else "")
-            say(f"hold {held} to talk{asks}{hands_free} | tap the pill to cycle "
-                f"Type / Refine / Ask | right-click for the menu | {quits}")
+            # With keys to hold, a tap on the pill no longer changes the mode
+            # (decisions.md 2026-11-22), and what a rewrite takes is a sentence said
+            # after the words have landed - so that is what this line teaches. Without
+            # keys, or in the earlier panel flow, the pill is still how a mode is chosen.
+            panel = getattr(profile, "panel_flows", False) is True
+            does = ("tap the pill to cycle Type / Refine / Ask"
+                    if chord is None or panel
+                    else 'say "make it an email" to rewrite what you just said')
+            say(f"hold {held} to talk{asks}{hands_free} | {does} "
+                f"| right-click for the menu | {quits}")
         else:
             say(
                 ("listening | " if armed else "click the pill to arm | ")

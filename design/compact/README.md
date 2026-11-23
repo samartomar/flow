@@ -5,6 +5,22 @@ as a Claude Design canvas. Live canvas:
 
 https://claude.ai/code/artifact/0ab88c75-8b24-455b-b96f-f9e5763a45fc
 
+## Where the product has moved on (2026-11-22)
+
+**The resting pill is as drawn here and is not to change.** Two things the canvas
+encodes are no longer how Flow ships (docs/decisions.md, 2026-11-22, "The pill is an
+indicator"), and the artboards have not been redrawn:
+
+- **A tap no longer cycles the mode** when there are keys to hold. It says what the keys
+  are. Mode is chosen from the right-click menu or `ctrl+alt+M`.
+- **Nothing rises while you talk.** A Refine lands in the window it was said in; an Ask
+  shows the pill and a line until the answer arrives, and the answer card then stays
+  until it is closed. The panel these artboards draw — raised on the hold, closed by
+  Send, Esc or a click outside — is a setting (`Profile.panel_flows`), off by default.
+
+`scripts/compact_shots.py` photographs both: every step down to the last six is the
+panel flow, and the last six are the product.
+
 ## Files
 
 - `gen.py` — generates every `*.dc.html` artboard. Edit this, not the artboards;

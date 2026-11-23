@@ -161,6 +161,54 @@ class TestBTheHookKnowsWhetherAKeyWasTyped(unittest.TestCase):
         self.assertEqual(states[0], states[1])
 
 
+class TestBAFlowsOwnShortcutIsNotTyping(unittest.TestCase):
+    """`Chord.own_key`: the rewrite shortcut's key, held, repeats - and `RegisterHotKey`
+    keeps every one of them. The surface says the shortcut is down; this stops counting
+    until something comes up."""
+
+    def held(self):
+        talk, _ask, _presses = _pair()
+        talk.own_key = True
+        return talk
+
+    def test_while_it_is_down_a_key_going_down_is_not_typing(self):
+        talk = self.held()
+        keys = _Keyboard(talk)
+        for _ in range(5):
+            keys.down(0x58)  # the key repeating, as the OS sends it
+        self.assertIs(talk.touched, False)
+
+    def test_its_own_key_coming_up_ends_it(self):
+        talk = self.held()
+        keys = _Keyboard(talk).down(0x58).up(0x58)
+        self.assertIs(talk.own_key, False)
+        self.assertIs(talk.touched, False)
+        keys.down(VK_A)
+        self.assertIs(talk.touched, True)
+
+    def test_a_modifier_coming_up_ends_it_and_the_key_still_down_is_typing_again(self):
+        # Alt comes up first with the letter still held: from here the letter reaches
+        # the window, and it counts.
+        talk = self.held()
+        keys = _Keyboard(talk).down(0x58).up(VK_LMENU)
+        self.assertIs(talk.own_key, False)
+        keys.down(0x58)
+        self.assertIs(talk.touched, True)
+
+    def test_it_is_never_set_from_here(self):
+        talk, _ask, _presses = _pair()
+        _Keyboard(talk).down(VK_LMENU, VK_A).up(VK_A, VK_LMENU)
+        self.assertIs(talk.own_key, False)
+
+    def test_it_cannot_say_which_key_either(self):
+        states = []
+        for vk in (VK_A, 0x58):
+            talk = self.held()
+            _Keyboard(talk).down(vk).up(vk).down(vk)
+            states.append((talk.touched, talk.own_key, talk._other))
+        self.assertEqual(states[0], states[1])
+
+
 class TestCHotkeysOwnsTheTeardownOfBoth(unittest.TestCase):
 
     def test_the_hook_is_whichever_chord_installed_one(self):

@@ -91,6 +91,8 @@ FIELDS = frozenset({
     "other",      # whether an outside key has gone down since it last looked
     "talking",    # whether it believes it is capturing
     "last_tap",   # the clock reading of the tap it last latched, for the pairing window
+    # `hold` (one per hold: `ms`, `mode`, `ok`, and `reason` as words | silence | break)
+    # and `stall` (`ms` the frame loop did not run for) use fields already above.
 })
 
 #: Named so that adding one to FIELDS fails loudly. These are the words themselves —

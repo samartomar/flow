@@ -14,15 +14,134 @@ residue.
 
 ### At the desk
 
-- [ ] **Your `codex` cannot answer, and that is in its config, not in Flow.**
-  `~/.codex/config.toml` sets `model = "gpt-6.2-astra"`, and codex-cli 0.163.0 answers
-  every call with *"The 'gpt-6.2-astra' model is not supported when using Codex with a
-  ChatGPT account."* and exits 1. Flow now says that sentence, tries `claude` first for
-  ten minutes after it, and shows it on Flow Home ▸ Models. The fix is yours: change the
-  model there, or type a model codex accepts into Flow Home ▸ Models ▸ Model (it is sent
-  as `-m`), or pin `claude`. Nothing in Flow edits another tool's settings.
+- [x] **A dictated sentence no longer reaches your codex hooks — done on your word,
+  2026-11-23.** `codex` ran whatever hooks you have set up for it on every call from
+  Flow, and a hook is handed the prompt: the words you dictated, or your question.
+  Yours are the Hindsight memory plugin's (session start, prompt, stop) and the lanes
+  card. Flow now runs `codex exec --disable hooks`, which is codex's own switch for one
+  call; nothing in your codex settings changed, and your hooks run as before in your
+  own codex sessions. `claude` was already run this way.
+  - **Seen, not inferred:** codex prints a `hook:` line for each hook it runs. Without
+    the switch, eight of them and an answer in 9.8 to 9.9 s; with it, none and an
+    answer in 5.5 to 5.6 s.
+  - **In the real app, from your shell:** "polish that" landed in 4.9 s (10.7 before),
+    a spoken question was answered in 6.5 s (9.8 before), a question typed into Flow
+    Home in 5.8 s (11.6 before). Nothing was kept by codex.
+  - **Not settled:** the two calls that took 24 s and 37 s. Seven calls with hooks off
+    took 4.9 to 7.1 s and none was slow, which is not proof the hooks were the cause.
+  - **One thing to know:** if your codex hooks ever become something you must run on
+    every call — an audit, a filter — Flow's calls skip them and there is no setting
+    for it. Say so and it becomes one.
 
-- [ ] **One Refine through `codex` once it answers — the leg this desk could not run.**
+- [x] **A codex call that answers keeps nothing — measured, 2026-11-23.** On the
+  codex your own shell finds (0.171.0): answered in 8.7 s with the switch and left no
+  session file and no database row; 8.4 s without it, and left both. Driven in the
+  real app from that shell as well: "polish that", a spoken question, a question typed
+  into Flow Home — answered in 10.7, 9.8 and 11.6 s, nothing kept.
+
+- [x] **Flow tells the CLIs to keep no record — done on your word, 2026-11-23.** Every
+  rewrite and every question Flow sent was also kept by the CLI that answered it,
+  whatever History was set to. `codex` is now run with `--ephemeral` and `claude` with
+  `--no-session-persistence`. Measured with a marked prompt and a search of everything
+  either CLI changed: nothing held it, where the same call without the switch left a
+  session file (claude) or a session file and a database row (codex). Driven in the
+  real app as well: dictate, "polish that", a question — all worked, no session file
+  appeared. `kiro-cli` has no such switch. Written up in the guide (History and Paste
+  last), the architecture doc (What leaves the machine) and
+  [decisions.md](docs/decisions.md), 2026-11-23.
+
+- [x] **What my test runs left on this PC — cleared on your word, 2026-11-23.** On
+  2026-11-22 23:55 to 2026-11-23 00:16 I drove the real app to reproduce your report,
+  before I had made the harness keep nothing. One run sent an 831-character question
+  that contained speech the microphone picked up in the room (finding 2 of the
+  2026-11-23 entry in [decisions.md](docs/decisions.md)). Cleared:
+  - the 25 entries in `~/.flow/history.jsonl` — the file is your own 32 again, byte for
+    byte;
+  - `claude`'s record of that call: one session file, deleted;
+  - `codex`'s record of it — `codex` was handed the question first, which I had not
+    told you — with `codex delete`, which took the session file and its rows in both
+    of codex's databases;
+  - the profile's counters, back to 731 words and 406976 ms. Nothing else in
+    `profile.json` changed.
+
+  What is left, and why I stopped there:
+  - **Bytes inside codex's database files.** A deleted row's bytes stay in a SQLite
+    file until the space is reused. They are in `~/.codex/state_5.sqlite` and its
+    `-wal` (checked) and most likely in `thread_history_1.sqlite` (1.2 GB, not
+    checked). Nothing in codex can show them. Scrubbing them is a `VACUUM` of codex's
+    own databases with every codex session closed; four were open when I looked. I
+    would leave it.
+  - **A dozen words at most** in the record of the Claude Code session that did this
+    work, where I read my own log.
+  - **Not something I can see:** the prompt was handed to codex's prompt hook, which is
+    your Hindsight plugin's. `~/.hindsight` holds no copy and the call was refused
+    before any answer, but the memory server itself is not mine to read.
+  - **Not something anything local undoes:** codex's refusal was the server's answer
+    (`400 model_not_found`), so the request was made; assume the question travelled
+    with it, as it did to `claude`.
+  - About 28 other session files from my runs (17 of `claude`'s, 11 of `codex`'s) hold
+    only "what is two plus two", my test sentence and Flow's own prompt. Left alone.
+
+  Later runs kept nothing: the harness uses no history and never hands the room to the
+  session.
+
+- [ ] **Try it again — this time it has been driven in the real app.** `uv run flow`,
+  then, in this order:
+  1. Hold **ctrl+win**. The line under the pill should say *listening - let go to
+     paste*, then show your words as it hears them. Let go: they paste.
+  2. Hold **ctrl+win+alt** and ask something; then **do it again straight away**. The
+     second one is the one that was broken. Each should say *asking codex* and count
+     the seconds, then put the answer on a card after about six.
+  3. Hold either and say nothing for a second. It should say *heard nothing - if you
+     spoke, check the microphone in Flow Home*.
+  4. Dictate, then hold and say **"polish that"**, and click somewhere else while it
+     works. It should say *rewritten, but you clicked after it was pasted - Paste last
+     has it*, and alt+shift+Z should paste the rewrite.
+  If any hold does nothing and says nothing, the trace now knows why: send me the last
+  `hold` and `stall` lines of `~/.flow/diag.jsonl`.
+
+- [x] **Nothing to choose between codex and claude on speed any more — 2026-11-23.**
+  I told you your codex could not answer and to pin claude until it was fixed.
+  **That was wrong.** Every check I ran started from a shell where `codex` is 0.163.0,
+  which refuses your account's model. The shell you start Flow from finds 0.171.0,
+  which answers: Flow's trace records the version at every launch, and yours say
+  0.171.0. Measured from your shell, a rewrite or a question through codex took 9.8 to
+  11.6 s, and four seconds of that was your hooks. With them off for Flow's calls
+  (first item above) it is 4.9 to 6.5 s in the app; a bare call through claude is 5.2
+  to 6.0 s. Pin either in Flow Home ▸ Models if you prefer how it writes; speed is no
+  longer a reason.
+
+- [ ] **Try the new flow in real windows — nobody has yet.** The second 2026-11-22 entry
+  ("The pill is an indicator") is tested by the suite and by script against the real
+  CLI, and has not been held in a hand. Ten minutes, in this order, in Slack or Teams
+  and then in Outlook or a Gmail tab:
+  1. Dictate a rambling sentence. It pastes. Hold again and say **"polish that"**. The
+     strip should count while it writes, and the text should be replaced where it is.
+  2. Say **"scratch that"** — your own words should come back (chat) — then press
+     **alt+shift+X** instead of speaking. Same result.
+  3. In mail, say **"make it an email"**. It should land with a greeting and sign-off,
+     and the strip should say *Ctrl+Z there undoes it*. Try that Ctrl+Z.
+  4. Hold **ctrl+alt+win** and ask something. Nothing should rise while you talk. The
+     card should come up with the answer and still be there after you click back into
+     your work. Close it with its ✕.
+  5. Tap the pill. It should say what the keys are and change nothing.
+  What to judge, because no test can: **does any step make you stop and wonder what
+  Flow is doing?** That was the complaint, and it is the only measure.
+
+- [ ] **Then decide the panel's fate.** Flow Home ▸ Settings ▸ The pill ▸ *Show a panel
+  while I refine and ask* turns the earlier flow back on, so the two can be compared
+  side by side. It is meant to be deleted. Say "remove the panel flow" once you are
+  sure, and `Profile.panel_flows`, the panel's Send and the "say more" machinery under
+  it all go.
+
+- [x] **Retracted, 2026-11-23: "your `codex` cannot answer".** True only of the
+  codex-cli 0.163.0 that my own shell found, which exits 1 on `gpt-6.2-astra`. Yours is
+  0.171.0 and answers; see "Choose who answers first" above. What stays true and
+  useful: when a CLI does fail, Flow now says the CLI's own sentence, tries the next
+  one first for ten minutes, and shows it on Flow Home ▸ Models.
+
+- [x] **One Refine through `codex`, answered — measured 2026-11-23 on 0.171.0** with
+  `-c model_reasoning_effort=low` in the call: 8.7 s, exit 0. What this item said before:
   `-c model_reasoning_effort=<level>` is now sent to codex from Flow's Effort setting. It
   was verified by codex's own banner at all five levels (`reasoning effort: low` …
   `max`), and not by a completed call, because codex here fails on the model first. One
@@ -31,8 +150,9 @@ residue.
   `flow/refine.py`, one field.
 
 - [ ] **Use Refine in the three places it now behaves differently.** Outlook or a Gmail
-  tab; Slack or Teams; and Notepad. Tap the pill to gold and read the line under it — it
-  should name the kind and the program — then dictate something you would really send.
+  tab; Slack or Teams; and Notepad. Dictate something you would really send and say
+  "polish that" — or put the pill on Refine from its right-click menu and read the line
+  under it, which should name the kind and the program.
   What to judge, because no test can: **is the email one you would send as it stands?**
   Specifically the greeting and the sign-off, which nobody dictated (decision part 2, and
   its reopen bar). Put your name in Flow Home ▸ Settings ▸ What Refine writes first.
@@ -44,12 +164,21 @@ residue.
   gets tidied text rather than a prompt, until you set `chrome.exe` or `msedge.exe` under
   Per program (which covers every tab).
 
-- [ ] **Does the mode line earn its place?** Every tap now puts one sentence under the
-  pill for about three seconds. The 2026-09-04 decision kept the strip quiet on purpose
-  and this reverses part of it. If it reads as noise by the end of a day, say so: the
-  next shape is that it speaks only the first few times, counted in the profile.
+- [ ] **Does the mode line earn its place?** Choosing a mode puts one sentence under the
+  pill for about three seconds, and so does a tap (which now says the keys instead of
+  changing mode). The 2026-09-04 decision kept the strip quiet on purpose and this
+  reverses part of it. If it reads as noise by the end of a day, say so: the next shape
+  is that it speaks only the first few times, counted in the profile.
 
 ### Decisions
+
+- [ ] **Should an answer be read aloud by default, and should a draft be asked after a
+  pause?** Both are on, both are yours to change, and the survey of ten comparable tools
+  found neither anywhere else: none reads an answer aloud unasked, and none sends on a
+  silence. They were built for a hands-free loop that the hold-to-ask keys have since
+  made unnecessary for most uses. Not changed, because a default that speaks is one
+  somebody may be relying on. The smallest move is the reply voice off until asked for;
+  auto-ask only matters when listening hands-free, since a hold sends on the release.
 
 - [ ] **The release zip is labelled MIT and bundles GPL code with no notices.** Found by
   the 2026-11-22 readiness review, not acted on, because it is a licence decision.
@@ -84,8 +213,11 @@ residue.
   Flow has never done: read from another program. The selection has to be copied out
   (Ctrl+C, which in a terminal is an interrupt — `inject.classify` already knows a
   terminal, and this must refuse there), the clipboard put back, and the result pasted
-  over a selection that may have moved. Refine's review-before-send is what makes it
-  safe to try: nothing replaces anything until Send.
+  over a selection that may have moved. **This brief needs re-arguing before it is
+  built**: it leaned on Refine's review-before-send ("nothing replaces anything until
+  Send"), and since the second 2026-11-22 entry a rewrite lands directly. The honest
+  shape now is the one the field uses — the selection is replaced, and the program's own
+  undo is the way back — with a refusal wherever Flow cannot tell what is selected.
 
 - [ ] **P3, again — show what the agent is doing.** A question now waits up to a minute
   with a counter. Both CLIs stream JSONL (`codex exec --json`, `claude --output-format

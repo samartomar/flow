@@ -22,11 +22,12 @@ spoken command, both modes, and what is stored where.
 | | |
 |---|---|
 | **Hold, talk, let go** | Hold `ctrl+win` or the pill; letting go pastes into the window you were in |
-| **Hold to ask** | Hold `ctrl+alt+win` and ask, whatever the pill is on; the answer rises above the pill |
-| **Three modes, one tap** | Type pastes; Refine rewrites it for the window you are in first; Ask puts it to your agent CLI. A tap says what the mode you landed on will do |
+| **Hold to ask** | Hold `ctrl+alt+win` and ask, whatever the pill is on. The pill says it is waiting; the answer comes up on a card above the pill and stays until you close it |
+| **Written properly, when you ask** | Dictate, then hold again and say "make it an email", "polish that" or "make it shorter" — or press `alt+shift+X`. Flow rewrites what it just pasted, where it is ([Having it rewritten](#having-it-rewritten)) |
+| **Three modes** | Type pastes; Refine rewrites every hold for the window you are in and pastes that; Ask puts it to your agent CLI. The pill's right-click menu or `ctrl+alt+M` changes mode |
 | **Refine writes what the window calls for** | A prompt in a terminal, an editor or an AI app; an email in mail; a chat message in Slack or Teams; anywhere else, your words tidied up ([What Refine writes](#what-refine-writes)) |
 | **Live text while you speak** | Partials refresh roughly every second as you talk |
-| **You decide when it goes** | Letting go is the send in Type; Refine and Ask wait for Send or the next hold; the Classic pill holds a draft until you send it |
+| **You decide when it goes** | Letting go is the send in every mode; no Enter is ever pressed unless you say so. The Classic pill holds a draft until you send it |
 | **Correct it by voice** | "change Tuesday to Wednesday" edits the draft in place — or, in the next hold, what Type just pasted |
 | **Keep talking** | Anything that isn't a correction is appended |
 | **Shape it into a prompt** | "make it a proper prompt" restructures dictation via your agent CLI |
@@ -287,9 +288,10 @@ hotkey  cancel   ctrl+alt+esc
 hotkey  mode     ctrl+alt+M
 hotkey  quit     ctrl+alt+Q
 hotkey  paste_last alt+shift+Z
+hotkey  rewrite  alt+shift+X
 chord   hold     ctrl+win  (hold to talk, release to send)
 chord   ask      ctrl+alt+win  (hold to ask, release to send the question)
-hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | tap the pill to cycle Type / Refine / Ask | right-click for the menu | ctrl+alt+Q quits
+hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | say "make it an email" to rewrite what you just said | right-click for the menu | ctrl+alt+Q quits
 ```
 
 ### Flags
@@ -414,6 +416,7 @@ answer, and the retry budget is spent afterwards exactly as it would have been.
 | dictate ⇄ converse | `ctrl+alt+M` | `ctrl+shift+M` |
 | quit | `ctrl+alt+Q` | `ctrl+shift+Q` |
 | paste the last thing Flow pasted, again ([Paste last](#history-and-paste-last)) | `alt+shift+Z` | `alt+shift+V` |
+| write what you just dictated properly, where it is ([Having it rewritten](#having-it-rewritten)) | `alt+shift+X` | `alt+shift+C` |
 
 Combos already owned by another app fall back automatically, in that order. The startup
 log prints which one actually registered, so a dead shortcut is never a silent mystery;
@@ -471,8 +474,8 @@ is the quickest way to it; the file is written the first time Flow saves anythin
 }
 ```
 
-The six action names are `toggle`, `send`, `cancel`, `mode`, `quit` and `paste_last` —
-the rows of the table above, in that order. They are also what the startup block prints beside each combo
+The seven action names are `toggle`, `send`, `cancel`, `mode`, `quit`, `paste_last` and
+`rewrite` — the rows of the table above, in that order. They are also what the startup block prints beside each combo
 (`hotkey  toggle   ctrl+alt+space`), so you never have to look them up. List only the ones
 you want to move; anything absent keeps its shipped combo.
 
@@ -665,9 +668,23 @@ chord   unavailable (keyboard hook refused); the toggle hotkey still works
 
 ### Ask's chord (ctrl+alt+win)
 
-**Hold `ctrl+alt+win`, ask, let go** — whatever the pill is on. The pill goes to Ask, the
-panel rises with your question in it, and the answer lands there, as it does from a violet
-pill. They are the keys Wispr Flow uses for its Command Mode on Windows, so if you have
+**Hold `ctrl+alt+win`, ask, let go** — whatever the pill is on. The pill goes to Ask and
+says under itself that it is asking, and for how long; nothing rises while you talk or
+while it waits. The answer comes up on a card above the pill — your question, the
+answer, **Copy** and **Continue in Flow** — and stays there until you close it (its ✕, or
+`ctrl+alt+esc`) or hold to talk again. A click somewhere else does not take it away.
+
+**The line under the pill is the pill talking.** While the keys are down it says
+*listening - let go to ask claude* (on the talk keys, *let go to paste*; in Refine, that
+it will be written for this window), and then your words as they are heard. When a
+hold ends in nothing it says which nothing: *heard nothing - if you spoke, check the
+microphone in Flow Home* for a hold of most of a second with no sound in it, and *did
+not catch any words - hold and say it again* when there was sound and no words came of
+it. The microphone is read only while the keys are down or hands-free is on: between
+holds whatever it delivers is thrown away unheard ([decisions.md](decisions.md),
+2026-11-23).
+
+They are the keys Wispr Flow uses for its Command Mode on Windows, so if you have
 used that, your hand already knows them ([decisions.md](decisions.md), 2026-09-23, "Ask's
 own hold").
 
@@ -909,10 +926,10 @@ With no window at all (Lite, `--no-paste`) Refine writes a prompt, as it always 
 
 **When it guesses wrong**, three ways to put it right, quickest first:
 
-1. **Say so at the result.** Hold the mic and say *"make it an email"*, *"make it a
-   message"*, *"make it a prompt"* or *"tidy it up"*. The same words are written again as
-   that kind. It has to be the whole of what you say; inside a longer sentence it is
-   dictation.
+1. **Say so in the next hold.** *"Make it an email"*, *"make it a message"*, *"make it a
+   prompt"* or *"tidy it up"*. The words you said are written again as that kind, and
+   the new version replaces the one in the window. It has to be the whole of what you
+   say; inside a longer sentence it is dictation.
 2. **Tell Flow what a program is for.** Flow Home ▸ Settings ▸ What Refine writes ▸ Per
    program: name the program (`notepad.exe`) and choose a kind. For a browser the choice
    covers every tab.
@@ -922,12 +939,15 @@ With no window at all (Lite, `--no-paste`) Refine writes a prompt, as it always 
 **Your name**, on the same card, signs the emails. Left empty, an email ends with a
 sign-off line and no name, never a `[Your Name]` placeholder.
 
-**Holding again says more.** With a result on the panel, a second hold adds to what you
-said, and everything heard so far is written again as the same kind — so *"actually make
-it Wednesday"* is a correction, not a second paragraph. Until 2026-11-22 the second hold
-was refined on its own, with no memory of the first. The **heard** block shows everything
-that was sent. To start again instead, close the panel (Esc, or a click anywhere else) or
-press Send: the next hold is then a new piece of writing.
+**With the panel on** (Flow Home ▸ Settings ▸ The pill ▸ *Show a panel while I refine
+and ask* — the flow before 2026-11-22, kept as a setting), a Refine waits on a panel
+above the pill until you press Send, and **holding again says more**: a second hold adds
+to what you said, and everything heard so far is written again as the same kind — so
+*"actually make it Wednesday"* is a correction, not a second paragraph. The **heard**
+block shows everything that was sent. To start again instead, close the panel (Esc, or a
+click anywhere else) or press Send: the next hold is then a new piece of writing. With
+the panel off, which is how Flow ships, each hold is its own piece of writing and what
+it pasted is changed as [Having it rewritten](#having-it-rewritten) describes.
 
 In `~/.flow/profile.json` these are `kinds` (program → `prompt`, `email`, `message` or
 `tidy`), `refine_kind` (`auto` or one of those four) and `name`.
@@ -1109,7 +1129,7 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
 | **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The Whisper list is four models — `large-v3` and `small` (the GPU pair, which also write Hindi as English), `small.en` and `base.en` (the CPU pair); the engine control reads **Parakeet · NVIDIA** then **Whisper · OpenAI**. A model Flow stopped listing but that is still on this PC is offered for removal, by name and size, with one press; nothing is removed unasked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
-| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; what Refine writes — its default kind, your name for emails, and a kind and an instruction per program; whether the model loads at startup; the update check; and what leaves this PC |
+| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other seven shortcuts, Paste last and Rewrite among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; what Refine writes — its default kind, your name for emails, and a kind and an instruction per program; whether the model loads at startup; the update check; and what leaves this PC |
 | **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
 | **History** | Only if you choose to keep one: what you dictated, the program it went to, whether it pasted, what the agent CLI made of a Refine and what it was made from, and anything the speech filter set aside — by day, searchable, each with Copy, Fix a word and Delete ([History and Paste last](#history-and-paste-last)) |
 | **Conversations** | The Ask conversation on screen, with a box to type the next question into; answers with their code blocks, Copy, Keep note and Read aloud; Wrap up for the kept notes; and, if you keep a history, earlier conversations by workspace, which you can open and carry on ([Conversations in Flow Home](#conversations-in-flow-home)) |
@@ -1159,6 +1179,34 @@ Refine with the words it was made from, what the speech filter set aside, and ev
 and its answer. It keeps 7, 30 or 90 days, and **Pause** stops keeping until you resume or
 Flow restarts — for the minute you are about to say something you would rather not have
 in a file. **Stop keeping** deletes the file: "don't keep it" means the disk too.
+
+**The CLI that answers keeps nothing either, where it can be told.** An agent CLI keeps
+its own history of what it is asked, in its own folder, and Flow's History setting has
+no say over that. So Flow says it on every call: `codex` is run with `--ephemeral` and
+`claude` with `--no-session-persistence`, and neither writes a session file or a
+database row for a rewrite or a question.
+
+**Nor are your hooks run on it.** If you have set up hooks for `codex` or `claude` — a
+memory plugin, a logger — they are for your coding sessions, and a hook is handed the
+prompt: on a call from Flow, the sentence you dictated. So `claude` is run with
+`--safe-mode` and `codex` with `--disable hooks`, each CLI's own switch for one call.
+Flow changes nothing in either CLI's settings, and your hooks run as before in your own
+sessions. On the PC this was measured on it also took four seconds off every rewrite
+and question through `codex`. If your `codex` hooks are something you are required to
+run on every call, know that Flow's calls skip them; there is no setting for it.
+
+Two limits, so this is not read as more than it is:
+
+- `kiro-cli` has no switch for keeping no record and keeps what it keeps. If that
+  matters, pin `codex` or `claude` in Flow Home ▸ Models.
+- None of this reaches what the provider keeps on its side.
+
+Up to and including Flow 0.8.2 both CLIs did keep every call, whatever History was set
+to: a `claude` session file each under `~/.claude/projects/`, a `codex` session each
+under `~/.codex/sessions/` — and `codex` ran your hooks on each. What was written
+before then is still there. `codex delete <id>` removes one of codex's; claude's are
+the files themselves ([decisions.md](decisions.md), 2026-11-23, "The CLI keeps no
+record" and "codex runs none of the user's hooks").
 
 **Fix a word.** Select the words Flow got wrong in an entry and press the pencil. *Fix it
 here* corrects that entry; *Always fix it* also adds the correction to your dictionary
@@ -1474,6 +1522,56 @@ that a count of Backspaces cannot see into — and no emoji. The kept History en
 with it (*pasted, then changed*); a paste you took back stays in History marked *taken
 back*, and Paste last still has it, which is the way back from a "scratch that" you did not
 mean.
+
+### Having it rewritten
+
+**Dictate first; ask for the rewrite afterwards.** The words are in the window the moment
+you let go. If they should read better than you said them, hold again and say what you
+want, or press the key ([decisions.md](decisions.md), 2026-11-22, "The pill is an
+indicator"):
+
+```
+make it an email               written as that kind: an email, a message, a prompt,
+make it a message                or "tidy it up" for your own words cleaned up
+polish that                    written as whatever this window calls for
+make it shorter                also longer, more formal, more casual, friendlier,
+                                 clearer, simpler, more direct
+alt+shift+X                    "polish that", without saying it
+```
+
+Your agent CLI writes it — the strip under the pill says what it is writing and for how
+long — and Flow puts it where the words were, the same way it makes a correction: its
+own characters back out, the new ones in. The strip then says what it was written as.
+
+- **It has to be the whole of what you say.** *"Make it an email to Priya about the
+  release"* is dictation.
+- **Nothing is lost if it fails.** A CLI that is slow, signed out or missing changes
+  nothing: your words are still in the window as you said them, and the strip says why.
+- **Asking twice starts from what you said**, not from the first rewrite — so *"make it
+  an email"* and then *"make it a message"* gives you the message, not an email
+  shortened.
+- **"Scratch that" puts your own words back** while the rewrite is one line, as a chat
+  message is. An email has paragraphs, and Flow cannot count its way back over those, so
+  there the way back is the window's own undo, and the strip says so when it lands:
+  *Ctrl+Z there undoes it*.
+- **The same limits as any correction:** the same window in front, nothing typed and
+  nothing clicked since, within a minute, up to 800 characters. Outside them the strip
+  says which one it was — *nothing to rewrite - you typed after it was pasted* — and
+  the request is never pasted as words. If you moved on while the CLI was writing —
+  it takes six to twelve seconds, and a click back into your work is enough — the
+  rewrite is not dropped into the wrong place: the strip says *rewritten, but you
+  clicked after it was pasted - Paste last has it*, and `alt+shift+Z` pastes it.
+
+**The key is one of Flow's own shortcuts**, so it can be moved like the others (Flow
+Home ▸ Settings, or `rewrite` under `hotkeys` in `~/.flow/profile.json`), and
+`alt+shift+C` is taken when another program already owns `alt+shift+X`. Pressing it does
+not count as typing in the window: Windows keeps that key for Flow and the program never
+sees it.
+
+**In Refine mode the rewrite comes first.** Every hold is rewritten for the window and
+pasted when it comes back — no panel, no Send. If the CLI does not answer, what you said
+goes in instead. What landed can then be changed exactly as above: *"scratch that"* takes
+it back out, *"make it shorter"* and *"make it an email"* rewrite it.
 
 **Holds in a row get their space.** The same knowledge fixes something older: two holds
 used to paste as *Hello there.How are you?*. When a paste continues Flow's own last paste
@@ -2098,6 +2196,14 @@ tracked at all, and which parts of it are deliberately not.
   the R4 gate in [docs/roadmap.md](roadmap.md) for why one model cannot do both.
 - **Elevated windows reject the paste** (Windows UIPI). The draft is put on the
   clipboard first, so `Ctrl+V` by hand still works.
+- **A rewrite longer than one line cannot be taken back by voice.** Flow takes text back
+  by counting Backspaces, and it will not count across paragraphs it did not watch being
+  laid out. An email is paragraphs. The strip says *Ctrl+Z there undoes it* when a
+  rewrite lands, and Paste last still has the rewrite; a terminal has no undo, and there
+  the strip does not promise one.
+- **The rewrite key takes `alt+shift+X` from every program while Flow runs.** Word uses
+  it to mark an index entry and Eclipse's keymap starts its Run shortcuts with it. Move
+  it in Flow Home ▸ Settings if one of those is yours.
 - **Paste last shares `alt+shift+Z` with Wispr Flow's own Paste last transcript.** A
   global shortcut belongs to whichever program registered it first: with Wispr Flow
   running first, Flow takes `alt+shift+V` instead, and the startup lines and Flow Home ▸
@@ -2112,6 +2218,9 @@ tracked at all, and which parts of it are deliberately not.
 - **A kept history is plain text.** `~/.flow/history.jsonl` is readable by anything that
   can read your user folder, the same as `lexicon.txt` and `profile.json`. It is kept only
   if you chose to keep it, and deleted when you stop.
+- **`kiro-cli` keeps its own record of what Flow asks it.** `codex` and `claude` are
+  told not to; `kiro-cli` 3.1.0 offers no way to say so
+  ([History and Paste last](#history-and-paste-last)).
 - **Semantic rewrites take ~6 s**, and a converse-mode answer ~8-10 s — the cost of
   starting an agent CLI. This is why only genuine rewrites and questions use one.
 - **The published accuracy numbers are other people's.** The per-accent numbers in

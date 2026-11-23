@@ -23,6 +23,7 @@ import queue
 import sys
 import tempfile
 import threading
+import types
 import time
 import unittest
 import urllib.error
@@ -1257,3 +1258,99 @@ class TestTheModelsPageSaysWhichCliIsDown(unittest.TestCase):
 
     def test_a_session_with_no_record_has_nobody_down(self):
         self.assertEqual(self.models(Pumped(self))["agent"]["down"], [])
+
+class TestTheRewriteShortcutIsNamedWhereTheOthersAre(unittest.TestCase):
+    """`rewrite` (alt+shift+X): a thing asked for by voice cannot be found by looking,
+    so the page that teaches the product shows the key and Settings lets it be moved."""
+
+    def keyed(self):
+        h = Pumped(self)
+        h.home.hotkeys = types.SimpleNamespace(
+            chosen={"paste_last": "alt+shift+Z", "rewrite": "alt+shift+X"},
+            failed=[], chord=None, ask_chord=None)
+        return h
+
+    def test_the_home_page_is_given_the_keys_that_registered(self):
+        api = self.keyed().home.api
+        self.assertEqual(api._shortcut_names()["rewrite"], "alt+shift+X")
+
+    def test_with_no_hotkeys_it_is_blank_not_missing(self):
+        self.assertEqual(Pumped(self).home.api._shortcut_names()["rewrite"], "")
+
+    def test_settings_lists_it_between_paste_last_and_quit(self):
+        h = self.keyed()
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, page = h.call("GET", "/api/settings")
+        self.assertEqual(status, 200)
+        listed = page["shortcuts"]["hotkeys"]
+        rows = {row["action"]: row for row in listed}
+        self.assertEqual(rows["rewrite"]["label"], "Rewrite what I just said")
+        self.assertEqual(rows["rewrite"]["combo"], "alt+shift+X")
+        order = [row["action"] for row in listed]
+        self.assertEqual(order[order.index("paste_last") + 1], "rewrite")
+
+    def test_it_can_be_moved_like_any_other(self):
+        h = self.keyed()
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, _page = h.call("POST", "/api/settings/hotkey",
+                                   {"action": "rewrite", "combo": "alt+shift+r"})
+        self.assertEqual(status, 200)
+        self.assertEqual(Profile(h.profile.path).hotkeys.get("rewrite"), "alt+shift+r")
+
+
+class TestTheEarlierPanelFlowIsASwitch(unittest.TestCase):
+    """`Profile.panel_flows`: off is the product (a rewrite lands, an answer shows on a
+    card); on is the flow before 2026-11-22, kept as a way back."""
+
+    def page(self, h):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, page = h.call("GET", "/api/settings")
+        self.assertEqual(status, 200)
+        return page
+
+    def post(self, h, body):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            return h.call("POST", "/api/settings/flows", body)
+
+    def test_a_fresh_profile_has_it_off(self):
+        self.assertFalse(self.page(Pumped(self))["flows"]["panel"])
+
+    def test_turning_it_on_is_saved(self):
+        h = Pumped(self)
+        status, page = self.post(h, {"panel": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(page["flows"]["panel"])
+        self.assertTrue(Profile(h.profile.path).panel_flows)
+
+    def test_the_pill_on_screen_is_told_now_not_at_the_next_start(self):
+        h = Pumped(self)
+
+        class Surface:
+            panel_flows = False
+
+        h.home.surface = Surface()
+        self.post(h, {"panel": True})
+        self.assertTrue(h.home.surface.panel_flows)
+        self.assertTrue(h.session.refine_says_more)
+        self.post(h, {"panel": False})
+        self.assertFalse(h.home.surface.panel_flows)
+        self.assertFalse(h.session.refine_says_more)
+
+    def test_a_surface_with_no_such_flow_is_left_alone(self):
+        # The shipped surface: it has no `panel_flows`, and gains none.
+        h = Pumped(self)
+
+        class Shipped:
+            pass
+
+        h.home.surface = Shipped()
+        self.post(h, {"panel": True})
+        self.assertFalse(hasattr(h.home.surface, "panel_flows"))
+        self.assertTrue(Profile(h.profile.path).panel_flows)
+
+    def test_anything_but_a_boolean_is_refused(self):
+        h = Pumped(self)
+        for bad in ("yes", 1, None):
+            status, _ = self.post(h, {"panel": bad})
+            self.assertEqual(status, 400, bad)
+        self.assertFalse(h.profile.panel_flows)

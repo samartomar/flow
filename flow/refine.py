@@ -510,6 +510,11 @@ class Cli:
     #: is the measurement and "answers with it" is the desk check in NEEDS_YOU. The
     #: failure it could cause is bounded by the walk it sits in - a codex that rejected
     #: the key would exit non-zero, be named, and hand the call to the next CLI.
+    #:
+    #: The completed call came on 2026-11-23: codex-cli 0.171.0, this argv with `-c
+    #: model_reasoning_effort=low`, answered in 8.7 s at exit 0. The 0.163.0 that would
+    #: not answer was the codex a development shell found; the owner's own shell finds
+    #: 0.171.0, and the trace's `identity` lines say which a launch saw.
     effort_config: str = ""
     #: Where in `argv` a tuning flag may be inserted. Not the end: codex's argv finishes
     #: with `-`, the positional that tells it the prompt is on stdin, and a flag after it
@@ -611,12 +616,71 @@ class Cli:
 #: codex and claude flags above already refuse; with an empty trust list its tools could
 #: not read the project anyway. The user's own global kiro settings still apply - those
 #: are theirs, not a repository's - and kiro goes back to the 4.3 s bare-directory figure.
+#:
+#: **Neither codex nor claude keeps a record of the call (2026-11-23).** Each of them
+#: writes its own history of what it is asked, and Flow's History setting never reached
+#: it: with History off, every rewrite and every question was still on disk, in a folder
+#: that is not Flow's. Found by having to clean up after a test run of this app. claude
+#: had kept a session file per call under `~/.claude/projects/`, about 310 KB each. codex
+#: had kept a rollout file under `~/.codex/sessions/` and rows in two of its databases,
+#: where the prompt is the session's title in codex's own picker - and it writes them for
+#: a call the server refuses, too.
+#:
+#: Both vendors ship the switch. Each was measured through `_invoke`, not read: a
+#: multi-line prompt carrying a random marker, then every file either CLI had changed
+#: searched for that marker. claude 2.1.330 with `--no-session-persistence` answered in
+#: 6.0 s at exit 0 and **no file held the marker** (session files 795 -> 795); without
+#: it, 5.2 s and one new session file that did. codex was measured twice, because two
+#: versions were in reach. codex-cli 0.171.0 with `--ephemeral` answered in 8.7 s at
+#: exit 0 and left no rollout and no row (155 -> 155 files, `threads` unchanged);
+#: without it, 8.4 s, one new rollout, one new row, and the marker in three files.
+#: codex-cli 0.163.0, which exits 1 on its model before it answers, gave the same pair
+#: for a refused call - so a call the server turns away is not kept either.
+#: `--no-session-persistence` works in print mode only, by claude's own help; print
+#: mode is the only one this module uses.
+#:
+#: The failure either switch can cause is the one `effort_config` describes: a CLI too
+#: old to know it exits non-zero, is named, and hands the call to the next. That is the
+#: right way round. The alternative is to try again without it, which keeps the record
+#: after all, silently, on exactly the machines nobody is watching.
+#:
+#: What the switches do not reach, said here so nobody reads them as more than they are:
+#: kiro-cli has none (3.1.0's `chat --help` offers `--resume` and `--list-sessions` and no
+#: way not to save), so it keeps what it keeps; and nothing local governs what a
+#: vendor's servers retain.
+#:
+#: **codex runs none of the user's hooks on the call (2026-11-23, on the owner's word).**
+#: codex runs whatever hooks its user has set up on every `exec`, and a call from Flow
+#: is an `exec`. On the machine this was built on that was three programs - at session
+#: start, on the prompt, at stop - and the one on the prompt is handed the prompt, which
+#: here is the sentence somebody just dictated. So a memory plugin installed for coding
+#: sessions was receiving every rewrite and every question, on a call nobody thinks of
+#: as a codex session, and the user waited about four seconds for it each time. claude
+#: does not run them either: `--safe-mode`, in its argv since 2026-08-03 to keep a
+#: workspace's instructions out, disables hooks and plugins too, by its own help.
+#:
+#: `--disable hooks` is codex's own switch for one invocation - `exec --help`: "Disable
+#: a feature (repeatable). Equivalent to `-c features.<name>=false`", and `codex
+#: features list` names `hooks`, stable. It writes nothing to the user's codex settings,
+#: which is the line Flow does not cross; their hooks run as before on every codex
+#: session that is theirs.
+#:
+#: Measured on codex-cli 0.171.0 from the repository, the argv below against the same
+#: argv without the two tokens, two rounds each: with it 5.5 s and 5.6 s, exit 0,
+#: answered, and codex wrote no `hook:` line to stderr; without it 9.9 s and 9.8 s and
+#: eight of them (SessionStart twice, UserPromptSubmit, Stop, and a "Completed" for
+#: each). Nothing was kept either way (`--ephemeral` is unaffected). 0.163.0 has the
+#: same feature: six lines without, none with. A codex that does not know a feature
+#: name says `Error: Unknown feature flag: <name>` and exits 1 - measured with a
+#: made-up name - which is the failure described above: it is named, and the next CLI
+#: is tried.
 CANDIDATES: tuple[Cli, ...] = (
-    Cli("codex", ("codex", "exec", "--skip-git-repo-check", "-s", "read-only",
-                  "-c", "project_doc_max_bytes=0", "-"), stdin_ok=True,
+    Cli("codex", ("codex", "exec", "--skip-git-repo-check", "--ephemeral",
+                  "--disable", "hooks",
+                  "-s", "read-only", "-c", "project_doc_max_bytes=0", "-"), stdin_ok=True,
         model_flag="-m", effort_config="model_reasoning_effort", tune_at=2),
-    Cli("claude", ("claude", "--safe-mode", "-p"), stdin_ok=True,
-        model_flag="--model", effort_flag="--effort"),
+    Cli("claude", ("claude", "--safe-mode", "--no-session-persistence", "-p"),
+        stdin_ok=True, model_flag="--model", effort_flag="--effort"),
     Cli("kiro-cli", ("kiro-cli", "chat", "--no-interactive", "--trust-tools="),
         probe=(r"%LOCALAPPDATA%\Kiro-Cli\kiro-cli.exe",),
         timeout_sec=60.0, marker="kiro", neutral_cwd=True,

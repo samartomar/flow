@@ -239,9 +239,21 @@ class TestTheNotesAWordlessPillMustAnswer(unittest.TestCase):
         # did not answer. It used to be half of a "refined via claude, after codex
         # exited 1" note this surface never showed, so a broken first choice cost
         # eight seconds a call for as long as nobody was told.
+        #
+        # "rewritten" joined on 2026-11-23: a rewrite that came back after the window
+        # had stopped being Flow's to change. It was built, kept for Paste last, and
+        # announced in a note this surface did not show - so somebody who clicked
+        # back into their work during the twelve seconds a rewrite takes saw the
+        # counter stop and nothing else.
         self.assertEqual(uc.SAID_NOTES,
                          ("nothing to", "still ", "only the last",
-                          "discarded", "stopped after", "skipping "))
+                          "discarded", "stopped after", "skipping ", "rewritten"))
+
+    def test_a_rewrite_that_could_not_land_is_said(self):
+        self.assertEqual(
+            self.note("rewritten, but you clicked after it was pasted - "
+                      "Paste last has it"),
+            ["rewritten, but you clicked after it was pasted - Paste last has it"])
 
     def test_a_cli_being_passed_over_is_said(self):
         self.assertEqual(

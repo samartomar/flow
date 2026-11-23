@@ -630,7 +630,7 @@ class FakeHotkeys:
     def __init__(self) -> None:
         self.chosen = {"toggle": "ctrl+alt+space", "send": "ctrl+alt+enter",
                        "cancel": "ctrl+alt+esc", "mode": "ctrl+alt+M", "quit": "ctrl+alt+Q",
-                       "paste_last": "alt+shift+Z"}
+                       "paste_last": "alt+shift+Z", "rewrite": "alt+shift+X"}
         self.failed: list[str] = []
         self.chord = FakeChord("ctrl+win")
         self.ask_chord = FakeChord("ctrl+alt+win")

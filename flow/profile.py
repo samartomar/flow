@@ -498,6 +498,12 @@ class Profile:
         #: name there is often not what somebody signs mail with, and a name Flow guessed
         #: would go out under an email they dictated.
         self.name: str = ""
+        #: Whether Refine and Ask raise a panel above the pill while you talk - the flow
+        #: before 2026-11-22. Off by default: the result of a Refine lands where you
+        #: were typing and an answer shows on a card that needs nothing from you. Kept
+        #: as a way back while the new flow is proved at the owner's desk, and named
+        #: for what it turns on so that "off" is the plain state.
+        self.panel_flows: bool = False
         #: Which of `ui.PANEL_WIDTHS` the draft panel is drawn at. A name and not a
         #: number: three widths that have each been drawn are worth more than an integer
         #: nobody has rendered at, and the meaning is judged in `flow/ui.py` for the same
@@ -677,6 +683,7 @@ class Profile:
         if self.refine_kind not in REFINE_KINDS:
             self.refine_kind = REFINE_KIND_DEFAULT
         self.name = take("name", _text, "")
+        self.panel_flows = take("panel_flows", _flag, False)
         self.panel = take("panel", _text, PANEL_DEFAULT)
         self.place = take("place", _text, PLACE_DEFAULT)
         self.mic = take("mic", lambda v, _d: bool(v), False)
@@ -767,6 +774,7 @@ class Profile:
             "kinds": dict(self.kinds),
             "refine_kind": self.refine_kind,
             "name": self.name,
+            "panel_flows": self.panel_flows,
             "panel": self.panel,
             "place": self.place,
             "mic": self.mic,

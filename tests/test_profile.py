@@ -1171,3 +1171,36 @@ class TestWhatRefineWritesIsRemembered(unittest.TestCase):
         again = Profile(p.path)
         self.assertEqual((again.kinds, again.refine_kind, again.name), ({}, "auto", ""))
         self.assertEqual(again.faults, [])
+
+class TestThePanelFlowIsRemembered(unittest.TestCase):
+    def test_a_fresh_profile_has_it_off(self):
+        self.assertIs(tmp_profile().panel_flows, False)
+
+    def test_it_round_trips(self):
+        p = tmp_profile()
+        p.panel_flows = True
+        self.assertTrue(p.save())
+        again = Profile(p.path)
+        self.assertIs(again.panel_flows, True)
+        self.assertNotIn("panel_flows", again.faults)
+
+    def test_a_string_is_a_wrong_type_not_a_yes(self):
+        # `bool("false")` is True; a hand-edit must not turn the earlier flow on.
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        raw["panel_flows"] = "false"
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        again = Profile(p.path)
+        self.assertIs(again.panel_flows, False)
+        self.assertIn("panel_flows", again.faults)
+
+    def test_a_profile_written_before_it_existed_loads_clean(self):
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        raw.pop("panel_flows")
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        again = Profile(p.path)
+        self.assertIs(again.panel_flows, False)
+        self.assertEqual(again.faults, [])

@@ -4512,6 +4512,14 @@ class Pill(tk.Tk):
                 self.session.toggle_mode()
             elif name == "paste_last":
                 self._paste_last()
+            elif name == "rewrite":
+                # The rewrite shortcut (decisions.md 2026-11-22). This pill does not
+                # watch what it pasted, so the session answers the way it answers
+                # the spoken request here: out loud, that there is nothing it can
+                # change - never a shortcut that does nothing and says nothing.
+                rewrite = getattr(self.session, "rewrite_last", None)
+                if callable(rewrite):
+                    rewrite()
             elif name == "quit":
                 self.quit_app()
                 return False

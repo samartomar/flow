@@ -265,6 +265,20 @@ def _site(title: str) -> str | None:
     return None
 
 
+#: What Flow says beside a rewrite it cannot take back by voice, in a window that has an
+#: undo of its own. Not said in a terminal, where Ctrl+Z is not undo: in a shell it
+#: suspends whatever is running.
+UNDO_HINT = "Ctrl+Z there undoes it"
+
+
+def is_terminal(app: str) -> bool:
+    """Whether `app` is a terminal, where the keys that mean "undo" elsewhere mean
+    something else. Editors that host a terminal count: Flow cannot tell their source
+    pane from their shell (`inject.EDITOR_HOSTS`), so it does not promise either."""
+    name = app.strip().lower() if isinstance(app, str) else ""
+    return name in _TERMINALS or name in _AI_APPS
+
+
 def detect(app: str = "", title: str = "") -> str:
     """The kind of writing `app` is for, read from its process name and window title.
 
@@ -391,4 +405,56 @@ def spoken(utterance: str) -> str | None:
     for kind, pattern in _SPOKEN:
         if pattern.match(text):
             return kind
+    return None
+
+
+# -- what was asked of words that have already landed -------------------------------------
+
+#: A request to write what is there properly without naming a kind: "polish that". The
+#: window decides which kind, the way it does for Refine.
+_POLISH_IT = re.compile(
+    "^" + _ASK + r"(?:"
+    rf"(?:refine|polish|rewrite|improve) {_IT}(?: up)?|"
+    rf"write {_IT} (?:up )?(?:properly|better)|write {_IT} up|"
+    rf"make {_IT} (?:better|proper|read well|read better|sound better)|"
+    rf"fix {_IT} up"
+    r")" + _PLEASE + r"?[.!?]*$", re.I)
+
+#: The handful of changes people ask for by name, as whole utterances. A closed list on
+#: purpose. These words also open ordinary sentences - "make it clear that we need the
+#: report by Friday" is dictation - and a rule loose enough to take every "make it ..."
+#: as an instruction would swallow that sentence and rewrite the one before it, in
+#: another program, with nothing on screen to say why. So: one of these adjectives, and
+#: nothing after it.
+_CHANGE_IT = re.compile(
+    "^" + _ASK + r"(?:"
+    rf"make {_IT} (?:(?:a bit|a little|much|more|less|slightly) )*"
+    r"(?:shorter|longer|formal|casual|polite|friendly|friendlier|professional|concise|"
+    r"simpler|clearer|direct|warmer|firmer|softer)|"
+    rf"(?:shorten|tighten|simplify) {_IT}(?: up)?"
+    r")" + _PLEASE + r"?[.!?]*$", re.I)
+
+
+def wanted(utterance: str) -> str | None:
+    """What a whole utterance asks to be done with words already on the page.
+
+    One of the four kinds for "make it an email"; `AUTO` for "polish that", where the
+    window decides; the utterance itself for one of the named changes ("make it
+    shorter"), to be passed on as an instruction; None for anything that is dictation.
+
+    Whole-utterance and short for `spoken`'s reason, which matters more here than
+    anywhere: this is asked about text Flow has *already pasted* into somebody's
+    document, so a false match does not mis-shape a draft on a panel - it rewrites
+    what they wrote.
+    """
+    kind = spoken(utterance)
+    if kind is not None:
+        return kind
+    text = utterance.strip() if isinstance(utterance, str) else ""
+    if not text or len(text) > 80:
+        return None
+    if _POLISH_IT.match(text):
+        return AUTO
+    if _CHANGE_IT.match(text):
+        return text.rstrip(".!? ")
     return None

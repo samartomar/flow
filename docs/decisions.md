@@ -2634,3 +2634,387 @@ email sent with a greeting or a sign-off they did not want — the brief then ke
 what was dictated, the strict side of the split; (3) the 190 s walk is ever waited out —
 the per-pool ceiling; (4) the mode line is reported as noise by somebody who cycles
 often — it then says itself only the first few times, counted in the profile.
+
+### 2026-11-22 — The pill is an indicator: a rewrite is asked for after the words land, and an answer is a card that stays
+
+The owner, shown the round above, said two screens are right and are to be left alone —
+the resting pill and Flow Home — and that *"when we switch to ask and refine and the
+other clicks, the whole thing falls apart from experience"*. Neither of those two
+screens is changed by this entry. Everything between them is.
+
+**What was falling apart, each read off the code rather than guessed.**
+
+- **A tap changed where the next sentence went.** A click on the pill shorter than
+  `PILL_HOLD_SEC` cycled Type, Refine, Ask. The pill is 120 px wide and the pin sits on
+  it, so a click that missed sent the next dictation to a cloud CLI instead of onto the
+  page, with a colour as the only notice.
+- **A window rose over the work while you were still talking.** The pill grew from 120
+  to 400 px into a panel the moment a Refine or Ask hold began, over whatever was above
+  it — which, with the pill at the bottom of the screen, is where people type.
+- **Clicking back into your own work closed it.** Click-outside dismissed the panel, so
+  the answer went away at the moment somebody turned to use it.
+- **Refine took a second action to do what Type does on the release.** Result on the
+  panel, then Send. And because a result could sit there, "hold again to say more"
+  needed a state machine — the one whose defects fill item 4 of the entry above, found
+  three times over.
+
+**What comparable tools do**, from a teardown of ten of them the same day (Wispr Flow's
+own help pages read directly; the rest from their documentation and release notes):
+every one puts a rewrite straight where the cursor is, and falls back to the words as
+dictated when the model fails — Wispr Flow's help says a transform that fails *"pastes
+the original dictation instead"*. None changes mode when its indicator is clicked. An
+answer gets a surface that stays until it is closed, with Copy and a way to the main
+window, and none of them closes it on a click elsewhere. Most have a key that rewrites
+the last dictation.
+
+**Decided:**
+
+1. **A rewrite is asked for after the words have landed.** Dictate in Type; then *"make
+   it an email"*, *"polish that"*, *"make it shorter"* in the next hold (`kinds.wanted`,
+   whole utterance only). The CLI is handed the words as pasted and its answer replaces
+   them where they are, through the machinery a spoken correction already uses
+   (`Session._restyle_paste`, the `retype` event, `inject.paste(remove=)`). This is the
+   order that removes the panel: the words are on the page before anything is asked of
+   a network, so a CLI that is slow, missing or wrong costs nothing. Run through the
+   real session and `claude`: *"make it shorter"* 7.2 s and *"make it an email"* 5.8 s,
+   each replacing the paste in place; *"polish that"* 31 s on the first call, because
+   this machine's `codex` timed out first and was then tried last (`refine.Health`).
+   A second request is written from the words as said (`Pasted.heard`), so two models'
+   choices do not compound.
+
+2. **In Refine mode the rewrite lands on the release** (`CompactPill._land`). No panel,
+   no Send. If nothing comes back, what was said goes in. If the user has moved to
+   another window, nothing is pasted anywhere and Paste last has it.
+
+   **This changes the sentence the entry above leaned on, and says so.** Its item 2
+   justified a greeting and a sign-off nobody dictated by "Refine never sends (R5), so
+   a conventional frame is read on the panel before it leaves". It is now read in the
+   window it was written for. R5 itself stands: landing is not sending — the text goes
+   into a text box and no Enter is pressed, which is the rule Type has always had. The
+   email reopen bar of that entry (2) is the one to watch.
+
+3. **What landed can be changed like any Type paste** (`Session.refine_lands`). The
+   first cut of this round left a hole: after a Refine landed, *"scratch that"* in the
+   next hold was itself refined and pasted. A landed Refine is Flow's own paste in a
+   window it can watch, so the corrections, *"make it shorter"* and *"make it an
+   email"* all apply to it, and two landings in a row get their space. Where a result
+   still waits on a panel or in a draft the flag is False and nothing changes.
+
+4. **An Ask shows nothing but the pill until there is an answer.** While it is out the
+   strip under the pill says who is being asked and for how long. The answer comes up
+   on a card: the question, the answer, Copy, Continue in Flow. **It stays until it is
+   closed** — its mark, the cancel key, or the next hold — and a click elsewhere leaves
+   it alone.
+
+   **The first cut of the card was wrong and was reversed the same day.** It had no
+   buttons, faded after a reading time (8 s plus 15 characters a second, capped at
+   45 s), and opened Flow Home on a click anywhere. The reasoning was "nothing to
+   manage". The teardown came back after it was built: a timed fade takes an answer
+   away from somebody half way down it, and click-anywhere opens a window on somebody
+   selecting a word. Both are gone, and `TestAnAnswerStaysUntilYouCloseIt` pins it.
+
+5. **With keys to hold, a tap on the pill changes nothing.** It says what the keys are.
+   Mode is chosen from the right-click menu or `ctrl+alt+M`. Without keys (`--no-chord`,
+   Lite) the pill is still the only way in, and a tap still cycles.
+
+6. **A key for the rewrite: `alt+shift+X`** (`rewrite`, `alt+shift+C` behind it), which
+   is *"polish that"* pressed. For the room where nobody says a command aloud, and
+   because a thing that can only be asked for by voice cannot be found by looking. It
+   sits beside Paste last and has no Ctrl in it, for that entry's AltGr reason.
+
+   **The key's own press must not read as typing, and the hook must not learn which
+   key it was.** A correction is only safe while nothing has been typed, and the
+   keyboard hook's whole account of typing is one boolean (`Chord.touched`) — the guide
+   promises it "never learns which key you pressed". Teaching the hook the shortcut's
+   key would have been the direct fix and would have broken that sentence. Instead:
+   `RegisterHotKey` reports the press, and a key it reports is one the OS kept, so the
+   surface claims the key after the fact (`CompactPill._rewrite_last`) and
+   `_watch_paste_run` waits `TOUCH_GRACE_SEC` (0.2 s) before believing any key, so the
+   claim can arrive. Held, the key repeats; for that the surface sets one more boolean
+   on the hook, `Chord.own_key`, which the hook clears on the first key to come *up*,
+   whichever it is. Still no key is compared against anything but the modifiers, and
+   the pinned field list in `test_chord.py` carries the argument. Nothing is made on
+   the strength of the wait: a change reads the hook itself on its way out
+   (`_pump_retype`) and a paste asks without it.
+
+7. **The earlier flow is a setting, off** (`Profile.panel_flows`, Flow Home ▸ Settings ▸
+   The pill). It is there so the owner can compare the two at his desk, and so a person
+   who wants to read a rewrite before it touches their window can. It is not a second
+   product: it comes out once the direct flow has been lived with.
+
+**What was not done.**
+
+- **A third hold for Refine**, as Ask has. Considered and refused: the free modifier
+  pairs are worse than no key. Right Shift held eight seconds turns on FilterKeys,
+  Alt+Shift released on its own switches keyboard layout, Alt+Win reaches for menus. A
+  tap key has none of that.
+- **A "Rewrite" row on the pill's menu.** The menu borrows the foreground to open, and
+  a correction needs the window it is correcting in front. Not attempted blind.
+- **Select text, say what to do with it** — P11 in NEEDS_YOU. Its brief there assumed
+  the panel ("nothing replaces anything until Send"); it has to be re-argued for a flow
+  where the result lands.
+- **The answer is still read aloud by default, and a draft is still asked after a
+  pause.** The teardown found no other tool doing either. Both are the owner's settings
+  to change, and are in NEEDS_YOU as questions.
+- **`design/compact/` and `docs/flow.gif` are now behind the product.** The canvas
+  still draws the tap that cycles and the panel that rises. Noted at the top of its
+  README; redrawing it belongs with the round that re-shoots the reel.
+
+**Not seen by a person yet.** Everything above is tested (the suite, and the real
+session against the real CLI by script), and the paste-in-place it stands on has been
+in use since 2026-09-23. No hand has yet held the keys over a real Outlook or Slack
+window in this flow. That is the first desk item in NEEDS_YOU.
+
+**Reopens if:** (1) a rewrite ever lands in a window it was not written for — the
+foreground check in `_land` and `_pump_retype` is then wrong, and landing stops until
+it is right; (2) somebody is caught out by an email landing unread — the panel becomes
+the default for the email kind alone, which is the narrow case R5 was written about;
+(3) `alt+shift+X` proves to be somebody's daily shortcut in another program — the
+default moves, the action stays; (4) a typed key is ever missed inside the 0.2 s —
+the wait goes and the hook is taught the shortcut's key, with the guide's sentence
+rewritten to say so; (5) the answer card is reported as in the way — it gains a pin
+and a place, not a timer.
+
+### 2026-11-23 — Driven in the real app: a release that switched off the next hold, a microphone read between holds, and holds that said nothing
+
+The entry above was reported done on a green suite. The owner ran it and wrote: *"ctrl +
+windows + alt does not respond back, no error; clicking the Ask button does nothing;
+Refine does not work; the whole flow is still not functional."* He was right, and the
+suite could not have known: every test of the pill drives a pill built without a
+window, over a session that is a mock.
+
+**What his own trace said.** `~/.flow/diag.jsonl` for that session holds the keyboard
+hook's record of eight holds — four on the talk keys, four on the Ask keys, three of
+those as *start, break, start* — and **not one** `state`, `decode` or `ask` record. The
+keys arrived. Nothing downstream of them ever happened.
+
+**How it was reproduced.** By running the app itself — `flow.__main__.main`, the real
+pill and its frame loop, the real session, the Parakeet engine, the real CLIs — with
+three things pretended and nothing else: the keys (first as the names the hook queues,
+then as real key events through `SendInput`, so the hook itself was in the path), the
+voice (synthesized speech put where the microphone's blocks arrive), and the paste
+(recorded, never typed). It lives in `.shots/harness/`, which is not tracked.
+
+**Found, in the order they explain the report:**
+
+1. **A release switched off the hold that came after it.** Pressed in the order the
+   keys sit — Ctrl, Win, Alt — Ctrl+Win forms for a moment, Alt breaks it, and the Ask
+   hold begins on the same keystroke. The break's `disarm` event and the new hold's
+   start were read off the queue together; the event was handled a frame later and took
+   `armed` away from the hold that had just begun. The guard against exactly this
+   tested "the session is LISTENING", which for the first half second of any hold it
+   is not. **From Type it happened to work** — changing sides drains the events first —
+   **so the first question was answered and every one after it, on a pill already on
+   Ask, was heard by nobody**: no words, no question, no line. Reproduced twice with
+   real keys, and it leaves precisely the trace the owner's session left. The guard is
+   now "a hold is down, or hands-free is on".
+
+2. **The microphone could be read between holds.** A release leaves the stream open for
+   a minute so the next hold starts at once, on the argument that an unread stream is
+   not a recording. `Session._pump_audio` read whatever it was handed, and the same
+   guard, the other way round, kept the pill `armed` after a release whenever the room
+   was louder than the gate — so the frame went on ticking and the session went on
+   listening. In a driven run it put some 800 characters of a room into a draft, and
+   the next question carried them to the CLI. **This is the serious one**, and it is
+   closed in two places: the pill's guard no longer asks the session's state, and the
+   session throws the blocks away itself while a stream is only lingering, so no
+   surface can break the promise again.
+
+3. **A hold showed almost nothing while it was down.** With the panel gone, holding the
+   keys changed a ring a pixel and a half wide. "Does not respond" is the honest
+   reading of that. The pill is still the pill and nothing rises, but the line under
+   it now says *listening - let go to paste* (or *to ask claude*, or that it will be
+   written for this window), and then the words as they are heard.
+
+4. **A hold that ended in nothing said nothing.** A microphone muted or turned down, or
+   sound the decoder made no words of: silence either way, in Ask and Refine. Now
+   *heard nothing - if you spoke, check the microphone in Flow Home*, for a hold of
+   0.7 s or more, and *did not catch any words - hold and say it again*.
+
+5. **A rewrite that could not land vanished.** It takes six to twelve seconds, and
+   people click back into their work in less. The change was dropped by a silent
+   `return`, and the note that said so was one this pill did not show. Now it is said
+   (*rewritten, but you clicked after it was pasted - Paste last has it*) and kept. A
+   rewrite identical to what is there is said too, and the window is left alone.
+
+**What the trace now keeps**, because the last one could not answer the question it was
+opened for: one `hold` record per hold (how long, which mode, whether anything was
+heard) and a `stall` record whenever the frame loop did not run for a second —
+durations and categories, no words.
+
+**Not explained, and said so.** Finding 1 accounts for the second and later Ask holds
+of that session. It does not account for the four plain talk holds at its start, which
+also left no `state` record, nor for the Ask button on Flow Home, which worked in every
+reproduction — against the demo, against the real app over its API, and in the real
+page in a browser. The `hold` and `stall` records exist so that the next trace settles
+both. A muted microphone would produce the first and now says so; a frame loop that was
+not running would produce both, and now leaves a line.
+
+**What changes in how this project is worked on.** "The suite is green" was never
+evidence that a hold works, and it was reported as if it were. A change to what the
+keys, the microphone or the paste do is now driven in the real app before it is called
+done.
+
+**Reopens if:** (1) a trace ever shows a `hold` with `ok: false` beside words that were
+plainly spoken — the gate, the device or the linger guard is then wrong, in that order
+of likelihood; (2) a `stall` record appears — whatever blocked the loop is the bug, and
+Flow Home's buttons failing with it is the same bug; (3) the listening line is reported
+as noise — it then shows the words only, and the first line goes; (4) anybody shows
+audio from between two holds in a draft again — the linger goes, and a hold pays the
+100 to 270 ms it was added to save.
+
+### 2026-11-23 — The CLI keeps no record: `--ephemeral` for codex, `--no-session-persistence` for claude
+
+**What was true, and nobody had written down.** Flow's promise about what it keeps is
+one file, by choice: `~/.flow/history.jsonl`. It was true of Flow and silent about the
+program Flow starts. Every agent CLI keeps its own history of what it is asked, and
+"History: off" never reached it. Found while cleaning up after the driven test runs of
+the entry above, one of which had carried overheard speech: claude had a session file
+for every call under `~/.claude/projects/` (about 310 KB each), and codex a rollout
+file under `~/.codex/sessions/` plus rows in `state_5.sqlite` and
+`thread_history_1.sqlite`, where the whole prompt is the session's title, first message
+and preview — shown in codex's own picker, and written even for a call the server
+refused. So a person who chose not to keep what they dictate had every rewrite and
+every question on disk anyway, in two folders this project's docs never named.
+
+**Decided.** Both vendors ship a switch and Flow passes it on every call:
+`codex exec --ephemeral`, `claude --no-session-persistence`. Not a setting. There is no
+version of "keep nothing" in which the courier keeps a copy, and nobody resumes a
+one-line rewrite as a session.
+
+**Measured, through `_invoke`, not read from help text.** A multi-line prompt carrying
+a random marker, then every file either CLI had changed during the call searched for it
+(databases streamed whole), with session files and database rows counted before and
+after:
+
+| | with the switch | without |
+|---|---|---|
+| claude 2.1.330 | answered in 6.0 s, exit 0; **no file held the marker**; session files 795 → 795 | 5.2 s; one new session file, holding it |
+| codex-cli 0.171.0 | answered in 8.7 s, exit 0; **no file held the marker**; no rollout, no row | 8.4 s; one new rollout, one new `threads` row; the marker in three files |
+| codex-cli 0.163.0, which refuses its model | exit 1 in 4.8 s; **no file held the marker**; no rollout, no row | exit 1; one new rollout, one new row; the marker in three files |
+
+Then the shipped entry points, `refine.refine` and `refine.ask`, with the real CLIs:
+a rewrite in 11.0 s and an answer in 8.8 s (codex refusing, claude answering), counts
+unchanged, neither marker anywhere. Then the real app, driven twice. From a
+development shell, codex 0.163.0 refusing and claude answering: dictate, "polish that",
+a question. From the owner's own shell, codex 0.171.0 answering: "polish that" in
+10.7 s, a spoken question in 9.8 s, a question typed into Flow Home in 11.6 s. All of
+it worked and no session file appeared. The switch costs no time: 8.7 s with it against
+8.4 s without for a call that answers, 3.5 to 3.9 s against 3.3 to 4.3 s for one that is
+refused.
+
+**Two codex versions, and a correction to this project's own record.** Until this entry
+every live check here had been run from a development shell, where `codex` is 0.163.0
+and exits 1 on the configured model. It was written down as "this machine's codex
+cannot answer" — in NEEDS_YOU, in the 2026-11-22 audit, in `refine.py` — and the owner
+was told to pin claude until it was fixed. It is not true of the shell he starts Flow
+from. The trace records the CLI versions at every launch (`identity`), and his launches
+say 0.171.0, which answers. The first measurements of this entry were therefore of
+refused calls only; the completed ones were made the same day from the right shell and
+are the ones in the table. **What changes in how this is worked on:** a live check is
+run from the shell the owner uses, and the trace's `identity` lines are read before
+anything is claimed about his machine.
+
+**A CLI too old for the switch fails; it is not retried without it.** It exits
+non-zero, is named, and the call goes to the next CLI — the walk `effort_config`
+already relies on. Retrying without the switch would keep the record after all,
+silently, on exactly the machines nobody is watching.
+
+**Not done, and said so.**
+
+1. **kiro-cli.** 3.1.0's `chat --help` offers `--resume`, `--resume-id` and
+   `--list-sessions` and no way not to save. It keeps what it keeps, from the empty
+   directory Flow starts it in. The guide says so under Known limitations.
+2. **codex runs the user's own hooks on a call from Flow.** They are handed the prompt.
+   On the machine this was found on they are a memory plugin's, and they cost time.
+   From inside this repository, three runs each, alternating: a call that answered
+   took 9.7 to 10.8 s with hooks on and 5.6 to 8.1 s with `--disable hooks`; a call
+   that was refused, 5.3 to 5.8 s against 2.4 to 2.9 s. Two single calls from the
+   repository took 24 s and 37 s — past the 20 s wait, which is what a person sees as
+   "codex did nothing". Those two were not run to ground: the hooks are the likeliest
+   cause and not a proven one. claude is the other way round: `--safe-mode` already
+   turns the user's hooks off.
+   Left as it is because it is the user's configuration and not a repository's, the
+   rule the kiro entry set; whether a dictated sentence should reach a hook at all is
+   put to the owner in NEEDS_YOU rather than decided here.
+   *Decided the same day: the next entry.*
+3. **What the provider keeps.** No local switch governs it.
+4. **What was written before this date.** Still on disk for anybody who used Flow
+   before it. The guide names the folders and how to remove a session.
+
+**Reopens if:** (1) either CLI drops or renames its switch — the call fails loudly and
+names the CLI, and the entry has to be re-measured, not patched from memory; (2) a
+codex call is shown to leave a file or a row with `--ephemeral`; (3) kiro-cli ships
+a way not to save — it goes in the same day, measured the same way; (4) somebody needs
+to resume what Flow asked — then it is a setting, off by default.
+
+### 2026-11-23 — codex runs none of the user's hooks on a call from Flow: `--disable hooks`
+
+**What was put to the owner, and his answer.** Item 2 of the entry above: codex runs
+its user's hooks on every `exec`, a call from Flow is an `exec`, and the hook on the
+prompt is handed the prompt — the dictated sentence, on every rewrite and every
+question. On his machine those hooks are a memory plugin's and a status card's, set up
+for coding sessions. He was shown what a hook receives and what it costs, and said to
+switch them off for Flow's calls.
+
+**Decided.** `codex exec --disable hooks` on every call. It is codex's own switch for
+one invocation — `exec --help`: "Disable a feature (repeatable). Equivalent to
+`-c features.<name>=false`"; `codex features list` names `hooks`, stable, on both
+versions in reach. Not a setting, on the same reasoning as `--ephemeral`: nobody
+dictating an email means it for a hook. claude already ran none: `--safe-mode`, in its
+argv since 2026-08-03 to keep a workspace's instructions out, disables hooks and
+plugins as well, by its own help (read again on 2.1.330; not measured here).
+
+**This is not Flow reconfiguring another tool.** That rule is about what Flow writes:
+nothing in `~/.codex` is touched, `hooks.json` is as it was, and the user's hooks run
+unchanged in every codex session that is theirs. A flag on a process Flow starts is the
+same kind of thing as `-s read-only` and `-c project_doc_max_bytes=0`, which have been
+in this argv from the beginning.
+
+**Measured, by what codex itself says.** codex writes a `hook:` line to stderr for each
+hook it starts and another when it completes, so this was counted rather than inferred
+from the clock. From the repository, the shipped argv against the same argv without
+the two tokens, alternating:
+
+| | with `--disable hooks` | without |
+|---|---|---|
+| codex-cli 0.171.0, two rounds | 5.5 s and 5.6 s, exit 0, answered; **no `hook:` line** | 9.9 s and 9.8 s, exit 0, answered; eight: SessionStart twice, UserPromptSubmit, Stop, and a "Completed" for each |
+| codex-cli 0.163.0, which refuses its model | exit 1; **no `hook:` line** | exit 1; six |
+
+Nothing was kept in either column: 691 rollout files before and after, `threads`
+unchanged, and no file under `~/.codex` or `~/.hindsight` that changed during a call
+held that call's marker — with the hooks on, too. So the prompt hook left no copy on
+this disk; what the plugin's server did with what it was handed cannot be seen from
+here, which is the reason to stop handing it over. Through `refine._invoke`, once:
+answered in 7.1 s.
+
+**Then the real app, from the owner's shell** (the trace's `identity` line for each
+launch says codex 0.171.0): "polish that" landed in 4.9 s, where it took 10.7 s the
+same day with hooks on; a spoken question was on its card in 6.5 s (9.8 s); a question
+typed into Flow Home was answered in 5.8 s (11.6 s). No session was kept.
+
+**What this changes in the entry above.** codex took about ten seconds a call on this
+machine and claude about six, and the owner was told the choice between them was a
+choice about waiting. About four of codex's ten were the hooks. With them off the two
+are within a second of each other, and that advice is withdrawn in NEEDS_YOU.
+
+**A codex that does not know the feature fails; it is not retried with hooks on.**
+Measured with a made-up name: `Error: Unknown feature flag: nosuchfeature`, exit 1.
+Flow names the CLI and goes to the next one, as for any switch in this argv.
+
+**Not done, and said so.**
+
+1. **The two slow calls.** The 24 s and 37 s calls of the entry above are still not
+   explained. Seven calls with hooks off took 4.9 to 7.1 s and none was slow. That is
+   seven calls, not a cause.
+2. **Whatever else codex starts on an `exec`.** MCP servers and plugins the user has
+   configured were not looked at. Hooks were, because a hook is handed the prompt.
+3. **kiro-cli.** Not looked at for hooks. It runs from an empty directory with an empty
+   trust list; the user's global kiro settings apply, as the kiro entry says.
+
+**Reopens if:** (1) codex renames or removes the `hooks` feature — the call fails
+loudly and names codex, and this is re-measured, not patched from memory; (2) a `hook:`
+line is shown on the stderr of a call Flow made; (3) somebody's codex hooks are a
+control they are required to run on every call — an audit, a filter — and Flow's calls
+are skipping it: then it is a setting, and which way it defaults is argued again with
+that person's case in hand.

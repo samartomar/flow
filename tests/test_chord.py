@@ -901,13 +901,19 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         # suite proves a keystroke cannot get in there. A sink that could be told *what*
         # was pressed would be a different field, and this is where that would be argued
         # about instead.
+        # Argued again on 2026-11-22 for `own_key` (decisions.md, "The pill is an
+        # indicator"): one boolean the *surface* sets, "a shortcut of Flow's own is
+        # held down", cleared here by the first key to come up - any key, so nothing
+        # is compared that was not compared before. It lets the rewrite shortcut's
+        # key repeat without reading as typing, and it cannot say which key that is.
         chord, _presses = _chord()
         _Keyboard(chord).down(VK_LCONTROL, VK_LWIN, VK_A).up(VK_A, VK_LWIN, VK_LCONTROL)
         self.assertEqual(
             set(vars(chord)),
             {"presses", "mods", "action", "warm_action", "end_action", "break_action",
              "toggle_action", "gesture", "clock", "installed", "_down", "_other",
-             "_extra", "_armed", "_talking", "_hold", "riders", "touched", "_hook",
+             "_extra", "_armed", "_talking", "_hold", "riders", "touched", "own_key",
+             "_hook",
              "_tid", "_ready", "_proc", "_thread", "trace"},
         )
 
