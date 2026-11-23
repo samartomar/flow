@@ -1123,3 +1123,137 @@ class TestEdgeCatalogueIsAskedOnlyWhenSomeoneLooks(unittest.TestCase):
                 mock.patch("flow.speak.voices_changed") as changed:
             self.Api._edge_catalogue_once(mock.Mock())
         changed.assert_not_called()
+
+class TestWhatRefineWritesIsASetting(unittest.TestCase):
+    """Flow Home's "What Refine writes" card: a default, a name, and a kind per
+    program - the three things a window's name cannot tell Flow (flow/kinds.py)."""
+
+    def page(self, h):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, page = h.call("GET", "/api/settings")
+        self.assertEqual(status, 200)
+        return page
+
+    def post(self, h, path, body):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            return h.call("POST", path, body)
+
+    def test_a_fresh_profile_lets_the_window_decide_and_signs_with_nothing(self):
+        page = self.page(Pumped(self))
+        self.assertEqual(page["writing"]["default"], "auto")
+        self.assertEqual(page["writing"]["name"], "")
+        self.assertEqual([k["key"] for k in page["writing"]["kinds"]],
+                         ["prompt", "email", "message", "tidy"])
+
+    def test_the_default_is_saved(self):
+        h = Pumped(self)
+        status, page = self.post(h, "/api/settings/writing", {"default": "prompt"})
+        self.assertEqual(status, 200)
+        self.assertEqual(page["writing"]["default"], "prompt")
+        self.assertEqual(Profile(h.profile.path).refine_kind, "prompt")
+
+    def test_a_default_that_is_not_a_kind_is_refused(self):
+        h = Pumped(self)
+        status, _ = self.post(h, "/api/settings/writing", {"default": "memo"})
+        self.assertEqual(status, 400)
+        self.assertEqual(h.profile.refine_kind, "auto")
+
+    def test_the_name_is_saved_with_its_spaces_tidied(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/writing", {"name": "  Samar   Tomar "})
+        self.assertEqual(Profile(h.profile.path).name, "Samar Tomar")
+
+    def test_the_name_can_be_cleared(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/writing", {"name": "Samar"})
+        self.post(h, "/api/settings/writing", {"name": ""})
+        self.assertEqual(Profile(h.profile.path).name, "")
+
+    def test_a_paragraph_is_not_a_name(self):
+        h = Pumped(self)
+        status, _ = self.post(h, "/api/settings/writing", {"name": "x" * 200})
+        self.assertEqual(status, 400)
+
+    def test_changing_one_leaves_the_other(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/writing", {"name": "Samar"})
+        self.post(h, "/api/settings/writing", {"default": "tidy"})
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.name, saved.refine_kind), ("Samar", "tidy"))
+
+    def test_a_program_can_be_given_a_kind(self):
+        h = Pumped(self)
+        status, page = self.post(h, "/api/settings/apps",
+                                 {"exe": "Notepad.exe", "kind": "email"})
+        self.assertEqual(status, 200)
+        self.assertEqual(Profile(h.profile.path).kinds, {"notepad.exe": "email"})
+        self.assertEqual(page["apps"], [{"exe": "notepad.exe", "instruction": "",
+                                         "kind": "email"}])
+
+    def test_a_kind_that_is_not_one_is_refused(self):
+        h = Pumped(self)
+        status, _ = self.post(h, "/api/settings/apps",
+                              {"exe": "notepad.exe", "kind": "memo"})
+        self.assertEqual(status, 400)
+        self.assertEqual(h.profile.kinds, {})
+
+    def test_changing_the_kind_does_not_wipe_the_instruction(self):
+        # The page's kind picker posts a kind and nothing else.
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps",
+                  {"exe": "slack.exe", "instruction": "keep it to one line"})
+        self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": "message"})
+        saved = Profile(h.profile.path)
+        self.assertEqual(saved.apps, {"slack.exe": "keep it to one line"})
+        self.assertEqual(saved.kinds, {"slack.exe": "message"})
+
+    def test_letting_flow_decide_again_removes_only_the_kind(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps",
+                  {"exe": "slack.exe", "instruction": "one line", "kind": "message"})
+        self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": "auto"})
+        saved = Profile(h.profile.path)
+        self.assertEqual(saved.kinds, {})
+        self.assertEqual(saved.apps, {"slack.exe": "one line"})
+
+    def test_removing_a_program_removes_both(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps",
+                  {"exe": "slack.exe", "instruction": "one line", "kind": "message"})
+        _status, page = self.post(h, "/api/settings/apps",
+                                  {"exe": "slack.exe", "instruction": "", "kind": ""})
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.apps, saved.kinds), ({}, {}))
+        self.assertEqual(page["apps"], [])
+
+    def test_a_program_with_either_setting_gets_one_row(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps", {"exe": "code.exe", "instruction": "terse"})
+        self.post(h, "/api/settings/apps", {"exe": "notepad.exe", "kind": "email"})
+        rows = self.page(h)["apps"]
+        self.assertEqual([r["exe"] for r in rows], ["code.exe", "notepad.exe"])
+        self.assertEqual([r["kind"] for r in rows], ["auto", "email"])
+
+    def test_a_hand_edited_kind_that_is_not_one_reads_as_flow_decides(self):
+        h = Pumped(self)
+        h.profile.kinds = {"notepad.exe": "memo"}
+        self.assertEqual(self.page(h)["apps"][0]["kind"], "auto")
+
+
+class TestTheModelsPageSaysWhichCliIsDown(unittest.TestCase):
+    def models(self, h):
+        status, page = h.call("GET", "/api/models")
+        self.assertEqual(status, 200)
+        return page
+
+    def test_a_cli_being_passed_over_is_named_with_its_reason(self):
+        from flow import refine as refine_mod
+
+        h = Pumped(self)
+        h.session.cli_health = refine_mod.Health()
+        h.session.cli_health.failed("codex", "codex exited 1: no such model")
+        self.assertEqual(self.models(h)["agent"]["down"],
+                         [{"name": "codex", "why": "codex exited 1: no such model"}])
+
+    def test_a_session_with_no_record_has_nobody_down(self):
+        self.assertEqual(self.models(Pumped(self))["agent"]["down"], [])

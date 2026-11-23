@@ -60,7 +60,15 @@ boundary is this:
 
 - **Always local.** Microphone audio, the utterance buffers, the lexicon, the profile,
   every local edit, SAPI speech, and Piper speech. R9 is enforced by absence — there is no
-  code in those modules that could send anything anywhere. `flow --stats` is in this band
+  code in those modules that could send anything anywhere. **The front window's title is
+  in this band too**, and it is the newest thing in it (2026-11-22): Refine reads the
+  program name and the title of the window a paste would go to, to decide which kind of
+  writing to produce (`flow/kinds.py`). It is read at that moment, matched against a short
+  list of site names, and dropped — `Session.target_title` is overwritten on the next
+  read, `diag.NEVER` refuses `title` and `window` as trace fields by name, history
+  records the process alone, and the brief a kind selects is a constant in `refine.py`
+  that carries nothing of the window. A title names what somebody is reading, so it is
+  treated as their words are. `flow --stats` is in this band
   too: it reads `~/.flow/diag.jsonl` and `~/.flow/profile.json`, prints a few lines and
   exits, and `flow/stats.py` has no opener in it to do anything else with them.
 - **Sent to Microsoft's speech service, if and only if you installed `[edge]` and chose
@@ -72,7 +80,9 @@ boundary is this:
   the only way to hear them; `flow/piper.py` is the local answer for anyone who would
   rather not. Absent the extra, no socket is opened and `flow/edge.py` is never imported.
 - **Sent to the configured agent CLI, and so to its provider.** A Refine sends the
-  draft tail (≤ `refine.MAX_CHARS`) plus the instruction; an Ask sends the question
+  draft tail (≤ `refine.MAX_CHARS`) plus the instruction — or, for a whole-text Refine,
+  one of four fixed briefs chosen by kind — and, **when an email is being written and a
+  name is set in Flow Home, that name**, because the email is signed with it; an Ask sends the question
   tail, the thread tail, **and the workshop preamble** — which names the workspace, so
   a filesystem path leaves the machine along with the words. That is the one piece of
   non-dictated content Flow adds to an outgoing call, and it is worth stating plainly

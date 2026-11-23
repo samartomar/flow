@@ -19,7 +19,6 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   refine bullets  Refine.dc.html's own worked example: a lead line, a blank
                   line and three bullets, one of them indented
   palette   Switch workspace, mid-search: the query field, the top hit lit
-  setup     Workbench setup: mic, CLI, where it pastes
   no-cli    States.dc.html 1: no agent CLI on PATH — grey, not red
   mic-gone  States.dc.html 2: slashed glyph, persistent red ring
   silence   States.dc.html 3: held, nothing said — straight back to grey
@@ -27,6 +26,14 @@ for is captured as a PNG, so "it renders" is a set of pictures and not a claim:
   recover   States.dc.html 5: the workspace is gone — amber, once
   copied    States.dc.html 6: Lite — `copied — press Ctrl+V` under the pill
   menu      the right-click, the only menu the design allows
+  email     Refine in a mail window: the dictation, and the email it became
+            under "written as an email" (flow/kinds.py)
+  writing   the same panel while the CLI is out: what is being written, by
+            whom, and for how long
+  asking-n  Ask's wait, with its seconds
+  mode      the line a tap puts under the pill: the mode, and what it will do
+  failed    a failure, said under its flash
+  needs-cli a tap with no agent CLI: what the other two modes need
 
 The gestures (tap cycles, hold talks) are logic, pinned headless in
 `tests/test_ui_compact.py`; what only pixels can prove is that the ring, the
@@ -49,7 +56,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from PIL import ImageGrab  # noqa: E402
 
-from flow import paint  # noqa: E402
+from flow import kinds, paint  # noqa: E402
 
 # Before any window: awareness is fixed for the process the moment the
 # first one exists, and these shots are the record of what the surface
@@ -246,10 +253,83 @@ def main() -> None:
             pill._palette.type(ch)
         pill._sync_box()
 
-    def setup_open():
-        # The three answers a real machine would have found — all native to
-        # the fake now (shots.py's FakeSession carries them).
-        pill._open_setup()
+    # (The Workbench setup box used to be photographed here. It left the
+    # product when Flow Home took its three lines, and this step went on
+    # calling `_open_setup` into an AttributeError the walk swallowed.)
+
+    PRIYA = ("hey so um I need to write to Priya about the the release we were "
+             "supposed to ship on Thursday but uh the migration is not done so "
+             "I think we should move it to next Tuesday and also can you ask "
+             "her to to let the QA team know and say sorry for the late notice")
+
+    def refine_email():
+        # What `claude` returned for exactly these words through the email
+        # brief on 2026-11-22, with a name set - not a mock-up of it.
+        sess.state, sess.mode = State.IDLE, REFINE
+        sess.target_app, sess.refine_kind = "OUTLOOK.EXE", kinds.EMAIL
+        pill.armed = False
+        pill._panel_mode = REFINE
+        pill._panel_failed = False
+        pill._panel_heard = PRIYA
+        pill._panel_heard_final = True
+        pill._panel_result = (
+            "Hi Priya,\n"
+            "\n"
+            "I think we should move the release from Thursday to next "
+            "Tuesday. The migration is not done.\n"
+            "\n"
+            "Could you let the QA team know? Sorry for the late notice.\n"
+            "\n"
+            "Thanks,\n"
+            "Samar")
+        pill._open_panel()
+
+    def refine_writing():
+        # Mid-refine: the words are in, the CLI is out, and the tag's row says
+        # what is happening instead of leaving a blue ring to carry it.
+        sess.state, sess.mode = State.REFINING, REFINE
+        sess.target_app, sess.refine_kind = "OUTLOOK.EXE", kinds.EMAIL
+        sess.waited = 6.4
+        pill.armed = True
+        pill._panel_mode = REFINE
+        pill._panel_failed = False
+        pill._panel_heard = PRIYA
+        pill._panel_heard_final = True
+        pill._panel_result = ""
+        pill._open_panel()
+
+    def asking_counted():
+        sess.state, sess.mode = State.ASKING, CONVERSE
+        sess.waited = 14.2
+        pill.armed = True
+        pill._panel_mode = CONVERSE
+        pill._panel_failed = False
+        pill._panel_heard = "which file draws the pill and how does it pick the ring colour"
+        pill._panel_heard_final = True
+        pill._panel_result = ""
+        pill._open_panel()
+
+    def mode_line():
+        # A tap onto Refine with Outlook in front.
+        pill._close_panel()
+        sess.state, sess.mode, sess.waited = State.IDLE, REFINE, 0.0
+        sess.target_app = "OUTLOOK.EXE"
+        pill.armed = False
+        pill._say(pill._mode_line())
+
+    def failure_line():
+        sess.mode, sess.state = DICTATE, State.IDLE
+        pill._flash = FLASH_FRAMES
+        pill._say(uc._clip(
+            "skipping codex - see Flow Home, Models: exited 1: The 'gpt-6.2-astra' "
+            "model is not supported when using Codex with a ChatGPT account."),
+            uc.ERROR_FRAMES)
+
+    def needs_cli():
+        pill._flash = 0
+        sess._provider = lambda: ""
+        sess.mode, sess.state = DICTATE, State.IDLE
+        pill._cycle_mode()
 
     def no_cli():
         # States.dc.html 1: Type still works, the other two are not offered —
@@ -352,8 +432,6 @@ def main() -> None:
         (0, lambda: pill._close_panel()),
         (0, palette_open),
         (600, lambda: box_shot(pill, "12-compact-palette")),
-        (0, setup_open),
-        (600, lambda: box_shot(pill, "13-compact-setup")),
         (0, lambda: pill._close_box()),
         (0, no_cli),
         (500, lambda: shot(pill, "14-compact-no-cli")),
@@ -381,6 +459,22 @@ def main() -> None:
         (500, lambda: shot(pill, "21-compact-mic-open")),
         (0, state(State.IDLE, armed=False)),
         (0, reset_fallbacks),
+        # What the pill says in words, 2026-11-22.
+        (0, refine_email),
+        (700, lambda: shot(pill, "22-compact-refine-email")),
+        (0, refine_writing),
+        (700, lambda: shot(pill, "23-compact-refine-writing")),
+        (0, asking_counted),
+        (700, lambda: shot(pill, "24-compact-asking-counted")),
+        (0, mode_line),
+        (600, lambda: shot(pill, "25-compact-mode-line")),
+        (0, failure_line),
+        (300, lambda: shot(pill, "26-compact-failure-line")),
+        (0, reset_fallbacks),
+        (0, needs_cli),
+        (500, lambda: shot(pill, "27-compact-needs-cli")),
+        (0, reset_fallbacks),
+        (0, lambda: setattr(sess, "target_app", "claude.exe")),
         (0, state(State.IDLE, armed=False)),
         (400, menu),
     ]

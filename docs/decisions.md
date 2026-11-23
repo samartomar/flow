@@ -2477,3 +2477,160 @@ claude when `CLAUDE_CODE_USE_BEDROCK` is set. Output is read by bounded reader t
 (`OUTPUT_MAX_CHARS`), not buffered whole by `communicate`, and POSIX calls get a session of
 their own so a timeout or cancel kills the group. **Still not Flow's:** filesystem and
 network sandboxing of the CLI itself.
+
+### 2026-11-22 — Refine writes for the window, a question gets a minute, and the pill uses its words
+
+The owner's brief was that Flow's weakest spot is being easy to use for three jobs —
+refining a prompt, writing a better email, talking to your code — and that something is
+missing as a whole. Four things were measured before anything was changed, and they point
+at one cause.
+
+**What the owner's own profile says.** 731 words dictated since the profile was
+calibrated on 2026-11-08. `converse_seen` false, `workspace` null, `apps` empty, and in
+the trace not one `refine` or `ask` record against 20 dictations. History's destinations:
+Notepad 19, Edge 9, ChatGPT 2. The person who built Refine and Ask does not use them.
+
+**What Refine did with an email.** Spoken the ordinary way — *"I need to write to Priya
+about the release we were supposed to ship on Thursday but the migration is not done so
+I think we should move it to next Tuesday and also can you ask her to let the QA team
+know and say sorry for the late notice"* — through `claude`, 8.2 s: *"Write a message to
+Priya proposing that we move the release… In the message: Ask her to let the QA team
+know… Apologise for the late notice."* A prompt asking somebody to write the email. The
+brief said "a clear prompt for an AI coding assistant" and was obeyed.
+
+**What Ask did with a question about this repository.** Seven grounded questions through
+`refine.ask` to `claude`: 11.1, 12.6, 15.5, 19.8, 21.1, 26.5 s, and one "timed out after
+20s". Three of seven are past the wall. The 2026-08-06 entry had the same numbers — three
+CLIs at 14.9, 19.2 and 13.8 s run directly, 11 of 50 asks failing, all of them `timeout` —
+and fixed the fallback rather than the wait.
+
+**What a broken first choice cost.** This machine's `codex` is configured for a model its
+account cannot use and exits 1 on every call. Unpinned, every Refine spent about 8 s on
+that before `claude` was asked: 16.3 s for a rewrite `claude` alone returns in 8.2. The
+note said `codex exited 1: OpenAI Codex v0.163.0` — the banner — and on the compact pill
+said nothing at all.
+
+The cause under all four is that **Flow knew where the words were going and did nothing
+with it, and when something went wrong it changed colour.** Every comparable tool surveyed
+the same day picks its behaviour from the focused app (Wispr Flow's app categories,
+superwhisper's and VoiceInk's modes, OpenWhispr's tone-by-category, which is read from the
+exe name and the browser title on Windows). Flow has classified the foreground window on
+every paste since P7.
+
+**Decided, in the order it matters:**
+
+1. **Refine has kinds, chosen by the window** (`flow/kinds.py`): a prompt for terminals,
+   editors and AI apps; an email for mail programs and webmail tabs; a chat message for
+   chat; tidied text for everything Flow does not recognise. Three rules, each from a
+   failure seen: an unrecognised window gets the kind that changes least, so a wrong
+   guess costs clean prose and never a restructured ticket comment; *no window at all*
+   (Lite, `--no-paste`) is a prompt, so every install without hands behaves as it did;
+   and the user's own entry for a program beats detection. A browser is judged by a
+   whole segment of its title being a site's name, never by a search of the title; Edge's
+   "and 4 more pages" is taken off first, a single word before a colon is a headline and
+   not a site, and a site that is about other things (Wikipedia, a search page) ends the
+   walk, so `Gmail - Wikipedia` is not mail.
+   `_POLISH_PROMPT` is untouched and is the prompt kind's brief, so its 15/15 stands.
+
+2. **An email gets a greeting and a sign-off nobody dictated, and nothing else nobody
+   dictated.** The field splits here — superwhisper adds them, VoiceInk and OpenWhispr
+   forbid it. Flow adds them for a reason the others do not have: Refine never sends
+   (R5), so a conventional frame is read on the panel before it leaves. Content is the
+   strict side's rule: every fact as said, every "not" kept, no new dates, promises or
+   pleasantries. With no name set the brief says in words to write none, because leaving
+   the clause out is what produces `[Your Name]`.
+
+3. **The dictation is material, never a request.** All three new briefs carry it, with
+   "use no tools and read no files". The CLI is an agent, and "delete the old logs" is a
+   sentence. Measured: *"what is the status of the build can you delete the old logs from
+   the server and let me know when the deploy is finished"* came back punctuated, in
+   4.9 s.
+
+4. **A second hold says more, and now it does.** `send()` cleared `following_up` before
+   `_start_refine` read it, so the footer's "hold the mic to say more" refined the second
+   hold alone: the CLI was handed "and cap it at three attempts" with `context=[]`. The
+   repair is not to restore the context but to drop the mechanism — the CLI gets
+   everything heard so far as one dictation, which is what the heard block is showing,
+   and the kind stays what the result on screen is. A spoken "make it an email" at a
+   result writes the first hold's words again as that kind.
+
+   **The surface decides when there is a result to say more about, because the session
+   cannot see a panel.** The first cut of this fix let the session decide from
+   `following_up` and `_refined` alone, and those look the same whether the result is on
+   screen or was closed with Esc ten minutes ago - so a hold over a closed panel drew a
+   fresh heard block while the CLI was handed the old words in front of the new ones.
+   Caught on re-reading `_talk_start`, before it shipped. Three seams close it: the
+   compact pill calls `Session.end_refine()` when its panel closes; `Session.refine_heard`
+   is what the heard block shows after a send, so "heard" is what was sent and not the
+   last eight words; and `Session.refine_says_more` is False on the shipped surface,
+   which has no heard block and so never extends - a second Refine there is the words as
+   said, as it always was.
+
+   **An independent review then found the same defect twice more, and that is why the
+   state is a flag of its own.** Told at a hold over a closed band, the session was still
+   not told when the next words came by the `send` key or the spoken trigger; and "a
+   result is on the panel" was being read off `following_up and _refined`, which a
+   recalled prompt and a rewrite applied to a draft both make true. Each was run on the
+   real session and each sent an earlier dictation in front of unrelated words. So
+   `_refine_open` is armed in one place - `_pump_refine`, when a result is delivered as a
+   reply - and cleared by everything that takes the result away: a new rewrite starting,
+   the text handed over, the panel closing (the one door for Esc, a click outside, a mode
+   switch and Send), a change of mode, a new conversation. The surface reads the same
+   answer (`Session.can_say_more`) to decide whether its heard block appends.
+
+5. **A question waits 60 s, as a floor under `--cli-timeout`** (`refine.ASK_TIMEOUT_SEC`),
+   for `Cli.timeout_sec`'s reason. **A CLI that did not answer is tried last for ten
+   minutes** (`refine.Health`, owned by the session and handed in, so a few hundred tests
+   with failing fakes keep no memory between them). Tried last, not skipped. The walk
+   where nothing answers is now 60 + 5 + 60 + 5 + 60 = 190 s on the first question and
+   the same on the next, since every CLI is down and the order is the old order; the
+   2026-08-06 reopen bar for a per-pool ceiling stands, and is nearer.
+
+6. **`_why` reads the line that calls itself an error**, the last one, and the `message`
+   inside it when it is JSON. **And never a line of the prompt.** codex echoes its input
+   to stderr, so the stream this reads has the user's dictation in it, and the review
+   showed a loose shape returning "the error is that priya's salary letter went to the
+   wrong list" as the reason a CLI failed - a string that goes on to the pill, into
+   `Health` for ten minutes and onto Flow Home. Two guards: the shape is strict (the
+   word at the start with a colon, or an upper-case level after a timestamp), and any
+   line that is part of the prompt just sent is refused whatever it looks like. `codex` gets Flow's effort setting as
+   `-c model_reasoning_effort=<level>`, measured on codex-cli 0.163.0 by its own banner
+   at all five levels; it had been running every rewrite at the user's config, here
+   `ultra`.
+
+7. **The compact pill says three things it used to colour.** A mode somebody chose says
+   its name and what the next hold will do. A failure says why under its flash. A tap
+   with no agent CLI says what the other two modes need. And while a call is out the
+   panel says what, who and how long.
+
+**This overrides two standing sentences, and says so.** The 2026-09-04 entry "A wordless
+pill still has to say three things" kept mode notes off the strip as "the glyph's own
+hue, said a second time", and `States.dc.html` made the no-CLI tap "grey, not red: no
+flash, no error". Both were right when written. The first reopens on its own bar — "five
+meanings on one ring is already the most it can carry, and a sixth needs a different
+channel, not a sixth hue" — because what Refine will write is a sixth, seventh, eighth
+and ninth. The second is kept as written (still grey, still no flash) and gains a
+sentence, because "no error" had become "no response". The session's own mode notes stay
+off the strip, and a mode the *keys* switch for one hold says nothing.
+
+**What was not done, and why it is next rather than now.**
+
+- **Select text, say what to do with it.** Six of the surveyed tools have it and it is
+  how every one of them answers an email. It needs Flow to copy a selection out of
+  another program, which in a terminal is Ctrl+C. It is a feature with its own safety
+  argument and is in NEEDS_YOU as the first proposal.
+- **Streaming the agent's progress.** Both CLIs emit JSONL. With a counter on the panel
+  the wait is honest; with tool lines on it the wait would be legible. Still P3.
+- **Teaching Refine in the first run, properly.** The wizard said "Two things, one
+  pill" and showed Dictate and Ask; Refine was found by tapping. This round added one
+  sentence with a spoken example to the wizard's first step and corrected the Home
+  page's one line about Refine, which said "shaped for your project". What the survey's
+  best onboarding does is a practice sentence per mode with the result shown, and that,
+  with the reel it would put out of date, is still to do.
+
+**Reopens if:** (1) a real session shows a window read as mail or chat that was neither —
+the fix is that entry out of the list, not a cleverer match; (2) somebody reports an
+email sent with a greeting or a sign-off they did not want — the brief then keeps only
+what was dictated, the strict side of the split; (3) the 190 s walk is ever waited out —
+the per-pool ceiling; (4) the mode line is reported as noise by somebody who cycles
+often — it then says itself only the first few times, counted in the profile.

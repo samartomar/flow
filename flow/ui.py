@@ -175,6 +175,7 @@ if sys.platform == "win32":
         take_warnings,
         window_alive,
         window_pid,
+        window_title,
     )
 
     #: Its own handle rather than `ctypes.windll.user32`, which is a process-wide cached
@@ -221,6 +222,11 @@ else:
     # answers a body with no hands has: no window to keep, to find, or to bring forward.
     def window_alive(_hwnd, _pid: int = 0) -> bool:
         return False
+
+    def window_title(_hwnd) -> str:
+        # No window, so no title: `kinds.detect` reads that as "no destination", which
+        # is Refine doing what it did before there were kinds.
+        return ""
 
     def window_pid(_hwnd) -> int:
         return 0
@@ -2632,6 +2638,13 @@ class Pill(tk.Tk):
         #: `SCALE` is where the drawing actually reads it from.
         self.scale = SCALE
         self.session = session
+        # The session asks this pill for the front window's title when Refine is
+        # about to write (`Session.kind_here`); see `_front_title`.
+        session.title_probe = self._front_title
+        # A second Refine here starts again, as it always has on this surface: there is
+        # no heard block to show that the first one's words went along with it
+        # (`Session.refine_says_more`).
+        session.refine_says_more = False
         self.on_send = on_send
         self.hotkeys = hotkeys
         #: Lite: no hands (product.md). Set before either child window is built, because
@@ -4261,6 +4274,15 @@ class Pill(tk.Tk):
                     return
                 self.session.target_app = target.process
             self.paste_target = hwnd
+
+    def _front_title(self) -> str:
+        """The title of the window a paste would go to, read now (`inject.window_title`).
+
+        Handed to the session as `title_probe`, so the question "which site is this
+        tab" is asked when Refine is about to write and not when the window last
+        changed - a tab is switched without the foreground window changing at all.
+        """
+        return window_title(self.paste_target)
 
     @property
     def converse(self) -> bool:

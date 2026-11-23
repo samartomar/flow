@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # for test_menu's fakes
 
 import flow.ui_compact as uc  # noqa: E402
+from flow import kinds  # noqa: E402
 from flow.session import CONVERSE, DICTATE, REFINE, Event, State  # noqa: E402
 from test_menu import FakeMenu, FakeVar  # noqa: E402
 
@@ -449,7 +450,7 @@ class TestTheNoticeCarriesAnySentence(unittest.TestCase):
         self.assertEqual(len(said), 1)
         # Never in an error colour: a muted mic is a thing to fix, not a
         # failure of Flow's — the same rule Lite's "copied" line follows.
-        self.assertEqual(said[0][2], uc.DIM)
+        self.assertEqual(said[0][2], uc.NOTICE_TEXT)
 
 
 class TestTheCapsuleIsFilled(unittest.TestCase):
@@ -1043,13 +1044,17 @@ class TestTheRefinesWholeArc(unittest.TestCase):
         p._draw()
         texts = [t[1] for t in p.canvas.texts]
         self.assertIn("heard", texts)
-        self.assertIn("refined for this repo", texts)
+        # The tag names the kind the result was written as (flow/kinds.py). It
+        # read "refined for this repo" over every result until 2026-11-22,
+        # including an email and one written with no workspace at all.
+        self.assertIn("refined as a prompt", texts)
+        self.assertNotIn("refined for this repo", texts)
         self.assertIn("hold the mic to say more", texts)
         self.assertIn("Send", texts)
         # The tag carries the hue — Refine's result has no accent bar
         # (Refine.dc.html; the bar is Ask's card).
         gold = [t[1] for t in p.canvas.texts if t[2] == uc.REFINE_GOLD]
-        self.assertEqual(gold, ["refined for this repo"])
+        self.assertEqual(gold, ["refined as a prompt"])
         self.assertEqual([r for r in p.canvas.rects if r[4] == uc.REFINE_GOLD],
                          [])
         heard = [t for t in p.canvas.texts if t[1] == "the raw dictation"]
@@ -1865,7 +1870,9 @@ class TestRefineFailed(unittest.TestCase):
         self.assertIsNone(layout.result_tag_y)
         p._draw()
         texts = [t[1] for t in p.canvas.texts]
-        self.assertNotIn("refined for this repo", texts)
+        self.assertNotIn("refined as a prompt", texts)
+        # Nor the line that says work is under way: the call has ended.
+        self.assertEqual([t for t in texts if t.startswith("shaping that")], [])
         self.assertIn("refine failed (timed out) — draft unchanged", texts)
 
     def test_copy_on_a_failure_copies_the_raw_text_too(self):
@@ -1978,7 +1985,10 @@ class TestLiteCopiesAndSaysSo(unittest.TestCase):
         p._draw()
         lines = [t for t in p.canvas.texts if t[1] == "copied — press Ctrl+V"]
         self.assertEqual(len(lines), 1)
-        self.assertEqual(lines[0][2], uc.DIM)  # never an error colour
+        # Quiet, and never an error colour. `NOTICE_TEXT` rather than `DIM`
+        # since 2026-11-22: the strip carries failures now, and has to be read.
+        self.assertEqual(lines[0][2], uc.NOTICE_TEXT)
+        self.assertNotEqual(lines[0][2], uc.ERROR)
         p._frame()
         self.assertEqual(p._notice, 1)
         p._frame()
@@ -2696,6 +2706,11 @@ class TestSayMoreMeansSayMore(unittest.TestCase):
         p._panel_result = result
         p._panel_failed = failed
         p._hold_fresh = True
+        # The session's own answer (`Session.can_say_more`), which is what the surface
+        # reads. It read `following_up` until 2026-11-22; that flag also means "follow
+        # up" and "bring back my last prompt", and is set here as well to show that it
+        # is no longer the one that decides.
+        p.session.can_say_more = True
         p.session.following_up = True
         p.session.events.return_value = [Event("partial", "make it shorter")]
         return p
@@ -2726,11 +2741,23 @@ class TestSayMoreMeansSayMore(unittest.TestCase):
         p._panel_mode = REFINE
         p._panel_result = ""
         p._hold_fresh = True
-        p.session.following_up = False
+        p.session.can_say_more = False
         p.session.events.return_value = [Event("partial", "write me a function")]
         p._pump_events()
 
         self.assertEqual(p._panel_heard, "write me a function")
+
+    def test_a_result_the_session_will_not_extend_is_not_appended_to(self):
+        # The surface and the session ask one question. `following_up` alone - armed by
+        # "follow up" or a recalled prompt - is not it: the session would send the new
+        # words on their own, so the heard block must not show them joined.
+        p = self.refine_following_up()
+        p.session.can_say_more = False
+        p._panel_heard = "write me a function that"
+        p._pump_events()
+
+        self.assertEqual(p._panel_heard, "make it shorter")
+        self.assertEqual(p._panel_result, "")
 
     def test_a_failed_refine_is_not_extended(self):
         # The CLI's last line stands in the same slot a result does, so the slot cannot
@@ -2764,6 +2791,434 @@ class TestSayMoreMeansSayMore(unittest.TestCase):
 
         self.assertIn('self._emit("reply", revised)', source)
         self.assertIn("self.following_up = True", source)
+        # And the flag that means exactly "a result is there to say more about", armed
+        # in that same place and nowhere else in the module.
+        self.assertEqual(source.count("self._refine_open = True"), 1)
+
+
+
+def chosen(p, kind=None, app="", provider="claude"):
+    """Make `p`'s Mock session behave like one a mode can be chosen on: `toggle_mode`
+    moves `mode` the way the real one does, and Refine has an answer for this window."""
+    order = {DICTATE: REFINE, REFINE: CONVERSE, CONVERSE: DICTATE}
+
+    def toggle(to=None):
+        p.session.mode = to if to is not None else order[p.session.mode]
+        return p.session.mode
+
+    p.session.toggle_mode.side_effect = toggle
+    p.session.provider = provider
+    p.session.target_app = app
+    p.session.kind_here.return_value = kind or kinds.PROMPT
+    return p
+
+
+class TestAChosenModeSaysItsName(unittest.TestCase):
+    """decisions.md 2026-11-22. A mode was a hue and nothing else, and Refine now does
+    one of four things depending on the window - which no hue says."""
+
+    def test_a_tap_onto_refine_says_what_it_will_write_and_for_where(self):
+        p = chosen(pill(mode=DICTATE), kinds.EMAIL, "OUTLOOK.EXE")
+        p._on_press()
+        p._on_release()
+        self.assertEqual(
+            p._notice_text,
+            "Refine - writes an email for OUTLOOK, then you press Send")
+        self.assertGreater(p._notice, 0)
+
+    def test_the_sentence_is_the_sessions_own_answer_for_this_window(self):
+        # One function decides the kind for the sentence and for the rewrite.
+        p = chosen(pill(mode=DICTATE), kinds.MESSAGE, "slack.exe")
+        p._cycle_mode()
+        p.session.kind_here.assert_called()
+        self.assertIn("writes a chat message for slack", p._notice_text)
+
+    def test_ask_says_who_answers_and_about_what(self):
+        p = chosen(pill(mode=REFINE))
+        p._cycle_mode()
+        self.assertEqual(p._notice_text, "Ask - claude answers, about flow")
+
+    def test_ask_with_no_workspace_does_not_invent_one(self):
+        p = chosen(pill(mode=REFINE))
+        p.session.workspace = ""
+        p._cycle_mode()
+        self.assertEqual(p._notice_text, "Ask - claude answers")
+
+    def test_type_says_it_pastes(self):
+        p = chosen(pill(mode=CONVERSE))
+        p._cycle_mode()
+        self.assertEqual(p._notice_text, "Type - pastes what you say")
+
+    def test_lite_says_it_copies(self):
+        p = chosen(pill(mode=CONVERSE, lite=True))
+        p._cycle_mode()
+        self.assertEqual(p._notice_text, "Type - copies what you say")
+
+    def test_the_menus_radios_say_it_too(self):
+        p = chosen(pill(mode=DICTATE), kinds.TIDY, "notepad.exe")
+        p._pick_mode(REFINE)
+        self.assertIn("Refine - writes tidied text for notepad", p._notice_text)
+
+    def test_a_mode_the_keys_change_for_one_hold_says_nothing(self):
+        # The Ask keys switch to Ask and back on every use. That is the hand choosing,
+        # and a sentence under the pill each time would be the noise the strip was
+        # kept quiet to avoid.
+        p = chosen(pill(mode=DICTATE))
+        p._to_side(ask=True)
+        self.assertEqual(p._notice, 0)
+        p._to_side(ask=False)
+        self.assertEqual(p._notice, 0)
+
+    def test_the_line_survives_a_session_that_cannot_answer(self):
+        # A fixture, or a session mid-teardown: every read is checked for its type.
+        p = pill(mode=REFINE)
+        p.session.kind_here = None
+        p.session.target_app = None
+        self.assertEqual(p._mode_line(), "Refine - writes a prompt, then you press Send")
+
+
+class TestNoCliSaysWhyNothingHappened(unittest.TestCase):
+    def test_a_tap_with_nothing_to_cycle_to_says_what_is_missing(self):
+        # "Grey, not red" had become "no anything", which on a pill is the same as a
+        # tap that was not registered.
+        p = pill(mode=DICTATE)
+        p.session.provider = ""
+        p._on_press()
+        p._on_release()
+        self.assertEqual(p._notice_text, uc.NO_CLI_LINE)
+        self.assertGreater(p._notice, 0)
+
+    def test_it_is_still_grey_and_the_mode_still_does_not_move(self):
+        p = pill(mode=DICTATE)
+        p.session.provider = ""
+        p._cycle_mode()
+        self.assertEqual(p._flash, 0)
+        p.session.toggle_mode.assert_not_called()
+
+    def test_the_line_names_both_modes_and_where_to_go(self):
+        for word in ("Refine", "Ask", "claude", "codex", "Open Flow"):
+            self.assertIn(word, uc.NO_CLI_LINE)
+
+
+class TestAFailureSaysWhy(unittest.TestCase):
+    """An `error` was a red flash and nothing else unless a panel was open, so "model
+    failed to load" and a refused paste were both a colour."""
+
+    def errored(self, text, **attrs):
+        p = pill(**attrs)
+        p.session.events.return_value = [Event("error", text)]
+        p._pump_events()
+        return p
+
+    def test_an_error_with_no_panel_is_said_under_the_flash(self):
+        p = self.errored("model failed to load: out of memory")
+        self.assertEqual(p._flash, uc.FLASH_FRAMES)
+        self.assertEqual(p._notice_text, "model failed to load: out of memory")
+
+    def test_it_stays_up_longer_than_an_ordinary_line(self):
+        p = self.errored("model failed to load: out of memory")
+        self.assertEqual(p._notice, uc.ERROR_FRAMES)
+        self.assertGreater(uc.ERROR_FRAMES, uc.COPIED_FRAMES)
+
+    def test_a_cli_failure_with_the_panel_closed_is_said_too(self):
+        p = self.errored("ask failed (claude exited 1: Not logged in)")
+        self.assertIn("Not logged in", p._notice_text)
+
+    def test_a_cli_failure_the_panel_is_holding_is_not_said_twice(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p.session.events.return_value = [
+            Event("error", "refine failed (timed out) — draft unchanged")]
+        p._pump_events()
+        self.assertTrue(p._panel_failed)
+        self.assertEqual(p._notice, 0)
+
+    def test_a_paragraph_is_cut_to_a_line_the_strip_can_hold(self):
+        p = self.errored("refine failed (" + "the CLI went on at length " * 20 + ")")
+        self.assertLessEqual(len(p._notice_text), uc.SAY_MAX)
+        self.assertTrue(p._notice_text.endswith("…"))
+
+    def test_a_multi_line_error_is_one_line(self):
+        p = self.errored("first line\n  second line")
+        self.assertEqual(p._notice_text, "first line second line")
+
+    def test_a_cli_being_passed_over_is_one_of_the_notes_the_strip_says(self):
+        p = pill()
+        p.session.events.return_value = [
+            Event("note", "skipping codex exited 1: no such model - Flow Home, "
+                          "Models has the rest")]
+        p._pump_events()
+        self.assertIn("skipping codex", p._notice_text)
+
+
+class TestThePanelSaysWhatItIsWaitingOn(unittest.TestCase):
+    """The blue ring said *that* something was out. For a wait measured in tens of
+    seconds the panel now says what, who, and for how long."""
+
+    def waiting(self, state=State.REFINING, mode=REFINE, kind=None, waited=0.0):
+        p = panel_pill(state, mode=mode)
+        p._panel_open = True
+        p._panel_mode = mode
+        p._panel_heard = "the words as said"
+        p._panel_heard_final = True
+        p.session.provider = "claude"
+        p.session.refine_kind = kind or kinds.PROMPT
+        p.session.waited = waited
+        return p
+
+    def texts(self, p):
+        p._draw()
+        return [t[1] for t in p.canvas.texts]
+
+    def test_refine_says_what_is_being_written_and_by_whom(self):
+        p = self.waiting(kind=kinds.EMAIL)
+        self.assertIn("writing that as an email via claude", self.texts(p))
+
+    def test_ask_says_who_is_being_asked(self):
+        p = self.waiting(State.ASKING, CONVERSE)
+        self.assertIn("asking claude", self.texts(p))
+
+    def test_the_seconds_appear_once_there_are_some(self):
+        p = self.waiting(kind=kinds.EMAIL, waited=1.4)
+        self.assertEqual(p._waiting_line(), "writing that as an email via claude")
+        p.session.waited = 7.9
+        self.assertEqual(p._waiting_line(), "writing that as an email via claude - 7 s")
+
+    def test_a_new_second_is_a_frame_worth_drawing(self):
+        # The one thing on the panel that moves on its own.
+        p = self.waiting(waited=3.0)
+        before = p._draw_key()
+        p.session.waited = 4.0
+        self.assertNotEqual(before, p._draw_key())
+
+    def test_it_is_drawn_in_the_waiting_colour_not_the_results(self):
+        p = self.waiting(kind=kinds.EMAIL)
+        p._draw()
+        line = [t for t in p.canvas.texts if t[1].startswith("writing that")]
+        self.assertEqual(line[0][2], uc.WAITING)
+
+    def test_nothing_is_out_when_nothing_is_out(self):
+        p = self.waiting(State.IDLE)
+        self.assertEqual(p._waiting_line(), "")
+        self.assertIsNone(p._panel_layout().result_tag_y)
+
+    def test_a_closed_panel_has_no_line_to_keep_redrawing(self):
+        p = self.waiting()
+        p._panel_open = False
+        self.assertEqual(p._waiting_line(), "")
+
+    def test_a_release_leaves_the_words_and_the_line_and_nothing_else(self):
+        # What the app actually shows mid-refine, driven through the release itself:
+        # `_ask` takes the old result off, the session is refining, and the row under
+        # the words says so. (An earlier version of this test put a result back by
+        # hand, which is a state the app cannot reach.)
+        p = self.waiting(State.IDLE, kind=kinds.EMAIL)
+        p._panel_result = "Hi Priya,"
+        p.session.draft.text = "and thank her"
+        p.session.refine_heard = "tell priya it moved and thank her"
+
+        def sent():
+            p.session.state = State.REFINING
+
+        p.session.send.side_effect = sent
+        p._ask()
+        texts = self.texts(p)
+        self.assertNotIn("Hi Priya,", texts)
+        self.assertIn("tell priya it moved and thank her", texts)
+        self.assertIn("writing that as an email via claude", texts)
+        self.assertNotIn("written as an email", texts)
+
+    def test_a_session_that_cannot_answer_still_draws(self):
+        p = self.waiting()
+        p.session.provider = None
+        p.session.waited = None
+        p.session.refine_kind = None
+        self.assertEqual(p._waiting_line(),
+                         "shaping that into a prompt via the agent CLI")
+
+
+class TestTheTagSaysWhatTheResultIs(unittest.TestCase):
+    def drawn(self, kind):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_heard = "tell priya the release moves"
+        p._panel_heard_final = True
+        p._panel_result = "Hi Priya,"
+        p.session.refine_kind = kind
+        p._draw()
+        return [t[1] for t in p.canvas.texts if t[2] == uc.REFINE_GOLD]
+
+    def test_each_kind_names_itself(self):
+        self.assertEqual(self.drawn(kinds.EMAIL), ["written as an email"])
+        self.assertEqual(self.drawn(kinds.MESSAGE), ["written as a chat message"])
+        self.assertEqual(self.drawn(kinds.TIDY), ["tidied up"])
+        self.assertEqual(self.drawn(kinds.PROMPT), ["refined as a prompt"])
+
+    def test_a_new_kind_is_a_frame_worth_drawing(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = "x"
+        p.session.refine_kind = kinds.PROMPT
+        before = p._draw_key()
+        p.session.refine_kind = kinds.EMAIL
+        self.assertNotEqual(before, p._draw_key())
+
+
+class TestThePillSuppliesTheTitle(unittest.TestCase):
+    def test_the_title_asked_for_is_the_paste_targets(self):
+        # While a window is pinned the words go there, so that is the window whose
+        # kind of writing matters - not whatever is in front.
+        p = pill()
+        p.paste_target = 0xBEEF
+        with mock.patch.object(uc, "window_title", return_value="Inbox - Gmail") as read:
+            self.assertEqual(p._front_title(), "Inbox - Gmail")
+        read.assert_called_once_with(0xBEEF)
+
+
+
+class TestThePanelAndTheSessionAgreeOnSayingMore(unittest.TestCase):
+    """The session cannot see a panel, so the pill tells it when a result is gone -
+    and shows, under "heard", what the CLI was actually given."""
+
+    def test_a_hold_over_a_closed_panel_tells_the_session_the_result_is_gone(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = False
+        p._panel_result = "the old shaped prompt"
+        p._talk_start()
+        p.session.end_refine.assert_called_once_with()
+        self.assertEqual(p._panel_result, "")
+
+    def test_a_hold_over_a_result_still_on_screen_does_not(self):
+        # That one may say more, and the session is left holding what it adds to.
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = "the shaped prompt"
+        p._talk_start()
+        p.session.end_refine.assert_not_called()
+        self.assertEqual(p._panel_result, "the shaped prompt")
+
+    def test_type_never_touches_it(self):
+        p = pill(mode=DICTATE)
+        p._talk_start()
+        p.session.end_refine.assert_not_called()
+
+    def test_the_heard_block_shows_what_the_cli_was_given(self):
+        # On a second hold that is everything heard so far, not the last eight words.
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p.session.draft.text = "and cap it at three attempts"
+        p.session.refine_heard = ("add retry logic to the upload client "
+                                  "and cap it at three attempts")
+        p._ask()
+        p.session.send.assert_called_once_with()
+        self.assertEqual(p._panel_heard, "add retry logic to the upload client "
+                                         "and cap it at three attempts")
+
+    def test_a_question_is_still_shown_as_asked(self):
+        p = panel_pill(mode=CONVERSE)
+        p._panel_open = True
+        p._panel_mode = CONVERSE
+        p.session.draft.text = "where is the timeout set"
+        p.session.refine_heard = "something a Refine was made from earlier"
+        p._ask()
+        self.assertEqual(p._panel_heard, "where is the timeout set")
+
+    def test_a_session_that_cannot_say_leaves_the_words_of_the_release(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p.session.draft.text = "the words of this hold"
+        p.session.refine_heard = None
+        p._ask()
+        self.assertEqual(p._panel_heard, "the words of this hold")
+
+    def test_each_surface_says_whether_a_second_hold_may_say_more(self):
+        # Set where the pill is built, because a design switch rebuilds the pill
+        # around the same session - so a source check, as a fixture never runs
+        # `__init__`.
+        import ast
+
+        def assigned(module: str) -> list:
+            """Every value assigned to `session.refine_says_more` in `module`, as code
+            and not as text - a comment saying so would satisfy a search."""
+            tree = ast.parse(Path(uc.__file__).with_name(module).read_text(encoding="utf-8"))
+            return [node.value.value for node in ast.walk(tree)
+                    if isinstance(node, ast.Assign)
+                    and isinstance(node.value, ast.Constant)
+                    and any(isinstance(t, ast.Attribute) and t.attr == "refine_says_more"
+                            and isinstance(t.value, ast.Name) and t.value.id == "session"
+                            for t in node.targets)]
+
+        self.assertEqual(assigned("ui_compact.py"), [True])
+        self.assertEqual(assigned("ui.py"), [False])
+
+
+
+class TestClosingThePanelEndsTheResult(unittest.TestCase):
+    """The independent review, 2026-11-22: the only place the session was told a result
+    had gone was a hold over a closed band, so a Send that came by the `send` key or the
+    spoken trigger was read as more of a result closed minutes earlier."""
+
+    def open_refine(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p._panel_result = "the shaped prompt"
+        return p
+
+    def test_every_way_of_closing_tells_the_session(self):
+        # Esc, a click outside, a mode switch and Send all end in `_close_panel`.
+        p = self.open_refine()
+        p._close_panel()
+        p.session.end_refine.assert_called_once_with()
+
+    def test_closing_one_that_is_not_open_says_nothing(self):
+        p = panel_pill(mode=REFINE)
+        p._panel_open = False
+        p._close_panel()
+        p.session.end_refine.assert_not_called()
+
+    def test_a_session_that_has_no_such_method_still_closes(self):
+        p = self.open_refine()
+        p.session.end_refine = None
+        p._close_panel()
+        self.assertFalse(p._panel_open)
+
+    def test_a_send_by_the_key_shows_what_the_cli_was_given(self):
+        # The same rewrite, reached by another door than the release.
+        p = self.open_refine()
+        p.session.send.return_value = ""
+        p.session.refine_heard = "add retry logic and cap it at three attempts"
+        p._send()
+        self.assertEqual(p._panel_heard, "add retry logic and cap it at three attempts")
+
+    def test_a_type_paste_by_the_key_touches_no_heard_block(self):
+        p = pill(mode=DICTATE)
+        p._deliver = mock.Mock()
+        p._panel_heard = ""
+        p.session.send.return_value = "some dictated words"
+        p.session.refine_heard = "a refine from earlier"
+        p._send()
+        self.assertEqual(p._panel_heard, "")
+        p._deliver.assert_called_once()
+
+    def test_a_long_note_is_cut_to_a_line_and_a_short_one_is_not(self):
+        p = pill()
+        long = "skipping codex - see Flow Home, Models: " + "x" * 300
+        p.session.events.return_value = [Event("note", long)]
+        p._pump_events()
+        self.assertLessEqual(len(p._notice_text), uc.SAY_MAX)
+        self.assertTrue(p._notice_text.startswith("skipping codex - see Flow Home, Models"))
+        stopped = ("stopped after 5 min — the chord was still held. What you "
+                   "said is here; press Send when you want it")
+        p.session.events.return_value = [Event("note", stopped)]
+        p._pump_events()
+        self.assertEqual(p._notice_text, stopped)
 
 
 if __name__ == "__main__":

@@ -246,7 +246,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--hearing); marg
 .hotkey .what { width: 170px; flex-shrink: 0; font-weight: 500; font-size: 13.5px; }
 .ws { display: flex; align-items: center; gap: 10px; min-height: 42px; }
 .ws label { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; }
-.app-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.app-row { display: grid; grid-template-columns: 140px 132px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .privacy { display: flex; align-items: flex-start; gap: 10px; min-height: 40px; }
 .privacy svg { margin-top: 1px; }
 

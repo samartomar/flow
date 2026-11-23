@@ -23,7 +23,7 @@ import time
 import traceback
 from pathlib import Path
 
-from .. import stats
+from .. import kinds, stats
 from ..edits import SEND_WORD_PRESETS, enter_word
 from ..history import (
     ANSWERED,
@@ -39,7 +39,8 @@ from ..history import (
     matches,
 )
 from ..history import DAYS as HISTORY_DAYS
-from ..refine import EFFORTS, available, named
+from ..profile import REFINE_KINDS
+from ..refine import EFFORTS, NAME_MAX, available, named
 from ..session import CONVERSE, DICTATE, REFINE, RECENT_ANSWERED, RECENT_ASKED
 from ..version import check_update, version
 from .bridge import Busy
@@ -218,6 +219,37 @@ def _entry_view(e: dict, now: float) -> dict:
     return view
 
 
+def _app_rows(profile) -> list[dict]:
+    """Every program Flow has a setting for: its instruction, its kind, or both.
+
+    One row a program, from the union of the two tables, because that is how somebody
+    thinks about it - "what does Flow do in Slack" - and two lists would show a
+    program twice.
+    """
+    if profile is None:
+        return []
+    notes = getattr(profile, "apps", {}) or {}
+    chosen = getattr(profile, "kinds", {}) or {}
+    rows = []
+    for exe in sorted({*notes, *chosen}, key=str):
+        note, kind = notes.get(exe), chosen.get(exe)
+        rows.append({"exe": exe,
+                     "instruction": note if isinstance(note, str) else "",
+                     "kind": kind if kinds.valid(kind) else kinds.AUTO})
+    return rows
+
+
+def _writing(profile) -> dict:
+    """What the Settings page needs to draw "What Refine writes"."""
+    default = getattr(profile, "refine_kind", kinds.AUTO) if profile is not None else kinds.AUTO
+    return {
+        "default": default if default in REFINE_KINDS else kinds.AUTO,
+        "name": (getattr(profile, "name", "") or "") if profile is not None else "",
+        "kinds": [{"key": k, "label": kinds.KINDS[k].label, "noun": kinds.KINDS[k].noun}
+                  for k in kinds.ORDER],
+    }
+
+
 class ApiError(Exception):
     """A request the page made that cannot be done, said the way the page shows it."""
 
@@ -292,6 +324,7 @@ class Api:
             ("POST", "/api/settings/design"): self.set_design,
             ("POST", "/api/settings/classic"): self.set_classic,
             ("POST", "/api/settings/apps"): self.set_app,
+            ("POST", "/api/settings/writing"): self.set_writing,
             ("POST", "/api/update"): self.update,
             ("POST", "/api/open"): self.open_folder,
         }
@@ -537,12 +570,17 @@ class Api:
             pinned = getattr(s, "cli", None)
             profile = getattr(s, "profile", None)
             speaker = getattr(s, "speaker", None)
+            health = getattr(s, "cli_health", None)
             return {
                 "pinned": pinned.name if pinned is not None else None,
                 "model": getattr(s, "cli_model", "") or "",
                 "models": list(getattr(profile, "cli_models", ()) or ()),
                 "effort": getattr(s, "cli_effort", "") or "",
                 "timeout": float(getattr(s, "cli_timeout", 0) or 0),
+                "ask_timeout": float(getattr(s, "ask_timeout", 0) or 0),
+                # The CLIs being passed over, each with what it said (`refine.Health`).
+                # The pill has room for one clipped line about it; this is "the rest".
+                "down": dict(health.down()) if health is not None else {},
                 "voice": getattr(speaker, "voice", None) if speaker is not None else None,
                 "speaks": speaker is not None,
                 "muted": bool(getattr(s, "muted", False)),
@@ -576,6 +614,9 @@ class Api:
                 "models": live["models"],
                 "effort": live["effort"],
                 "efforts": list(EFFORTS),
+                "ask_timeout": live["ask_timeout"],
+                "down": [{"name": name, "why": why}
+                         for name, why in sorted(live["down"].items())],
                 "timeout": live["timeout"],
             },
             "voice": {
@@ -1689,9 +1730,8 @@ class Api:
                 "place": getattr(profile, "place", "") if profile else "",
                 "places": places,
             },
-            "apps": [{"exe": exe, "instruction": text}
-                     for exe, text in sorted((getattr(profile, "apps", {}) or {}).items())]
-            if profile is not None else [],
+            "apps": _app_rows(profile),
+            "writing": _writing(profile),
             "paths": paths,
             "profile": profile is not None,
             "version": version(),
@@ -1953,21 +1993,61 @@ class Api:
         return self.settings({})
 
     def set_app(self, body: dict) -> dict:
+        """One program's two settings: the kind Refine writes there, and an extra
+        instruction for it. Each is changed only when the request names it, so the
+        page's kind picker cannot wipe an instruction and the reverse.
+
+        An instruction that is absent keeps its old meaning - remove the entry - only
+        when no kind is named either, which is the request every caller made before
+        kinds existed.
+        """
         profile = self._need_profile()
         exe = str(body.get("exe") or "").strip().lower()
         text = body.get("instruction")
+        kind = body.get("kind")
         if not exe.endswith(".exe") or len(exe) > 80 or "\\" in exe or "/" in exe:
             raise ApiError("name the program as its file is called, like code.exe")
         if text is not None and (not isinstance(text, str) or len(text) > 400):
             raise ApiError("keep the instruction to a sentence or two")
+        if kind is not None and kind not in ("", kinds.AUTO) and not kinds.valid(kind):
+            raise ApiError("that is not a kind of writing Refine knows")
 
         def apply() -> None:
-            table = dict(profile.apps)
-            if text and text.strip():
-                table[exe] = text.strip()
-            else:
-                table.pop(exe, None)
-            profile.apps = table
+            if text is not None or kind is None:
+                table = dict(profile.apps)
+                if text and text.strip():
+                    table[exe] = text.strip()
+                else:
+                    table.pop(exe, None)
+                profile.apps = table
+            if kind is not None:
+                chosen = dict(getattr(profile, "kinds", {}) or {})
+                if kinds.valid(kind):
+                    chosen[exe] = kind
+                else:
+                    # "" and "auto" both mean: let Flow work it out from the window.
+                    chosen.pop(exe, None)
+                profile.kinds = chosen
+
+        self._call(apply)
+        self._save()
+        return self.settings({})
+
+    def set_writing(self, body: dict) -> dict:
+        """What Refine writes when no program's own entry decides it, and the name an
+        email is signed with."""
+        profile = self._need_profile()
+        default, name = body.get("default"), body.get("name")
+        if default is not None and default not in REFINE_KINDS:
+            raise ApiError("that is not a kind of writing Refine knows")
+        if name is not None and (not isinstance(name, str) or len(name.strip()) > NAME_MAX):
+            raise ApiError(f"keep the name under {NAME_MAX} characters")
+
+        def apply() -> None:
+            if default is not None:
+                profile.refine_kind = default
+            if name is not None:
+                profile.name = " ".join(name.split())
 
         self._call(apply)
         self._save()

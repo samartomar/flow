@@ -235,9 +235,19 @@ class TestTheNotesAWordlessPillMustAnswer(unittest.TestCase):
                 self.assertEqual(self.note(text), [])
 
     def test_the_list_is_prefixes_and_says_which(self):
+        # "skipping " joined on 2026-11-22: an agent CLI being passed over because it
+        # did not answer. It used to be half of a "refined via claude, after codex
+        # exited 1" note this surface never showed, so a broken first choice cost
+        # eight seconds a call for as long as nobody was told.
         self.assertEqual(uc.SAID_NOTES,
                          ("nothing to", "still ", "only the last",
-                          "discarded", "stopped after"))
+                          "discarded", "stopped after", "skipping "))
+
+    def test_a_cli_being_passed_over_is_said(self):
+        self.assertEqual(
+            self.note("skipping codex exited 1: no such model - Flow Home, "
+                      "Models has the rest"),
+            ["skipping codex exited 1: no such model - Flow Home, Models has the rest"])
 
     def test_a_conversation_event_needs_nothing(self):
         # Nothing of the conversation is on this screen to clear.
@@ -518,7 +528,7 @@ class TestTheStripIsTheChannelForAllOfIt(unittest.TestCase):
         p._draw()
         self.assertIn("dropped 3 words", [t[1] for t in p.canvas.texts])
 
-    def test_it_is_dim_and_never_an_error_colour(self):
+    def test_it_is_quiet_and_never_an_error_colour(self):
         # A rejection and a refusal are things to know, not failures of
         # Flow's — the same argument the muted-mic line was written under.
         p = panel_pill(x=100, y=400)
@@ -527,8 +537,21 @@ class TestTheStripIsTheChannelForAllOfIt(unittest.TestCase):
         p._shell_h = uc.PILL_H + uc.NOTICE_H
         p._draw_notice(p.canvas)
         fills = {t[2] for t in p.canvas.texts}
-        self.assertIn(uc.DIM, fills)
+        self.assertEqual(fills, {uc.NOTICE_TEXT})
         self.assertNotIn(uc.ERROR, fills)
+
+    def test_its_words_can_be_read(self):
+        # The strip is where the pill says why something failed, to somebody looking
+        # at another window. `DIM` was 3.16:1 on this fill; 10 px text needs 4.5.
+        def luminance(colour: str) -> float:
+            parts = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                   for c in parts]
+            return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+        light, dark = sorted((luminance(uc.NOTICE_TEXT), luminance(uc.SHELL)),
+                             reverse=True)
+        self.assertGreaterEqual((light + 0.05) / (dark + 0.05), 4.5)
 
 
 class TestTheDoubleTapStartsHandsFree(unittest.TestCase):

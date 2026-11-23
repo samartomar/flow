@@ -34,7 +34,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Sequence
 
-from . import edits
+from . import edits, kinds
 from .history import CHOICES as HISTORY_CHOICES
 from .history import DAYS as HISTORY_DAYS
 from .history import DAYS_DEFAULT as HISTORY_DAYS_DEFAULT
@@ -276,6 +276,12 @@ GESTURE_DEFAULT = "hold"
 DESIGN_DEFAULT = "compact"
 DESIGNS = ("current", "compact")
 
+#: What `refine_kind` may be: "auto", or one of the kinds Refine can write. Read from
+#: `flow/kinds.py` rather than spelled out, so a kind added there is a setting here
+#: without a second list to forget.
+REFINE_KIND_DEFAULT = kinds.AUTO
+REFINE_KINDS = (kinds.AUTO, *kinds.ORDER)
+
 #: Where decoding may run, as `--decode-device` spells it. Spelled here rather than
 #: imported from `flow/asr.py`, which pulls in numpy and the decoder: this module is read
 #: on every launch and by `flow --stats`, which loads no model.
@@ -475,6 +481,23 @@ class Profile:
         self.ask_chord: str = ASK_CHORD_DEFAULT
         #: exe name -> an extra instruction for rewrites made while that app is in front.
         self.apps: dict[str, str] = {}
+        #: exe name -> the kind of writing Refine produces there (`flow/kinds.py`):
+        #: prompt, email, message or tidy. Empty means Flow works it out from the
+        #: window, which it does for the common mail, chat and AI programs; an entry is
+        #: somebody saying what detection cannot know - "Notepad is where I draft mail".
+        #: Carried as written, `apps`' bargain: what counts as a kind is judged by
+        #: `kinds.resolve` where it is used, and an entry it does not recognise is passed
+        #: over rather than obeyed.
+        self.kinds: dict[str, str] = {}
+        #: What Refine writes when no entry above decides it. "auto" - the default -
+        #: reads the window; a kind's name pins every Refine to that kind, for whoever
+        #: uses the mode for one thing and does not want it second-guessed.
+        self.refine_kind: str = REFINE_KIND_DEFAULT
+        #: What an email Refine writes is signed with, or "" for a sign-off line and no
+        #: name. Asked for rather than read from the OS account or from git: a display
+        #: name there is often not what somebody signs mail with, and a name Flow guessed
+        #: would go out under an email they dictated.
+        self.name: str = ""
         #: Which of `ui.PANEL_WIDTHS` the draft panel is drawn at. A name and not a
         #: number: three widths that have each been drawn are worth more than an integer
         #: nobody has rendered at, and the meaning is judged in `flow/ui.py` for the same
@@ -647,6 +670,13 @@ class Profile:
         # Same bargain as `hotkeys`: a value that is not a table degrades to none and is
         # named, and what is *in* the table is judged where it is used.
         self.apps = take("apps", lambda v, _d: _apps(v), {})
+        # The same table shape and the same bargain. `refine_kind` is judged here
+        # because, unlike a program's name, it has exactly five right answers.
+        self.kinds = take("kinds", lambda v, _d: _apps(v), {})
+        self.refine_kind = take("refine_kind", _text, REFINE_KIND_DEFAULT)
+        if self.refine_kind not in REFINE_KINDS:
+            self.refine_kind = REFINE_KIND_DEFAULT
+        self.name = take("name", _text, "")
         self.panel = take("panel", _text, PANEL_DEFAULT)
         self.place = take("place", _text, PLACE_DEFAULT)
         self.mic = take("mic", lambda v, _d: bool(v), False)
@@ -734,6 +764,9 @@ class Profile:
             # on its own — and an empty table lands in every profile, which is the only
             # advertisement this feature gets in a project with no settings dialog.
             "apps": dict(self.apps),
+            "kinds": dict(self.kinds),
+            "refine_kind": self.refine_kind,
+            "name": self.name,
             "panel": self.panel,
             "place": self.place,
             "mic": self.mic,

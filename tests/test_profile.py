@@ -1113,3 +1113,61 @@ class TestTheHotkeyOverridesAreCarriedRatherThanJudged(unittest.TestCase):
         p = tmp_profile()
         p.save()
         self.assertEqual(json.loads(p.path.read_text(encoding="utf-8"))["hotkeys"], {})
+
+class TestWhatRefineWritesIsRemembered(unittest.TestCase):
+    """`kinds`, `refine_kind` and `name` (flow/kinds.py). Three fields, each degrading on
+    its own, so a nonsense value costs that setting and never the calibration beside it."""
+
+    def test_a_fresh_profile_lets_the_window_decide(self):
+        p = tmp_profile()
+        self.assertEqual((p.kinds, p.refine_kind, p.name), ({}, "auto", ""))
+
+    def test_all_three_round_trip(self):
+        p = tmp_profile()
+        p.kinds = {"notepad.exe": "email"}
+        p.refine_kind = "tidy"
+        p.name = "Samar Tomar"
+        self.assertTrue(p.save())
+        again = Profile(p.path)
+        self.assertEqual(again.kinds, {"notepad.exe": "email"})
+        self.assertEqual(again.refine_kind, "tidy")
+        self.assertEqual(again.name, "Samar Tomar")
+        self.assertEqual([f for f in again.faults
+                          if f in ("kinds", "refine_kind", "name")], [])
+
+    def test_a_default_that_is_not_a_kind_reads_as_auto(self):
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        raw["refine_kind"] = "memo"
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertEqual(Profile(p.path).refine_kind, "auto")
+
+    def test_a_table_that_is_not_one_degrades_to_none_and_is_named(self):
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        raw["kinds"] = "email"
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        again = Profile(p.path)
+        self.assertEqual(again.kinds, {})
+        self.assertIn("kinds", again.faults)
+
+    def test_an_entry_with_an_unknown_kind_survives_a_save(self):
+        # Carried as written, `apps`' bargain: a hand-edit is not rewritten by the
+        # next save, and `kinds.resolve` passes over it where it is used.
+        p = tmp_profile()
+        p.kinds = {"notepad.exe": "memo"}
+        p.save()
+        self.assertEqual(Profile(p.path).kinds, {"notepad.exe": "memo"})
+
+    def test_a_profile_written_before_this_existed_loads_clean(self):
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        for key in ("kinds", "refine_kind", "name"):
+            raw.pop(key)
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        again = Profile(p.path)
+        self.assertEqual((again.kinds, again.refine_kind, again.name), ({}, "auto", ""))
+        self.assertEqual(again.faults, [])

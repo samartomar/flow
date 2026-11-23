@@ -7,6 +7,99 @@ with rounds one to three archived in
 [docs/history/loop-rounds-1-3.md](docs/history/loop-rounds-1-3.md). This file holds only
 what is live: desk work, and the two decisions parked on evidence.
 
+## From the 2026-11-22 round — what only you can do, decide or see
+
+The round is in [docs/decisions.md](docs/decisions.md) under 2026-11-22. These are its
+residue.
+
+### At the desk
+
+- [ ] **Your `codex` cannot answer, and that is in its config, not in Flow.**
+  `~/.codex/config.toml` sets `model = "gpt-6.2-astra"`, and codex-cli 0.163.0 answers
+  every call with *"The 'gpt-6.2-astra' model is not supported when using Codex with a
+  ChatGPT account."* and exits 1. Flow now says that sentence, tries `claude` first for
+  ten minutes after it, and shows it on Flow Home ▸ Models. The fix is yours: change the
+  model there, or type a model codex accepts into Flow Home ▸ Models ▸ Model (it is sent
+  as `-m`), or pin `claude`. Nothing in Flow edits another tool's settings.
+
+- [ ] **One Refine through `codex` once it answers — the leg this desk could not run.**
+  `-c model_reasoning_effort=<level>` is now sent to codex from Flow's Effort setting. It
+  was verified by codex's own banner at all five levels (`reasoning effort: low` …
+  `max`), and not by a completed call, because codex here fails on the model first. One
+  Refine with codex pinned settles it: an answer means the entry is fully measured; an
+  exit naming the key means `effort_config` comes off the codex entry in
+  `flow/refine.py`, one field.
+
+- [ ] **Use Refine in the three places it now behaves differently.** Outlook or a Gmail
+  tab; Slack or Teams; and Notepad. Tap the pill to gold and read the line under it — it
+  should name the kind and the program — then dictate something you would really send.
+  What to judge, because no test can: **is the email one you would send as it stands?**
+  Specifically the greeting and the sign-off, which nobody dictated (decision part 2, and
+  its reopen bar). Put your name in Flow Home ▸ Settings ▸ What Refine writes first.
+
+- [ ] **A browser tab Flow reads wrong.** Detection reads a whole segment of the tab's
+  title. If a tab you use is read as mail or chat and is neither, or the reverse, the fix
+  is one entry in `flow/kinds.py` — tell me the title as the tab shows it. ChatGPT in a
+  browser is the known miss: it titles a conversation's tab with the conversation, so it
+  gets tidied text rather than a prompt, until you set `chrome.exe` or `msedge.exe` under
+  Per program (which covers every tab).
+
+- [ ] **Does the mode line earn its place?** Every tap now puts one sentence under the
+  pill for about three seconds. The 2026-09-04 decision kept the strip quiet on purpose
+  and this reverses part of it. If it reads as noise by the end of a day, say so: the
+  next shape is that it speaks only the first few times, counted in the profile.
+
+### Decisions
+
+- [ ] **The release zip is labelled MIT and bundles GPL code with no notices.** Found by
+  the 2026-11-22 readiness review, not acted on, because it is a licence decision.
+  `release.yml` builds with `--extra voice --extra edge` and `packaging/flow.spec`
+  collects both: `piper_tts` 1.8.0 declares GPL-3.0-or-later and ships espeak-ng data,
+  `edge-tts` is LGPL-3.0, and the bundled FFmpeg libraries are LGPL beside x264/x265.
+  The winget and Scoop manifests and the README say MIT. Two honest shapes: **keep Piper
+  in the zip** and ship a `THIRD-PARTY-NOTICES` with the licence texts, with the
+  manifests saying what the bundle contains; or **take it out of the zip** and let Flow
+  Home fetch it the way it fetches voices, which keeps the download MIT and costs a
+  click. The second is the same move the Parakeet GPU helper already makes.
+
+- [ ] **Nothing is signed.** `flow.exe` and the `parakeet-server.exe` Flow downloads at
+  run time. For one developer it is a SmartScreen click; for an IT department it is the
+  end of the conversation, because WDAC and AppLocker allow by publisher. A certificate
+  is yours to buy; the signing step in `release.yml` is small once it exists.
+
+- [ ] **No setting can be fixed by an administrator.** Every preference is per-user JSON
+  that the user and Flow Home can change. A team rollout needs a read-only machine policy
+  — the agent-CLI modes off, history off, the update check off, a mirror for model
+  downloads. The smallest version is one file (`%ProgramData%\Flow\policy.json`) read
+  before the profile. It is a week, not a patch, and it only matters if Flow is going to
+  a company; say which.
+
+### Proposals
+
+- [ ] **P11 — select it, say what to do with it.** The feature the survey found in six
+  comparable tools and Flow does not have: text selected in any program, a hold, *"make
+  this more formal"* or *"reply saying Tuesday works"*, and the selection is rewritten in
+  place. It is how every one of them does an email reply, and it is the half of "help me
+  write better" that is about words already on the screen. What it costs is the one thing
+  Flow has never done: read from another program. The selection has to be copied out
+  (Ctrl+C, which in a terminal is an interrupt — `inject.classify` already knows a
+  terminal, and this must refuse there), the clipboard put back, and the result pasted
+  over a selection that may have moved. Refine's review-before-send is what makes it
+  safe to try: nothing replaces anything until Send.
+
+- [ ] **P3, again — show what the agent is doing.** A question now waits up to a minute
+  with a counter. Both CLIs stream JSONL (`codex exec --json`, `claude --output-format
+  stream-json`), so the panel could say `reading flow/session.py` instead of `asking
+  claude - 14 s`. It was parked because speech cannot append to an utterance; the panel
+  can.
+
+- [ ] **Teach Refine in the first run, with a try-it step.** The wizard's first step
+  now says what Refine is, with a spoken example, and the Home page's line about it is
+  true again. What it does not have is what Dictate has at step five: a box to try it
+  in, with the result shown. That is one more step, and it belongs with the round that
+  re-shoots `docs/flow.gif`, which this round's Settings card and Home line have already
+  put out of date.
+
 ## Decisions still open
 
 - [ ] **One surface, and which one.** Added 2026-09-04. Both designs are real now — the

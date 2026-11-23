@@ -227,7 +227,7 @@
             ${s.all_words != null ? `<div class="stat"><b>${Number(s.all_words).toLocaleString()}</b><span>words all time</span></div>` : ""}
           </div>
           <hr class="rule">
-          <div class="row">${glyph(C.refine, 0.8)}<p class="note">Tap the pill to gold for <b class="warn">Refine</b>: shaped for your project before you send it.</p></div>
+          <div class="row">${glyph(C.refine, 0.8)}<p class="note">Tap the pill to gold for <b class="warn">Refine</b>: what you say is rewritten for the window you are in &ndash; an email in mail, a message in chat, a prompt in a terminal &ndash; and waits for you to press Send. <a href="#/settings">What Refine writes</a></p></div>
           ${sc.corrects ? `<div class="row">${icon("pencil", C.soft, 15)}<p class="note grow">Said it wrong? Hold again and say <b>scratch that</b>, or <b>change Tuesday to Thursday</b>. Flow fixes what it just pasted, until you type or click.</p></div>` : ""}
           ${sc.paste_last ? `<div class="row">${icon("copy", C.soft, 15)}<p class="note grow">Pasted in the wrong window? <b>Paste last</b> puts it in the one in front.</p>${keys(sc.paste_last)}</div>` : ""}
         </section>
@@ -470,9 +470,10 @@
           <div class="row"><h2 class="grow">Ask and Refine</h2><span class="note">${ag.available.length ? "found on this PC" : ""}</span></div>
           <p class="note">The agent CLI you already use does the answering. Flow never holds a key.</p>
           ${ag.available.length ? `<div class="row wrap">${clis}</div>
+          ${(ag.down || []).map((c) => `<p class="note warn"><b>${esc(c.name)} did not answer</b>${(ag.down || []).length < ag.available.length ? ", so Flow is trying it last for now" : ""}: ${esc(c.why)}. ${(ag.down || []).length < ag.available.length ? "Fix it or pick another above - Flow tries it first again as soon as it answers." : "It is still asked each time."}</p>`).join("")}
           <div class="row"><label class="note" for="cli-model">Model</label><input id="cli-model" class="input grow" list="cli-models" value="${esc(ag.model)}" placeholder="the CLI's own default" maxlength="120"><datalist id="cli-models">${ag.models.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist><button type="button" class="btn sm" data-act="cli-model">Save</button></div>
           <div class="row"><span class="note">Effort</span>${seg(ag.efforts, ag.effort, "effort", "How hard the CLI may think")}</div>
-          <div class="row"><label class="note" for="cli-timeout">Wait up to</label><input id="cli-timeout" class="input" type="number" min="1" max="600" step="1" value="${Math.round(ag.timeout)}"><span class="note grow">seconds</span><button type="button" class="btn sm" data-act="cli-timeout">Save</button></div>`
+          <div class="row"><label class="note" for="cli-timeout">Wait up to</label><input id="cli-timeout" class="input" type="number" min="1" max="600" step="1" value="${Math.round(ag.timeout)}"><span class="note grow">seconds${ag.ask_timeout > ag.timeout ? `; a question gets ${Math.round(ag.ask_timeout)}, because reading a project takes longer than a rewrite` : ""}</span><button type="button" class="btn sm" data-act="cli-timeout">Save</button></div>`
           : '<p class="note">None found. Install <span class="mono">claude</span> or <span class="mono">codex</span> and sign in to it - Flow finds it on your PATH.</p>'}
         </section>
         <section class="card">
@@ -506,8 +507,15 @@
     const wsRows = ws.recent.map((p) => `
       <div class="ws"><label><input type="radio" name="ws" value="${esc(p)}" data-change="ws" ${p === ws.current ? "checked" : ""}>${icon("folder", C.green, 16)}<span class="mono ellipsis">${esc(p)}</span></label>
         <button type="button" class="icon-btn" aria-label="Forget ${esc(p)}" data-act="ws-forget" data-path="${esc(p)}">${icon("x", C.soft, 14)}</button></div>`).join("");
+    // What Refine writes. One list of kinds, used three times: the default, each
+    // program's own choice, and the row that adds a program.
+    const wr = d.writing;
+    const kindOptions = (chosen, first) => [["auto", first]].concat(wr.kinds.map((k) => [k.key, k.label])).map(([v, t]) =>
+      `<option value="${esc(v)}" ${v === chosen ? "selected" : ""}>${esc(t)}</option>`).join("");
     const apps = d.apps.map((a) => `
-      <div class="app-row"><span class="mono ellipsis">${esc(a.exe)}</span><span class="note ellipsis" title="${esc(a.instruction)}">${esc(a.instruction)}</span>
+      <div class="app-row"><span class="mono ellipsis">${esc(a.exe)}</span>
+        <select data-change="app-kind" data-exe="${esc(a.exe)}" aria-label="What Refine writes in ${esc(a.exe)}">${kindOptions(a.kind, "Flow decides")}</select>
+        <span class="note ellipsis" title="${esc(a.instruction)}">${esc(a.instruction)}</span>
         <button type="button" class="icon-btn" aria-label="Remove ${esc(a.exe)}" data-act="app-remove" data-exe="${esc(a.exe)}">${icon("x", C.soft, 14)}</button></div>`).join("");
     return `
       <div class="page-head"><div class="grow"><h1>Settings</h1><p class="sub">Everything Flow remembers about how you like it. The pill never grows one of these.</p></div></div>
@@ -556,15 +564,23 @@
               <select data-change="place" aria-label="Where the pill sits">${d.classic.places.map((p) => `<option ${p === d.classic.place ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></div>
           </section>
           <section class="card">
-            <h2>Refine, per app</h2>
-            <p class="note">An extra instruction for Refine when a program is in front - say, &ldquo;keep it to one line&rdquo; for a chat app.</p>
+            <h2>What Refine writes</h2>
+            <p class="note">Refine suits the window you are in: <b>a prompt</b> in a terminal, an editor or an AI app, <b>an email</b> in Outlook, Gmail and other mail, <b>a chat message</b> in Slack, Teams and the like, and anywhere else your own words, <b>tidied up</b>. Nothing is sent until you press Send.</p>
+            <div class="setting"><div class="text"><b>Refine writes</b><span class="note">${wr.default === "auto" ? "Chosen by the window in front." : "The same kind everywhere, whatever the window."}</span></div>
+              <select data-change="refine-kind" aria-label="What Refine writes">${kindOptions(wr.default, "What suits the window")}</select></div>
+            <div class="setting"><div class="text"><b>Your name</b><span class="note">Signs the emails Refine writes. Empty: a sign-off and no name.</span></div>
+              <input id="writing-name" class="input" value="${esc(wr.name)}" placeholder="not set" aria-label="Your name" maxlength="60"><button type="button" class="btn sm" data-act="name-save">Save</button></div>
+            <p class="fine">At a result, hold the mic and say &ldquo;make it an email&rdquo; - or a prompt, a message, &ldquo;tidy it up&rdquo; - to have the same words written the other way.</p>
+            <h3>Per program</h3>
+            <p class="note">Where Flow guesses wrong, say what a program is for - and add an instruction if you like, such as &ldquo;keep it to one line&rdquo;.</p>
             <div class="col">${apps || '<p class="fine">None yet.</p>'}</div>
-            <div class="app-row"><input id="app-exe" class="input mono" placeholder="slack.exe" aria-label="Program"><input id="app-text" class="input" placeholder="the instruction" aria-label="Instruction" maxlength="400"><button type="button" class="btn sm" data-act="app-add">Add</button></div>
+            <div class="app-row"><input id="app-exe" class="input mono" placeholder="notepad.exe" aria-label="Program"><select id="app-kind" aria-label="What Refine writes there">${kindOptions("auto", "Flow decides")}</select><input id="app-text" class="input" placeholder="an instruction, if you want one" aria-label="Instruction" maxlength="400"><button type="button" class="btn sm" data-act="app-add">Add</button></div>
           </section>
           <section class="card">
             <h2>What leaves this PC</h2>
             <div class="privacy">${icon("circlecheck", C.green, 18)}<div class="col"><b>Your voice never does</b><span class="note">Speech is recognised here. No account, no key.</span></div></div>
             <div class="privacy">${icon("terminal", C.blue, 18)}<div class="col"><b>Ask and Refine send text to your agent CLI</b><span class="note">The words, and the workspace path when one is set.</span></div></div>
+            <div class="privacy">${icon("lock", C.soft, 18)}<div class="col"><b>The window's name picks what Refine writes, and goes nowhere</b><span class="note">Its program and title are read when you refine, never kept and never sent.</span></div></div>
             <div class="privacy">${icon("lock", C.soft, 18)}<div class="col"><b>The trace keeps timings and counts, never words</b><span class="note">Flow's own diagnostics, on this PC.</span></div></div>
             <div class="privacy">${icon("history", d.history && d.history.keeping ? C.green : C.soft, 18)}<div class="col"><b>${d.history && d.history.keeping
               ? `History keeps your words for ${esc(d.history.days)} days`
@@ -963,6 +979,7 @@
           : `<span class="row">${k.mode ? keys(k.mode) : ""}<span class="note">${k.mode ? "then hold" : "tap the pill to violet, then hold"}</span></span>`}
           <span class="note">the answer rises above the pill, like ChatGPT</span></div>
       </div>
+      <div class="row">${glyph(C.refine, 0.9)}<p class="note grow">And when the words need work first: tap the pill until its mic is gold for <b class="warn">Refine</b>. Say an email the way you would say it to a person &ndash; <i>&ldquo;tell Priya the release moves to Tuesday and say sorry for the late notice&rdquo;</i> &ndash; and it comes back as the email, to read before you send it.</p></div>
       <p class="fine">${icon("shield", C.soft, 13)} Speech is recognised on this PC. No account, no API key.</p>`;
   }
 
@@ -1458,9 +1475,17 @@
     design: (el) => run(() => api("settings/design", { name: el.dataset.value }), "Switching the pill"),
     "app-add": () => {
       const exe = (value("app-exe") || "").trim(), instruction = (value("app-text") || "").trim();
-      if (exe && instruction) run(() => api("settings/apps", { exe, instruction }), "Saved");
+      const kind = value("app-kind") || "auto";
+      // A program needs something said about it: a kind, an instruction, or both. Only
+      // what was filled in is sent: an empty instruction means "remove it" to the
+      // server, so sending one beside a kind would wipe what the program already had.
+      const body = { exe };
+      if (instruction) body.instruction = instruction;
+      if (kind !== "auto") body.kind = kind;
+      if (exe && (instruction || kind !== "auto")) run(() => api("settings/apps", body), "Saved");
     },
-    "app-remove": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, instruction: "" })),
+    "app-remove": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, instruction: "", kind: "" })),
+    "name-save": () => run(() => api("settings/writing", { name: (value("writing-name") || "").trim() }), "Saved"),
     open: (el) => run(() => api("open", { what: el.dataset.what }), null, false),
     update: async () => {
       const line = document.getElementById("update-line");
@@ -1479,6 +1504,8 @@
     mic: (el) => run(() => api("settings/mic", { name: el.value || null }), "Microphone changed"),
     send: (el) => run(() => api("settings/send", { word: el.value }), `Say "${el.value}" to send`),
     ws: (el) => run(() => api("settings/workspace", { path: el.value || null }), "Workspace changed"),
+    "refine-kind": (el) => run(() => api("settings/writing", { default: el.value }), "Saved"),
+    "app-kind": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, kind: el.value }), "Saved"),
     panel: (el) => run(() => api("settings/classic", { panel: el.value }), "Saved"),
     place: (el) => run(() => api("settings/classic", { place: el.value }), "Saved"),
     "history-days": (el) => run(() => api("history/days", { days: Number(el.value), ...historyView }), `Kept for ${el.value} days`),

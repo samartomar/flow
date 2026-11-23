@@ -1430,3 +1430,42 @@ class TestAnEditorThatHostsATerminalNeverRunsTheLastLine(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(sent.call_count, 2)
         self.assertEqual(warnings, [])
+
+class TestTheWindowsTitle(unittest.TestCase):
+    """`window_title`, read for `flow/kinds.py`: which site a browser tab is."""
+
+    def test_no_window_has_no_title(self):
+        self.assertEqual(inject.window_title(0), "")
+        self.assertEqual(inject.window_title(None), "")
+
+    def test_it_is_the_caption_windows_keeps(self):
+        def fill(_hwnd, buf, _size):
+            buf.value = "Inbox - Gmail - Google Chrome"
+            return len(buf.value)
+
+        with mock.patch.object(inject.user32, "GetWindowTextW", side_effect=fill):
+            self.assertEqual(inject.window_title(0xBEEF),
+                             "Inbox - Gmail - Google Chrome")
+
+    def test_a_failed_read_is_no_title_and_never_an_exception(self):
+        with mock.patch.object(inject.user32, "GetWindowTextW",
+                               side_effect=OSError("access denied")):
+            self.assertEqual(inject.window_title(0xBEEF), "")
+
+    def test_the_read_is_bounded(self):
+        seen = []
+
+        def record(_hwnd, buf, size):
+            seen.append((len(buf), size))
+            return 0
+
+        with mock.patch.object(inject.user32, "GetWindowTextW", side_effect=record):
+            inject.window_title(0xBEEF)
+        self.assertEqual(seen, [(inject.TITLE_CHARS, inject.TITLE_CHARS)])
+
+    def test_classify_does_not_read_it(self):
+        # That one is asked on the edge, when the window changes; a title changes
+        # while the window stays the same one, so it is its own call.
+        with mock.patch.object(inject.user32, "GetWindowTextW") as read:
+            inject.classify(0)
+        read.assert_not_called()

@@ -30,8 +30,10 @@ something wrong, hold the keys again and say *"change Tuesday to Thursday"* or *
 that"*, and it fixes the text it just pasted.
 
 Flow sits in a small pill at the bottom of the screen, and the pill has two more modes. In
-Refine, what you say is rewritten into a proper prompt for your project. In Ask, your question goes to the agent
-CLI you already use (`codex` or `claude`) and the answer is read back to you.
+Refine, what you say is rewritten to suit the window you're in: a prompt in a terminal or an
+editor, an email in Outlook or Gmail, a chat message in Slack or Teams, and anywhere else
+your own words tidied up. In Ask, your question goes to the agent CLI you already use
+(`codex` or `claude`) and the answer is read back to you.
 
 I made Flow for people whose English has an accent that speech recognition keeps tripping
 over, often enough that they give up and type. Spanish, Indian, Russian and Japanese
@@ -105,8 +107,14 @@ Tap the pill to cycle through its three modes. Its colour tells you which one it
 | Mode | Pill | When you let go |
 |:---|:---|:---|
 | Type | white | The words are pasted. |
-| Refine | gold | `codex` or `claude` turns them into a prompt for your project. Nothing is pasted until you press Send. |
+| Refine | gold | `codex` or `claude` rewrites them for the window in front: a prompt, an email, a chat message, or the same words tidied. Nothing is pasted until you press Send. |
 | Ask | violet | The question goes to your agent CLI. The answer appears above the pill and is read aloud, and **Continue in Flow** opens the conversation in a window. |
+
+Tapping the pill says what the mode you landed on will do, such as *Refine - writes an
+email for OUTLOOK, then you press Send*. If Refine picked the wrong kind, hold the mic at
+the result and say *"make it an email"* (or a prompt, a message, *"tidy it up"*), or tell
+Flow what a program is for in Flow Home ▸ Settings ▸ What Refine writes. Holding again
+with more to say adds it to what you already said.
 
 Point Refine and Ask at a project folder (Flow Home ▸ Settings ▸ Workspaces, or `--cwd`)
 and the answers are about your code. If you'd rather correct a draft by voice before
@@ -129,7 +137,9 @@ voice profile all stay local, and no API key is read, stored or passed anywhere 
 A few things do go out, and only when you use them:
 
 - A draft you refine or a question you ask goes to that agent CLI's cloud, along with your
-  workspace path if you set one.
+  workspace path if you set one. To choose what kind of writing a Refine is, Flow reads
+  the name and title of the window in front. That is used on your PC at that moment and is
+  never stored or sent.
 - Pasting puts the text on the Windows clipboard for a moment, where clipboard managers
   and cloud sync can see it.
 - If you choose one of Microsoft's natural voices to read answers, the text of each answer
@@ -175,7 +185,7 @@ Pull requests are welcome for anything else. To run it from a clone:
 ```bash
 git clone https://github.com/samartomar/flow && cd flow
 uv sync && uv run flow                          # run it
-uv run python -m unittest discover -s tests     # ~3,200 tests, about 90 s, no mic needed
+uv run python -m unittest discover -s tests     # ~4,000 tests, about 95 s, no mic needed
 ```
 
 The GIF at the top is recorded by [`scripts/home_reel.py`](scripts/home_reel.py) from a

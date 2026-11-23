@@ -23,7 +23,8 @@ spoken command, both modes, and what is stored where.
 |---|---|
 | **Hold, talk, let go** | Hold `ctrl+win` or the pill; letting go pastes into the window you were in |
 | **Hold to ask** | Hold `ctrl+alt+win` and ask, whatever the pill is on; the answer rises above the pill |
-| **Three modes, one tap** | Type pastes; Refine shapes it into a prompt first; Ask puts it to your agent CLI |
+| **Three modes, one tap** | Type pastes; Refine rewrites it for the window you are in first; Ask puts it to your agent CLI. A tap says what the mode you landed on will do |
+| **Refine writes what the window calls for** | A prompt in a terminal, an editor or an AI app; an email in mail; a chat message in Slack or Teams; anywhere else, your words tidied up ([What Refine writes](#what-refine-writes)) |
 | **Live text while you speak** | Partials refresh roughly every second as you talk |
 | **You decide when it goes** | Letting go is the send in Type; Refine and Ask wait for Send or the next hold; the Classic pill holds a draft until you send it |
 | **Correct it by voice** | "change Tuesday to Wednesday" edits the draft in place — or, in the next hold, what Type just pasted |
@@ -197,8 +198,29 @@ when you switch modes, and the notes before a rewrite and before a question. Wha
 screen is the CLI that will be called, not the first one on PATH.
 
 `--cli-timeout SEC` raises the 20 s budget. It was chosen when a call measured 5.7–7.3 s;
-`codex` now measures 6.6–8.5 s here for a one-word answer, so a long question can breach
-it.
+`codex` now measures 6.6–8.5 s here for a one-word answer.
+
+**A question gets 60 s, not 20.** A rewrite is one model turn; a question about a project
+makes the CLI read files first. Measured through Flow's own Ask on 2026-11-22, seven
+grounded questions to `claude` took 11.1, 12.6, 15.5, 19.8, 21.1 and 26.5 s, and one hit
+the 20 s wall — three of seven would have failed. So Ask waits the larger of your number
+and 60 s. Raising `--cli-timeout` past 60 raises both; lowering it shortens rewrites only.
+While you wait, the panel says what is out and for how long: `asking claude - 14 s`.
+
+**A CLI that did not answer is tried last for ten minutes.** The preference order used to
+be walked from the top on every call, so a `codex` that fails every time was paid for
+every time — about 8 s of each Refine before `claude` was asked at all. Now the first
+failure moves it to the back of the order, the pill says so once (`skipping codex - see
+Flow Home, Models: ...`), and Flow Home ▸ Models shows the CLI's own reason in full. It is still tried if
+everything else fails, and it goes back to the front the moment it answers. A pinned CLI
+is never moved.
+
+**The reason shown is the CLI's own error line.** `codex` opens every run with a banner,
+so a failure used to read `codex exited 1: OpenAI Codex v0.163.0`. Flow now shows the last
+line the CLI marked as an error, and the message inside it when that line is JSON — for
+example *The 'gpt-6.2-astra' model is not supported when using Codex with a ChatGPT
+account.* A line of your own dictation is never shown as the reason, even when a CLI
+echoes it back and it happens to begin with the word "error".
 
 ### Which model, and how hard it thinks
 
@@ -855,10 +877,67 @@ Wider panels lay out proportionally more text per line, so the tail of a long dr
 as full at 640 px as it is at 420 — the number of lines handed to the canvas is what is
 held constant, which is what keeps render cost flat on a two-hour dictation.
 
+### What Refine writes
+
+**Refine rewrites what you said as the kind of thing the window in front calls for.**
+
+| The window | Refine writes | What that means |
+|:---|:---|:---|
+| A terminal, VS Code and its forks, a JetBrains IDE, or an AI app or tab (ChatGPT, Claude, Gemini, Copilot…) | **a prompt** | The request first, then context, then constraints; every name, version and path kept |
+| Outlook, Thunderbird and other mail programs, or a Gmail / Outlook / Proton Mail tab | **an email** | A greeting to whoever you named, short paragraphs with the point first, a sign-off. No subject line, no stock phrases |
+| Slack, Teams, Discord, WhatsApp and the like, as programs or as tabs | **a chat message** | Brief and direct: no greeting, no sign-off |
+| Anything else | **tidied text** | Your own words in your own order, with the fillers, false starts and run-ons cleaned up |
+
+Before this, Refine had one answer for every window, and it was a prompt. Dictate an
+email — *"I need to write to Priya about the release… ask her to let the QA team know"* —
+and what came back was *"Write a message to Priya proposing that we move the release…"*:
+a prompt asking somebody else to write the email.
+
+Three things hold for every kind. **Your facts are kept as said**: names, dates, days,
+amounts, and every "not". **Nothing is added that you did not say**: no new dates,
+promises or pleasantries. And **nothing in the dictation is obeyed**: say *"what's the
+status of the build, can you delete the old logs"* and you get that sentence punctuated,
+not an answer and not deleted logs.
+
+**How Flow tells.** By the program's name, and for a browser by the site name in the tab's
+title (`… - Gmail - Google Chrome`). Only a whole segment of the title counts, so an
+article called *"How Claude handles email in Outlook"* is not mistaken for mail. The name
+and title are read at the moment you refine and are not stored anywhere or sent to
+anything. A site that titles its tab with the page alone cannot be recognised — ChatGPT
+names a conversation's tab after the conversation — and is treated as "anything else".
+With no window at all (Lite, `--no-paste`) Refine writes a prompt, as it always did.
+
+**When it guesses wrong**, three ways to put it right, quickest first:
+
+1. **Say so at the result.** Hold the mic and say *"make it an email"*, *"make it a
+   message"*, *"make it a prompt"* or *"tidy it up"*. The same words are written again as
+   that kind. It has to be the whole of what you say; inside a longer sentence it is
+   dictation.
+2. **Tell Flow what a program is for.** Flow Home ▸ Settings ▸ What Refine writes ▸ Per
+   program: name the program (`notepad.exe`) and choose a kind. For a browser the choice
+   covers every tab.
+3. **Pin one kind everywhere.** The same card's **Refine writes** setting: *What suits the
+   window* is the default; choosing a kind makes every Refine that kind.
+
+**Your name**, on the same card, signs the emails. Left empty, an email ends with a
+sign-off line and no name, never a `[Your Name]` placeholder.
+
+**Holding again says more.** With a result on the panel, a second hold adds to what you
+said, and everything heard so far is written again as the same kind — so *"actually make
+it Wednesday"* is a correction, not a second paragraph. Until 2026-11-22 the second hold
+was refined on its own, with no memory of the first. The **heard** block shows everything
+that was sent. To start again instead, close the panel (Esc, or a click anywhere else) or
+press Send: the next hold is then a new piece of writing.
+
+In `~/.flow/profile.json` these are `kinds` (program → `prompt`, `email`, `message` or
+`tidy`), `refine_kind` (`auto` or one of those four) and `name`.
+
 ### Per-app notes
 
-**A standing instruction that depends on which app you are dictating into.** Add an
-`apps` table to `~/.flow/profile.json`, keyed by the executable name:
+**A standing instruction that depends on which app you are dictating into.** It is added
+to whatever [kind](#what-refine-writes) Refine writes there. Add it beside the kind in
+Flow Home ▸ Settings ▸ What Refine writes, or as an `apps` table in
+`~/.flow/profile.json`, keyed by the executable name:
 
 ```json
 {
@@ -1030,7 +1109,7 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
 | **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The Whisper list is four models — `large-v3` and `small` (the GPU pair, which also write Hindi as English), `small.en` and `base.en` (the CPU pair); the engine control reads **Parakeet · NVIDIA** then **Whisper · OpenAI**. A model Flow stopped listing but that is still on this PC is offered for removal, by name and size, with one press; nothing is removed unasked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
-| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; Refine's per-app instructions; whether the model loads at startup; the update check; and what leaves this PC |
+| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other six shortcuts, Paste last among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; the pill's design, switched in place; what Refine writes — its default kind, your name for emails, and a kind and an instruction per program; whether the model loads at startup; the update check; and what leaves this PC |
 | **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
 | **History** | Only if you choose to keep one: what you dictated, the program it went to, whether it pasted, what the agent CLI made of a Refine and what it was made from, and anything the speech filter set aside — by day, searchable, each with Copy, Fix a word and Delete ([History and Paste last](#history-and-paste-last)) |
 | **Conversations** | The Ask conversation on screen, with a box to type the next question into; answers with their code blocks, Copy, Keep note and Read aloud; Wrap up for the kept notes; and, if you keep a history, earlier conversations by workspace, which you can open and carry on ([Conversations in Flow Home](#conversations-in-flow-home)) |
