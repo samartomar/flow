@@ -684,6 +684,139 @@ class TestEdgePadding(unittest.TestCase):
         self.assertEqual(len(pcm(self.FakeFrame(576, 0))), 1152)
 
 
+class TestEdgeSaysWhyItIsSilent(unittest.TestCase):
+    """A refused or unreachable service used to be a reply that made no sound and gave no
+    reason: `_pull` swallowed the exception, and Preview answered "ok" (2026-11-23, the
+    owner's desk: HTTP 403 for six weeks, nothing on screen). The reply is still silent
+    and the session still carries on; what is new is that the reason is kept.
+
+    No network: `edge_tts` is replaced by a module whose stream does what the case says.
+    """
+
+    class Refused(Exception):
+        """Shaped like aiohttp's `WSServerHandshakeError`: the status is an attribute."""
+
+        status = 403
+
+    def _synth(self):
+        from flow import edge
+
+        return edge.Synth(Voice("Natural en-US-AvaNeural", "Female", "en-US",
+                                engine="edge", path="en-US-AvaNeural"))
+
+    def _pull(self, chunks=(), error=None, cut_off=False):
+        """Run one reply's fetch to its end. Returns (synth, what reached the player)."""
+        import queue
+        import sys
+        import threading
+        import types
+
+        synth = self._synth()
+
+        class Communicate:
+            def __init__(self, text, voice, rate="+0%"):
+                pass
+
+            async def stream(self):
+                for chunk in chunks:
+                    yield chunk
+                if cut_off:
+                    synth.stop()
+                    yield {"type": "audio", "data": b"late"}
+                if error is not None:
+                    raise error
+
+        fake = types.ModuleType("edge_tts")
+        fake.Communicate = Communicate
+        q, settled = queue.Queue(), threading.Event()
+        synth._epoch, synth._settled, synth._trouble = 1, settled, ""
+        with mock.patch.dict(sys.modules, {"edge_tts": fake}):
+            synth._pull("hello", q, 1, settled)
+        self.assertTrue(settled.is_set(), "a reply always settles, or Preview waits")
+        got = []
+        while not q.empty():
+            got.append(q.get_nowait())
+        self.assertIsNone(got[-1], "the player is always told the stream is over")
+        return synth, got[:-1]
+
+    def test_a_refusal_is_named(self):
+        from flow import edge
+
+        synth, heard = self._pull(error=self.Refused("403, message='Invalid response "
+                                                     "status'"))
+        self.assertEqual(heard, [])
+        self.assertEqual(synth.trouble(), edge.REFUSED)
+
+    def test_no_connection_is_named(self):
+        from flow import edge
+
+        for error in (ConnectionRefusedError("refused"), OSError("getaddrinfo failed"),
+                      TimeoutError()):
+            with self.subTest(error=type(error).__name__):
+                synth, _heard = self._pull(error=error)
+                self.assertEqual(synth.trouble(), edge.UNREACHABLE)
+
+    def test_an_answer_with_no_sound_in_it_is_named(self):
+        from flow import edge
+
+        synth, heard = self._pull(chunks=[{"type": "WordBoundary", "text": "hello"}])
+        self.assertEqual(heard, [])
+        self.assertEqual(synth.trouble(), edge.NO_SOUND)
+        synth, _heard = self._pull(error=ValueError("unexpected frame"))
+        self.assertEqual(synth.trouble(), edge.NO_SOUND)
+
+    def test_a_reply_that_spoke_is_no_trouble(self):
+        synth, heard = self._pull(chunks=[{"type": "audio", "data": b"mp3"},
+                                          {"type": "audio", "data": b"more"}])
+        self.assertEqual(heard, [b"mp3", b"more"])
+        self.assertEqual(synth.trouble(), "")
+
+    def test_a_reply_cut_short_after_it_started_is_not_called_silent(self):
+        # The line dropped mid-answer: something was heard, so "refused" would be wrong.
+        synth, heard = self._pull(chunks=[{"type": "audio", "data": b"mp3"}],
+                                  error=ConnectionResetError("reset"))
+        self.assertEqual(heard, [b"mp3"])
+        self.assertEqual(synth.trouble(), "")
+
+    def test_a_reply_the_user_cut_off_is_not_trouble(self):
+        synth, _heard = self._pull(cut_off=True)
+        self.assertEqual(synth.trouble(), "")
+
+    def test_the_next_reply_starts_clean(self):
+        from flow import edge
+
+        synth, _heard = self._pull(error=self.Refused())
+        self.assertEqual(synth.trouble(), edge.REFUSED)
+        with mock.patch("flow.edge.available", return_value=True), \
+                mock.patch("threading.Thread"):
+            self.assertTrue(synth.say("again"))
+        # Asked before the new reply has settled: nothing is known to be wrong with it.
+        self.assertEqual(synth.trouble(), "")
+
+    def test_nothing_asked_for_is_no_trouble_and_no_wait(self):
+        self.assertEqual(self._synth().trouble(wait=30.0), "")
+
+    def test_the_speaker_asks_only_an_engine_that_can_know(self):
+        from flow import speak
+
+        speaker = speak.Speaker(voice="Microsoft Zira")
+        self.assertEqual(speaker.trouble(wait=30.0), "", "Windows speaks here: no wait")
+        self.assertIsNone(speaker._proc, "asking must not start the speech host")
+
+        class Synth:
+            voice = Voice("Natural en-US-AvaNeural", "Female", "en-US", engine="edge")
+
+            def trouble(self, wait=0.0):
+                return f"asked with {wait}"
+
+        speaker = speak.Speaker(voice="Natural en-US-AvaNeural")
+        speaker._synth = Synth()
+        self.assertEqual(speaker.trouble(2.0), "asked with 2.0")
+        # A Piper synth has no such answer, and that is "" rather than an error.
+        del Synth.trouble
+        self.assertEqual(speaker.trouble(2.0), "")
+
+
 class TestLegacyVoicesAreHidden(unittest.TestCase):
     """The 2013 voices stay reachable by name after they stop being offered."""
 

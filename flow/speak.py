@@ -732,6 +732,22 @@ class Speaker:
             threading.Thread(target=self._watch, daemon=True, name="speech").start()
         return True
 
+    def trouble(self, wait: float = 0.0) -> str:
+        """Why the reply just asked for makes no sound, or "" when nothing is known to be
+        wrong. Waits up to `wait` seconds to find out.
+
+        Only an engine that can know answers: the Microsoft voices, whose service can
+        refuse or be out of reach (`edge.Synth.trouble`). Windows and Piper speak on this
+        PC and have no such answer to give, so for them this is "" at once. Reads
+        `_synth` directly, as `speaking` does, so asking never starts an engine.
+        """
+        synth = self._synth
+        if synth is not None and synth.voice.name == self._voice:
+            ask = getattr(synth, "trouble", None)
+            if ask is not None:
+                return ask(wait)
+        return ""
+
     def stop(self) -> bool:
         """Cut off the current reply — the user has taken the answer back.
 

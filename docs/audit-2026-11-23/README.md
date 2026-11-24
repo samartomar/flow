@@ -220,7 +220,7 @@ Hindi, and it is far behind v3 on English (11.09).
 | `onnxruntime` 1.28.0 | 1.32.0 is out; the notes between were not read. |
 | `piper-tts` 1.8.0 | Still the [latest](https://pypi.org/project/piper-tts/). GPL-3.0-or-later, as every version from 1.3.0. |
 | `rhasspy/piper-voices` at `v1.0.0` | The tag still serves the files Flow's checksums expect. On `main`, voices are being retrained in place since 2026-11-09 and three of Flow's eight now differ. |
-| `edge-tts` 7.2.8 | **Refused by the service.** See below. |
+| `edge-tts` 7.2.8 | **Refused by the service.** See below. Moved to 7.3.1 the same day. |
 
 One statement to keep an eye on: parakeet.cpp's README says its CUDA release binaries
 target Turing cards and newer. The v0.6.1 CUDA build runs on this GTX 1070, which is
@@ -240,7 +240,11 @@ Microsoft made a new token mandatory around 10 October 2026 and version 7.2.8 fa
 handshake with HTTP 403 ([issue 490](https://github.com/rany2/edge-tts/issues/490), 48
 comments). The fix is in [7.3.0](https://github.com/rany2/edge-tts/releases) of
 2026-10-13; 7.3.1 is the latest. Users report slower and sometimes empty responses after
-the fix. Not reproduced here, because a test sends text to Microsoft.
+the fix. When this note was first written that was not reproduced, because a test sends
+text to Microsoft. Later the same day the owner chose a Natural voice and found Preview
+silent, and it was: Flow's preview sentence got HTTP 403 on 7.2.8 and 14,832 bytes of
+audio on 7.3.1. The pin is now 7.3.1; `docs/decisions.md`, "The Microsoft voices spoke
+again", has the measurements and what else changed.
 
 **Piper.** The original `rhasspy/piper` repository is archived; the engine continues at
 [`OHF-Voice/piper1-gpl`](https://github.com/OHF-Voice/piper1-gpl) under GPL-3.0-or-later.
@@ -294,7 +298,8 @@ too slow to start as measured.
    on Flow's own clips the same day and none clearly beat 14.5. Look again when the
    helper can decode with a beam or take a vocabulary, or when a model is published that
    is not a fine-tune of v3.
-2. **Move the `edge-tts` pin to 7.3.1**, after one test call confirms 7.2.8 is refused.
+2. **Move the `edge-tts` pin to 7.3.1.** Done the same day, after a test call confirmed
+   7.2.8 is refused. The release download still carries 7.2.8 until the next release.
 3. **Decide what the Piper catalogue should offer** in light of the voice terms above.
 4. **Leave the rewrite model alone.** There is no faster or more faithful choice to make.
 5. **Hear Phonon 31m against Piper** if a better local voice is wanted; it would be a new
@@ -312,7 +317,6 @@ too slow to start as measured.
   are too few to score.
 - Whether the candidates are better or worse than v3 in the other 24 languages. Only
   English was measured.
-- Whether `edge-tts` 7.2.8 fails on this network today. Taken from upstream reports.
 - The leaderboard's results dataset is private; its numbers were read from the page's own
   data, and the three rows quoted most here were checked against that capture.
 - That the Windows natural voices are unreachable: no Microsoft page says so outright.

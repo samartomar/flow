@@ -68,6 +68,12 @@ VOICE_ENGINES = {
     "edge": "Natural - the text goes to Microsoft",
 }
 
+#: How long a press of Preview or Read aloud waits to learn whether the voice will be
+#: heard (`Api._say`). Measured 2026-11-23 against Microsoft's service: a refusal came
+#: back in 0.7 s and a first chunk of sound in 1.8 s. Long enough for both with room,
+#: short enough that a dead network does not hold the button for the engine's own 10 s.
+SAY_WAIT_SEC = 5.0
+
 #: The two designs, by the names the page shows. "current" is the stored spelling of
 #: the pill Flow shipped first, kept so older profiles still load.
 DESIGN_LABELS = {"compact": "Compact", "current": "Classic"}
@@ -861,12 +867,39 @@ class Api:
             self._call(lambda: s.toggle_speech() if bool(s.muted) != want else None)
         return self.models({})
 
+    def _say(self, speaker, text: str) -> None:
+        """Say `text` because somebody pressed a button to hear it, and raise with the
+        reason when they will not.
+
+        A reply read out after an answer may fail quietly: the answer is on the screen.
+        A press of Preview or Read aloud asked for sound and nothing else, and silence
+        with no word of why is what the owner reported on 2026-11-23 ("Clicking preview
+        nothing happens"): Microsoft's service had refused his copy of its voices for six
+        weeks. The wait is on this request's own thread, never the session's.
+        """
+        if self._call(lambda: speaker.say(text)) is False:
+            raise ApiError("that voice did not start - choose another in the list on "
+                           "the Models page")
+        ask = getattr(speaker, "trouble", None)
+        why = ask(SAY_WAIT_SEC) if ask is not None else ""
+        if not why or not isinstance(why, str):
+            return
+        from .. import edge
+
+        packs = getattr(self.home, "packs", None)
+        if why == edge.REFUSED:
+            why += (" - this PC's copy of the Microsoft voices is too old for it. Update "
+                    "them under Better voices on the Models page."
+                    if packs is not None and packs.outdated("edge") else
+                    ". Choose a Windows or Piper voice for now.")
+        raise ApiError(why)
+
     def replies_preview(self, _body: dict) -> dict:
         s = self.session
         speaker = getattr(s, "speaker", None)
         if speaker is None:
             raise ApiError("spoken replies are not available on this PC")
-        self._call(lambda: speaker.say("This is how Flow will read its answers to you."))
+        self._say(speaker, "This is how Flow will read its answers to you.")
         return {"ok": True}
 
     def voice_engine(self, body: dict) -> dict:
@@ -1386,7 +1419,7 @@ class Api:
         if speaker is None:
             raise ApiError("no voice on this PC - answers are shown and not read")
         text, _question = self._answer(body)
-        self._call(lambda: speaker.say(text))
+        self._say(speaker, text)
         return self.ask_page({"conv": body.get("conv")})
 
     # -- The first run -----------------------------------------------------------

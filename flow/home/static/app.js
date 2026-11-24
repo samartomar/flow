@@ -390,6 +390,16 @@
       return `<div class="row wrap"><button type="button" class="btn ${name === "piper" ? "primary" : ""}" data-act="pack-add" data-engine="${name}">${icon("download", name === "piper" ? "#15171C" : C.text, 15)}${esc(label)}</button><span class="note">${esc(e.size_text)}</span></div>`
         + (e.job && e.job.state === "failed" ? `<p class="note warn">${esc(e.job.error)}</p>` : "");
     };
+    // An engine that is here but older than the oldest copy that works (`outdated`,
+    // voicepacks.py): it used to read "Added" while its voices said nothing. The update
+    // is the same route as the add - the server installs the version this Flow pins.
+    const updateEngine = (name, e, label) => {
+      if (running(e.job)) return `<p class="note"><span class="dot blue"></span> Updating ${esc(label)} - usually under a minute.</p>`;
+      const said = `<p class="note warn">${esc(e.old)}</p>`;
+      if (!e.can) return `${said}<p class="note">This download of Flow cannot update them itself. A newer Flow carries the fix; until then, choose a Windows or Piper voice.</p>`;
+      return `${said}<div class="row wrap"><button type="button" class="btn primary" data-act="pack-update" data-engine="${name}">${icon("download", "#15171C", 15)}Update ${esc(label)}</button><span class="note">a small download</span></div>`
+        + (e.job && e.job.state === "failed" ? `<p class="note warn">${esc(e.job.error)}</p>` : "");
+    };
     const piperRow = (v) => {
       const j = v.job;
       const act = v.installed
@@ -409,19 +419,23 @@
           <div class="pack">
             <div class="row">${icon("shield", C.green, 16)}<b class="grow">Piper</b><span class="badge green">on this PC</span></div>
             <p class="note">Natural voices that run here. Nothing leaves this PC, and they work offline.</p>
-            ${addEngine("piper", pk.piper, "Add Piper")}
+            ${pk.piper.outdated ? updateEngine("piper", pk.piper, "Piper") : addEngine("piper", pk.piper, "Add Piper")}
             ${pk.piper.installed ? `<div class="pack-voices">${pk.piper.voices.map(piperRow).join("")}</div>
             <p class="fine">Hear them first on <a href="${esc(pk.piper.samples)}" target="_blank" rel="noopener noreferrer">Piper's samples page</a>.</p>` : ""}
           </div>
           <div class="pack">
             <div class="row">${icon("speaker", C.ask, 16)}<b class="grow">Microsoft natural voices</b><span class="badge amber">online</span></div>
             <p class="note">Ava, Andrew, Emma, Sonia and more - the voices Narrator uses. Choosing one sends each answer's text to Microsoft to be spoken. No account, no key.</p>
-            ${pk.edge.installed ? `<p class="note good">${icon("circlecheck", C.green, 15)} Added - choose one in the list above, under Natural.</p>` : addEngine("edge", pk.edge, "Add Microsoft voices")}
+            ${pk.edge.outdated ? updateEngine("edge", pk.edge, "Microsoft voices") : pk.edge.installed ? `<p class="note good">${icon("circlecheck", C.green, 15)} Added - choose one in the list above, under Natural.</p>` : addEngine("edge", pk.edge, "Add Microsoft voices")}
           </div>
         </div>
       </section>` : "";
     const groups = {};
     (vo.voices || []).forEach((v) => { (groups[v.group] = groups[v.group] || []).push(v); });
+    // The voice in use is one of an engine that cannot speak until it is updated: said
+    // beside the voice, where the silence is noticed, and not only on the card below.
+    const silentEngine = pk && ["piper", "edge"].find((n) => pk[n].outdated
+      && (vo.voices || []).some((v) => v.name === vo.current && v.engine === n));
     const voiceOptions = [`<option value="" ${vo.current ? "" : "selected"}>The engine's default</option>`]
       .concat(Object.entries(groups).map(([g, vs]) => `<optgroup label="${esc(g)}">${vs.map((v) =>
         `<option value="${esc(v.name)}" ${v.name === vo.current ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</optgroup>`)).join("");
@@ -480,6 +494,7 @@
           <div class="row"><h2 class="grow">Spoken replies</h2>${vo.available ? sw(!vo.muted, "mute", "Read answers aloud") : ""}</div>
           ${vo.available ? `<p class="note">Answers from Ask can be read aloud. Flow never listens while it talks.</p>
           <div class="row"><select id="voice" class="grow" data-change="voice" aria-label="Voice">${voiceOptions}</select><button type="button" class="btn" data-act="preview">${icon("play", C.text, 14)}Preview</button></div>
+          ${silentEngine ? `<p class="note warn">This voice is silent until ${silentEngine === "edge" ? "the Microsoft voices are" : "Piper is"} updated - see Better voices, below.</p>` : ""}
           <div class="row top">${icon("shield", C.soft, 14)}<p class="fine">Natural voices send the answer's text to Microsoft to be spoken. Windows and Piper voices stay on this PC.</p></div>`
           : '<p class="note">No speech engine answered on this PC, so answers are shown and not read.</p>'}
         </section>
@@ -1368,6 +1383,7 @@
     mute: (el) => run(() => api("replies", { muted: el.getAttribute("aria-checked") === "true" })),
     preview: () => run(() => api("replies/preview", {}), null, false),
     "pack-add": (el) => run(() => api("voices/engine", { engine: el.dataset.engine }), "Adding - this takes a minute"),
+    "pack-update": (el) => run(() => api("voices/engine", { engine: el.dataset.engine }), "Updating - this takes a moment"),
     "piper-download": (el) => run(() => api("voices/piper", { name: el.dataset.name, action: "download" }), "Downloading"),
     "piper-cancel": (el) => run(() => api("voices/piper", { name: el.dataset.name, action: "cancel" }), "Cancelled"),
     "piper-delete": (el) => run(() => api("voices/piper", { name: el.dataset.name, action: "delete" }), "Deleted"),

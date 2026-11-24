@@ -14,6 +14,24 @@ residue.
 
 ### At the desk
 
+- [x] **A Natural voice speaks again — you heard it, 2026-11-23.** You chose
+  `Natural en-US-AvaNeural`, pressed Preview and nothing happened. Microsoft's service
+  has refused the version of its voices Flow installed (`edge-tts` 7.2.8) since about
+  10 October, and Flow swallowed the refusal. Fixed on your go-ahead to download the
+  39 KB update; you then started Flow, pressed Preview, and it spoke.
+  - **This PC is on 7.3.1**, in the environment your Flow runs from.
+  - **What was checked before you heard it:** the same Preview request got a refusal
+    (HTTP 403) before and 2.5 s of speech after, through Flow's own code, with a counter
+    in place of the speakers.
+  - **From now on Flow says so:** Preview and Read aloud show why when no sound will
+    come, and Better voices shows "Update Microsoft voices" in place of "Added" when the
+    copy on a PC is too old.
+
+- [ ] **Yours to decide: a release for the Microsoft voices.** The Windows download of
+  v0.8.2 carries `edge-tts` 7.2.8 inside it and cannot update itself, so the Microsoft
+  voices are silent for everyone on it until a new version is cut. Windows and Piper
+  voices are not affected.
+
 - [x] **A dictated sentence no longer reaches your codex hooks — done on your word,
   2026-11-23.** `codex` ran whatever hooks you have set up for it on every call from
   Flow, and a hook is handed the prompt: the words you dictated, or your question.

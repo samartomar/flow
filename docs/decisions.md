@@ -3064,3 +3064,89 @@ a Parakeet v4 or NVIDIA's unified models in a parakeet.cpp release; (3) Flow gai
 benchmark of technical dictation and a candidate wins it clearly; (4) Flow drops the
 other 24 languages on purpose, which removes the cost of an English-only model but not
 v2's result above. A leaderboard figure alone reopens nothing.
+
+### 2026-11-23 — The Microsoft voices spoke again: edge-tts 7.3.1, an old copy is offered an update, and Preview says why
+
+**What the owner reported.** With `Natural en-US-AvaNeural` chosen on the Models page:
+"Clicking preview nothing happens." No sound and no message.
+
+**The cause, measured.** Flow pinned `edge-tts==7.2.8`. Sent Flow's own preview
+sentence from this repository's environment, Microsoft's speech service answered the
+handshake with **HTTP 403** in 0.7 s; the voice catalogue still loaded (318 voices),
+which is why a Natural voice could be listed, chosen and silent. The same sentence
+through `edge-tts` 7.3.1 came back as 14,832 bytes of audio. Upstream dates the change
+to about 2026-10-10 and the fix to 7.3.0 of 2026-10-13
+([audit-2026-11-23](audit-2026-11-23/README.md)). So the add-on had been silent for
+six weeks, on every Flow that added it before then, and the release download ships
+7.2.8 inside it.
+
+**And Flow hid it.** `edge.Synth._pull` caught every exception and passed, by design: a
+reply that cannot be spoken is silent and the session carries on. Preview called `say`,
+which returns as soon as the workers start, and answered "ok". The card under the
+voice read "Added".
+
+**Decided.**
+
+1. **The pin moves to 7.3.1 and the floor to 7.3** (`voicepacks.ENGINES`,
+   `pyproject.toml`, `uv.lock`: that one package and nothing else). 7.3.1 has the same
+   four dependencies as 7.2.8. The floor is the service's, not a preference.
+2. **An engine that is here but below its floor is not "Added".** `VoicePacks.outdated`
+   compares the version on disk with the floor in the extra's own range; the card then
+   says the voices are silent and offers **Update**, which is the Add route and
+   installs the pin. A version Flow cannot read as numbers is never called old. The
+   Windows download cannot install into itself and says to get a newer Flow.
+3. **The update is used without a restart.** `flow/edge.py` imports `edge_tts` at the
+   moment of use, so after an update of a copy this process had loaded, the loaded
+   modules are dropped and the next reply imports the new ones. Only for engines named
+   in `voicepacks.RELOADS`, which is `edge`: Piper holds a model and native code, and
+   an update of it asks for a restart.
+4. **A press that asked for sound says why there is none.** `edge.Synth` keeps the
+   reason a reply made no sound (`REFUSED`, `UNREACHABLE`, `NO_SOUND`) and
+   `Speaker.trouble(wait)` hands it over. Preview and Read aloud wait up to 5 s for the
+   first sound or the failure and answer with the reason; a refusal of an old copy
+   names the update. A reply the user cut off, and one cut short after it started, are
+   not called silent.
+
+**Not changed, on purpose.** A reply read out after a spoken question still fails
+quietly: the answer is on the screen, and the pill is not given a new thing to say. The
+standing line beside the voice list covers the case that can be known in advance.
+
+**Measured after.** In this repository's environment, through Flow's own code and with
+nothing played aloud:
+
+| | before | after |
+|:---|:---|:---|
+| Version on disk, and what the card reads | 7.2.8, "silent", Update offered | 7.3.1, "Added" |
+| A reply through `edge.Synth` | 0 bytes in 0.9 s, trouble "refused to speak" | 14,832 bytes in 0.75 s, no trouble |
+| The same process, no restart, after `VoicePacks.install("edge")` | | loaded `edge_tts` is 7.3.1 and it speaks |
+| `Api.replies_preview`, real `Speaker`, a counting sink for the sound device | | ok in 0.97 s; 118,656 bytes, 2.5 s of speech, written |
+
+The page was driven in a browser on `python -m flow.home.demo --old-voices`: Preview
+showed the reason in red, Update ran, the card read "Added", the line beside the voice
+went, and Preview answered. 31 tests added; each of 16 single-line breakages of the
+change was caught by them. The suite: 4190 tests, 5 skipped.
+
+**Then heard.** Every check above counted bytes and played nothing. The same evening
+the owner started Flow, pressed Preview with `Natural en-US-AvaNeural` chosen, and
+answered that it speaks.
+
+**Not done, and said so.**
+
+1. **The Update button was not pressed on a real out-of-date PC by a person.** The
+   owner's environment was updated through `VoicePacks.install` from a script, which is
+   the code the button runs; the button itself was pressed only in the demo.
+2. **The refusal was not driven through the whole API with the old copy**, because the
+   old wheel was no longer on this PC once the environment was updated. It was measured
+   at `edge.Synth` before the update, and the API's wording is held by tests.
+3. **The release download still ships 7.2.8**, and the fix reaches those users with the
+   next release, which is the owner's to cut. Not checked in a built download: whether
+   it carries the package's version for the card to read. If it does not, the card
+   still reads "Added" there; Preview says the service refused either way.
+4. **Slower or empty answers after the fix**, which upstream users report. One reply
+   here took 0.75 s. `NO_SOUND` is what Flow says if it happens.
+
+**Reopens if:** (1) a current copy is refused - the service has moved again, and the
+floor and pin are measured again, not guessed; (2) an update leaves a running Flow still
+refused, which would mean dropping the loaded modules is not enough; (3) spoken replies
+after a question go silent often enough that "one press of Preview away" is not an
+answer: then the pill says it, and that is argued with the pill's own rules in hand.

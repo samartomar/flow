@@ -1904,6 +1904,24 @@ probe waited on the network. Capping the probe gives **0.58 s to first sound**, 
 behind the first byte off the wire. Synthesis then runs about six times faster than
 playback, so it does not stall mid-reply.
 
+**If one of these voices says nothing.** The service is Microsoft's, and it decides which
+versions of the add-on it answers. Around 10 October 2026 it stopped answering
+`edge-tts` 7.2.8 and older, so a Flow that added these voices before then held a copy
+that could list them and not speak them. Flow now tells you:
+
+- **Preview**, and **Read aloud** under an answer, say why when no sound will come: the
+  service refused, it could not be reached, or it answered with nothing. A refusal
+  comes back in under a second.
+- **Better voices** shows **Update Microsoft voices** in place of "Added" when the copy
+  on this PC is older than the service answers, and the line beside the voice list says
+  the chosen voice is silent until then. The update is one small download and is used
+  by the next reply, with no restart.
+- **The Windows download** cannot install into itself, so there the card says to get a
+  newer Flow, and a Windows or Piper voice works in the meantime.
+
+A reply read out after a spoken question still fails quietly if the service is down: the
+answer is on the screen, and the reason is one press of Preview away.
+
 ### Asking without pressing anything
 
 A conversation where you press a button after every sentence is not a conversation. In

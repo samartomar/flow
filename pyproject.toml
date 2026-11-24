@@ -94,8 +94,12 @@ parakeet = [
 #
 # `av` is not listed because it is already here: faster-whisper depends on it, so the MP3
 # the service returns can be decoded without adding a wheel anyone was not downloading.
+#
+# 7.3 is a floor the service set, not a preference: since about 2026-10-10 it refuses the
+# handshake of anything older with HTTP 403 (measured 2026-11-23: 7.2.8 refused, 7.3.1
+# spoke). `voicepacks.ENGINES` reads this floor to offer an older copy an update.
 edge = [
-    "edge-tts>=7.2",
+    "edge-tts>=7.3",
 ]
 
 [project.scripts]
