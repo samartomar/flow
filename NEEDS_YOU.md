@@ -70,20 +70,24 @@ residue.
   If any hold does nothing and says nothing, the trace now knows why: send me the last
   `hold` and `stall` lines of `~/.flow/diag.jsonl`.
 
-- [ ] **Try the new flow in real windows — nobody has yet.** The second 2026-11-22 entry
-  ("The pill is an indicator") is tested by the suite and by script against the real
-  CLI, and has not been held in a hand. Ten minutes, in this order, in Slack or Teams
-  and then in Outlook or a Gmail tab:
-  1. Dictate a rambling sentence. It pastes. Hold again and say **"polish that"**. The
-     strip should count while it writes, and the text should be replaced where it is.
-  2. Say **"scratch that"** — your own words should come back (chat) — then press
-     **alt+shift+X** instead of speaking. Same result.
-  3. In mail, say **"make it an email"**. It should land with a greeting and sign-off,
-     and the strip should say *Ctrl+Z there undoes it*. Try that Ctrl+Z.
-  4. Hold **ctrl+alt+win** and ask something. Nothing should rise while you talk. The
-     card should come up with the answer and still be there after you click back into
-     your work. Close it with its ✕.
-  5. Tap the pill. It should say what the keys are and change nothing.
+- [ ] **Try the 2026-11-24 flow at the desk: styles, pieces, lenses, hands-free.** Built
+  and suite-tested the same day (decisions.md, "You choose, Flow does not guess"). Fifteen
+  minutes, in this order:
+  1. Flow Home ▸ **Styles**: read the four built-ins, put your name in, and select
+     **Email**. Right-click the pill: the *Refine writes* rows should tick Email too.
+  2. Put the pill on Refine. In Outlook or a Gmail tab, hold **ctrl+win**, say who and
+     what, let go: an email lands. Hold again and say more ("and ask her to tell QA"):
+     the **whole** email should be rewritten and replaced in place, not a second one
+     added. Say **"done"**: the strip says the next Refine starts a new piece.
+  3. Click into the email and type a letter, then Refine again: that is a new piece.
+  4. Flow Home ▸ Styles ▸ *A style of your own*: add one (say "Standup update - three
+     bullets: done, next, blocked"), select it, and Refine in Slack.
+  5. Flow Home ▸ **Lenses**: select **Business**. Hold **ctrl+alt+win** and ask
+     something; the waiting line should say *through the Business lens*. On the card,
+     press **Insert**: the answer should land where you were (or in the pinned window).
+  6. Tap **ctrl+win** once: the strip says *hands-free - each pause pastes*. Talk,
+     pause, talk: each pause pastes, and the words show while you speak. Tap again to
+     stop. Tap **ctrl+alt+win** quickly: nothing should happen.
   What to judge, because no test can: **does any step make you stop and wonder what
   Flow is doing?** That was the complaint, and it is the only measure.
 
@@ -93,20 +97,9 @@ residue.
   sure, and `Profile.panel_flows`, the panel's Send and the "say more" machinery under
   it all go.
 
-- [ ] **Use Refine in the three places it now behaves differently.** Outlook or a Gmail
-  tab; Slack or Teams; and Notepad. Dictate something you would really send and say
-  "polish that" — or put the pill on Refine from its right-click menu and read the line
-  under it, which should name the kind and the program.
-  What to judge, because no test can: **is the email one you would send as it stands?**
-  Specifically the greeting and the sign-off, which nobody dictated (decision part 2, and
-  its reopen bar). Put your name in Flow Home ▸ Settings ▸ What Refine writes first.
-
-- [ ] **A browser tab Flow reads wrong.** Detection reads a whole segment of the tab's
-  title. If a tab you use is read as mail or chat and is neither, or the reverse, the fix
-  is one entry in `flow/kinds.py` — tell me the title as the tab shows it. ChatGPT in a
-  browser is the known miss: it titles a conversation's tab with the conversation, so it
-  gets tidied text rather than a prompt, until you set `chrome.exe` or `msedge.exe` under
-  Per program (which covers every tab).
+- [ ] **Is the email one you would send as it stands?** Specifically the greeting and the
+  sign-off, which nobody dictated (2026-11-22 decision part 2, and its reopen bar). If
+  not, the Email style is yours to edit now: Flow Home ▸ Styles ▸ Email ▸ Edit.
 
 - [ ] **Does the mode line earn its place?** Choosing a mode puts one sentence under the
   pill for about three seconds, and so does a tap (which now says the keys instead of
@@ -115,14 +108,6 @@ residue.
   is that it speaks only the first few times, counted in the profile.
 
 ### Decisions
-
-- [ ] **Should an answer be read aloud by default, and should a draft be asked after a
-  pause?** Both are on, both are yours to change, and the survey of ten comparable tools
-  found neither anywhere else: none reads an answer aloud unasked, and none sends on a
-  silence. They were built for a hands-free loop that the hold-to-ask keys have since
-  made unnecessary for most uses. Not changed, because a default that speaks is one
-  somebody may be relying on. The smallest move is the reply voice off until asked for;
-  auto-ask only matters when listening hands-free, since a hold sends on the release.
 
 - [ ] **The release zip is labelled MIT and bundles GPL code with no notices.** Found by
   the 2026-11-22 readiness review, not acted on, because it is a licence decision.
@@ -574,11 +559,6 @@ sessions away.
   reads as 3% or 10% depending on nothing, and either number would pick a different
   design. The trace already carries operation ids, durations and state transitions —
   no new instrument, just sessions.
-- [ ] **P2 — adaptive auto-ask timeout.** Collect first: within-utterance pause
-  distribution is already derivable from `~/.flow/diag.jsonl` state transitions; ~200
-  pauses over ≥3 sessions before offering adaptive; then p95 + 0.5 s clamped [3.0, 8.0]
-  as a profile field. The bar was always right; the file is empty of records because it
-  is absent.
 
 ## Proposals still waiting (unchanged)
 

@@ -97,7 +97,12 @@ class FakeSpeaker:
 
 
 def session(**kw) -> Session:
-    return Session(asr=kw.pop("asr", None) or FakeAsr(), mic=FakeMic(), **kw)
+    s = Session(asr=kw.pop("asr", None) or FakeAsr(), mic=FakeMic(), **kw)
+    if kw.get("speaker") is not None:
+        # Answers are silent unless the user turns reading on (decisions.md
+        # 2026-11-24); these tests are about what happens when it is on.
+        s.muted = False
+    return s
 
 
 class TestTheMeterDoesNotClaimToHear(unittest.TestCase):

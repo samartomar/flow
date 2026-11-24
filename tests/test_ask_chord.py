@@ -614,5 +614,29 @@ class TestJFlowHomeTurnsTheChordOff(unittest.TestCase):
             self._api().set_chord({"keys": "ctrl"})
 
 
+
+class TestATapOfTheAskKeysDoesNothing(unittest.TestCase):
+    """decisions.md 2026-11-24: hands-free belongs to the talk chord and only dictates.
+    A quick tap of ctrl+alt+win used to switch it on *and* turn the pill to Ask."""
+
+    def test_a_quick_tap_is_only_a_short_question(self):
+        from flow import hold
+        from test_chord import _fired
+        presses = queue.Queue()
+        ask = Chord(presses, frozenset({"ctrl", "alt", "win"}), gesture="hold",
+                    **ASK_ACTIONS)
+        _Keyboard(ask, hold_ms=hold.TAP_MAX_MS - 50).down(
+            VK_LCONTROL, VK_LMENU, VK_LWIN).up(VK_LWIN, VK_LMENU, VK_LCONTROL)
+        self.assertEqual(_fired(presses), ["warm", "ask", "ask-end"])
+
+    def test_the_talk_chords_tap_still_toggles(self):
+        from flow import hold
+        from test_chord import _fired
+        presses = queue.Queue()
+        talk = Chord(presses, frozenset({"ctrl", "win"}))
+        _Keyboard(talk, hold_ms=hold.TAP_MAX_MS - 50).down(
+            VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
+        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end", "toggle"])
+
 if __name__ == "__main__":
     unittest.main()

@@ -1368,8 +1368,28 @@ class TestThePanelDraws(unittest.TestCase):
         p._draw()
         texts = [t[1] for t in p.canvas.texts]
         self.assertIn("Copy", texts)
-        self.assertIn("hold the mic to reply", texts)
+        self.assertIn("hold to reply", texts)
         self.assertNotIn("Send", texts)
+        # decisions.md 2026-11-24: Insert, between Copy and the hint.
+        self.assertEqual(texts[texts.index("Copy") + 1], "Insert")
+
+    def test_insert_lands_the_answer_where_a_refine_would(self):
+        p = self.open()
+        p._panel_result = "Use ALTER TABLE."
+        p._deliver = mock.Mock()
+        p._say = mock.Mock()
+        p._insert_answer()
+        p._deliver.assert_called_once_with("Use ALTER TABLE.")
+        p._say.assert_called_once_with("answer inserted")
+
+    def test_insert_before_the_answer_says_so(self):
+        p = self.open()
+        p._panel_result = ""
+        p._deliver = mock.Mock()
+        p._say = mock.Mock()
+        p._insert_answer()
+        p._deliver.assert_not_called()
+        p._say.assert_called_once_with("nothing to insert yet - the answer has not come back")
 
     def test_the_foot_is_the_pill_squared_on_the_join(self):
         p = self.open()
@@ -1428,6 +1448,7 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
             m.order,
             ["Type", "Refine", "Ask",
              "tap the pill to cycle",
+             "Refine writes", "Prompt", "Email", "Chat message", "Tidy up", "Styles...",
              "Paste last", "nothing sent yet",
              "Switch workspace", "~/dev/products/flow",
              "Open Flow", "models, microphone, shortcuts, settings"])
@@ -1480,8 +1501,35 @@ class TestTheMenuIsWorkspaceDcHtml(unittest.TestCase):
                 _p, m = self.build(mode=mode)
                 # Three radios, one tick: FakeVar recorded the value the
                 # variable was made with.
-                self.assertEqual([label for label, _v in m.radios],
+                self.assertEqual([label for label, _v in m.radios][:3],
                                  ["Type", "Refine", "Ask"])
+
+    def test_a_style_is_selected_from_the_menu(self):
+        # decisions.md 2026-11-24: the same setting as Flow Home's Styles page.
+        p, m = self.build()
+        m.commands["Email"]()
+        p.session.select_style.assert_called_once_with("email")
+        p.session.home = mock.Mock()
+        p.session.home.open.return_value = ""
+        m.commands["Styles..."]()
+        p.session.home.open.assert_called_once_with("styles")
+
+    def test_a_lens_is_selected_from_the_menu(self):
+        # decisions.md 2026-11-24: the Styles rows' twin for Ask.
+        from flow.profile import Profile
+        import tempfile
+        from pathlib import Path as _P
+        p = pill(mode=DICTATE)
+        p.session.workspace = ""
+        p.session.profile = Profile(_P(tempfile.mkdtemp()) / "profile.json")
+        m = FakeMenu()
+        with mock.patch.object(uc.tk, "StringVar", FakeVar),                 mock.patch.object(uc, "_dark_menu", FakeMenu):
+            p._populate_menu(m)
+        at = m.order.index("Ask answers through")
+        self.assertEqual(m.order[at + 1:at + 5],
+                         ["No lens", "Architecture", "Business", "Lenses..."])
+        m.commands["Business"]()
+        p.session.select_lens.assert_called_once_with("business")
 
     def test_choosing_a_mode_goes_straight_at_it(self):
         p, m = self.build()
@@ -3789,9 +3837,11 @@ class TestAHoldAnswersWhileItIsDown(unittest.TestCase):
         p.session.provider = "claude"
         self.assertEqual(p._listening_text(), "listening - let go to ask claude")
 
-    def test_refine_says_it_writes_for_the_window(self):
-        self.assertEqual(self.held(REFINE)._listening_text(),
-                         "listening - let go and it is written for this window")
+    def test_refine_names_the_style_it_will_write_in(self):
+        p = self.held(REFINE)
+        p.session.kind_here.return_value = "email"
+        self.assertEqual(p._listening_text(),
+                         "listening - let go and it is written as an email")
 
     def test_then_the_words_as_they_are_heard(self):
         p = self.held()
@@ -3876,6 +3926,21 @@ class TestAHoldThatEndsInNothingSaysSo(unittest.TestCase):
             with self.subTest(mode=mode):
                 p = self.released(2.0, mode=mode)
                 p._say.assert_called_once_with(uc.HEARD_NOTHING, uc.ERROR_FRAMES)
+
+    def test_a_hold_taken_as_a_command_is_not_called_silence(self):
+        # Found driving the real app, 2026-11-24: "done" ended a piece, the draft was
+        # left as it was, and the strip said "heard nothing - check the microphone".
+        p = direct(mode=REFINE)
+        p.panel_flows = False
+        p._quicken = mock.Mock()
+        p._press_talking = True
+        p._hold_since = time.perf_counter() - 2.0
+        p._hold_words = "Done."
+        p._draft_at_hold = p.session.draft.text = ""
+        p.session.talk_end.return_value = False
+        p._say = mock.Mock()
+        p._talk_end(send=True)
+        self.assertNotIn(mock.call(uc.HEARD_NOTHING, uc.ERROR_FRAMES), p._say.mock_calls)
 
     def test_it_is_said_over_the_holds_own_listening_line(self):
         # As it happens at a desk: the listening line is still under the pill when the

@@ -93,6 +93,11 @@ FIELDS = frozenset({
     "last_tap",   # the clock reading of the tap it last latched, for the pairing window
     # `hold` (one per hold: `ms`, `mode`, `ok`, and `reason` as words | silence | break)
     # and `stall` (`ms` the frame loop did not run for) use fields already above.
+    # --- `landed`, one per handover (decisions.md 2026-11-24): whether words reached a
+    # window, so a report from the desk can be read from the trace. Both are the code's
+    # own vocabulary, never the words or the window.
+    "how",        # pasted | not_pasted | copied | not_copied | replaced | not_replaced
+    "pinned",     # whether a pin chose the window
 })
 
 #: Named so that adding one to FIELDS fails loudly. These are the words themselves —

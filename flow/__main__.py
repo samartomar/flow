@@ -30,7 +30,7 @@ from .profile import DESIGN_DEFAULT, DESIGNS
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, EFFORT_DEFAULT, EFFORTS, available, named, unverified, unverified_note
-from .session import AUTO_ASK_SEC, CONVERSE, Session
+from .session import CONVERSE, Session
 from .stats import TYPING_WPM
 from .stats import report as stats_report
 from .version import check_update, version
@@ -596,10 +596,9 @@ def main(argv: list[str] | None = None) -> int:
         help="voice for spoken replies: a name, part of one, or male/female "
              "(list them with scripts/voices.py)",
     )
-    ap.add_argument(
-        "--no-auto-ask", action="store_true",
-        help="in converse mode, wait for the Ask button instead of a pause",
-    )
+    # Accepted and ignored: auto-ask is gone (decisions.md 2026-11-24), and a script
+    # that still passes the flag should not stop launching.
+    ap.add_argument("--no-auto-ask", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument(
         "--cli", default=None, metavar="NAME",
         help="pin the agent CLI instead of trying each in turn "
@@ -1097,8 +1096,6 @@ def main(argv: list[str] | None = None) -> int:
     # The flag wins over the profile, and the profile over the default — the same order
     # `--voice` follows. This used to assign unconditionally, so the absence of a flag
     # overwrote a stored preference and switching auto-ask off never survived a restart.
-    if args.no_auto_ask:
-        session.auto_ask = False
     if args.converse:
         # `to=`, not a bare cycle: with three modes, one blind flip from
         # DICTATE lands on REFINE — exactly the defect a three-way cycle
@@ -1106,11 +1103,6 @@ def main(argv: list[str] | None = None) -> int:
         session.toggle_mode(to=CONVERSE)
         say("mode: CONVERSE - the Ask button puts the draft to the agent CLI "
             "and the reply appears in Flow")
-        if session.auto_ask:
-            say(f"auto-ask: on - a pause of {AUTO_ASK_SEC:.0f}s sends the question "
-                "(--no-auto-ask to press it yourself)")
-        else:
-            say("auto-ask: off - press Ask when you are ready")
     elif paste is None:
         say("mode: DICTATE - Send copies the draft, and you paste it "
             "(--converse, or the right-click menu, to ask instead)")
@@ -1291,7 +1283,7 @@ def main(argv: list[str] | None = None) -> int:
             panel = getattr(profile, "panel_flows", False) is True
             does = ("tap the pill to cycle Type / Refine / Ask"
                     if chord is None or panel
-                    else 'say "make it an email" to rewrite what you just said')
+                    else 'say "polish that" to rewrite what you just said')
             say(f"hold {held} to talk{asks}{hands_free} | {does} "
                 f"| right-click for the menu | {quits}")
         else:

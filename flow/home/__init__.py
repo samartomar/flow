@@ -23,7 +23,7 @@ from .server import HomeServer
 
 #: The pages the window has, by the name the URL and the rail use. "start" is the first
 #: run, which the rail does not list: it is opened once, by `__main__`, and left for good.
-PAGES = ("home", "history", "voice", "ask", "models", "settings", "start")
+PAGES = ("home", "history", "voice", "styles", "ask", "lenses", "models", "settings", "start")
 
 
 class Home:

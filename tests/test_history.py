@@ -331,6 +331,8 @@ class TestTheChoiceIsAProfileField(unittest.TestCase):
 def session(test, choice=KEEP, **kw) -> tuple[Session, History]:
     h = kept(test, choice=choice)
     s = Session(asr=FakeAsr(), mic=FakeMic(), profile=h.profile, history=h, **kw)
+    if kw.get("speaker") is not None:
+        s.muted = False  # reading answers aloud is opt-in (decisions.md 2026-11-24)
     test.addCleanup(s.close)
     return s, h
 
@@ -361,6 +363,34 @@ class TestTheSessionRecordsHandovers(unittest.TestCase):
         s.delivered("words", copied=True)
         s.delivered("more words", "could not copy: busy", copied=True)
         self.assertEqual([e["how"] for e in h.entries()], ["not copied", "copied"])
+
+    def test_every_handover_leaves_a_landed_record_in_the_trace(self):
+        # decisions.md 2026-11-24: a report from the desk can be read from diag.jsonl.
+        from flow.diag import FIELDS
+
+        class Recording:
+            path = None
+
+            def __init__(self):
+                self.records = []
+
+            def write(self, kind, /, **fields):
+                self.records.append({"kind": kind, **fields})
+
+        diag = Recording()
+        s, _ = session(self, diag=diag)
+        s.delivered("check the logs for the staging pod", window=None)
+        s.delivered("words", "not pasted: you moved to another window", pinned=True)
+        s.delivered("words", "not pasted: Flow had the focus, not the window you were aiming at")
+        landed = [r for r in diag.records if r["kind"] == "landed"]
+        self.assertEqual([(r["how"], r["ok"], r["reason"], r["pinned"]) for r in landed],
+                         [("pasted", True, None, False),
+                          ("not_pasted", False, "moved", True),
+                          ("not_pasted", False, "flow_focus", False)])
+        self.assertEqual(landed[0]["words"], 7)
+        for r in landed:
+            self.assertTrue(FIELDS.issuperset(r), "a field is not on the allow-list")
+        self.assertNotIn("staging", str(diag.records))
 
     def test_the_refine_result_is_kept_as_refined_with_what_was_heard(self):
         s, h = session(self)

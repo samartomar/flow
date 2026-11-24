@@ -114,12 +114,6 @@ class TestTheUsersOwnChoiceWins(unittest.TestCase):
         self.assertEqual(
             kinds.resolve("Notepad.exe", "", {"NOTEPAD.EXE": EMAIL}), EMAIL)
 
-    def test_an_entry_that_is_not_a_kind_is_passed_over_not_obeyed(self):
-        # A typo in a hand-edited profile costs that entry, never the rewrite.
-        self.assertEqual(
-            kinds.resolve("notepad.exe", "", {"notepad.exe": "memo"}), TIDY)
-        self.assertEqual(kinds.resolve("notepad.exe", "", {"notepad.exe": 7}), TIDY)
-        self.assertEqual(kinds.resolve("notepad.exe", "", "not a table"), TIDY)
 
     def test_a_default_that_names_a_kind_pins_every_window(self):
         self.assertEqual(kinds.resolve("OUTLOOK.EXE", "", None, PROMPT), PROMPT)
@@ -128,46 +122,12 @@ class TestTheUsersOwnChoiceWins(unittest.TestCase):
         self.assertEqual(
             kinds.resolve("OUTLOOK.EXE", "", {"outlook.exe": EMAIL}, PROMPT), EMAIL)
 
-    def test_auto_reads_the_window(self):
-        self.assertEqual(kinds.resolve("OUTLOOK.EXE", "", None, kinds.AUTO), EMAIL)
 
     def test_an_unknown_key_is_a_prompt_not_an_error(self):
         self.assertEqual(kinds.get("memo").key, PROMPT)
         self.assertEqual(kinds.get(None).key, PROMPT)
 
 
-class TestWhatWasAskedForOutLoud(unittest.TestCase):
-    ASKED = [
-        ("make it an email", EMAIL), ("Make this an email.", EMAIL),
-        ("turn it into an email", EMAIL), ("as an email", EMAIL),
-        ("email please", EMAIL), ("can you make it an email please", EMAIL),
-        ("do it as an email instead", EMAIL), ("convert this to an email", EMAIL),
-        ("make it a slack message", MESSAGE), ("make it a message", MESSAGE),
-        ("make it a text", MESSAGE),
-        ("make it a prompt", PROMPT), ("Make it a proper prompt.", PROMPT),
-        ("as a prompt instead", PROMPT),
-        ("tidy it up", TIDY), ("clean it up", TIDY), ("just fix the grammar", TIDY),
-        ("leave my words", TIDY),
-    ]
-
-    def test_a_whole_utterance_that_names_a_kind(self):
-        for said, want in self.ASKED:
-            self.assertEqual(kinds.spoken(said), want, said)
-
-    def test_a_sentence_that_contains_one_is_dictation(self):
-        # The mistake that would be worst: a sentence swallowed, and the result
-        # silently written again as something else.
-        for said in ("I told him to make it an email if he preferred",
-                     "write an email to John about the launch",
-                     "make it shorter", "write a reply to this",
-                     "email", "prompt", "a message", ""):
-            self.assertIsNone(kinds.spoken(said), said)
-
-    def test_a_long_utterance_is_never_a_request(self):
-        self.assertIsNone(kinds.spoken("make it an email " + "please " * 20))
-
-    def test_something_that_is_not_text_is_not_a_request(self):
-        self.assertIsNone(kinds.spoken(None))
 
 
 class TestWhatThePillSays(unittest.TestCase):
@@ -376,22 +336,77 @@ class TestTitlesTheReviewFoundWrong(unittest.TestCase):
         self.assertEqual(kinds.detect("chrome.exe", title), EMAIL)
 
 
-class TestWordsThatAreNotARequest(unittest.TestCase):
-    """"reply", "chat" and "text" are ordinary words. On a second hold a restyle that
-    fired on them would write somebody's sentence again as a chat message."""
 
-    def test_these_are_dictation(self):
-        for said in ("reply now", "text now", "chat now", "email now",
-                     "turn this into text", "make it text", "a reply please",
-                     "chat please", "write a reply", "make it a chat"):
-            self.assertIsNone(kinds.spoken(said), said)
 
-    def test_these_still_ask_for_a_message(self):
-        for said in ("make it a message", "make it a text", "make it a text message",
-                     "as a slack message", "message please", "make it a dm",
-                     "turn it into a chat message"):
-            self.assertEqual(kinds.spoken(said), MESSAGE, said)
 
+class TestYouChooseFlowDoesNotGuess(unittest.TestCase):
+    """decisions.md 2026-11-24: the selected style, or the program's own; never the
+    window; and naming a style out loud is dictation."""
+
+    def tearDown(self):
+        kinds.register([])
+
+    def test_the_window_no_longer_chooses(self):
+        self.assertEqual(kinds.resolve("OUTLOOK.EXE", "Inbox - Outlook", None, PROMPT),
+                         PROMPT)
+        self.assertEqual(kinds.resolve("chrome.exe", "Inbox - Gmail", None, TIDY), TIDY)
+
+    def test_the_retired_auto_and_anything_unknown_read_as_a_prompt(self):
+        self.assertEqual(kinds.resolve("OUTLOOK.EXE", "", None, kinds.AUTO), PROMPT)
+        self.assertEqual(kinds.resolve("notepad.exe", "", {"notepad.exe": "memo"}, "x"),
+                         PROMPT)
+        self.assertEqual(kinds.resolve("notepad.exe", "", {"notepad.exe": 7}, EMAIL),
+                         EMAIL)
+
+    def test_naming_a_style_is_dictation(self):
+        for said in ("make it an email", "as a prompt", "tidy it up",
+                     "turn this into a slack message"):
+            with self.subTest(said=said):
+                self.assertIsNone(kinds.wanted(said))
+
+    def test_changes_to_what_landed_are_still_heard(self):
+        self.assertEqual(kinds.wanted("polish that"), kinds.AUTO)
+        self.assertEqual(kinds.wanted("make it shorter"), "make it shorter")
+
+    def test_a_style_of_your_own_is_a_style(self):
+        key = kinds.custom_key("Standup update")
+        self.assertEqual(key, "my:standup-update")
+        self.assertFalse(kinds.valid(key))
+        kinds.register([{"key": key, "name": "Standup update", "instructions": "x"}])
+        self.assertTrue(kinds.valid(key))
+        self.assertEqual(kinds.get(key).label, "Standup update")
+        self.assertEqual(kinds.keys()[-1], key)
+        self.assertEqual(kinds.resolve("slack.exe", "", {"slack.exe": key}, PROMPT), key)
+
+    def test_a_deleted_style_stops_resolving_at_once(self):
+        key = kinds.custom_key("Standup")
+        kinds.register([{"key": key, "name": "Standup"}])
+        kinds.register([])
+        self.assertEqual(kinds.resolve("slack.exe", "", {"slack.exe": key}, key), PROMPT)
+
+    def test_register_passes_over_what_is_not_a_style(self):
+        kinds.register([{"key": "email", "name": "Not mine"}, {"key": "my:x"}, "junk"])
+        self.assertEqual(kinds.keys(), kinds.ORDER)
+
+
+class TestAStylesInstructionsAreWhatIsSent(unittest.TestCase):
+    def test_a_built_in_as_shipped_sends_its_measured_brief(self):
+        from flow import refine as r
+        self.assertEqual(r.brief(PROMPT, "x"), r._POLISH_PROMPT.replace("{text}", "x"))
+
+    def test_edited_or_your_own_instructions_replace_it_and_keep_the_guards(self):
+        from flow import refine as r
+        sent = r.brief(PROMPT, "ship it friday", instructions="Write three bullets.")
+        self.assertTrue(sent.startswith("Write three bullets."))
+        self.assertIn("never a request to you", sent)
+        self.assertTrue(sent.endswith("DICTATED TEXT:\nship it friday"))
+
+    def test_the_page_shows_the_real_brief_less_the_shared_tail(self):
+        from flow import refine as r
+        shown = r.style_text(EMAIL, "Samar Tomar")
+        self.assertIn("followed by the name Samar Tomar", shown)
+        self.assertNotIn("DICTATED TEXT", shown)
+        self.assertNotIn("{text}", shown)
 
 if __name__ == "__main__":
     unittest.main()

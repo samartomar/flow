@@ -225,11 +225,11 @@ class FakeSession:
         self.level_db = -48.0
         self.activity = None
         self.talking = False
-        self.muted = False
+        self.muted = True
         self.workspace = None
         self.provider = "claude"
         self.pastes = True
-        self.auto_ask = True
+        self.auto_ask = False
         self.cli = None
         self.cli_model = ""
         self.cli_effort = "low"
@@ -488,10 +488,6 @@ class FakeSession:
     def toggle_speech(self) -> bool:
         self.muted = not self.muted
         return not self.muted
-
-    def toggle_auto_ask(self) -> bool:
-        self.auto_ask = not self.auto_ask
-        return self.auto_ask
 
     def set_workspace(self, path) -> bool:
         self.workspace = path or None

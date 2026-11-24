@@ -268,6 +268,54 @@ class TestConfidenceReading(unittest.TestCase):
         self.assertIsNone(c.confidence)
 
 
+
+class TestStylesAreRemembered(unittest.TestCase):
+    """decisions.md 2026-11-24: your own styles, edited built-ins, and when each was
+    last used. Each degrades on its own."""
+
+    def test_a_round_trip_keeps_all_three_and_selects_your_own(self):
+        p = tmp_profile()
+        p.styles = [{"key": "my:standup", "name": "Standup", "instructions": "Bullets."}]
+        p.style_edits = {"email": "Be brief."}
+        p.style_used = {"email": 1700000000.0}
+        p.refine_kind = "my:standup"
+        self.assertTrue(p.save())
+        again = Profile(p.path)
+        self.assertEqual(again.styles, p.styles)
+        self.assertEqual(again.style_edits, {"email": "Be brief."})
+        self.assertEqual(again.style_used, {"email": 1700000000.0})
+        self.assertEqual(again.refine_kind, "my:standup")
+        self.assertEqual(again.style_instructions("my:standup"), "Bullets.")
+        self.assertEqual(again.style_instructions("email"), "Be brief.")
+        self.assertIsNone(again.style_instructions("prompt"))
+
+    def _session(self, profile):
+        # Looked up when called: that class is further down the file.
+        return TestTheReadAnswersChoiceIsRemembered._session(self, profile)
+
+    def test_selecting_a_style_is_on_disk_at_once(self):
+        p = tmp_profile()
+        s = self._session(p)
+        self.assertTrue(s.select_style("email"))
+        self.assertEqual(Profile(p.path).refine_kind, "email")
+        self.assertFalse(s.select_style("memo"))
+        self.assertEqual(Profile(p.path).refine_kind, "email")
+
+    def test_a_bad_entry_costs_itself_and_not_the_others(self):
+        p = tmp_profile()
+        p.save()
+        raw = json.loads(p.path.read_text(encoding="utf-8"))
+        raw["styles"] = [{"key": "my:ok", "name": "Ok", "instructions": "x"},
+                         {"key": "email", "name": "Mine", "instructions": "x"},
+                         {"key": "my:ok", "name": "Again", "instructions": "y"}, 7]
+        raw["style_edits"] = {"email": "  ", "memo": "x", "tidy": "Light touch."}
+        raw["refine_kind"] = "my:gone"
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        again = Profile(p.path)
+        self.assertEqual([e["key"] for e in again.styles], ["my:ok"])
+        self.assertEqual(again.style_edits, {"tidy": "Light touch."})
+        self.assertEqual(again.refine_kind, "prompt", "a deleted style is not selected")
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -488,17 +536,10 @@ class TestCorrectionsTeachVocabularyOnTheFly(unittest.TestCase):
         self.assertEqual(lx.hotwords(), "Sameer")
 
 
-class TestTheAutoAskChoiceIsRemembered(unittest.TestCase):
-    """P9's countdown can be switched off, and switching it off lasted until you quit.
-
-    Auto-ask is the one setting in this app that decides whether the user's words leave
-    the machine without a press. Somebody who turns it off has said something about how
-    they want to work, and asking them to say it again every launch is the app not
-    listening — the same argument `set_voice` already makes for saving immediately
-    rather than at the next Send.
-
-    The default stays on. The field is additive and absent reads as on, so nobody who
-    already has a profile gets a preference they never expressed.
+class TestTheReadAnswersChoiceIsRemembered(unittest.TestCase):
+    """Whether Ask's answers are read aloud (decisions.md 2026-11-24). **Off unless
+    somebody turns it on**, and remembered once they do. It replaced auto-ask, which
+    went the same day; an old profile's `auto_ask` is ignored.
     """
 
     def _session(self, profile):
@@ -530,53 +571,40 @@ class TestTheAutoAskChoiceIsRemembered(unittest.TestCase):
         self.addCleanup(s.close)
         return s
 
-    def test_a_fresh_profile_has_it_on(self):
-        self.assertTrue(tmp_profile().auto_ask)
+    def test_a_fresh_profile_has_it_off(self):
+        self.assertFalse(tmp_profile().read_answers)
 
     def test_a_session_starts_from_what_the_profile_says(self):
         p = tmp_profile()
-        p.auto_ask = False
-        self.assertFalse(self._session(p).auto_ask)
+        self.assertTrue(self._session(p).muted)
+        p.read_answers = True
+        self.assertFalse(self._session(p).muted)
 
-    def test_a_session_without_a_profile_is_still_on(self):
-        self.assertTrue(self._session(None).auto_ask)
+    def test_a_session_without_a_profile_does_not_speak(self):
+        self.assertTrue(self._session(None).muted)
 
-    def test_turning_it_off_is_on_disk_before_the_next_send(self):
-        # Saved through the same path a voice is, and for the same reason: someone who
-        # switches it off and closes the app has still made the choice.
+    def test_auto_ask_is_gone_from_the_session(self):
         p = tmp_profile()
-        self._session(p).toggle_auto_ask()
-        self.assertFalse(Profile(p.path).auto_ask, "the choice did not survive")
+        raw = {"auto_ask": True}
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertFalse(self._session(Profile(p.path)).auto_ask)
 
-    def test_and_turning_it_back_on_is_too(self):
+    def test_turning_it_on_is_on_disk(self):
         p = tmp_profile()
-        p.auto_ask = False
         s = self._session(p)
-        s.toggle_auto_ask()
-        self.assertTrue(Profile(p.path).auto_ask)
+        s.toggle_speech()
+        self.assertTrue(Profile(p.path).read_answers, "the choice did not survive")
 
-    def test_a_profile_written_before_this_existed_reads_as_on(self):
+    def test_a_profile_written_before_this_existed_reads_as_off(self):
         p = tmp_profile()
         p.save()
         raw = json.loads(p.path.read_text(encoding="utf-8"))
-        del raw["auto_ask"]
+        del raw["read_answers"]
         p.path.write_text(json.dumps(raw), encoding="utf-8")
-        self.assertTrue(Profile(p.path).auto_ask)
-
-    def test_a_null_reads_as_on_as_well(self):
-        # `bool(None)` is False, which would turn "this key was never written" into a
-        # preference for off — the one reading the default may not have.
-        p = tmp_profile()
-        p.save()
-        raw = json.loads(p.path.read_text(encoding="utf-8"))
-        raw["auto_ask"] = None
-        p.path.write_text(json.dumps(raw), encoding="utf-8")
-        self.assertTrue(Profile(p.path).auto_ask)
+        self.assertFalse(Profile(p.path).read_answers)
 
     def test_converse_seen_defaults_the_other_way_round_and_says_why(self):
-        # The mirror of the two above, and deliberately the opposite default. Absent
-        # `auto_ask` means on, because nobody expressed a preference; absent
-        # `converse_seen` means **not seen**, because an upgrade is the first time the
+        # Absent `converse_seen` means **not seen**, because an upgrade is the first time the
         # first-entry notice has existed at all — so an existing profile is told once
         # rather than never.
         p = tmp_profile()
@@ -934,9 +962,9 @@ class TestAWrongTypeCostsItsFieldAndNothingElse(unittest.TestCase):
     def test_a_string_false_is_a_wrong_type_and_not_a_truthy(self):
         # `bool("false")` is True, so writing the obvious thing in an editor turned the
         # setting *on*. A wrong type takes the default; it does not get interpreted.
-        self.assertIs(written(auto_ask="false").auto_ask, True)
-        self.assertIs(written(auto_ask=False).auto_ask, False)
-        self.assertIs(written(auto_ask=0).auto_ask, True, "0 is not a boolean here")
+        self.assertIs(written(read_answers="true").read_answers, False)
+        self.assertIs(written(read_answers=True).read_answers, True)
+        self.assertIs(written(read_answers=1).read_answers, False, "1 is not a boolean here")
 
     def test_every_persisted_field_survives_every_wrong_shape(self):
         """The table the item asked for: no shape of any field may raise.
@@ -959,7 +987,7 @@ class TestAWrongTypeCostsItsFieldAndNothingElse(unittest.TestCase):
                     # Loaded, and every field is usable without a type check by callers.
                     self.assertIsInstance(p.send_word, str)
                     self.assertIsInstance(p.send_enter_word, str)
-                    self.assertIsInstance(p.auto_ask, bool)
+                    self.assertIsInstance(p.read_answers, bool)
                     self.assertIsInstance(p.workspaces, list)
                     self.assertIsInstance(p.dismissed, set)
                     self.assertIsInstance(p.pairs, Counter)
@@ -1012,7 +1040,7 @@ class TestAValidProfileIsUnmoved(unittest.TestCase):
         p = tmp_profile()
         p.floor_db, p.speech_db, p.confidence = -61.5, -24.0, 0.88
         p.calibrated_at, p.calibrated_device = 1_700_000_000.0, "USB Mic"
-        p.voice, p.auto_ask = "Microsoft Mark", False
+        p.voice, p.read_answers = "Microsoft Mark", True
         p.send_word, p.send_enter_word = "tango", "enter tango"
         p.workspace = "D:/dev/flow"
         p.workspaces = ["D:/dev/flow", "D:/dev/other"]
@@ -1118,9 +1146,10 @@ class TestWhatRefineWritesIsRemembered(unittest.TestCase):
     """`kinds`, `refine_kind` and `name` (flow/kinds.py). Three fields, each degrading on
     its own, so a nonsense value costs that setting and never the calibration beside it."""
 
-    def test_a_fresh_profile_lets_the_window_decide(self):
+    def test_a_fresh_profile_selects_the_prompt_style(self):
+        # decisions.md 2026-11-24: the user chooses and Flow does not guess.
         p = tmp_profile()
-        self.assertEqual((p.kinds, p.refine_kind, p.name), ({}, "auto", ""))
+        self.assertEqual((p.kinds, p.refine_kind, p.name), ({}, "prompt", ""))
 
     def test_all_three_round_trip(self):
         p = tmp_profile()
@@ -1135,13 +1164,16 @@ class TestWhatRefineWritesIsRemembered(unittest.TestCase):
         self.assertEqual([f for f in again.faults
                           if f in ("kinds", "refine_kind", "name")], [])
 
-    def test_a_default_that_is_not_a_kind_reads_as_auto(self):
+    def test_a_default_that_is_not_a_style_reads_as_a_prompt(self):
         p = tmp_profile()
         p.save()
         raw = json.loads(p.path.read_text(encoding="utf-8"))
         raw["refine_kind"] = "memo"
         p.path.write_text(json.dumps(raw), encoding="utf-8")
-        self.assertEqual(Profile(p.path).refine_kind, "auto")
+        self.assertEqual(Profile(p.path).refine_kind, "prompt")
+        raw["refine_kind"] = "auto"
+        p.path.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertEqual(Profile(p.path).refine_kind, "prompt", "auto is retired")
 
     def test_a_table_that_is_not_one_degrades_to_none_and_is_named(self):
         p = tmp_profile()
@@ -1169,7 +1201,7 @@ class TestWhatRefineWritesIsRemembered(unittest.TestCase):
             raw.pop(key)
         p.path.write_text(json.dumps(raw), encoding="utf-8")
         again = Profile(p.path)
-        self.assertEqual((again.kinds, again.refine_kind, again.name), ({}, "auto", ""))
+        self.assertEqual((again.kinds, again.refine_kind, again.name), ({}, "prompt", ""))
         self.assertEqual(again.faults, [])
 
 class TestThePanelFlowIsRemembered(unittest.TestCase):

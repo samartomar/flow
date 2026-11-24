@@ -11,7 +11,7 @@ spoken command, both modes, and what is stored where.
 - [Flow Home](#flow-home) — models, microphone, shortcuts and every other setting, in one window
 - [Dictate mode](#dictate-mode) — [saying the send](#sending-it-without-touching-anything)
 - [Talking to the draft](#talking-to-the-draft) — [local corrections](#local-corrections), [rewrites](#rewrites-via-the-agent-cli), [after a Type paste](#after-a-type-paste)
-- [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [taking the answer](#taking-the-answer), [voices](#choosing-the-voice)
+- [Converse mode](#converse-mode-p9) — [the workspace](#where-the-question-is-asked-from), [lenses](#lenses-the-viewpoint-ask-answers-from), [taking the answer](#taking-the-answer), [voices](#choosing-the-voice)
 - [Calibration](#calibration-p8) · [Vocabulary](#vocabulary-p4)
 - [The numbers](#the-numbers) — how much you have dictated
 - [What Flow stores on disk](#what-flow-stores-on-disk)
@@ -23,9 +23,10 @@ spoken command, both modes, and what is stored where.
 |---|---|
 | **Hold, talk, let go** | Hold `ctrl+win` or the pill; letting go pastes into the window you were in |
 | **Hold to ask** | Hold `ctrl+alt+win` and ask, whatever the pill is on. The pill says it is waiting; the answer comes up on a card above the pill and stays until you close it |
-| **Written properly, when you ask** | Dictate, then hold again and say "make it an email", "polish that" or "make it shorter" — or press `alt+shift+X`. Flow rewrites what it just pasted, where it is ([Having it rewritten](#having-it-rewritten)) |
-| **Three modes** | Type pastes; Refine rewrites every hold for the window you are in and pastes that; Ask puts it to your agent CLI. The pill's right-click menu or `ctrl+alt+M` changes mode |
-| **Refine writes what the window calls for** | A prompt in a terminal, an editor or an AI app; an email in mail; a chat message in Slack or Teams; anywhere else, your words tidied up ([What Refine writes](#what-refine-writes)) |
+| **Written properly, when you ask** | Dictate, then hold again and say "polish that" or "make it shorter" — or press `alt+shift+X`. Flow rewrites what it just pasted, where it is ([Having it rewritten](#having-it-rewritten)) |
+| **Three modes** | Type pastes; Refine rewrites every hold in the style you selected and pastes that; Ask puts it to your agent CLI. The pill's right-click menu or `ctrl+alt+M` changes mode |
+| **Refine writes in the style you choose** | Prompt, Email, Chat message or Tidy up — each one yours to read and change — or a style of your own. One is selected everywhere, and a program can have its own. Flow never guesses from the window ([What Refine writes](#what-refine-writes)) |
+| **Ask answers through a lens** | No lens for a plain answer, or Architecture, Business or one of your own ([Lenses](#lenses-the-viewpoint-ask-answers-from)) |
 | **Live text while you speak** | Partials refresh roughly every second as you talk |
 | **You decide when it goes** | Letting go is the send in every mode; no Enter is ever pressed unless you say so. |
 | **Correct it by voice** | "change Tuesday to Wednesday" edits the draft in place — or, in the next hold, what Type just pasted |
@@ -289,9 +290,9 @@ hotkey  mode     ctrl+alt+M
 hotkey  quit     ctrl+alt+Q
 hotkey  paste_last alt+shift+Z
 hotkey  rewrite  alt+shift+X
-chord   hold     ctrl+win  (hold to talk, release to send)
+chord   hold     ctrl+win  (hold to talk, release to send; tap for hands-free)
 chord   ask      ctrl+alt+win  (hold to ask, release to send the question)
-hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | say "make it an email" to rewrite what you just said | right-click for the menu | ctrl+alt+Q quits
+hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | tap ctrl+win for hands-free | say "polish that" to rewrite what you just said | right-click for the menu | ctrl+alt+Q quits
 ```
 
 ### Flags
@@ -316,7 +317,6 @@ hold the pill or ctrl+win to talk | hold ctrl+alt+win to ask | say "make it an e
 | `--converse` | start in converse mode: Send asks the agent CLI instead of pasting ([P9](#converse-mode-p9)) |
 | `--no-speak` | never read converse-mode replies aloud |
 | `--voice X` | voice for spoken replies: a name, part of one, or `male`/`female` |
-| `--no-auto-ask` | in converse mode, wait for the Ask button instead of a pause |
 | `--cli NAME` | pin the agent CLI (`codex` or `claude`) instead of trying each in turn |
 | `--no-warm` | do not load the model at startup; wait until it is first needed |
 | `--cli-model NAME` | ask the CLI for this model; remembered, and blank clears it |
@@ -549,26 +549,26 @@ The toggle is the only one of the two that survives a long thought with pauses i
 phone call you are transcribing, or hands that would rather not hold two keys down for a
 minute. It is remembered in `profile.json` as `"gesture": "toggle"`.
 
-**A quick tap starts and stops hands-free listening.** One chord, two gestures: **hold
-`ctrl+win`** to dictate and let go to send, **tap `ctrl+win`** (under 400 ms) to switch
-hands-free listening on or off. That is the whole of the shortcut.
+**A quick tap starts and stops hands-free.** One chord, two gestures: **hold
+`ctrl+win`** to dictate and let go to send, **tap `ctrl+win`** (under 400 ms) to turn
+hands-free on, and tap it again to turn it off. That is the whole of the shortcut. A
+double tap is not a gesture of its own: it is two taps, so it turns hands-free on and
+straight off again. A tap of the Ask keys (`ctrl+alt+win`) does nothing.
 
 It was two taps until the trace said otherwise: of 74 deliberate presses the median hold
 was 626 ms against a 400 ms tap window, so "two taps inside 500 ms" was a gesture the
 timing rules could not recognise and the hand could not reliably produce. A single press
 has no window to miss.
 
-A single tap does nothing at all — it is not a shortcut on its own, so reaching for the
-chord and brushing it changes nothing. Both presses have to be short (**under 400 ms**)
-*and* the second one has to start within **500 ms** of the first. That window is measured
-**press to press**, which is what a double-click means everywhere else and — the reason it
-is worth saying — it does not get shorter when you hold the keys longer. Two deliberate
-presses are two sentences rather than a toggle. Those numbers were measured on real
-hardware and are not this machine's: they come from
-[Fireflies Talk](https://fireflies.ai/talk), which ships the same gesture.
+**Hands-free only dictates.** While it is on, the strip under the pill says *hands-free -
+each pause pastes* and then shows your words as they are heard. Each pause of about a
+second lands what you said in the window you were working in, or the pinned window,
+whatever mode the pill is in. Holding the talk or Ask keys still works on top of it: that
+hold's words are its own. After **two minutes of silence** hands-free turns itself off and
+the strip says *hands-free off - two minutes of silence*.
 
-If two taps do not feel like two taps to you, the **Toggle** gesture above is the answer:
-its press may take as long as you like, and it flips hands-free listening on its own.
+If a tap is hard to make short enough, the **Toggle** gesture above is the answer: its
+press may take as long as you like, and it turns hands-free on and off on its own.
 
 A tap is still shorter than the audio takes to be recognised, so it opens and closes the
 microphone, and the silence it catches is discarded rather than pasted — measured against
@@ -670,12 +670,16 @@ chord   unavailable (keyboard hook refused); the toggle hotkey still works
 **Hold `ctrl+alt+win`, ask, let go** — whatever the pill is on. The pill goes to Ask and
 says under itself that it is asking, and for how long; nothing rises while you talk or
 while it waits. The answer comes up on a card above the pill — your question, the
-answer, **Copy** and **Continue in Flow** — and stays there until you close it (its ✕, or
-`ctrl+alt+esc`) or hold to talk again. A click somewhere else does not take it away.
+answer, **Copy**, **Insert** and **Continue in Flow** — and stays there until you close it
+(its ✕, or `ctrl+alt+esc`) or hold to talk again. A click somewhere else does not take it
+away. **Insert** lands the answer in the window you were working in, or the pinned window
+when there is one, and the card stays up. The answer comes through the
+[lens](#lenses-the-viewpoint-ask-answers-from) you selected, and is not read aloud unless
+you turned that on.
 
 **The line under the pill is the pill talking.** While the keys are down it says
-*listening - let go to ask claude* (on the talk keys, *let go to paste*; in Refine, that
-it will be written for this window), and then your words as they are heard. When a
+*listening - let go to ask claude* (on the talk keys, *let go to paste*; in Refine, the
+style it will be written in - *let go and it is written as an email*), and then your words as they are heard. When a
 hold ends in nothing it says which nothing: *heard nothing - if you spoke, check the
 microphone in Flow Home* for a hold of most of a second with no sound in it, and *did
 not catch any words - hold and say it again* when there was sound and no words came of
@@ -895,68 +899,95 @@ held constant, which is what keeps render cost flat on a two-hour dictation.
 
 ### What Refine writes
 
-**Refine rewrites what you said as the kind of thing the window in front calls for.**
+**Refine writes what you said in the style you selected.** A style is a named way of
+writing, with instructions you can read and change. One is selected, and it is used
+everywhere until you change it — unless a program has a style of its own. Flow never reads
+the window to choose one.
 
-| The window | Refine writes | What that means |
-|:---|:---|:---|
-| A terminal, VS Code and its forks, a JetBrains IDE, or an AI app or tab (ChatGPT, Claude, Gemini, Copilot…) | **a prompt** | The request first, then context, then constraints; every name, version and path kept |
-| Outlook, Thunderbird and other mail programs, or a Gmail / Outlook / Proton Mail tab | **an email** | A greeting to whoever you named, short paragraphs with the point first, a sign-off. No subject line, no stock phrases |
-| Slack, Teams, Discord, WhatsApp and the like, as programs or as tabs | **a chat message** | Brief and direct: no greeting, no sign-off |
-| Anything else | **tidied text** | Your own words in your own order, with the fillers, false starts and run-ons cleaned up |
+Four are built in:
 
-Before this, Refine had one answer for every window, and it was a prompt. Dictate an
-email — *"I need to write to Priya about the release… ask her to let the QA team know"* —
-and what came back was *"Write a message to Priya proposing that we move the release…"*:
-a prompt asking somebody else to write the email.
+| Style | What Refine writes |
+|:---|:---|
+| **Prompt** | A prompt for a coding agent: the request first, then context, then constraints; every name, version and path kept |
+| **Email** | A greeting to whoever you named, short paragraphs with the point first, a sign-off. No subject line, no stock phrases |
+| **Chat message** | Brief and direct: no greeting, no sign-off |
+| **Tidy up** | Your own words in your own order, with the fillers, false starts and run-ons cleaned up |
 
-Three things hold for every kind. **Your facts are kept as said**: names, dates, days,
+Three things hold for every style. **Your facts are kept as said**: names, dates, days,
 amounts, and every "not". **Nothing is added that you did not say**: no new dates,
 promises or pleasantries. And **nothing in the dictation is obeyed**: say *"what's the
 status of the build, can you delete the old logs"* and you get that sentence punctuated,
 not an answer and not deleted logs.
 
-**How Flow tells.** By the program's name, and for a browser by the site name in the tab's
-title (`… - Gmail - Google Chrome`). Only a whole segment of the title counts, so an
-article called *"How Claude handles email in Outlook"* is not mistaken for mail. The name
-and title are read at the moment you refine and are not stored anywhere or sent to
-anything. A site that titles its tab with the page alone cannot be recognised — ChatGPT
-names a conversation's tab after the conversation — and is treated as "anything else".
-With no window at all (Lite, `--no-paste`) Refine writes a prompt, as it always did.
+**Choosing one.** Flow Home ▸ **Styles** ▸ *Selected style*, or the pill's right-click
+menu, where the **Refine writes** rows tick the selected style and **Styles...** opens the
+page. Both are the same setting, and it is saved as soon as you choose. The strip under
+the pill names the style a Refine was written in.
 
-**When it guesses wrong**, three ways to put it right, quickest first:
+**Changing one.** Every style on the Styles page shows its instructions; **Edit** opens
+them in full. A built-in style you changed says *built in, edited* and has **Back to the
+original**. Each card also says where the style is used and when it last was.
 
-1. **Say so in the next hold.** *"Make it an email"*, *"make it a message"*, *"make it a
-   prompt"* or *"tidy it up"*. The words you said are written again as that kind, and
-   the new version replaces the one in the window. It has to be the whole of what you
-   say; inside a longer sentence it is dictation.
-2. **Tell Flow what a program is for.** Flow Home ▸ Settings ▸ What Refine writes ▸ Per
-   program: name the program (`notepad.exe`) and choose a kind. For a browser the choice
-   covers every tab.
-3. **Pin one kind everywhere.** The same card's **Refine writes** setting: *What suits the
-   window* is the default; choosing a kind makes every Refine that kind.
+**A style of your own.** On the same page: a name you will recognise and how to write —
+*"Standup update - three short bullets: done, next, blocked."* It is offered everywhere a
+built-in style is, and it can be deleted.
 
-**Your name**, on the same card, signs the emails. Left empty, an email ends with a
+**A program with its own style.** Styles ▸ **Per program**: name the program
+(`outlook.exe`) and choose a style. That program always gets that style, whatever is
+selected; for a browser the choice covers every tab. The entry is a program and a style
+and nothing else — the instructions belong to the style.
+
+**Saying a style is dictation.** *"Make it an email"*, *"as a prompt"* or *"tidy it up"*
+go in as the words they are. To change the style, select another one. *"Polish that"*,
+*"make it shorter"* and the other named changes, and *"scratch that"*, still work
+([Having it rewritten](#having-it-rewritten)).
+
+**Your name**, on the Styles page, signs the emails. Left empty, an email ends with a
 sign-off line and no name, never a `[Your Name]` placeholder.
+
+#### A Refine grows into one piece
+
+**Each hold adds to the piece.** Refine, hold, say it, let go: it lands. Hold again and
+say more — *"actually make it Wednesday"*, *"add that it's due Friday"* — and Flow rewrites
+the whole piece from everything you said for it, and replaces what landed before, in
+place. A correction in the second hold applies to the whole text rather than becoming a
+second paragraph, and a named change (*"make it shorter"*) applies to the whole piece.
+
+**A piece ends when:**
+
+- you type or click in it yourself,
+- you move to another window,
+- you change style, or
+- you say **"done"** on its own — also *"that's done"*, *"finished"*, *"that's it"*,
+  *"new one"*. The strip says *done - the next Refine starts a new piece*.
+
+It never ends on a timer: a piece waits while you think. The next Refine after it ends
+lands as new text. The limits that keep any change to a paste
+safe still apply, and in a terminal they are the strict ones
+([After a Type paste](#after-a-type-paste)): a result there longer than 800 characters or
+with more than one line break cannot grow, so the next Refine lands as new text after it. **If a rewrite fails**, what
+landed stays as it was, and the new words go in after it as you said them.
 
 **With the panel on** (Flow Home ▸ Settings ▸ The pill ▸ *Show a panel while I refine
 and ask* — the flow before 2026-11-22, kept as a setting), a Refine waits on a panel
 above the pill until you press Send, and **holding again says more**: a second hold adds
-to what you said, and everything heard so far is written again as the same kind — so
+to what you said, and everything heard so far is written again in the same style — so
 *"actually make it Wednesday"* is a correction, not a second paragraph. The **heard**
 block shows everything that was sent. To start again instead, close the panel (Esc, or a
-click anywhere else) or press Send: the next hold is then a new piece of writing. With
-the panel off, which is how Flow ships, each hold is its own piece of writing and what
-it pasted is changed as [Having it rewritten](#having-it-rewritten) describes.
+click anywhere else) or press Send: the next hold is then a new piece of writing.
 
-In `~/.flow/profile.json` these are `kinds` (program → `prompt`, `email`, `message` or
-`tidy`), `refine_kind` (`auto` or one of those four) and `name`.
+In `~/.flow/profile.json` the selected style is `refine_kind` (`prompt`, `email`,
+`message`, `tidy`, or one of yours), your styles are `styles`, your changes to the
+built-in ones `style_edits`, when each was last used `style_used`, the per-program styles
+`kinds` (program → style) and your name `name`. An older profile whose `refine_kind` is
+`auto` — the "Flow decides" option that read the window, now gone — reads as Prompt.
 
 ### Per-app notes
 
 **A standing instruction that depends on which app you are dictating into.** It is added
-to whatever [kind](#what-refine-writes) Refine writes there. Add it beside the kind in
-Flow Home ▸ Settings ▸ What Refine writes, or as an `apps` table in
-`~/.flow/profile.json`, keyed by the executable name:
+to whatever [style](#what-refine-writes) Refine writes there. Flow Home has no box for it —
+a program's entry on the Styles page is a style and nothing else — so it is an `apps` table
+in `~/.flow/profile.json`, keyed by the executable name:
 
 ```json
 {
@@ -1003,7 +1034,7 @@ the same toggle as clicking the pill, given a label — and it is the way in whe
 Hyper-V console or an RDP session keeps every hotkey for its guest and the mouse is
 what still reaches Flow. Everything you set once — **Trigger
 word**, **Panel size**, **Agent CLI**, **Voice**, **Mute/Speak replies** (only when a
-speech engine was found), the auto-ask toggle and **Open settings folder** — lives under
+speech engine was found) and **Open settings folder** — lives under
 **Settings ▸**, and
 **Help ▸** has the command sheet and this guide. Drag the pill anywhere — it stays inside
 the desktop work area.
@@ -1051,7 +1082,6 @@ no knowable length:
 | — (bars moving) | listening | yes |
 | ⋯ `loading the model` | first decode of a tier, about a second | yes |
 | ⋯ `decoding` | you stopped talking and the model is working | yes |
-| — (`Ask 4s` on the button) | draft held, counting down to the question | yes |
 | ⋯ `refining` | the agent CLI is rewriting the draft, about 6 s | yes |
 | ⋯ `asking` | the agent CLI is answering, about 8–10 s | yes |
 | ▬ `speaking - not listening` | the reply is playing | **no** |
@@ -1100,8 +1130,7 @@ prompts have paragraphs.
 **The microphone stands down for as long as the editor is open**, and says so —
 `editing - not listening` on the bubble, flat bars on the pill, and a note when it starts
 and when it ends. Without that, whatever the room said while you were typing would be
-appended to the very text you were typing. The auto-ask countdown is held for the same
-reason.
+appended to the very text you were typing.
 
 This is the one window that deliberately takes the focus, and the guarantees around Send
 survive it: Flow only ever remembers a foreground window that is *not* its own, so a Send
@@ -1127,8 +1156,10 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 | Page | What is on it |
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
-| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The Whisper list is four models — `large-v3` and `small` (the GPU pair, which also write Hindi as English), `small.en` and `base.en` (the CPU pair); the engine control reads **Parakeet · NVIDIA** then **Whisper · OpenAI**. A model Flow stopped listing but that is still on this PC is offered for removal, by name and size, with one press; nothing is removed unasked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
-| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other seven shortcuts, Paste last and Rewrite among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; Ask after a pause; whether a panel shows while you refine and ask; what Refine writes — its default kind, your name for emails, and a kind and an instruction per program; whether the model loads at startup; the update check; and what leaves this PC |
+| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The Whisper list is four models — `large-v3` and `small` (the GPU pair, which also write Hindi as English), `small.en` and `base.en` (the CPU pair); the engine control reads **Parakeet · NVIDIA** then **Whisper · OpenAI**. A model Flow stopped listing but that is still on this PC is offered for removal, by name and size, with one press; nothing is removed unasked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud, with the same **Read answers aloud** switch as Lenses; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
+| **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other seven shortcuts, Paste last and Rewrite among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; whether a panel shows while you refine and ask; whether the model loads at startup; the update check; and what leaves this PC. Where Refine's style and Ask's lens are chosen, it points to Styles and Lenses |
+| **Styles** | How Refine writes ([What Refine writes](#what-refine-writes)): the selected style; your name for emails; every style with its instructions, where it is used and when it last was, each with Edit and, for a built-in one you changed, **Back to the original**; a style of your own; and the programs that have their own style |
+| **Lenses** | Under Ask in the rail. The viewpoint Ask answers from ([Lenses](#lenses-the-viewpoint-ask-answers-from)): the selected lens; **Read answers aloud**; every lens with its instructions, each with Edit and **Back to the original** for a built-in one you changed; and a lens of your own |
 | **Voice** | Tune Flow to your room and your voice ([Calibration](#calibration-p8)), applied at once; check how well Flow hears you, in five sentences scored word by word; the dictionary — what Flow learned from your fixes, your corrections, your words to listen for — each with Add, Remove, Always fix, Never and Forget ([Vocabulary](#vocabulary-p4)); and everything you can say |
 | **History** | Only if you choose to keep one: what you dictated, the program it went to, whether it pasted, what the agent CLI made of a Refine and what it was made from, and anything the speech filter set aside — by day, searchable, each with Copy, Fix a word and Delete ([History and Paste last](#history-and-paste-last)) |
 | **Conversations** | The Ask conversation on screen, with a box to type the next question into; answers with their code blocks, Copy, Keep note and Read aloud; Wrap up for the kept notes; and, if you keep a history, earlier conversations by workspace, which you can open and carry on ([Conversations in Flow Home](#conversations-in-flow-home)) |
@@ -1530,9 +1561,7 @@ want, or press the key ([decisions.md](decisions.md), 2026-11-22, "The pill is a
 indicator"):
 
 ```
-make it an email               written as that kind: an email, a message, a prompt,
-make it a message                or "tidy it up" for your own words cleaned up
-polish that                    written as whatever this window calls for
+polish that                    written in the selected style, or the program's own
 make it shorter                also longer, more formal, more casual, friendlier,
                                  clearer, simpler, more direct
 alt+shift+X                    "polish that", without saying it
@@ -1542,19 +1571,23 @@ Your agent CLI writes it — the strip under the pill says what it is writing an
 long — and Flow puts it where the words were, the same way it makes a correction: its
 own characters back out, the new ones in. The strip then says what it was written as.
 
-- **It has to be the whole of what you say.** *"Make it an email to Priya about the
+- **It has to be the whole of what you say.** *"Polish that paragraph about the
   release"* is dictation.
+- **Naming a style is dictation.** *"Make it an email"*, *"as a prompt"* and *"tidy it
+  up"* go in as words; the style is chosen in [Styles](#what-refine-writes), not by voice.
 - **Nothing is lost if it fails.** A CLI that is slow, signed out or missing changes
   nothing: your words are still in the window as you said them, and the strip says why.
-- **Asking twice starts from what you said**, not from the first rewrite — so *"make it
-  an email"* and then *"make it a message"* gives you the message, not an email
-  shortened.
-- **"Scratch that" puts your own words back** while the rewrite is one line, as a chat
-  message is. An email has paragraphs, and Flow cannot count its way back over those, so
-  there the way back is the window's own undo, and the strip says so when it lands:
-  *Ctrl+Z there undoes it*.
-- **The same limits as any correction:** the same window in front, nothing typed and
-  nothing clicked since, within a minute, up to 800 characters. Outside them the strip
+- **"Polish that" starts from what you said**, not from an earlier rewrite, so asking
+  twice does not compound two rewrites. A named change such as *"make it shorter"* works
+  on the text as it stands.
+- **"Scratch that" puts your own words back.** A rewrite was pasted, not typed, so
+  outside a terminal Flow can count its way back over a whole email, paragraphs and all
+  (up to 6,000 characters). In a terminal it can only go back over one line: there the
+  way back is the window's own undo, and the strip says so when it lands - *Ctrl+Z there
+  undoes it* - where the window has one.
+- **The same limits as any correction:** the same window in front, and nothing typed and
+  nothing clicked since. A rewrite has no clock on it; dictation keeps the minute and the
+  800 characters. Outside them the strip
   says which one it was — *nothing to rewrite - you typed after it was pasted* — and
   the request is never pasted as words. If you moved on while the CLI was writing —
   it takes six to twelve seconds, and a click back into your work is enough — the
@@ -1567,10 +1600,11 @@ Home ▸ Settings, or `rewrite` under `hotkeys` in `~/.flow/profile.json`), and
 not count as typing in the window: Windows keeps that key for Flow and the program never
 sees it.
 
-**In Refine mode the rewrite comes first.** Every hold is rewritten for the window and
-pasted when it comes back — no panel, no Send. If the CLI does not answer, what you said
-goes in instead. What landed can then be changed exactly as above: *"scratch that"* takes
-it back out, *"make it shorter"* and *"make it an email"* rewrite it.
+**In Refine mode the rewrite comes first.** Every hold is rewritten in the selected style
+and pasted when it comes back — no panel, no Send. If the CLI does not answer, what you
+said goes in instead. The next hold adds to the same piece and rewrites the whole of it
+([A Refine grows into one piece](#a-refine-grows-into-one-piece)); *"scratch that"* takes
+what landed back out, and *"make it shorter"* changes the whole piece.
 
 **Holds in a row get their space.** The same knowledge fixes something older: two holds
 used to paste as *Hello there.How are you?*. When a paste continues Flow's own last paste
@@ -1606,7 +1640,8 @@ explicitly excluded from the output, so an ordinary correction never pays for th
 
 `ctrl+alt+M`, the right-click menu, or `--converse` at launch. Send becomes **Ask**: the
 draft goes to your agent CLI instead of into the focused window, the answer renders in the
-bubble in its own colour, and it is read aloud.
+bubble in its own colour, and it is read aloud only if you turned that on
+([Hearing the reply](#hearing-the-reply)).
 
 **It is a prompt workshop, not a general chat.** Every question carries a preamble saying
 so — the CLI is helping you refine the prompt you just dictated, which you are about to
@@ -1625,13 +1660,11 @@ is a prompt either way.
 - **There is no persistent CLI process.** Continuity is re-sent from the thread, not held
   open, so a crashed or upgraded CLI cannot take the conversation with it.
 - **Answers are asked to be short** — at most three sentences of plain prose — because the
-  reply is read on a floating bubble and spoken aloud, and neither survives an essay. The
+  reply is read on a floating card, or heard aloud, and neither survives an essay. The
   exception is asking for a piece of *work*: "give me a prompt for…", a plan, a list. Then
   the ceiling comes off, because truncating the thing the conversation was for is the one
   failure worse than a tall bubble. Which brief applies is decided from your request,
   never from the answer.
-- **A pause sends the question.** Stop talking for 4 seconds and the draft goes on its
-  own — see [Asking without pressing anything](#asking-without-pressing-anything).
 - **Flow goes deaf while it talks, and says so.** The microphone is ignored for as long as
   a reply is playing, because it is hearing the speakers and there is no echo cancellation
   to tell that from your voice. The pill's bars go flat and the bubble says
@@ -1666,6 +1699,32 @@ workshop: D:\dev\oldpath no longer exists - Ask runs without a project
 A path that has gone is reported and then ignored. A startup that refused over a stale
 setting would be worse than an ungrounded question — the project moved, and Flow is not
 the thing that should stop working.
+
+### Lenses: the viewpoint Ask answers from
+
+**Ask answers through the lens you selected.** A lens is a named viewpoint, with
+instructions you can read and change:
+
+| Lens | What it does |
+|:---|:---|
+| **No lens** | The default: the plain answer, with nothing added to your question |
+| **Architecture** | Structure before detail: the components, their boundaries, the trade-offs, and the decisions that are hard to reverse |
+| **Business** | The outcome that matters first: value, cost, time and risk, in words a non-engineer can act on |
+
+and any lens of your own — a name and how to look at a question, such as *"Reviewer -
+point out what could break, what is missing a test, and what is unclear."*
+
+Choose one on Flow Home ▸ **Lenses** (under Ask in the rail), or from the pill's
+right-click menu, where the **Ask answers through** rows tick the selected lens and
+**Lenses...** opens the page. It stays selected until you change it. Each lens shows its
+instructions, **Edit** opens them, and a built-in lens you changed has **Back to the
+original**.
+
+**A lens is instructions only.** It works on your question and the conversation, and
+reads nothing else — not your calendar, your mail or your tasks. Ask is still grounded in
+the workspace folder, as above.
+
+The same page has **Read answers aloud**, off unless you turn it on.
 
 ### Taking the answer
 
@@ -1734,10 +1793,12 @@ Without a history, a conversation lasts until Flow quits, as it always has.
 
 ### Hearing the reply
 
-Spoken replies are **on by default in converse mode** — entering converse mode is the
-opt-in, and a conversation you have to read is not the feature. `--no-speak` refuses the
-engine at launch; **Mute replies** in the right-click menu toggles it mid-session and cuts
-off whatever is mid-sentence.
+**Answers are not read aloud unless you ask for it.** An answer stays on its card, and
+nothing speaks unasked. **Read answers aloud** on Flow Home ▸ Lenses turns it on; it is
+the same switch as **Spoken replies** on the Models page, it is remembered in
+`profile.json` as `read_answers`, and turning it off cuts off whatever is mid-sentence.
+`--no-speak` refuses the engine at launch. **Read aloud** under an answer on the
+Conversations page reads that one answer whatever the switch says.
 
 Speech goes through `System.Speech` in one long-lived PowerShell host, not a subprocess per
 reply. That is not an optimisation: a subprocess that has already been launched cannot be
@@ -1921,28 +1982,6 @@ that could list them and not speak them. Flow now tells you:
 A reply read out after a spoken question still fails quietly if the service is down: the
 answer is on the screen, and the reason is one press of Preview away.
 
-### Asking without pressing anything
-
-A conversation where you press a button after every sentence is not a conversation. In
-converse mode a draft that stops changing is put to the CLI on its own after **4 seconds**
-of silence, and the Ask button counts down — `Ask 4s`, `Ask 3s` — so it is never a
-surprise.
-
-**The draft stays correctable the whole time.** Anything you do resets the clock: speaking,
-a correction landing, pressing Refine or Continue. The countdown only runs while the mic is
-live and nothing else is happening — it will not fire while you are talking, while a decode
-is still running, while the previous answer is playing, or after you disarm the pill.
-
-Four seconds is measured rather than chosen. On the one volunteer recording where every
-item was located, the pauses a speaker leaves between separate spoken items run
-**1.4–3.3 s** (median 2.5 s), and each of those gaps also contains a spoken item number, so
-the real silence is shorter still. Anything under ~3.3 s fires while someone is mid-thought.
-
-**Dictate mode never does this.** Pasting into a focused window is irreversible, so it stays
-a deliberate act forever. Asking a question is not, and its answer is additive — that is the
-whole distinction. `--no-auto-ask`, or **Ask only when I press it** in the right-click menu,
-turns it off.
-
 ### Interrupting a reply
 
 Flow will not listen while it is speaking, and that is deliberate. Without it, the
@@ -1962,7 +2001,7 @@ Three ways to cut a reply short, all explicit:
 |---|---|
 | `ctrl+alt+esc`, or the **Clear draft** menu item | stops the reply, then clears the draft |
 | Click the pill to disarm | stops the reply and stops capturing |
-| Right-click → **Mute replies** | stops it and stays silent from then on |
+| Turn off **Read answers aloud** (Flow Home ▸ Lenses) | stops it and stays silent from then on |
 
 If you use headphones there is no echo to suppress, but Flow cannot tell — the behaviour
 is the same either way.
@@ -2185,7 +2224,7 @@ figure — along with everything else in there.
 | Path | Written by | Contents |
 |---|---|---|
 | `~/.flow/lexicon.txt` | you, by hand — and by Flow only when you act: creating it from a template of comments when it is missing, appending one line when you tap an offered correction or press Add on Flow Home's Voice page, and taking out one entry's lines when you press Remove there | terms to bias toward, and `wrong -> right` corrections to apply. The template is comments only, so the opt-in is typing a line that is not a comment. Flow never edits, reorders or reformats a line — everything you did not ask to change comes back byte for byte |
-| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, and toggling auto-ask — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether auto-ask is on, the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the six global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup, and whether to keep a history and for how long (`history`, `history_days`: absent means not chosen, which keeps nothing) — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
+| `~/.flow/profile.json` | `--calibrate`, every Send, every dictated utterance, choosing a voice, a style or a lens, every Refine and Ask (when the style or lens was last used), and switching **Read answers aloud** — and by you, for the two fields nothing else can set | measured room/voice/confidence and the microphone name the room was measured through, learned confusion pairs, misroute signatures, the chosen voice, whether answers are read aloud (`read_answers`), the two spoken send words, the `workspace` a converse question is asked from, an optional `hotkeys` table rebinding the six global combos ([Changing them](#changing-them)), what [Flow Home](#flow-home) chose — the speech models and where they run, the microphone by name, the CLI's wait, whether the model loads at startup, the selected style (`refine_kind`), your styles and your changes to the built-in ones (`styles`, `style_edits`, `style_used`), the programs with their own style (`kinds`), the selected lens and your lenses (`lens`, `lenses`, `lens_edits`, `lens_used`), and whether to keep a history and for how long (`history`, `history_days`: absent means not chosen, which keeps nothing) — and two running totals — words dictated and the milliseconds of speech behind them ([The numbers](#the-numbers)). Plain JSON, readable and deletable by hand; an older profile loads with the shipped defaults for anything it lacks, and a field Flow cannot use is dropped on its own without costing the rest of the file |
 | `~/.flow/models/` | `--engine parakeet`, and Flow Home's Models page | the Parakeet models, as plain files (not the Hugging Face cache, which onnxruntime cannot read external weights through): `parakeet-tdt-0.6b-v3` at 2.4 GB and `parakeet-tdt-0.6b-v3-int8` at 640 MB. Models lists them with their sizes and deletes the one you do not use |
 | `~/.cache/huggingface/hub/` | first decode, and Flow Home's Models page | the models. `base.en` 141 MiB, `small.en` 464 MiB, `large-v3` 2.9 GiB; Models lists them with their sizes and deletes the ones you do not use, and offers to remove the ones an earlier Flow listed (`large-v2`, `medium.en`, `distil-large-v3`, `distil-large-v3.5`, `large-v3-turbo`) |
 | `~/.flow/history.jsonl` | **only if you chose to keep a history** on Flow Home's History page: every Send, every Ask and its answer, and what the speech filter set aside | one JSON line per entry, the words included — which is why it exists only by your choice ([History and Paste last](#history-and-paste-last)). Kept 7, 30 or 90 days and at most 20 000 entries, then trimmed; **Stop keeping** deletes it. A line broken by hand costs that line only |

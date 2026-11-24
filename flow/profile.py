@@ -34,7 +34,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Sequence
 
-from . import edits, kinds
+from . import edits, kinds, lenses
 from .history import CHOICES as HISTORY_CHOICES
 from .history import DAYS as HISTORY_DAYS
 from .history import DAYS_DEFAULT as HISTORY_DAYS_DEFAULT
@@ -188,6 +188,54 @@ def _apps(value) -> dict:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _styles(value) -> list[dict]:
+    return _own(value, kinds.CUSTOM_PREFIX, kinds.NAME_MAX)
+
+
+def _own(value, prefix: str, name_max: int) -> list[dict]:
+    """The user's own styles: well-formed entries only, at most `STYLES_MAX`, no repeats.
+
+    An entry needs a key under `kinds.CUSTOM_PREFIX`, a name and instructions, all text.
+    Anything else is passed over rather than refused as a whole, so one bad hand-edit
+    costs that style and not the others."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in value if isinstance(value, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        key, name, text = entry.get("key"), entry.get("name"), entry.get("instructions")
+        if not (isinstance(key, str) and key.startswith(prefix)
+                and isinstance(name, str) and name.strip()
+                and isinstance(text, str) and text.strip()) or key in seen:
+            continue
+        seen.add(key)
+        out.append({"key": key, "name": " ".join(name.split())[:name_max],
+                    "instructions": text.strip()})
+        if len(out) >= STYLES_MAX:
+            break
+    return out
+
+
+def _style_edits(value) -> dict[str, str]:
+    """Edited built-in styles: a built-in's key to non-empty text. Others are dropped."""
+    return _edits(value, kinds.ORDER)
+
+
+def _edits(value, built_in) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {k: v.strip() for k, v in value.items()
+            if k in built_in and isinstance(v, str) and v.strip()}
+
+
+def _style_used(value) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    return {k: float(v) for k, v in value.items()
+            if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)
+            and v > 0}
+
+
 def _counter(value) -> Counter:
     """`{phrase: positive count}`. Entries that are not that shape are dropped.
 
@@ -276,11 +324,16 @@ GESTURE_DEFAULT = "hold"
 DESIGN_DEFAULT = "compact"
 DESIGNS = ("current", "compact")
 
-#: What `refine_kind` may be: "auto", or one of the kinds Refine can write. Read from
-#: `flow/kinds.py` rather than spelled out, so a kind added there is a setting here
-#: without a second list to forget.
-REFINE_KIND_DEFAULT = kinds.AUTO
-REFINE_KINDS = (kinds.AUTO, *kinds.ORDER)
+#: The style selected when nobody has chosen one: Prompt, the product's first promise.
+#: "auto" (read the window) was the default until 2026-11-24 and is no longer a value:
+#: the user chooses and Flow does not guess (decisions.md), so a profile that says
+#: "auto" reads as Prompt. `REFINE_KINDS` is the built-ins; the user's own styles are
+#: valid too, and are checked against `styles` when the profile is read.
+REFINE_KIND_DEFAULT = kinds.PROMPT
+REFINE_KINDS = kinds.ORDER
+
+#: How many styles of their own somebody may keep. A picker, not a library.
+STYLES_MAX = 24
 
 #: Where decoding may run, as `--decode-device` spells it. Spelled here rather than
 #: imported from `flow/asr.py`, which pulls in numpy and the decoder: this module is read
@@ -364,12 +417,12 @@ class Profile:
         #: fallback, so an older profile loads with no voice and an older Flow ignores
         #: the key it does not know.
         self.voice: str | None = None
-        #: P9: whether a settled converse-mode draft asks itself after a pause. The one
-        #: setting that decides whether words leave the machine without a press, which
-        #: is why it is remembered rather than re-stated every launch. Absent reads as
-        #: on, so an existing profile does not acquire a preference nobody expressed;
-        #: same no-bump reasoning as `voice`.
-        self.auto_ask: bool = True
+        #: Whether Ask's answers are read aloud. **Off unless somebody turns it on**
+        #: (decisions.md 2026-11-24): an answer stays on its card, and speech that
+        #: starts unasked in a meeting is the worst surprise Flow can give. It replaces
+        #: `auto_ask`, which went the same day - it only ever ran while hands-free, and
+        #: hands-free no longer asks. An old profile's `auto_ask` is ignored.
+        self.read_answers: bool = False
         #: Whether a launch asks GitHub whether there is a newer Flow. **Off unless
         #: somebody turns it on**, and that default is the point rather than a shrug:
         #: `flow/version.py` holds the only URL opener in the package so that
@@ -378,15 +431,12 @@ class Profile:
         #: turn every claim in that section into "unless you use it the way everyone
         #: does", which is worth less than no claim at all.
         #:
-        #: The opposite fallback from `auto_ask`, and for the same structural reason read
-        #: the other way round: absence here means *nobody has decided*, and the safe
-        #: reading of an undecided privacy setting is the one that sends nothing. So
-        #: absent is False, not True.
+        #: Absence here means *nobody has decided*, and the safe reading of an undecided
+        #: privacy setting is the one that sends nothing. So absent is False.
         self.check_update: bool = False
         #: R5/P7: the words that press Send, and Send-then-Enter. Additive, schema stays
         #: 1, and a blank reads as absent rather than as "off" — `""` would match nothing
-        #: and disable the feature silently, which is the `auto_ask` null trap one field
-        #: over. **The defaults have to work out of the box**: the owner has said they
+        #: and disable the feature silently. **The defaults have to work out of the box**: the owner has said they
         #: will not hand-edit this file, so a feature needing an editor before first use
         #: is dead on arrival for its own requester.
         self.send_word: str = edits.SEND_WORD
@@ -489,10 +539,26 @@ class Profile:
         #: `kinds.resolve` where it is used, and an entry it does not recognise is passed
         #: over rather than obeyed.
         self.kinds: dict[str, str] = {}
-        #: What Refine writes when no entry above decides it. "auto" - the default -
-        #: reads the window; a kind's name pins every Refine to that kind, for whoever
-        #: uses the mode for one thing and does not want it second-guessed.
+        #: The selected style (decisions.md 2026-11-24): what Refine writes when no
+        #: program's own entry above decides it. It stays selected until changed, in
+        #: Flow Home or the pill's menu.
         self.refine_kind: str = REFINE_KIND_DEFAULT
+        #: The user's own styles: [{"key": "my:...", "name": ..., "instructions": ...}].
+        self.styles: list[dict] = []
+        #: A built-in style's instructions as the user edited them, by key. Absent means
+        #: the built-in as shipped, which is a measured brief; "Back to the original"
+        #: removes the entry.
+        self.style_edits: dict[str, str] = {}
+        #: When each style was last used, seconds since the epoch, for the Styles page.
+        self.style_used: dict[str, float] = {}
+        #: The selected lens Ask answers through (`flow/lenses.py`, decisions.md
+        #: 2026-11-24). "none" - a plain answer - unless somebody chose another.
+        self.lens: str = lenses.NONE
+        #: The user's own lenses, a built-in's edited instructions, and when each was
+        #: last used: the same three shapes as the styles above.
+        self.lenses: list[dict] = []
+        self.lens_edits: dict[str, str] = {}
+        self.lens_used: dict[str, float] = {}
         #: What an email Refine writes is signed with, or "" for a sign-off line and no
         #: name. Asked for rather than read from the OS account or from git: a display
         #: name there is often not what somebody signs mail with, and a name Flow guessed
@@ -630,9 +696,8 @@ class Profile:
         self.confidence = take("confidence", _number)
         self.calibrated_at = take("calibrated_at", _number)
         self.calibrated_device = take("calibrated_device", _text)
-        # `bool(None)` is False, so a key that was never written — or written as null by
-        # an older Flow — would read as a deliberate "off". Absent means the default.
-        self.auto_ask = take("auto_ask", _flag, True)
+        # Absent is False: an undecided profile does not speak unasked.
+        self.read_answers = take("read_answers", _flag, False)
         # Absent is False here, and that is the whole safety argument in one line: the
         # setting decides whether Flow opens a connection nobody asked it to open, so an
         # undecided profile has to read as "decided no". `_flag` means a file carrying
@@ -640,8 +705,8 @@ class Profile:
         # True, which is the trap that would otherwise turn a bad hand-edit into a
         # launch that phones home.
         self.check_update = take("check_update", _flag, False)
-        # Absent means False here, the opposite way round from `auto_ask` — the default
-        # is "has not been told", so an upgrade shows the notice once.
+        # Absent means False: the default is "has not been told", so an upgrade shows
+        # the notice once.
         self.converse_seen = take("converse_seen", _flag, False)
         self.welcomed = take("welcomed", _flag, False)
         self.voice = take("voice", _text)
@@ -679,9 +744,21 @@ class Profile:
         # The same table shape and the same bargain. `refine_kind` is judged here
         # because, unlike a program's name, it has exactly five right answers.
         self.kinds = take("kinds", lambda v, _d: _apps(v), {})
+        self.styles = take("styles", lambda v, _d: _styles(v), [])
+        self.style_edits = take("style_edits", lambda v, _d: _style_edits(v), {})
+        self.style_used = take("style_used", lambda v, _d: _style_used(v), {})
         self.refine_kind = take("refine_kind", _text, REFINE_KIND_DEFAULT)
-        if self.refine_kind not in REFINE_KINDS:
+        if self.refine_kind not in self.style_keys():
             self.refine_kind = REFINE_KIND_DEFAULT
+        self.lenses = take("lenses", lambda v, _d: _own(v, lenses.CUSTOM_PREFIX,
+                                                         lenses.NAME_MAX), [])
+        # No lens has nothing to edit: it is the plain answer.
+        self.lens_edits = take("lens_edits", lambda v, _d: _edits(
+            v, tuple(k for k in lenses.ORDER if k != lenses.NONE)), {})
+        self.lens_used = take("lens_used", lambda v, _d: _style_used(v), {})
+        self.lens = take("lens", _text, lenses.NONE)
+        if self.lens not in self.lens_keys():
+            self.lens = lenses.NONE
         self.name = take("name", _text, "")
         self.panel_flows = take("panel_flows", _flag, False)
         self.panel = take("panel", _text, PANEL_DEFAULT)
@@ -741,6 +818,45 @@ class Profile:
         self.dismissed = take("dismissed", lambda v, _d: _text_set(v), set(), stored=[])
         return True
 
+    def style_keys(self) -> tuple[str, ...]:
+        """Every style this profile can select: the built-ins, then the user's own."""
+        return (*kinds.ORDER, *(e["key"] for e in self.styles))
+
+    def style_instructions(self, key: str) -> str | None:
+        """The instructions Refine sends for `key` when they are not a built-in's own:
+        an edited built-in or one of the user's styles. None for a built-in as shipped.
+        """
+        if key in kinds.ORDER:
+            return self.style_edits.get(key) or None
+        for entry in self.styles:
+            if entry["key"] == key:
+                return entry["instructions"]
+        return None
+
+    def lens_keys(self) -> tuple[str, ...]:
+        """Every lens this profile can select: the built-ins, then the user's own."""
+        return (*lenses.ORDER, *(e["key"] for e in self.lenses))
+
+    def lens_label(self, key: str) -> str:
+        if key in lenses.BUILT_IN:
+            return lenses.BUILT_IN[key].label
+        for entry in self.lenses:
+            if entry["key"] == key:
+                return entry["name"]
+        return lenses.BUILT_IN[lenses.NONE].label
+
+    def lens_instructions(self, key: str) -> str:
+        """What a question asked through `key` carries: an edit, the user's own text, a
+        built-in's as shipped, or "" for No lens and for anything unknown."""
+        if key == lenses.NONE:
+            return ""
+        if key in lenses.BUILT_IN:
+            return self.lens_edits.get(key) or lenses.BUILT_IN[key].instructions
+        for entry in self.lenses:
+            if entry["key"] == key:
+                return entry["instructions"]
+        return ""
+
     def save(self) -> bool:
         payload = {
             "schema": SCHEMA,
@@ -750,7 +866,7 @@ class Profile:
             "calibrated_at": self.calibrated_at,
             "calibrated_device": self.calibrated_device,
             "voice": self.voice,
-            "auto_ask": self.auto_ask,
+            "read_answers": self.read_answers,
             "check_update": self.check_update,
             "converse_seen": self.converse_seen,
             "welcomed": self.welcomed,
@@ -773,6 +889,13 @@ class Profile:
             "apps": dict(self.apps),
             "kinds": dict(self.kinds),
             "refine_kind": self.refine_kind,
+            "styles": [dict(e) for e in self.styles],
+            "style_edits": dict(self.style_edits),
+            "style_used": dict(self.style_used),
+            "lens": self.lens,
+            "lenses": [dict(e) for e in self.lenses],
+            "lens_edits": dict(self.lens_edits),
+            "lens_used": dict(self.lens_used),
             "name": self.name,
             "panel_flows": self.panel_flows,
             "panel": self.panel,

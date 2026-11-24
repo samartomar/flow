@@ -12,6 +12,7 @@ further behind speech the longer someone talked.
 from __future__ import annotations
 
 import queue
+import re
 import threading
 import time
 import traceback
@@ -25,7 +26,7 @@ from typing import NamedTuple
 import numpy as np
 
 from . import MAX_UTTERANCE_SEC, SAMPLE_RATE
-from . import kinds
+from . import kinds, lenses
 from .asr import Transcriber, WhisperTranscriber
 from .audio import BLOCK, Mic, SpeechGate
 from .diag import Diag, NullDiag
@@ -52,7 +53,7 @@ from .edits import (
 #: a different word; lower-casing marks it as ordinary prose, which is the one thing not
 #: worth biasing a decoder toward.
 LEARNABLE = ("replace", "replace_all", "capitalize", "upper")
-from .help import auto_ask_notice, exits_note
+from .help import exits_note
 from .history import (
     ANSWERED,
     ASKED,
@@ -890,6 +891,9 @@ class Pasted:
     #: A second "make it a message" is written from these and not from the first
     #: rewrite, so asking twice does not compound two models' choices.
     heard: str = ""
+    #: The style a Refine landing was written in, so the piece it starts keeps that
+    #: style as it grows (decisions.md 2026-11-24). "" for dictation.
+    kind: str = ""
 
 
 @dataclass
@@ -933,6 +937,36 @@ def _quoted(text: str, limit: int = 40) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
+#: How much of a Refine landing a later hold may replace as one piece (decisions.md
+#: 2026-11-24). Larger than `CORRECT_MAX_CHARS`: those limits keep "scratch that" safe
+#: on *typed-looking* dictation, and a piece is a whole email or prompt that was pasted,
+#: so no editor reformatted it on the way in. Terminals keep the strict limits - Enter
+#: and line handling there are the shell's, and a miscount sends a line.
+PIECE_MAX_CHARS = 6000
+PIECE_MAX_BREAKS = 80
+
+
+#: What ends a piece out loud, as the whole of a Refine hold (decisions.md 2026-11-24).
+_DONE = re.compile(r"^\s*(?:(?:okay|ok|right|and)[, ]+)?(?:done|that'?s done|i'?m done|"
+                   r"finished|that'?s it|new one|new piece)[.!]?\s*$", re.I)
+
+
+def piece_unfit(text: str, app: str = "") -> str:
+    """Why a Refine landing cannot be replaced as a piece, or "" when it can. In a
+    terminal it is `paste_unfit`'s answer."""
+    if kinds.is_terminal(app):
+        return paste_unfit(text)
+    if not text.strip():
+        return "it was only a line break"
+    if len(text) > PIECE_MAX_CHARS:
+        return "it was too long to change"
+    if text.count("\n") > PIECE_MAX_BREAKS:
+        return "it had too many lines to change"
+    if text.endswith(("\n", "\r")) or "\r" in text:
+        return "it ended in a line break"
+    return ""
+
+
 def paste_unfit(text: str) -> str:
     """Why a paste of `text` cannot be changed by voice afterwards, or "" when it can —
     see `CORRECT_MAX_CHARS`. A trailing line break is out too: a terminal strips it
@@ -951,6 +985,21 @@ def paste_unfit(text: str) -> str:
 def paste_fits(text: str) -> bool:
     return not paste_unfit(text)
 
+
+
+def _landing_reason(problem: str) -> str:
+    """A refused or warned handover's note as a trace category, never its text.
+
+    The notes are `inject`'s and the surfaces' own sentences; matched on the phrases
+    they are built from so a new note reads as "other" rather than leaking."""
+    low = (problem or "").lower()
+    for needle, category in (("you moved", "moved"), ("flow had the focus", "flow_focus"),
+                             ("would not switch", "no_switch"), ("closed", "closed"),
+                             ("stale", "stale"), ("clipboard", "clipboard"),
+                             ("terminal", "terminal")):
+        if needle in low:
+            return category
+    return "other"
 
 class Session:
     def __init__(
@@ -1146,14 +1195,16 @@ class Session:
         #: rather than logged: it is the one number that says whether the half-duplex
         #: guard is doing anything, and a per-block note would drown the bubble.
         self.echo_blocks = 0
-        #: P9: let a settled draft go to the CLI on its own after a pause. Converse mode
-        #: only — see AUTO_ASK_SEC for why that distinction is the whole argument.
-        #:
-        #: Read from the profile, which defaults it to True, so the shipped behaviour is
-        #: unchanged and a user who switched it off does not have to say so again every
-        #: launch. `getattr` because a profile is optional and the fakes predate the
-        #: field.
-        self.auto_ask = bool(getattr(profile, "auto_ask", True))
+        #: Auto-ask is gone (decisions.md 2026-11-24): it only ever ran while
+        #: hands-free, and hands-free only dictates now. Held False rather than deleted
+        #: so the retired Classic surface, which still reads it, keeps its shape until
+        #: it goes.
+        self.auto_ask = False
+        # The user's own styles become styles everywhere `kinds` is asked (2026-11-24).
+        kinds.register(getattr(profile, "styles", None) if profile is not None else None)
+        #: Answers are read aloud only when the profile says so (decisions.md
+        #: 2026-11-24): `read_answers` is off unless somebody turned it on.
+        self.muted = not bool(getattr(profile, "read_answers", False))
         #: Which model to ask the agent CLI for, and how hard to make it think. Taken
         #: from the profile so a choice made once survives a restart, and defaulted to
         #: the CLI's own model and the cheapest effort — see `refine.EFFORT_DEFAULT`.
@@ -2773,7 +2824,8 @@ class Session:
         self._recall()
 
     def delivered(self, text: str, problem: str = "", copied: bool = False,
-                  window: int | None = None, submitted: bool = False) -> None:
+                  window: int | None = None, submitted: bool = False,
+                  pinned: bool = False) -> None:
         """A surface has put `text` where the user was, or on the clipboard.
 
         The one door dictation takes into History, and it is the surfaces' to open
@@ -2805,6 +2857,12 @@ class Session:
             how = "not pasted" if "not pasted" in (problem or "") else "pasted"
         fields = {"app": self.target_app if isinstance(self.target_app, str) else "",
                   "words": len(text.split()), "how": how, "note": problem or ""}
+        # The trace's copy of the outcome (decisions.md 2026-11-24): `how` and a reason
+        # *category*, never the note, which can quote a window title.
+        self.diag.write("landed", how=how.replace(" ", "_"),
+                        ok=how in ("pasted", "copied"),
+                        reason=_landing_reason(problem) if problem else None,
+                        words=fields["words"], pinned=bool(pinned))
         refined, self._refined = self._refined, None
         # Handed over: whatever was on the panel has been sent.
         self._refine_open = False
@@ -2816,7 +2874,8 @@ class Session:
         landed = refined is not None and refined["text"].strip() == text
         self._track_paste(raw, how, window, submitted,
                           entry["id"] if isinstance(entry, dict) else "",
-                          heard=refined["heard"] if landed else "")
+                          heard=refined["heard"] if landed else "",
+                          kind=self.refine_kind if landed else "")
 
     # -- correcting a Type paste --------------------------------------------------
 
@@ -2827,7 +2886,7 @@ class Session:
         return self.mode == DICTATE or (self.mode == REFINE and self.refine_lands is True)
 
     def _track_paste(self, text: str, how: str, window, submitted: bool,
-                     entry: str, heard: str = "") -> None:
+                     entry: str, heard: str = "", kind: str = "") -> None:
         """Keep a Type paste changeable, on top of the ones before it in that window —
         or say why nothing is changeable any more. The words kept are the ones sent,
         spaces and all: they are what the Backspaces will have to count.
@@ -2838,7 +2897,7 @@ class Session:
         why = ("it was copied, not pasted" if how in ("copied", "not copied")
                else "it did not paste" if how != "pasted"
                else "it went in with Enter" if submitted
-               else paste_unfit(text)
+               else (piece_unfit(text, self.target_app) if heard else paste_unfit(text))
                or ("that paste can't be changed"
                    if not window or not self._corrects_pastes() else ""))
         if why:
@@ -2847,20 +2906,27 @@ class Session:
         now = time.time()
         run = self.paste_run
         if run is not None and run.window == window:
-            run.pastes.append(Pasted(text, entry=entry, heard=heard))
+            run.pastes.append(Pasted(text, entry=entry, heard=heard, kind=kind))
             del run.pastes[:-CORRECT_STACK]
             run.at = now
         else:
             self._paste_run = PasteRun(window=window, at=now,
-                                       pastes=[Pasted(text, entry=entry, heard=heard)])
+                                       pastes=[Pasted(text, entry=entry, heard=heard,
+                                                      kind=kind)])
         self._paste_fix = None
 
     @property
     def paste_run(self) -> PasteRun | None:
         """The Type pastes a spoken correction can still change, or None. Expires here,
-        so every reader agrees about the minute."""
+        so every reader agrees about the minute.
+
+        Except a Refine landing, which is a piece (decisions.md 2026-11-24): a piece ends
+        on the user's own edit, another window, another style or "done", **never on a
+        timer** - the surface's watch on keys, clicks and the window in front is what
+        keeps a late replacement safe, and a minute is how long somebody thinks."""
         run = self._paste_run
-        if run is not None and time.time() - run.at > CORRECT_WINDOW_SEC:
+        if (run is not None and not (run.pastes and run.top.heard)
+                and time.time() - run.at > CORRECT_WINDOW_SEC):
             self._end_paste_run("it was over a minute ago")
             return None
         return run
@@ -2933,6 +2999,8 @@ class Session:
         """
         if not self._corrects_pastes():
             return False
+        if self.mode == REFINE and _DONE.match(utterance or "") and self.end_piece():
+            return True
         run = self.paste_run
         asked = kinds.wanted(utterance)
         if asked is not None:
@@ -3034,13 +3102,61 @@ class Session:
         if not source:
             self._emit("note", "nothing to rewrite - the last paste is empty")
             return
-        self._restyle = (run, top, top.text)
+        self._restyle = (run, top, top.text, "")
         if kinds.valid(asked) or asked == kinds.AUTO:
             kind = asked if kinds.valid(asked) else self.kind_here()
             self._start_refine("", text=source, polish=True, kind=kind)
         else:
             # A named change: the words as they stand, and the instruction as said.
             self._start_refine(asked, text=top.text.strip())
+
+    def open_piece(self) -> PasteRun | None:
+        """The piece a Refine hold would add to, or None (decisions.md 2026-11-24).
+
+        A piece is a Refine landing that is still Flow's to change: nothing typed or
+        clicked since, the same window, inside the minute - the paste run's own rules -
+        and written in the style that applies here now, so changing style starts a new
+        one. Only where a Refine lands in the window; the panel flow says more its own
+        way.
+        """
+        if self.mode != REFINE or self.refine_lands is not True or self.refine_says_more:
+            return None
+        run = self.paste_run
+        if run is None or not run.pastes:
+            return None
+        top = run.top
+        if not top.heard or not top.kind or top.kind != self.kind_here():
+            return None
+        return run
+
+    def _grow_piece(self, words: str) -> bool:
+        """Add `words` to the open piece: rewrite everything said for it so far as one
+        text, to replace what landed before. False when there is no piece to add to, and
+        the words are a new Refine.
+
+        The CLI is handed the words as said across every hold, never the last rewrite:
+        two models' choices do not compound, and a correction said in the second hold
+        ("actually make it Wednesday") is applied to the whole rather than appended.
+        """
+        run = self.open_piece()
+        if run is None:
+            return False
+        if self._refine_op is not None:
+            self._emit("note", "still rewriting - one moment")
+            return True
+        top = run.top
+        source = f"{top.heard.strip()} {words.strip()}".strip()
+        self._restyle = (run, top, top.text, source)
+        self._start_refine("", text=source, polish=True, kind=top.kind)
+        return True
+
+    def end_piece(self) -> bool:
+        """"Done": the open piece is finished, and the next Refine starts a new one."""
+        if self.open_piece() is None:
+            return False
+        self._end_paste_run("you said it was done")
+        self._emit("note", "done - the next Refine starts a new piece")
+        return True
 
     def rewrite_last(self) -> None:
         """The rewrite shortcut: "polish that", pressed instead of said.
@@ -3069,10 +3185,16 @@ class Session:
         before it sends a key (`CompactPill._pump_retype`); this checks what only the
         session knows.
         """
-        (run, top, was), self._restyle = self._restyle, None
+        (run, top, was, grown), self._restyle = self._restyle, None
         polish = self._refine_polish
         style = kinds.get(self.refine_kind)
         if revised is None:
+            if grown:
+                # A piece that could not grow: the earlier text stands, and the new
+                # words go in as said, after it - the release's own fallback, which the
+                # surface makes on this exact line (`CompactPill._land`).
+                self._emit("error", f"refine failed ({note}) - draft unchanged")
+                return
             # The best failure there is: nothing was ever taken away to put back.
             self._emit("error", f"could not rewrite that ({note}) - your words are "
                                 f"unchanged")
@@ -3092,7 +3214,7 @@ class Session:
         done = style.tag if polish else "rewritten as asked"
         if skipped:
             done += f" (via {note})"
-        heard = top.heard or was
+        heard = grown or top.heard or was
         before = top.text
         k = 0
         limit = min(len(before), len(revised))
@@ -3136,6 +3258,13 @@ class Session:
         run = fix.run
         if run is not self._paste_run:
             return
+        if fix.heard:
+            # A rewrite replacing a landing - a piece grown, "polish that" - is a
+            # handover too, and the trace says how it went (decisions.md 2026-11-24).
+            self.diag.write("landed", how="not_replaced" if problem else "replaced",
+                            ok=not problem,
+                            reason=_landing_reason(problem) if problem else None,
+                            words=len((fix.after or "").split()))
         if problem:
             self._end_paste_run("the last change did not go in")
             return
@@ -3158,7 +3287,7 @@ class Session:
                                 words=len(top.text.split()),
                                 how="pasted, then changed" if top.before else "pasted")
             self._handed = (top.text.strip(), now)
-            if fix.heard and paste_unfit(top.text):
+            if fix.heard and piece_unfit(top.text, self.target_app):
                 # An email has a greeting and paragraphs, and a count of Backspaces
                 # cannot be trusted across that many line breaks (`CORRECT_MAX_BREAKS`).
                 # It went in; what ends here is the promise that "scratch that" can
@@ -3167,7 +3296,7 @@ class Session:
                 # the moment to say so - not after "scratch that" has been refused.
                 self._emit("edit", fix.note if kinds.is_terminal(self.target_app)
                            else f"{fix.note} - {kinds.UNDO_HINT}")
-                self._end_paste_run(paste_unfit(top.text))
+                self._end_paste_run(piece_unfit(top.text, self.target_app))
                 return
             if fix.pair is not None and self.profile is not None:
                 # P8, as for a spoken correction in a draft — and saved now, because no
@@ -3685,18 +3814,10 @@ class Session:
         """
         if p.op == "polish":
             # A named request for a specific transformation, not an instruction to be
-            # interpreted — and never a mis-hearing to re-listen for. "Make it a proper
-            # prompt" names the prompt; "tidy this up" has always arrived here too and
-            # names something else, which `kinds.spoken` can now tell apart.
-            self._start_refine(p.payload, polish=True,
-                               kind=kinds.spoken(p.payload) or kinds.PROMPT)
-            return
-        asked = kinds.spoken(p.payload)
-        if asked is not None:
-            # "Make it an email", over a held draft. It used to go to the CLI as free
-            # text to interpret; it is the same named request as the polish above, for a
-            # different kind of writing, and gets that kind's own brief.
-            self._start_refine(p.payload, polish=True, kind=asked)
+            # interpreted — and never a mis-hearing to re-listen for. It is written in
+            # the style that applies here: naming a style out loud no longer picks one
+            # (decisions.md 2026-11-24).
+            self._start_refine(p.payload, polish=True, kind=self.kind_here())
             return
         audio = record.audio if record is not None else self._last_audio
         if p.escalated and audio is not None and self._pending_rescue is None:
@@ -4442,18 +4563,6 @@ class Session:
         self._check_calibrated_device()
         return True
 
-    def toggle_auto_ask(self) -> bool:
-        self.auto_ask = not self.auto_ask
-        # Saved now rather than at the next Send, for the reason `set_voice` gives: this
-        # is a choice about how someone wants to work, and one made just before closing
-        # the app is still a choice.
-        if self.profile is not None:
-            self.profile.auto_ask = self.auto_ask
-            self.profile.save()
-        self._emit("note", "auto-ask on - a pause sends the question"
-                   if self.auto_ask else "auto-ask off - press Ask when you are ready")
-        return self.auto_ask
-
     def _pump_auto_ask(self) -> None:
         if not self._auto_ask_armed():
             return
@@ -4491,37 +4600,63 @@ class Session:
                 return app_note(self.target_app, note)
         return ""
 
+    def select_style(self, key: str) -> bool:
+        """Select the style Refine writes in (decisions.md 2026-11-24): the pill's menu
+        and Flow Home set the same field, and it stays selected until changed. Saved now:
+        a choice made just before closing the app is still a choice."""
+        profile = self.profile
+        if profile is None or not kinds.valid(key):
+            return False
+        profile.refine_kind = key
+        profile.save()
+        self._emit("note", f"Refine writes {kinds.get(key).noun} now")
+        return True
+
+    def _lens_here(self) -> tuple[str, str]:
+        """The selected lens's name and instructions, ("", "") for No lens, and when it
+        was used, for the Lenses page."""
+        profile = self.profile
+        key = getattr(profile, "lens", lenses.NONE) if profile is not None else lenses.NONE
+        text_of = getattr(profile, "lens_instructions", None)
+        text = text_of(key) if callable(text_of) and isinstance(key, str) else ""
+        if not text:
+            return "", ""
+        label_of = getattr(profile, "lens_label", None)
+        name = label_of(key) if callable(label_of) else key
+        used = getattr(profile, "lens_used", None)
+        if isinstance(used, dict):
+            used[key] = round(time.time(), 1)
+            self._request_save()
+        return name, text
+
+    def select_lens(self, key: str) -> bool:
+        """Select the lens Ask answers through: the pill's menu and Flow Home set the
+        same field, and it stays selected until changed."""
+        profile = self.profile
+        keys = getattr(profile, "lens_keys", None) if profile is not None else None
+        if not callable(keys) or key not in keys():
+            return False
+        profile.lens = key
+        profile.save()
+        self._emit("note", "Ask answers plainly now" if key == lenses.NONE
+                   else f"Ask answers through the {profile.lens_label(key)} lens now")
+        return True
+
     def kind_here(self) -> str:
-        """What Refine would write for the window in front right now (`flow/kinds.py`).
+        """The style Refine writes in here: the program's own, or the selected one.
 
-        The user's own choices first - a per-app entry, then a default that names a
-        kind - and the window only after them. Public because the pill asks it too, on
-        a mode change, to say in words what the gold glyph is about to do; both ask the
-        same function so the sentence and the rewrite cannot disagree.
-
-        Cheap enough for that: two dictionary walks and at most one regex split of a
-        title, on values the pill already resolved.
+        decisions.md 2026-11-24, "You choose, Flow does not guess": nothing is read from
+        the window to pick a style. Public because the pill asks it too, to say which
+        style a Refine will use; both ask the same function so the line and the rewrite
+        cannot disagree.
         """
-        title = self.target_title
-        probe = self.title_probe
-        if callable(probe):
-            # Asked for, used on the next line, and let go: a local, so the title of
-            # whatever somebody was reading does not sit on the session between
-            # rewrites. `target_title` is only what a harness with no pill sets.
-            try:
-                title = probe()
-            except Exception:
-                # A surface's read of another program's window. Whatever went wrong
-                # there, the answer is "no title", which is an unrecognised page -
-                # never a reason for a rewrite somebody asked for not to happen.
-                title = ""
         profile = self.profile
         return kinds.resolve(
             self.target_app if isinstance(self.target_app, str) else "",
-            title if isinstance(title, str) else "",
+            "",
             getattr(profile, "kinds", None) if profile is not None else None,
-            getattr(profile, "refine_kind", kinds.AUTO) if profile is not None
-            else kinds.AUTO,
+            getattr(profile, "refine_kind", kinds.PROMPT) if profile is not None
+            else kinds.PROMPT,
         )
 
     def _start_refine(self, instruction: str, *, polish: bool = False,
@@ -4590,6 +4725,16 @@ class Session:
         # settings, and a setting changed mid-rewrite belongs to the next one.
         wanted = self.refine_kind
         signed = getattr(self.profile, "name", "") if self.profile is not None else ""
+        # The style's own instructions when it is the user's or an edited built-in
+        # (decisions.md 2026-11-24); None sends the built-in brief as shipped.
+        styled = None
+        if polish and self.profile is not None:
+            lookup = getattr(self.profile, "style_instructions", None)
+            styled = lookup(wanted) if callable(lookup) else None
+            used = getattr(self.profile, "style_used", None)
+            if isinstance(used, dict):
+                used[wanted] = round(time.time(), 1)
+                self._request_save()
 
         def work() -> None:
             passed_over: list[str] = []
@@ -4599,6 +4744,7 @@ class Session:
                 cli=self._cli, timeout=self._cli_timeout,
                 model=self.cli_model, effort=self.cli_effort,
                 skipped=passed_over, app=app, kind=wanted, name=signed,
+                instructions=styled,
                 health=self.cli_health,
             )
             with self._refine_lock:
@@ -4710,30 +4856,14 @@ class Session:
         self.muted = not self.muted
         if self.muted and self.speaker is not None:
             self.speaker.stop()
-        self._emit("note", "replies muted" if self.muted else "replies spoken aloud")
-        return not self.muted
-
-    def _first_converse_notice(self) -> None:
-        """Say once, on screen, that a pause sends the question.
-
-        Auto-ask stays ON (decisions.md 2026-08-03, part 4) because the card now pins
-        the question, so a premature send costs nothing. The bargain that makes that
-        defensible is that the first entry says so — and the reopen bar is one stranger
-        reporting a surprise send, which is a report only somebody who was never told
-        can make.
-
-        With `--no-profile` there is nothing to remember it in, so it is shown on every
-        entry rather than never. A session with no profile is a session that has also
-        forgotten the calibration and the trigger word; being told twice about auto-ask
-        is the cheapest of those costs, and the alternative is a warning that a
-        `--no-profile` user never receives.
-        """
-        if self.profile is not None and self.profile.converse_seen:
-            return
-        self._emit("note", auto_ask_notice(AUTO_ASK_SEC))
         if self.profile is not None:
-            self.profile.converse_seen = True
+            # Remembered, and saved now rather than at the next Send: a choice about how
+            # someone wants to work, made just before closing the app, is still a choice.
+            self.profile.read_answers = not self.muted
             self.profile.save()
+        self._emit("note", "answers stay on screen" if self.muted
+                   else "answers read aloud")
+        return not self.muted
 
     def new_conversation(self) -> None:
         """Start again: the thread, the reply and the card, in one act.
@@ -4897,7 +5027,6 @@ class Session:
                        f"leaves this machine{where}"
                        if who else
                        "converse mode - no agent CLI on PATH, so Ask has nothing to send")
-            self._first_converse_notice()
         elif self.mode == REFINE:
             who = self._provider()
             # The same work as converse's sentence: the provider, the fact that the
@@ -5009,8 +5138,12 @@ class Session:
             return heard, restyle
         return f"{heard} {text.strip()}".strip(), self.refine_kind
 
-    def send(self) -> str:
+    def send(self, dictate: bool = False) -> str:
         """Hand off the draft and reset.
+
+        `dictate` hands the draft back to paste whatever the mode is: hands-free only
+        dictates (decisions.md 2026-11-24), so a pause while the pill is on Refine or Ask
+        lands the words as said rather than sending them to the CLI.
 
         In dictate mode the caller injects the returned text (stage 8). In converse
         mode the text goes to the CLI instead and the caller gets "" — there is nothing
@@ -5023,6 +5156,8 @@ class Session:
         Both refusals below say so out loud. Send is a button, and a button that does
         nothing when pressed reads as broken — which is exactly how it was reported.
         """
+        if dictate and not self.draft.text.strip():
+            return ""
         if not self.draft.text.strip():
             # Named for the button that was pressed and for what is on screen while it
             # says this. In converse the chip reads **Ask**, and the card behind it is
@@ -5053,8 +5188,10 @@ class Session:
         # a defect: Refine's second hold was meant to *say more* about the result on the
         # panel, and by the time `_start_refine` asked whether it was a follow-up the
         # answer had already been reset. See `_refine_source`.
-        extending = self._extending_refine()
-        restyle = kinds.spoken(text) if extending else None
+        extending = False if dictate else self._extending_refine()
+        # Naming a style out loud is dictation (decisions.md 2026-11-24): there is no
+        # spoken restyle, so a second hold is always more of the same piece.
+        restyle = None
         if restyle is None:
             # A spoken "make it an email" is a command about the result, not a turn of
             # the thread: recalled later it would be a prompt that reads "make it an
@@ -5069,8 +5206,13 @@ class Session:
         self.gate.reset()
         self._utter = []
         self._emit("draft", "")
+        if dictate:
+            self._set_state(State.IDLE)
+            return text
         if self.mode == CONVERSE and text.strip():
             self._start_ask(text)
+            return ""
+        if self.mode == REFINE and text.strip() and self._grow_piece(text):
             return ""
         if self.mode == REFINE and text.strip():
             # Refine is a mode here, not an instruction: the polish pass over the
@@ -5108,6 +5250,10 @@ class Session:
         # `MAX_CHARS` makes that split a no-op, so the framing is intact by construction
         # rather than by luck.
         framing = ask_framing(self._refine_cwd)
+        # The selected lens (decisions.md 2026-11-24): a viewpoint the answer is given
+        # from, carried after the grounding and counted in the same budget.
+        lens_name, lens_text = self._lens_here()
+        framing += lenses.clause(lens_name, lens_text)
         budget = max(0, REFINE_MAX_CHARS - len(framing))
         kept = question if len(question) <= budget else question[-budget:]
         framed = kept + framing
@@ -5136,6 +5282,8 @@ class Session:
         # be noise on the common case.
         who = self._provider() or "nobody — no CLI on PATH"
         where = self._workspace_leaf()
+        if lens_text:
+            who = f"{who} through the {lens_name} lens"
         self._emit("note", f"asking {who} · {where}…" if where else f"asking {who}…")
         sent = len(kept)
         if sent < len(question):

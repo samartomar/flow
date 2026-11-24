@@ -487,3 +487,6 @@ body.first .page { align-items: center; padding: 32px 24px 40px; }
   padding: 28px 32px; display: flex; flex-direction: column; gap: 10px;
 }
 .gone-card p { color: var(--muted); }
+
+/* A style's instructions, as written: line breaks kept (decisions.md 2026-11-24). */
+.note.pre { white-space: pre-wrap; }

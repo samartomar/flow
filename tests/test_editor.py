@@ -274,29 +274,6 @@ class TestTheCountdownIsHeld(unittest.TestCase):
         self.assertEqual(s.draft.text, "what is a rollback")
         s.close()
 
-    def test_the_countdown_starts_again_from_the_commit_not_from_before_it(self):
-        s = session()
-        s.toggle_mode(to=CONVERSE)
-        s.draft.set("what is a rollback")
-        s._after_draft_change()
-        s.begin_edit()
-        s._settled_at = time.perf_counter() - (AUTO_ASK_SEC + 1.0)
-        s.commit_edit("what is a rollback in postgres")
-        left = s.auto_ask_in
-        self.assertIsNotNone(left, "the countdown never came back")
-        self.assertGreater(left, AUTO_ASK_SEC - 1.0)
-        s.close()
-
-    def test_a_cancel_releases_the_hold_as_well(self):
-        s = session()
-        s.toggle_mode(to=CONVERSE)
-        s.draft.set("what is a rollback")
-        s._after_draft_change()
-        s.begin_edit()
-        s.cancel_edit()
-        self.assertIsNotNone(s.auto_ask_in)
-        s.close()
-
 
 @unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 class TestFlowStillCannotPasteIntoItself(unittest.TestCase):

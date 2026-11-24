@@ -714,7 +714,10 @@ CHORD_IGNORED_LINE = "chord   in profile.json ignored: {combo} - {reason}"
 #: action names are the talk chord's with "ask" in front, so the surfaces can tell
 #: which hand is down: `ask` starts a hold that always asks, `ask-end` sends the
 #: question, `ask-break` is Windows meaning something else.
-ASK_ACTIONS = {"action": "ask", "end_action": "ask-end", "break_action": "ask-break"}
+#: `toggle_action` is empty: a tap of Ask's chord does nothing (decisions.md 2026-11-24).
+#: Hands-free belongs to the talk chord alone, and only dictates.
+ASK_ACTIONS = {"action": "ask", "end_action": "ask-end", "break_action": "ask-break",
+               "toggle_action": ""}
 ASK_CHORD_LINE = "chord   ask      {keys}  (hold to ask, release to send the question)"
 ASK_CHORD_IGNORED_LINE = "chord   ask_chord in profile.json ignored: {combo} - {reason}"
 ASK_CHORD_UNAVAILABLE = ("chord   ask unavailable (keyboard hook refused); "
@@ -892,7 +895,11 @@ class Chord:
         #: the two agree. What it costs is one attribute per chord and one dict copy per
         #: key event on the input path, which is why `_sync` writes only the three
         #: fields that changed rather than re-deriving them.
-        self._hold = Hold(self.mods, gesture=self.gesture, on_latch=_tap_enabled)
+        #: A chord with no `toggle_action` has no tap: Ask's chord (decisions.md
+        #: 2026-11-24), whose quick tap used to switch hands-free on *and* turn the pill
+        #: to Ask, so a hand that brushed it found the microphone open with nothing said.
+        self._hold = Hold(self.mods, gesture=self.gesture,
+                          on_latch=_tap_enabled if self.toggle_action else None)
         #: **Where the machine's verdict goes, when something is listening.** A callable
         #: taking `Diag.write`'s shape, or None. Set from `__main__` because this object
         #: is built before the session is, and the trace is a property of the run rather

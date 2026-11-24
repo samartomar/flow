@@ -238,7 +238,10 @@ NOTICE_TEXT = MUTED
 #: draft-shaped notes have the panel. A 400 px sentence under the pill on
 #: every tap is noise, and noise is how the strip that matters gets ignored.
 SAID_NOTES = ("nothing to", "still ", "only the last", "discarded",
-              "stopped after", "skipping ", "rewritten")
+              "stopped after", "skipping ", "rewritten",
+              # decisions.md 2026-11-24: a piece ended by "done", and a style chosen
+              # from the menu, are said where the choice was made.
+              "done - ", "Refine writes ", "Ask answers ")
 
 #: A hold this long that heard nothing says so when it ends. Shorter is a tap, or a hand
 #: that changed its mind, and silence is the right answer to those. Longer is somebody
@@ -257,6 +260,16 @@ NO_WORDS = "did not catch any words - hold and say it again"
 #: How much of what is being heard the strip shows while the keys are down: the tail,
 #: because the newest words are the ones somebody is checking.
 HEARD_TAIL = 64
+
+#: The strip while hands-free is on and nothing is being heard (decisions.md 2026-11-24).
+#: It names what a pause does, because the pill shows no other sign that the microphone
+#: is open and what will happen to the words.
+HANDSFREE_TEXT = "hands-free - each pause pastes"
+HANDSFREE_COPY_TEXT = "hands-free - each pause copies"
+
+#: Hands-free turns itself off after this long with nothing heard, and says so.
+HANDSFREE_IDLE_SEC = 120.0
+HANDSFREE_IDLE_TEXT = "hands-free off - two minutes of silence"
 
 #: A frame this late is written to the trace (`stall`). Frames are 30 ms apart; a
 #: second is a loop that was not running - a native menu left open, a call that
@@ -479,6 +492,16 @@ def _edit_rect(footer_y: int) -> tuple:
             PANEL_W - 74 - CHIP_H - 8, footer_y + CHIP_H)
 
 
+#: The answer card's Insert chip (decisions.md 2026-11-24), right of Copy.
+INSERT_LABEL = "Insert"
+INSERT_W = 62
+
+
+def _insert_rect(footer_y: int) -> tuple:
+    """Where Insert sits: right of Copy, before the hold hint."""
+    return (80, footer_y, 80 + INSERT_W, footer_y + CHIP_H)
+
+
 def _continue_rect(footer_y: int) -> tuple:
     """Where Continue in Flow sits in a footer whose chips start at `footer_y`."""
     return (PANEL_W - 16 - CONTINUE_W, footer_y, PANEL_W - 16, footer_y + CHIP_H)
@@ -536,10 +559,15 @@ PANEL_SPEC = {
         "heard_fill": TEXT,
         "result_tag": None,
         "result_accent": CARD_ACCENT,
-        "hint": "hold the mic to reply",
+        # Shorter than Refine's: Insert sits between Copy and the hint now.
+        "hint": "hold to reply",
         "send": False,
         # The conversation's way to the page: every turn, typed follow-ups, notes.
         "continue": True,
+        # The answer into the window you were working in, or the pinned one
+        # (decisions.md 2026-11-24): Copy, click and Ctrl+V was three steps for the
+        # thing most often done with an answer.
+        "insert": True,
     },
 }
 
@@ -852,6 +880,8 @@ class CompactPill(tk.Tk):
     #: so the double tap stopped hands-free instead of starting it. Class-level for
     #: `lite`'s reason: a fixture built with `__new__` must not recurse into `self.tk`.
     _handsfree = False
+    #: When hands-free last heard something, for its two-minute way out.
+    _handsfree_heard_at = 0.0
     hotkeys = None
     on_send = None
     settings_path = None
@@ -1508,6 +1538,7 @@ class CompactPill(tk.Tk):
         # waiting for arrive as a `draft` event, and `_pump_send` reads the
         # draft the event has just settled.
         self._pump_send()
+        self._pump_handsfree()
         self._pump_press()
         self._pump_paste_last()
         self._pump_retype()
@@ -1917,10 +1948,11 @@ class CompactPill(tk.Tk):
                 # of them, pasting half an utterance and stranding the rest.
                 self._last_draft = ev.text
             elif ev.kind == "partial":
-                if not self.panel_flows and self._press_talking:
+                if not self.panel_flows and (self._press_talking or self._handsfree):
                     # What is being heard, for the strip under the pill: the only
                     # proof on screen that the words are arriving.
                     self._hold_words = ev.text or ""
+                    self._handsfree_heard_at = time.monotonic()
                 # Not while a talk-keys hold waits to leave Ask: those words
                 # are dictation, and Ask's heard block is not theirs.
                 if self._panel_open and self._side_since is None:
@@ -2091,6 +2123,10 @@ class CompactPill(tk.Tk):
                 # an `edit`), not now — until then it has not happened.
                 self._retype_wait = time.perf_counter()
                 self._quicken()
+                # A Refine that grew its piece (decisions.md 2026-11-24) answers with
+                # this, not a `reply`: the landing the release decided is spent, and
+                # left set it would put the next answer into the window.
+                self._landing = None
             elif ev.kind == "note" and ev.text.startswith(SAID_NOTES):
                 # The few notes no colour on this pill can carry — see
                 # `SAID_NOTES`, which is also the list of what stays silent
@@ -2256,6 +2292,15 @@ class CompactPill(tk.Tk):
         here needs to know which happened: an empty return delivers nothing,
         and the refusal notes say why when the answer is neither.
         """
+        if (not self.panel_flows and getattr(self.session, "mode", None) == REFINE
+                and (self.session.draft.text or "").strip()):
+            # Refine by the send key or "boom" takes the release's door, which is the
+            # one that decides where the result lands. Through `session.send()` alone
+            # there was no landing, and the result fell through to a card with Copy
+            # and nothing else - Refine "tells me but does not paste" (2026-11-24).
+            self._send_pending = False
+            self._ask()
+            return
         self._send_pending = self._ask_pending = False
         self._send_since = None
         text = self.session.send()
@@ -2334,6 +2379,8 @@ class CompactPill(tk.Tk):
                 extra["window"] = window
             if submitted:
                 extra["submitted"] = True
+            if self.pinned:
+                extra["pinned"] = True
             delivered(text, problem, copied, **extra)
 
     def _key_hook(self):
@@ -2775,6 +2822,11 @@ class CompactPill(tk.Tk):
                 if self._hold_since is not None else 0.0)
         self._hold_since = None
         self._press_talking = False
+        # Words the strip showed during the hold. A hold the session took as a command -
+        # "done", "scratch that", "make it shorter" - leaves the draft as it was, and
+        # without this it was told "heard nothing - check the microphone" (found driving
+        # the real app, 2026-11-24). Heard is heard, whatever became of the words.
+        heard = bool((self._hold_words or "").strip())
         self._hold_words = ""
         pending = self.session.talk_end()
         draft = self.session.draft.text
@@ -2790,7 +2842,7 @@ class CompactPill(tk.Tk):
                        mode=mode if isinstance(mode, str) else "",
                        ok=words,
                        reason="words" if words else "break" if not send else "silence")
-        if (send and not words and not self.panel_flows
+        if (send and not words and not heard and not self.panel_flows
                 and held >= HEARD_NOTHING_SEC and self._strip_is_free()):
             self._say(HEARD_NOTHING, ERROR_FRAMES)
         if send and words:
@@ -2828,9 +2880,7 @@ class CompactPill(tk.Tk):
         on its way to becoming one must not be mistaken for one that already is.
         """
         if self._handsfree:
-            self._handsfree = False
-            self.armed = False
-            self.session.pause()
+            self._handsfree_off()
         else:
             try:
                 self.session.start()
@@ -2841,6 +2891,46 @@ class CompactPill(tk.Tk):
             self._mic_gone = False
             self._handsfree = True
             self.armed = True
+            self._hold_words = ""
+            self._handsfree_heard_at = time.monotonic()
+
+    def _handsfree_off(self, why: str = "") -> None:
+        """Hands-free ends: the microphone closes, and the strip says so when it was not
+        the user's own tap that ended it."""
+        self._handsfree = False
+        self.armed = False
+        self._hold_words = ""
+        self.session.pause()
+        if why:
+            self._say(why)
+
+    def _pump_handsfree(self) -> None:
+        """Hands-free only dictates (decisions.md 2026-11-24): each pause lands what was
+        said, whatever mode the pill is in, and two minutes of silence turns it off.
+
+        Before, a pause added the words to a draft that landed only on "boom", the send
+        key or a hold. The pill showed nothing of it, and the owner's report was the
+        honest reading: "looks engaged but does nothing". A hold that is down owns its
+        own words, and so does a release still waiting to send them.
+        """
+        if not self._handsfree:
+            return
+        now = time.monotonic()
+        if self._press_talking or self._send_pending or self._ask_pending:
+            self._handsfree_heard_at = now
+            return
+        session = self.session
+        held = getattr(getattr(session, "draft", None), "text", "")
+        if (isinstance(held, str) and held.strip() and not getattr(session, "busy", False)
+                and getattr(session, "state", None) is State.DRAFT):
+            text = session.send(dictate=True)
+            self._hold_words = ""
+            self._handsfree_heard_at = now
+            if text:
+                self._deliver(text, typed=True)
+            return
+        if now - self._handsfree_heard_at >= HANDSFREE_IDLE_SEC:
+            self._handsfree_off(HANDSFREE_IDLE_TEXT)
 
     def _on_press(self, e=None) -> None:
         """The button going down: remember when and where, decide nothing yet.
@@ -3131,6 +3221,8 @@ class CompactPill(tk.Tk):
                       if self.panel_flows or not self._keys_line()
                       else "what holding the pill does", state="disabled")
         m.add_separator()
+        self._add_style_rows(m)
+        self._add_lens_rows(m)
         # Paste last (the canvas's Pill artboard, and Wispr Flow's, FluidVoice's
         # and VoiceInk's menus): the words it would paste, so the row says what
         # a click does. After a frame, not now — the menu is still handing the
@@ -3151,6 +3243,42 @@ class CompactPill(tk.Tk):
         m.add_command(label="Open Flow", command=self._open_home)
         m.add_command(label="models, microphone, shortcuts, settings",
                       state="disabled")
+
+    def _add_style_rows(self, m) -> None:
+        """The style Refine writes in, ticked (decisions.md 2026-11-24): the same setting
+        as Flow Home's Styles page, a click away while moving from code to email. Absent
+        when there is no profile to keep a choice in."""
+        profile = getattr(self.session, "profile", None)
+        if profile is None or not hasattr(self.session, "select_style"):
+            return
+        chosen = getattr(profile, "refine_kind", kinds.PROMPT)
+        # On the instance for the reason `_mode_var` is: a Tk variable dies with the
+        # frame that made it, and a radio row with no variable draws no tick.
+        self._style_var = tk.StringVar(value=chosen if kinds.valid(chosen) else kinds.PROMPT)
+        m.add_command(label="Refine writes", state="disabled")
+        for key in kinds.keys():
+            m.add_radiobutton(label=kinds.get(key).label, value=key, variable=self._style_var,
+                              command=lambda k=key: self.session.select_style(k))
+        m.add_command(label="Styles...", command=lambda: self._open_home("styles"))
+        m.add_separator()
+
+    def _add_lens_rows(self, m) -> None:
+        """The lens Ask answers through, ticked - the Styles rows' twin for Ask."""
+        profile = getattr(self.session, "profile", None)
+        keys = getattr(profile, "lens_keys", None) if profile is not None else None
+        if not callable(keys) or not hasattr(self.session, "select_lens"):
+            return
+        offered = keys()
+        if not isinstance(offered, (tuple, list)):
+            return
+        chosen = getattr(profile, "lens", "none")
+        self._lens_var = tk.StringVar(value=chosen)
+        m.add_command(label="Ask answers through", state="disabled")
+        for key in offered:
+            m.add_radiobutton(label=profile.lens_label(key), value=key, variable=self._lens_var,
+                              command=lambda k=key: self.session.select_lens(k))
+        m.add_command(label="Lenses...", command=lambda: self._open_home("lenses"))
+        m.add_separator()
 
     def _open_home(self, page: str = "home") -> None:
         """Open Flow Home, or say on the strip why it could not open.
@@ -3545,7 +3673,7 @@ class CompactPill(tk.Tk):
         - but the line under it says it is listening and what the release will do,
         which is also the one place a mode is named at the moment it matters.
         """
-        if not self._press_talking or self.panel_flows:
+        if not (self._press_talking or self._handsfree) or self.panel_flows:
             return ""
         if getattr(self.session, "state", None) in (State.REFINING, State.ASKING):
             # A pause before letting go ends the utterance, and what was said can be
@@ -3555,6 +3683,11 @@ class CompactPill(tk.Tk):
         heard = " ".join((self._hold_words or "").split())
         if heard:
             return heard if len(heard) <= HEARD_TAIL else "\u2026" + heard[-HEARD_TAIL:]
+        if self._handsfree and not self._press_talking:
+            # Hands-free only dictates (decisions.md 2026-11-24), so this line does
+            # not name a mode: it says the microphone is open and what a pause does.
+            return (HANDSFREE_COPY_TEXT if self.lite or not self.on_send
+                    else HANDSFREE_TEXT)
         session = self.session
         mode = getattr(session, "mode", DICTATE)
         if mode == CONVERSE:
@@ -3562,7 +3695,11 @@ class CompactPill(tk.Tk):
             who = who if isinstance(who, str) and who else "the agent CLI"
             return f"listening - let go to ask {who}"
         if mode == REFINE:
-            return "listening - let go and it is written for this window"
+            # The style it will be written in, named at the moment it matters
+            # (decisions.md 2026-11-24: the line names the style a Refine uses).
+            here = getattr(session, "kind_here", None)
+            key = here() if callable(here) else kinds.PROMPT
+            return f"listening - let go and it is written {kinds.written(key)}"
         return ("listening - let go to copy" if self.lite or not self.on_send
                 else "listening - let go to paste")
 
@@ -3902,6 +4039,9 @@ class CompactPill(tk.Tk):
             self._open_editor()
         elif self._spec()["send"] and _hit(layout.send, x, y):
             self._panel_send()
+        elif (self._spec().get("insert")
+              and _hit(_insert_rect(layout.footer_y), x, y)):
+            self._insert_answer()
         elif (self._spec().get("continue")
               and _hit(_continue_rect(layout.footer_y), x, y)):
             self._continue_in_flow()
@@ -4063,6 +4203,18 @@ class CompactPill(tk.Tk):
             return
         if _copy_to_clipboard(self, text):
             self._flash = FLASH_FRAMES
+
+    def _insert_answer(self) -> None:
+        """The Insert chip (decisions.md 2026-11-24): the answer goes where a Refine
+        lands - the window you were working in, or the pinned one - by the same door
+        every paste takes. The card stays: it is closed by its own mark, as before."""
+        text = (self._panel_result or "").strip()
+        if not text:
+            self._say("nothing to insert yet - the answer has not come back")
+            return
+        self._deliver(text)
+        if not self._flash:
+            self._say("answer inserted")
 
     def _continue_in_flow(self) -> None:
         """Ask's footer chip: the conversation, carried on in Flow Home's
@@ -4541,6 +4693,11 @@ class CompactPill(tk.Tk):
         glyphs.copy(c, x1 + 6, gy - 6.5, MUTED, size=13)
         c.create_text(gx + 13, gy, anchor="w", text="Copy",
                       font=FONT_CHIP, fill=CODE)
+        if spec.get("insert"):
+            x1, y1, x2, y2 = _insert_rect(layout.footer_y)
+            _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
+            c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=INSERT_LABEL,
+                          font=FONT_CHIP, fill=CODE)
         c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
                       text=spec["hint"], font=FONT_TAG, fill=DIM)
         if spec["send"]:

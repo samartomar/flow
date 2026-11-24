@@ -391,13 +391,49 @@ def _signature(name) -> str:
     return ", and no name after it"
 
 
-def brief(kind: str, text: str, name: str = "") -> str:
-    """The whole instruction for one kind of writing, with `text` in it.
+#: What closes a style the user wrote or edited (decisions.md 2026-11-24). Their
+#: instructions say how to write; this says what the text is and what to hand back, so a
+#: style cannot be talked into answering the dictation or wrapping the result. The
+#: dictated text is the last thing, as in every built-in brief.
+_STYLE_TAIL = (
+    "\n" + _MATERIAL +
+    "Output ONLY the rewritten text: no preamble, no explanation, no code fences, no "
+    "surrounding quotes, no bracketed placeholders.\n\n"
+    "DICTATED TEXT:\n{text}"
+)
+
+#: How long a style's instructions may be. A page of guidance, not a document: past
+#: this it is something pasted into a field meant for a paragraph.
+STYLE_MAX = 4000
+
+
+def style_text(kind: str, name: str = "") -> str:
+    """A built-in style's instructions as the user reads and edits them on the Styles
+    page: its brief with the signature filled in and the dictated-text slot taken off.
+
+    What the page shows is what Refine sends, less the closing lines every style shares
+    (`_STYLE_TAIL`), so an edit starts from the real thing rather than a summary of it.
+    """
+    template = _BRIEFS.get(kind, _POLISH_PROMPT).replace("{signature}", _signature(name))
+    tail = "\n\nDICTATED TEXT:\n{text}"
+    if template.endswith(tail):
+        template = template[: -len(tail)]
+    return template.rstrip()
+
+
+def brief(kind: str, text: str, name: str = "", instructions: str | None = None) -> str:
+    """The whole instruction for one style of writing, with `text` in it.
+
+    `instructions` is a style the user wrote or edited (decisions.md 2026-11-24): it
+    replaces the built-in brief and is closed by `_STYLE_TAIL`. Without it a built-in
+    style sends its own brief, measured as it stands.
 
     Built by replacement rather than `str.format`, and that is a defect avoided rather
     than a style: the text is the user's, and a dictated "{0}" or a pasted `{name}` is
     exactly what `format` would try to fill.
     """
+    if isinstance(instructions, str) and instructions.strip():
+        return (instructions.strip()[:STYLE_MAX] + "\n" + _STYLE_TAIL).replace("{text}", text)
     template = _BRIEFS.get(kind, _POLISH_PROMPT)
     return (template.replace("{signature}", _signature(name))
             .replace("{text}", text))
@@ -1714,6 +1750,7 @@ def refine(
     effort: str = EFFORT_DEFAULT,
     kind: str = kinds.PROMPT,
     name: str = "",
+    instructions: str | None = None,
     health: Health | None = None,
 ) -> tuple[str | None, str]:
     """Apply a semantic instruction to `text`.
@@ -1749,7 +1786,7 @@ def refine(
     """
     head, tail = _split_tail(text)
     prompt = (
-        brief(kind, tail, name)
+        brief(kind, tail, name, instructions)
         if polish
         else _PROMPT.format(instruction=instruction, text=tail)
     )

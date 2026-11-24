@@ -3252,3 +3252,110 @@ voice before it is sent, which only Classic did for Type: the answer is then tha
 feature on the compact surface, not the old window back; (2) a stage cannot keep the
 suite green without deleting a test of session behaviour that nothing else covers: that
 test is ported first or the stage stops and says so.
+
+### 2026-11-24 — You choose, Flow does not guess: styles and lenses are selected in settings, a Refine grows into one piece, and hands-free only dictates
+
+**What the owner hit.** On 2026-11-24 he said Refine went to codex and came back but
+neither offered the result nor pasted it, that the tap was flaky, and that Refine and
+Ask "look engaged but do nothing". The trace and a read of the code explained each:
+
+- His profile had the earlier panel flow on (`Profile.panel_flows`), so every Refine
+  waited on the panel for Send. Switched off on his machine the same day, on his yes.
+- A Refine sent while hands-free (by "boom" or the send key) is never given a landing,
+  so its result fell through to a card with Copy and no paste.
+- There is no double-ctrl gesture: one short tap of the chord toggles hands-free, a
+  double tap toggles only once, the Ask chord's tap toggles it too, and the guide
+  describes both a single and a double tap.
+- Hands-free shows no words and collects them into a draft that lands only on "boom",
+  the send key or a hold, so it looked live and did nothing.
+- An answer had no way into a window but Copy.
+- No trace record says whether a result was pasted, refused or kept for Paste last.
+
+**What he decided, in one grilling round** (vocabulary in [GLOSSARY.md](../GLOSSARY.md)):
+
+1. **Styles.** A style is a named way Refine writes, with instructions he can read and
+   change. Four are built in (Prompt for a coding agent, Email to send, Chat message,
+   Tidy up), each editable with a way back to the original, and he can add his own.
+   They live on their own Styles page in Flow Home, which replaces "What Refine writes"
+   and shows where each style is used and when it last was.
+2. **Selected, not spoken, not guessed.** One style is selected and stays selected until
+   he changes it, in Flow Home or from the pill's right-click menu, which is the same
+   setting. A program may have its own style, which wins for that program; it is a
+   program-to-style entry with no instruction box of its own, because instructions
+   belong to the style. The line under the pill names the style a Refine used.
+3. **A Refine grows into one piece.** Each hold adds what was said; Flow rewrites the
+   whole piece and replaces what it landed before. A spoken change ("shorter", "add
+   that it's due Friday") applies to the whole piece. The piece ends when he edits it
+   himself, lands in another window or style, or says "done" — never on a timer.
+4. **The pin covers everything that lands**: dictation, Refine, an inserted answer and
+   Paste last. The answer card belongs to Flow and is not affected by the pin.
+5. **Ask has its own section, with lenses.** A lens is a named viewpoint Ask answers
+   from, with instructions he can read and change: No lens (the default, today's
+   behaviour), Architecture and Business built in, and his own. Selected the same way
+   as a style, and it stays selected. Lenses are instructions only; reading his
+   calendar, mail or tasks is not part of this and is his to raise later. Ask stays
+   grounded in the workspace folder, as now.
+6. **The answer card gets Insert**, which lands the answer in the target window, or the
+   pinned window when there is one.
+7. **Hands-free is dictation only.** One tap of ctrl+win turns it on and one turns it
+   off; double taps mean nothing special, and the Ask chord's tap no longer toggles it.
+   While on, the strip says "hands-free - each pause pastes" and shows the words live;
+   each pause of about a second lands what was said. A Refine or Ask hold still works
+   on top of it. It turns itself off after two minutes of silence and says so.
+8. **Auto-ask is removed.** It only ever ran while hands-free, which no longer asks.
+9. **Answers are not read aloud by default.** A switch in Ask's settings turns it on.
+
+**What this supersedes.**
+
+- 2026-11-22, "Refine writes for the window": Flow guessing the kind from the program
+  and the tab title (`kinds.detect`, the "Flow decides" option). Removed: Refine writes
+  in the selected style, or the program's own.
+- 2026-11-22, "The pill is an indicator": the spoken restyle of what landed ("make it an
+  email", "as a prompt", "tidy it up"). Those phrases are dictation again. Spoken
+  *changes* to the piece, "scratch that" and "done" stay.
+- 2026-11-22, "What was not done": the open questions on auto-ask and on reading
+  answers aloud are closed by items 8 and 9.
+
+**Why.** Each removal takes away a place where Flow decided something he did not see it
+decide — a style guessed from a window title, a sentence taken as a command, a draft
+collected out of sight, an answer spoken unasked. Every one of them reached him as
+"engaged but does nothing" or as a result he did not expect.
+
+**Built the same day, on his "Yes, build it"**, suite-green; at the desk it is the first
+item in `NEEDS_YOU.md`. Where each part lives, and the two calls the build made:
+
+- **Styles**: `flow/kinds.py` (`register`, `my:` keys, `resolve` reads no window,
+  `wanted` names no style), `refine.brief(..., instructions)` with the shared closing
+  lines every style gets (`_STYLE_TAIL`: the dictation is material, never a request),
+  `refine.style_text` for what the page shows, and the profile's `styles`,
+  `style_edits`, `style_used`. Flow Home ▸ Styles, and the pill's *Refine writes* rows.
+  A built-in as shipped still sends its measured brief, byte for byte.
+- **Pieces**: `Session.open_piece`, `_grow_piece`, `end_piece`. A grown piece is the
+  CLI's rewrite of every hold's words as said, replacing the last landing through the
+  same retype a spoken change uses. **The call:** a landing was replaceable only up to
+  800 characters and one line break (`CORRECT_MAX_*`), which an email exceeds on its
+  first landing. Those limits were set for dictation that an editor may have reformatted
+  as it was typed; a piece was *pasted*, so outside terminals a Refine landing may now be
+  replaced up to 6,000 characters and 80 line breaks (`piece_unfit`). Terminals keep the
+  strict limits, so there a multi-line result cannot grow and the next Refine lands as
+  new text. A piece that cannot grow keeps what landed and pastes the new words as said.
+- **Lenses**: `flow/lenses.py`; a lens is a clause after the question's grounding,
+  counted in the same budget, and the waiting line names it. Flow Home ▸ Lenses, under
+  Ask, which also holds *Read answers aloud*; the pill's *Ask answers through* rows.
+- **Insert**: a chip between Copy and the hint on the answer card (the hint shortened to
+  "hold to reply" to fit). **The call:** the button only. The spoken "paste that answer"
+  floated in the grilling was not part of what he confirmed, and was not built.
+- **Hands-free**: `CompactPill._pump_handsfree` and `Session.send(dictate=True)`; the
+  Ask chord has no tap (`ASK_ACTIONS` `toggle_action` empty). Refine by the send key or
+  "boom" now takes the release's landing (`CompactPill._send`).
+- **Read aloud**: `Profile.read_answers`, default off; `Session.muted` starts from it and
+  `toggle_speech` saves it. `auto_ask` is gone from the profile; `Session.auto_ask` is
+  held False only while the retired Classic surface still reads it.
+- **The trace**: a `landed` record per handover (`how`, `pinned`, a reason category),
+  so the next report from the desk can be read from `diag.jsonl`.
+
+**Reopens if:** (1) selecting a style in settings turns out to cost him more than the
+spoken switch it replaced, measured by how often he opens the menu to change it between
+two Refines; (2) a piece rewritten as a whole drifts from what he said in an earlier
+hold — then a piece keeps its earlier holds' text fixed and only the new part is
+rewritten.

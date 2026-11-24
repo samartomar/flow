@@ -1,4 +1,11 @@
-"""What Refine writes, decided by where the words are going.
+"""What Refine writes: the **styles** (GLOSSARY.md), and which one applies.
+
+**Since 2026-11-24 the user chooses and Flow does not guess** (decisions.md, "You choose,
+Flow does not guess"). One style is selected and stays selected; a program may have its
+own, which wins there; nothing is read from the window to pick one, and nothing said out
+loud switches it. Four styles are built in - the kinds below - and the user can add their
+own (`register`). The history that follows is why the four exist; `detect` is kept as the
+reading of a window it describes, and Refine no longer calls it.
 
 Refine had one voice. Whatever was dictated came back as "a clear prompt for an AI coding
 assistant", because that is the request this product was built around - and it is the
@@ -88,11 +95,70 @@ def get(key) -> Kind:
     PROMPT rather than an error, for `_app_note`'s reason: a hand-edited profile, or a
     kind retired by a later version, must cost that one setting and not the rewrite.
     """
+    if isinstance(key, str) and key in _CUSTOM:
+        return _CUSTOM[key]
     return KINDS.get(key if isinstance(key, str) else "", KINDS[PROMPT])
 
 
 def valid(key) -> bool:
-    return isinstance(key, str) and key in KINDS
+    return isinstance(key, str) and (key in KINDS or key in _CUSTOM)
+
+
+# -- the user's own styles (decisions.md 2026-11-24) ---------------------------------------
+
+#: The prefix that marks a style the user made, so its key can never be a built-in's.
+CUSTOM_PREFIX = "my:"
+
+#: How long a style's name may be: something said and read on one line.
+NAME_MAX = 40
+
+#: The user's styles, by key. Set from the profile by `register`, and read by `get` and
+#: `valid` so every caller that already speaks in kinds speaks in styles too.
+_CUSTOM: dict[str, Kind] = {}
+
+
+def custom_key(name: str) -> str:
+    """The key a style called `name` is stored under: the prefix and a slug."""
+    slug = "-".join("".join(c if c.isalnum() else " " for c in name.lower()).split())
+    return CUSTOM_PREFIX + (slug[:NAME_MAX] or "style")
+
+
+def _custom_kind(key: str, name: str) -> Kind:
+    noun = f"the {name} style"
+    return Kind(key, name, noun, f"writing that in the {name} style",
+                f"written in the {name} style")
+
+
+def register(styles) -> None:
+    """Make the profile's own styles known: a list of {"key", "name", ...} entries.
+
+    Replaces what was known, so a deleted style stops resolving at once. An entry that
+    is not a well-formed custom style is passed over, `apps`' bargain."""
+    known: dict[str, Kind] = {}
+    for entry in styles if isinstance(styles, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        key, name = entry.get("key"), entry.get("name")
+        if (isinstance(key, str) and key.startswith(CUSTOM_PREFIX)
+                and isinstance(name, str) and name.strip()):
+            known[key] = _custom_kind(key, " ".join(name.split())[:NAME_MAX])
+    _CUSTOM.clear()
+    _CUSTOM.update(known)
+
+
+def is_custom(key) -> bool:
+    return isinstance(key, str) and key in _CUSTOM
+
+
+def written(key) -> str:
+    """How a result is described in a sentence: "as an email", "in the Standup style"."""
+    style = get(key)
+    return f"in the {style.label} style" if is_custom(key) else f"as {style.noun}"
+
+
+def keys() -> tuple[str, ...]:
+    """Every style there is, built-ins first in `ORDER`, then the user's."""
+    return (*ORDER, *_CUSTOM)
 
 
 # -- where the words are going ----------------------------------------------------------
@@ -302,30 +368,26 @@ def detect(app: str = "", title: str = "") -> str:
     return TIDY
 
 
-def resolve(app: str = "", title: str = "", table=None, default: str = AUTO) -> str:
-    """The kind Refine will write for this window, with the user's own choices applied.
+def resolve(app: str = "", title: str = "", table=None, default: str = PROMPT) -> str:
+    """The style Refine writes in here: the program's own, or the selected one.
 
-    Three answers in order, and the first one that exists wins:
+    Two answers and no third (decisions.md 2026-11-24, "You choose, Flow does not
+    guess"):
 
-    1. `table` - the profile's per-app choices, keyed by executable name the way the
-       per-app instructions are. Somebody who has said "Notepad is where I draft email"
-       has said the one thing detection can never know.
-    2. `default`, when it names a kind - "always a prompt", for the person who uses Refine
-       for nothing else and does not want it second-guessed.
-    3. `detect`.
+    1. `table` - the profile's per-program styles, keyed by executable name.
+    2. `default` - the selected style. A value that is not a style (a deleted one, the
+       retired "auto", a typo) reads as PROMPT, the product's first promise.
 
-    Case-insensitive on the name for `_app_note`'s reason. A value that is not a kind is
-    passed over rather than obeyed, so a typo in a hand-edited profile falls through to
-    the next answer instead of to a kind nobody chose.
+    `title` is accepted and not read: the window no longer chooses. Case-insensitive on
+    the name for `_app_note`'s reason, and a value that is not a style is passed over
+    rather than obeyed.
     """
     name = app.strip().lower() if isinstance(app, str) else ""
     if name and isinstance(table, dict):
         for exe, kind in table.items():
             if isinstance(exe, str) and exe.strip().lower() == name and valid(kind):
                 return kind
-    if valid(default):
-        return default
-    return detect(app, title)
+    return default if valid(default) else PROMPT
 
 
 def describe(kind: str, app: str = "") -> str:
@@ -355,57 +417,10 @@ _IT = r"(?:it|this|that|these|those|the text|the draft|my text|my draft)"
 #: now" are things people say *in* a message.
 _PLEASE = r"(?:,? (?:please|instead|for me))"
 
-_AS = {
-    EMAIL: r"(?:an? )?(?:proper |short |quick |professional |formal |polite )?e-?mail",
-    # "message" and "dm" stand alone; "text" needs its article. "Turn this into text",
-    # "reply" and "chat" are ordinary words in ordinary dictation, and a restyle that
-    # fired on them would rewrite somebody's sentence as a chat message.
-    MESSAGE: (r"(?:(?:an? )?(?:short |quick )?(?:(?:slack|teams|discord|whatsapp|chat|"
-              r"text|direct|instant) )?(?:message|dm)|a (?:short |quick )?text)"),
-    PROMPT: r"(?:an? )?(?:proper |good |better |clear |real )?prompt",
-}
-
-_SPOKEN = [
-    (kind, re.compile(
-        "^" + _ASK + r"(?:"
-        rf"(?:make|turn|convert|rewrite|write|format|put|do|redo) {_IT} "
-        rf"(?:into |in to |as |like |to be |to )?{noun}{_PLEASE}?|"
-        rf"(?:make|write|draft|do) (?:{_IT} )?{noun}(?: (?:out )?of {_IT})?{_PLEASE}?|"
-        rf"(?:as|into|like) {noun}{_PLEASE}?|"
-        rf"{noun}{_PLEASE}"
-        r")[.!?]*$", re.I))
-    for kind, noun in _AS.items()
-]
-
-_SPOKEN.append((TIDY, re.compile(
-    "^" + _ASK + r"(?:"
-    rf"(?:just )?(?:tidy|clean) {_IT}(?: up)?|"
-    rf"(?:just )?(?:tidy|clean) up {_IT}|"
-    r"(?:just )?(?:tidy|clean) (?:it )?up|"
-    rf"(?:keep|leave) {_IT} as (?:it is|is|i said it)|"
-    rf"(?:keep|leave) my (?:own )?words|"
-    rf"(?:just )?fix (?:the )?(?:grammar|punctuation)(?: (?:in|of) {_IT})?"
-    r")" + _PLEASE + r"?[.!?]*$", re.I)))
-
-
-def spoken(utterance: str) -> str | None:
-    """The kind an utterance asks for, when the whole of it is such a request.
-
-    Whole-utterance only, the send trigger's rule (decisions.md 2026-08-01): "make it an
-    email" is a command, and "I told him to make it an email if he preferred" is a
-    sentence that happens to contain one. Anchored at both ends so the second never
-    fires, which is the mistake that would be worst here - a dictated sentence swallowed
-    and the result silently re-written as something else.
-
-    Returns one of the four kinds, or None for anything that is dictation.
-    """
-    text = utterance.strip() if isinstance(utterance, str) else ""
-    if not text or len(text) > 80:
-        return None
-    for kind, pattern in _SPOKEN:
-        if pattern.match(text):
-            return kind
-    return None
+# A style is chosen in settings and stays chosen (decisions.md 2026-11-24): "make it an
+# email", "as a prompt" and "tidy it up" switched the style of what had landed until that
+# day, and are dictation again. What is left below is the closed list of *changes* to
+# what landed, which the user still says out loud.
 
 
 # -- what was asked of words that have already landed -------------------------------------
@@ -438,18 +453,15 @@ _CHANGE_IT = re.compile(
 def wanted(utterance: str) -> str | None:
     """What a whole utterance asks to be done with words already on the page.
 
-    One of the four kinds for "make it an email"; `AUTO` for "polish that", where the
-    window decides; the utterance itself for one of the named changes ("make it
-    shorter"), to be passed on as an instruction; None for anything that is dictation.
+    `AUTO` for "polish that", which rewrites in the style that applies there; the
+    utterance itself for one of the named changes ("make it shorter"), to be passed on
+    as an instruction; None for anything that is dictation. Naming a style is not one of
+    them (decisions.md 2026-11-24): "make it an email" is dictation.
 
-    Whole-utterance and short for `spoken`'s reason, which matters more here than
-    anywhere: this is asked about text Flow has *already pasted* into somebody's
-    document, so a false match does not mis-shape a draft on a panel - it rewrites
-    what they wrote.
+    Whole-utterance and short, which matters more here than anywhere: this is asked
+    about text Flow has *already pasted* into somebody's document, so a false match does
+    not mis-shape a draft on a panel - it rewrites what they wrote.
     """
-    kind = spoken(utterance)
-    if kind is not None:
-        return kind
     text = utterance.strip() if isinstance(utterance, str) else ""
     if not text or len(text) > 80:
         return None

@@ -10,7 +10,7 @@
 
 (() => {
   // ------------------------------------------------------------------ token, routes
-  const PAGES = ["home", "history", "voice", "ask", "models", "settings", "start"];
+  const PAGES = ["home", "history", "voice", "styles", "ask", "lenses", "models", "settings", "start"];
   const start = new URLSearchParams(location.hash.slice(1));
   if (start.get("token")) {
     try { sessionStorage.setItem("flow-token", start.get("token")); } catch (_) { /* private */ }
@@ -120,8 +120,11 @@
     { group: "Dictate" },
     { id: "history", label: "History", icon: "history", tint: C.type },
     { id: "voice", label: "Voice", icon: "wave", tint: C.type },
+    { group: "Refine" },
+    { id: "styles", label: "Styles", icon: "sliders", tint: C.refine },
     { group: "Ask" },
     { id: "ask", label: "Conversations", icon: "chat", tint: C.ask },
+    { id: "lenses", label: "Lenses", icon: "sliders", tint: C.ask },
     { group: "Setup" },
     { id: "models", label: "Models", icon: "layers" },
     { id: "settings", label: "Settings", icon: "sliders" },
@@ -502,6 +505,147 @@
   }
 
   // ------------------------------------------------------------------ Settings
+  // ------------------------------------------------------------------ Styles
+  // decisions.md 2026-11-24: one selected style, a program's own where it has one, each
+  // style's instructions in full and editable, and styles of your own.
+  let styleOpen = null;
+  const ago = (t) => {
+    if (!t) return "not used yet";
+    const m = Math.round((Date.now() / 1000 - t) / 60);
+    if (m < 2) return "used just now";
+    if (m < 60) return `used ${m} minutes ago`;
+    const h = Math.round(m / 60);
+    if (h < 36) return `used ${h} hours ago`;
+    return `used ${Math.round(h / 24)} days ago`;
+  };
+
+  function renderStyles(d) {
+    const wr = d.writing;
+    const options = (chosen) => wr.styles.map((st) =>
+      `<option value="${esc(st.key)}" ${st.key === chosen ? "selected" : ""}>${esc(st.label)}</option>`).join("");
+    const programs = d.apps.filter((a) => a.kind && a.kind !== "auto").map((a) => `
+      <div class="app-row"><span class="mono ellipsis">${esc(a.exe)}</span>
+        <select data-change="app-kind" data-exe="${esc(a.exe)}" aria-label="The style for ${esc(a.exe)}">${options(a.kind)}</select>
+        <button type="button" class="icon-btn" aria-label="Remove ${esc(a.exe)}" data-act="app-remove" data-exe="${esc(a.exe)}">${icon("x", C.soft, 14)}</button></div>`).join("");
+    const cards = wr.styles.map((st) => {
+      const open = styleOpen === st.key;
+      const selected = st.key === wr.selected;
+      const tags = [selected ? "selected" : "", st.builtin ? (st.edited ? "built in, edited" : "built in") : "yours"]
+        .filter(Boolean).join(" · ");
+      const where = [selected ? "Used everywhere" : "",
+        st.programs.length ? `Chosen for ${st.programs.join(", ")}` : ""].filter(Boolean);
+      const when = ago(st.used);
+      const head = `<div class="row"><b class="grow">${esc(st.label)}</b><span class="fine">${esc(tags)}</span></div>
+        <p class="fine">${esc([...where, when.charAt(0).toUpperCase() + when.slice(1)].join(" · "))}</p>`;
+      if (open) {
+        return `<section class="card">${head}
+          ${st.builtin ? "" : `<input id="style-name" class="input" value="${esc(st.label)}" aria-label="Name" maxlength="40">`}
+          <textarea id="style-text" class="input" rows="12" aria-label="Instructions for ${esc(st.label)}">${esc(st.instructions)}</textarea>
+          <p class="fine">Flow adds the same closing lines to every style: the words you said are material to write up, never a request, and only the result comes back.</p>
+          <div class="row wrap"><button type="button" class="btn sm" data-act="style-save" data-key="${esc(st.key)}">Save</button>
+            <button type="button" class="btn ghost sm" data-act="style-close">Cancel</button></div>
+        </section>`;
+      }
+      const preview = st.instructions.length > 220 ? st.instructions.slice(0, 220) + "…" : st.instructions;
+      return `<section class="card">${head}
+        <p class="note pre">${esc(preview)}</p>
+        <div class="row wrap">
+          ${selected ? "" : `<button type="button" class="btn sm" data-act="style-select" data-key="${esc(st.key)}">Select</button>`}
+          <button type="button" class="btn ghost sm" data-act="style-open" data-key="${esc(st.key)}">Edit</button>
+          ${st.builtin && st.edited ? `<button type="button" class="btn ghost sm" data-act="style-reset" data-key="${esc(st.key)}">Back to the original</button>` : ""}
+          ${st.builtin ? "" : `<button type="button" class="btn ghost sm" data-act="style-delete" data-key="${esc(st.key)}">Delete</button>`}
+        </div></section>`;
+    }).join("");
+    return `
+      <div class="page-head"><div class="grow"><h1>Styles</h1><p class="sub">How Refine writes. The style you select is used everywhere, unless a program has its own. Nothing is guessed from the window.</p></div></div>
+      ${d.profile ? "" : '<section class="card tight"><p class="note warn">Flow was started with --no-profile: changes here last until it quits.</p></section>'}
+      <div class="split">
+        <div class="col">
+          <section class="card">
+            <div class="setting"><div class="text"><b>Selected style</b><span class="note">Stays selected until you change it, here or from the pill's right-click menu.</span></div>
+              <select data-change="refine-kind" aria-label="Selected style">${options(wr.selected)}</select></div>
+            <div class="setting"><div class="text"><b>Your name</b><span class="note">Signs the emails the Email style writes. Empty: a sign-off and no name.</span></div>
+              <input id="writing-name" class="input" value="${esc(wr.name)}" placeholder="not set" aria-label="Your name" maxlength="60"><button type="button" class="btn sm" data-act="name-save">Save</button></div>
+          </section>
+          ${cards}
+        </div>
+        <div class="col">
+          <section class="card">
+            <h2>Per program</h2>
+            <p class="note">A program with its own style always gets that one.</p>
+            <div class="col">${programs || '<p class="fine">None yet: every program gets the selected style.</p>'}</div>
+            <div class="app-row"><input id="app-exe" class="input mono" placeholder="outlook.exe" aria-label="Program"><select id="app-kind" aria-label="Its style">${options(wr.selected)}</select><button type="button" class="btn sm" data-act="app-add">Add</button></div>
+          </section>
+          <section class="card">
+            <h2>A style of your own</h2>
+            <p class="note">A name you will recognise, and how to write. For example: “Standup update - three short bullets: done, next, blocked.”</p>
+            <input id="style-new-name" class="input" placeholder="Standup update" aria-label="Name of the new style" maxlength="40">
+            <textarea id="style-new-text" class="input" rows="6" placeholder="Rewrite the dictated text as..." aria-label="Instructions for the new style"></textarea>
+            <div class="row"><button type="button" class="btn sm" data-act="style-new">Add style</button></div>
+          </section>
+        </div>
+      </div>`;
+  }
+
+  // ------------------------------------------------------------------ Lenses
+  // decisions.md 2026-11-24: the viewpoint Ask answers from, selected and kept, each one
+  // readable and editable, and lenses of your own. Instructions only: a lens reads the
+  // question and the conversation, nothing else.
+  let lensOpen = null;
+
+  function renderLenses(d) {
+    const ln = d.lenses;
+    const options = ln.lenses.map((l) =>
+      `<option value="${esc(l.key)}" ${l.key === ln.selected ? "selected" : ""}>${esc(l.label)}</option>`).join("");
+    const cards = ln.lenses.map((l) => {
+      const selected = l.key === ln.selected;
+      const tags = [selected ? "selected" : "", l.builtin ? (l.edited ? "built in, edited" : "built in") : "yours"]
+        .filter(Boolean).join(" · ");
+      const head = `<div class="row"><b class="grow">${esc(l.label)}</b><span class="fine">${esc(tags)}</span></div>
+        ${l.plain ? "" : `<p class="fine">${esc(ago(l.used).charAt(0).toUpperCase() + ago(l.used).slice(1))}</p>`}`;
+      if (lensOpen === l.key) {
+        return `<section class="card">${head}
+          ${l.builtin ? "" : `<input id="lens-name" class="input" value="${esc(l.label)}" aria-label="Name" maxlength="40">`}
+          <textarea id="lens-text" class="input" rows="8" aria-label="Instructions for ${esc(l.label)}">${esc(l.instructions)}</textarea>
+          <div class="row wrap"><button type="button" class="btn sm" data-act="lens-save" data-key="${esc(l.key)}">Save</button>
+            <button type="button" class="btn ghost sm" data-act="lens-close">Cancel</button></div>
+        </section>`;
+      }
+      const body = l.plain ? "The plain answer: nothing is added to your question."
+        : (l.instructions.length > 220 ? l.instructions.slice(0, 220) + "…" : l.instructions);
+      return `<section class="card">${head}
+        <p class="note pre">${esc(body)}</p>
+        <div class="row wrap">
+          ${selected ? "" : `<button type="button" class="btn sm" data-act="lens-select" data-key="${esc(l.key)}">Select</button>`}
+          ${l.plain ? "" : `<button type="button" class="btn ghost sm" data-act="lens-open" data-key="${esc(l.key)}">Edit</button>`}
+          ${l.builtin && l.edited ? `<button type="button" class="btn ghost sm" data-act="lens-reset" data-key="${esc(l.key)}">Back to the original</button>` : ""}
+          ${l.builtin ? "" : `<button type="button" class="btn ghost sm" data-act="lens-delete" data-key="${esc(l.key)}">Delete</button>`}
+        </div></section>`;
+    }).join("");
+    return `
+      <div class="page-head"><div class="grow"><h1>Lenses</h1><p class="sub">The viewpoint Ask answers from. The lens you select is used for every question until you change it. A lens works on your question and the conversation, and reads nothing else.</p></div></div>
+      ${d.profile ? "" : '<section class="card tight"><p class="note warn">Flow was started with --no-profile: changes here last until it quits.</p></section>'}
+      <div class="split">
+        <div class="col">
+          <section class="card">
+            <div class="setting"><div class="text"><b>Selected lens</b><span class="note">Stays selected until you change it, here or from the pill's right-click menu.</span></div>
+              <select data-change="lens-pick" aria-label="Selected lens">${options}</select></div>
+            ${d.ask.speaks ? `<div class="setting"><div class="text"><b>Read answers aloud</b><span class="note">Off: an answer stays on its card, and nothing speaks unasked.</span></div>${sw(d.ask.read_answers, "read-answers", "Read answers aloud")}</div>` : `<p class="note">Answers stay on their card. Spoken answers are not available on this PC.</p>`}
+          </section>
+          ${cards}
+        </div>
+        <div class="col">
+          <section class="card">
+            <h2>A lens of your own</h2>
+            <p class="note">A name, and how to look at a question. For example: “Reviewer - point out what could break, what is missing a test, and what is unclear.”</p>
+            <input id="lens-new-name" class="input" placeholder="Reviewer" aria-label="Name of the new lens" maxlength="40">
+            <textarea id="lens-new-text" class="input" rows="6" placeholder="Answer as..." aria-label="Instructions for the new lens"></textarea>
+            <div class="row"><button type="button" class="btn sm" data-act="lens-new">Add lens</button></div>
+          </section>
+        </div>
+      </div>`;
+  }
+
   function renderSettings(d) {
     const mic = d.mic;
     const sh = d.shortcuts;
@@ -569,7 +713,7 @@
           </section>
           <section class="card">
             <h2>Ask</h2>
-            <div class="setting"><div class="text"><b>Ask after a pause</b><span class="note">In Ask, a few quiet seconds send the question. Off: send it yourself.</span></div>${sw(d.ask.auto_ask, "auto-ask", "Ask after a pause")}</div>
+            <p class="note">Which lens Ask answers through, and whether answers are read aloud, are on <a href="#/lenses">Lenses</a>.</p>
           </section>
           <section class="card">
             <h2>The pill</h2>
@@ -577,22 +721,13 @@
           </section>
           <section class="card">
             <h2>What Refine writes</h2>
-            <p class="note">Refine suits the window you are in: <b>a prompt</b> in a terminal, an editor or an AI app, <b>an email</b> in Outlook, Gmail and other mail, <b>a chat message</b> in Slack, Teams and the like, and anywhere else your own words, <b>tidied up</b>. Nothing is sent until you press Send.</p>
-            <div class="setting"><div class="text"><b>Refine writes</b><span class="note">${wr.default === "auto" ? "Chosen by the window in front." : "The same kind everywhere, whatever the window."}</span></div>
-              <select data-change="refine-kind" aria-label="What Refine writes">${kindOptions(wr.default, "What suits the window")}</select></div>
-            <div class="setting"><div class="text"><b>Your name</b><span class="note">Signs the emails Refine writes. Empty: a sign-off and no name.</span></div>
-              <input id="writing-name" class="input" value="${esc(wr.name)}" placeholder="not set" aria-label="Your name" maxlength="60"><button type="button" class="btn sm" data-act="name-save">Save</button></div>
-            <p class="fine">At a result, hold the mic and say &ldquo;make it an email&rdquo; - or a prompt, a message, &ldquo;tidy it up&rdquo; - to have the same words written the other way.</p>
-            <h3>Per program</h3>
-            <p class="note">Where Flow guesses wrong, say what a program is for - and add an instruction if you like, such as &ldquo;keep it to one line&rdquo;.</p>
-            <div class="col">${apps || '<p class="fine">None yet.</p>'}</div>
-            <div class="app-row"><input id="app-exe" class="input mono" placeholder="notepad.exe" aria-label="Program"><select id="app-kind" aria-label="What Refine writes there">${kindOptions("auto", "Flow decides")}</select><input id="app-text" class="input" placeholder="an instruction, if you want one" aria-label="Instruction" maxlength="400"><button type="button" class="btn sm" data-act="app-add">Add</button></div>
+            <p class="note">Refine writes in the style you select, everywhere, unless a program has its own. <a href="#/styles">Styles</a> shows each one in full and lets you change it or add your own.</p>
           </section>
           <section class="card">
             <h2>What leaves this PC</h2>
             <div class="privacy">${icon("circlecheck", C.green, 18)}<div class="col"><b>Your voice never does</b><span class="note">Speech is recognised here. No account, no key.</span></div></div>
             <div class="privacy">${icon("terminal", C.blue, 18)}<div class="col"><b>Ask and Refine send text to your agent CLI</b><span class="note">The words, and the workspace path when one is set.</span></div></div>
-            <div class="privacy">${icon("lock", C.soft, 18)}<div class="col"><b>The window's name picks what Refine writes, and goes nowhere</b><span class="note">Its program and title are read when you refine, never kept and never sent.</span></div></div>
+            <div class="privacy">${icon("lock", C.soft, 18)}<div class="col"><b>The program in front picks its style only if you gave it one</b><span class="note">Its name is checked against your list when you refine. Window titles are not read for this, and nothing is kept or sent.</span></div></div>
             <div class="privacy">${icon("lock", C.soft, 18)}<div class="col"><b>The trace keeps timings and counts, never words</b><span class="note">Flow's own diagnostics, on this PC.</span></div></div>
             <div class="privacy">${icon("history", d.history && d.history.keeping ? C.green : C.soft, 18)}<div class="col"><b>${d.history && d.history.keeping
               ? `History keeps your words for ${esc(d.history.days)} days`
@@ -1173,8 +1308,8 @@
   }
 
   // ------------------------------------------------------------------ showing a page
-  const LOAD = { home: "home", history: "history", voice: "voice", ask: "ask", models: "models", settings: "settings", start: "start" };
-  const DRAW = { home: renderHome, history: renderHistory, voice: renderVoice, ask: renderAsk, models: renderModels, settings: renderSettings, start: renderStart };
+  const LOAD = { home: "home", history: "history", voice: "voice", styles: "settings", ask: "ask", lenses: "settings", models: "models", settings: "settings", start: "start" };
+  const DRAW = { home: renderHome, history: renderHistory, voice: renderVoice, styles: renderStyles, ask: renderAsk, lenses: renderLenses, models: renderModels, settings: renderSettings, start: renderStart };
   let data = null;
   let shown = "";
 
@@ -1216,7 +1351,9 @@
   // The fields a re-draw may happen under: their words live in this script, not in the
   // page, so an answer arriving while somebody types the next question lands without
   // taking the question away.
-  const HELD = new Set(["ask-text", "history-q", "fix-was", "fix-said", "fr-try"]);
+  const HELD = new Set(["ask-text", "history-q", "fix-was", "fix-said", "fr-try",
+    "style-text", "style-name", "style-new-name", "style-new-text",
+    "lens-text", "lens-name", "lens-new-name", "lens-new-text"]);
 
   // A poll never re-draws under somebody typing; an action they took always re-draws.
   function draw(name, fresh, force = false) {
@@ -1478,7 +1615,7 @@
       if (path) run(() => api("settings/workspace/add", { path }), "Workspace added");
     },
     "ws-forget": (el) => run(() => api("settings/workspace/forget", { path: el.dataset.path })),
-    "auto-ask": (el) => run(() => api("settings/auto_ask", { on: el.getAttribute("aria-checked") !== "true" })),
+    "read-answers": (el) => run(() => api("settings/read_answers", { on: el.getAttribute("aria-checked") !== "true" })),
     warm: (el) => run(() => api("settings/warm", { on: el.getAttribute("aria-checked") !== "true" }), "Saved"),
     // Same shape as `warm`, and the same reason it is its own action: this one decides
     // whether Flow opens a connection on its own, which is why the note beside it reads
@@ -1487,17 +1624,56 @@
     "check-update": (el) => run(() => api("settings/check-update", { on: el.getAttribute("aria-checked") !== "true" }), "Saved"),
     "panel-flows": (el) => run(() => api("settings/flows", { panel: el.getAttribute("aria-checked") !== "true" }), "Saved"),
     "app-add": () => {
-      const exe = (value("app-exe") || "").trim(), instruction = (value("app-text") || "").trim();
-      const kind = value("app-kind") || "auto";
-      // A program needs something said about it: a kind, an instruction, or both. Only
-      // what was filled in is sent: an empty instruction means "remove it" to the
-      // server, so sending one beside a kind would wipe what the program already had.
-      const body = { exe };
-      if (instruction) body.instruction = instruction;
-      if (kind !== "auto") body.kind = kind;
-      if (exe && (instruction || kind !== "auto")) run(() => api("settings/apps", body), "Saved");
+      // decisions.md 2026-11-24: a program gets a style, and nothing else - the
+      // instructions belong to the style.
+      const exe = (value("app-exe") || "").trim(), kind = value("app-kind");
+      if (exe && kind) run(() => api("settings/apps", { exe, kind }), "Saved");
     },
-    "app-remove": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, instruction: "", kind: "" })),
+    "lens-select": (el) => run(() => api("settings/lens", { key: el.dataset.key, select: true }), "Selected"),
+    "lens-open": (el) => { lensOpen = el.dataset.key; draw(current(), false, true); },
+    "lens-close": () => { lensOpen = null; draw(current(), false, true); },
+    "lens-save": (el) => {
+      const body = { key: el.dataset.key, instructions: value("lens-text") || "" };
+      const name = value("lens-name");
+      if (name !== undefined) body.name = name;
+      run(async () => { const out = await api("settings/lens", body); lensOpen = null; return out; }, "Saved");
+    },
+    "lens-reset": (el) => run(() => api("settings/lens", { key: el.dataset.key, reset: true }), "Back to the original"),
+    "lens-delete": (el) => {
+      if (confirm("Delete this lens? If it is selected, Ask goes back to the plain answer.")) {
+        run(() => api("settings/lens", { key: el.dataset.key, delete: true }), "Deleted");
+      }
+    },
+    "lens-new": () => run(async () => {
+      const out = await api("settings/lens/new", { name: value("lens-new-name") || "", instructions: value("lens-new-text") || "" });
+      const box = document.getElementById("lens-new-name"), text = document.getElementById("lens-new-text");
+      if (box) box.value = "";
+      if (text) text.value = "";
+      return out;
+    }, "Added"),
+    "style-select": (el) => run(() => api("settings/writing", { default: el.dataset.key }), "Selected"),
+    "style-open": (el) => { styleOpen = el.dataset.key; draw(current(), false, true); },
+    "style-close": () => { styleOpen = null; draw(current(), false, true); },
+    "style-save": (el) => {
+      const body = { key: el.dataset.key, instructions: value("style-text") || "" };
+      const name = value("style-name");
+      if (name !== undefined) body.name = name;
+      run(async () => { const out = await api("settings/style", body); styleOpen = null; return out; }, "Saved");
+    },
+    "style-reset": (el) => run(() => api("settings/style", { key: el.dataset.key, reset: true }), "Back to the original"),
+    "style-delete": (el) => {
+      if (confirm("Delete this style? Programs that use it go back to the selected style.")) {
+        run(() => api("settings/style", { key: el.dataset.key, delete: true }), "Deleted");
+      }
+    },
+    "style-new": () => run(async () => {
+      const out = await api("settings/style/new", { name: value("style-new-name") || "", instructions: value("style-new-text") || "" });
+      const box = document.getElementById("style-new-name"), text = document.getElementById("style-new-text");
+      if (box) box.value = "";
+      if (text) text.value = "";
+      return out;
+    }, "Added"),
+    "app-remove": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, kind: "" })),
     "name-save": () => run(() => api("settings/writing", { name: (value("writing-name") || "").trim() }), "Saved"),
     open: (el) => run(() => api("open", { what: el.dataset.what }), null, false),
     update: async () => {
@@ -1518,6 +1694,7 @@
     send: (el) => run(() => api("settings/send", { word: el.value }), `Say "${el.value}" to send`),
     ws: (el) => run(() => api("settings/workspace", { path: el.value || null }), "Workspace changed"),
     "refine-kind": (el) => run(() => api("settings/writing", { default: el.value }), "Saved"),
+    "lens-pick": (el) => run(() => api("settings/lens", { key: el.value, select: true }), "Saved"),
     "app-kind": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, kind: el.value }), "Saved"),
     "history-days": (el) => run(() => api("history/days", { days: Number(el.value), ...historyView }), `Kept for ${el.value} days`),
     "fr-mic": (el) => run(() => api("start/mic", { name: el.value || null }), "Microphone changed"),

@@ -34,7 +34,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flow import audio, stats  # noqa: E402
+from flow import audio, kinds, stats  # noqa: E402
 from flow.asr import WhisperTranscriber  # noqa: E402
 from flow.home import Home  # noqa: E402
 from flow.home import api as api_mod  # noqa: E402
@@ -1155,9 +1155,11 @@ class TestWhatRefineWritesIsASetting(unittest.TestCase):
         with mock.patch.object(audio, "input_devices", return_value=[]):
             return h.call("POST", path, body)
 
-    def test_a_fresh_profile_lets_the_window_decide_and_signs_with_nothing(self):
+    def test_a_fresh_profile_selects_prompt_and_signs_with_nothing(self):
+        # decisions.md 2026-11-24: the user chooses and Flow does not guess.
         page = self.page(Pumped(self))
-        self.assertEqual(page["writing"]["default"], "auto")
+        self.assertEqual(page["writing"]["default"], "prompt")
+        self.assertEqual(page["writing"]["selected"], "prompt")
         self.assertEqual(page["writing"]["name"], "")
         self.assertEqual([k["key"] for k in page["writing"]["kinds"]],
                          ["prompt", "email", "message", "tidy"])
@@ -1173,7 +1175,7 @@ class TestWhatRefineWritesIsASetting(unittest.TestCase):
         h = Pumped(self)
         status, _ = self.post(h, "/api/settings/writing", {"default": "memo"})
         self.assertEqual(status, 400)
-        self.assertEqual(h.profile.refine_kind, "auto")
+        self.assertEqual(h.profile.refine_kind, "prompt")
 
     def test_the_name_is_saved_with_its_spaces_tidied(self):
         h = Pumped(self)
@@ -1255,6 +1257,127 @@ class TestWhatRefineWritesIsASetting(unittest.TestCase):
         h = Pumped(self)
         h.profile.kinds = {"notepad.exe": "memo"}
         self.assertEqual(self.page(h)["apps"][0]["kind"], "auto")
+
+
+class TestStylesAreSeenEditedAndYourOwn(unittest.TestCase):
+    """decisions.md 2026-11-24: the Styles page shows each style's real instructions and
+    where it is used; a built-in can be edited and put back; your own can be added,
+    selected, renamed and deleted."""
+
+    def setUp(self):
+        self.addCleanup(kinds.register, [])
+
+    page = TestWhatRefineWritesIsASetting.page
+    post = TestWhatRefineWritesIsASetting.post
+
+    def styles(self, page):
+        return {st["key"]: st for st in page["writing"]["styles"]}
+
+    def test_the_built_ins_show_the_brief_refine_sends(self):
+        from flow import refine
+        st = self.styles(self.page(Pumped(self)))
+        self.assertEqual(list(st), ["prompt", "email", "message", "tidy"])
+        self.assertEqual(st["tidy"]["instructions"], refine.style_text("tidy"))
+        self.assertFalse(st["email"]["edited"])
+
+    def test_a_built_in_is_edited_and_put_back(self):
+        h = Pumped(self)
+        _s, page = self.post(h, "/api/settings/style",
+                             {"key": "email", "instructions": "Two lines at most."})
+        self.assertEqual(self.styles(page)["email"]["instructions"], "Two lines at most.")
+        self.assertTrue(self.styles(page)["email"]["edited"])
+        self.assertEqual(Profile(h.profile.path).style_edits, {"email": "Two lines at most."})
+        _s, page = self.post(h, "/api/settings/style", {"key": "email", "reset": True})
+        self.assertFalse(self.styles(page)["email"]["edited"])
+        self.assertEqual(Profile(h.profile.path).style_edits, {})
+
+    def test_your_own_style_is_added_selected_and_used_by_a_program(self):
+        h = Pumped(self)
+        status, page = self.post(h, "/api/settings/style/new",
+                                 {"name": "Standup update", "instructions": "Three bullets."})
+        self.assertEqual(status, 200)
+        key = "my:standup-update"
+        self.assertEqual(self.styles(page)[key]["label"], "Standup update")
+        self.assertTrue(kinds.valid(key), "a new style is a style at once")
+        self.post(h, "/api/settings/writing", {"default": key})
+        _s, page = self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": key})
+        self.assertEqual(page["writing"]["selected"], key)
+        self.assertEqual(self.styles(page)[key]["programs"], ["slack.exe"])
+
+    def test_deleting_your_own_style_lets_go_of_it_everywhere(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/style/new", {"name": "Standup", "instructions": "x"})
+        self.post(h, "/api/settings/writing", {"default": "my:standup"})
+        self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": "my:standup"})
+        _s, page = self.post(h, "/api/settings/style", {"key": "my:standup", "delete": True})
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.styles, saved.kinds, saved.refine_kind), ([], {}, "prompt"))
+        self.assertNotIn("my:standup", self.styles(page))
+        self.assertFalse(kinds.valid("my:standup"))
+
+    def test_what_cannot_be_done_is_refused(self):
+        h = Pumped(self)
+        for path, body in (
+                ("/api/settings/style", {"key": "email", "delete": True}),
+                ("/api/settings/style", {"key": "email", "name": "Mail"}),
+                ("/api/settings/style", {"key": "memo", "instructions": "x"}),
+                ("/api/settings/style", {"key": "email", "instructions": "  "}),
+                ("/api/settings/style/new", {"name": "Email", "instructions": "x"}),
+                ("/api/settings/style/new", {"name": "", "instructions": "x"}),
+                ("/api/settings/style/new", {"name": "Notes", "instructions": ""})):
+            with self.subTest(path=path, body=body):
+                status, _ = self.post(h, path, body)
+                self.assertEqual(status, 400)
+
+
+class TestLensesAreSeenEditedAndYourOwn(unittest.TestCase):
+    """decisions.md 2026-11-24: the Lenses page, the Styles page's twin for Ask."""
+
+    page = TestWhatRefineWritesIsASetting.page
+    post = TestWhatRefineWritesIsASetting.post
+
+    def lenses(self, page):
+        return {l["key"]: l for l in page["lenses"]["lenses"]}
+
+    def test_no_lens_is_selected_and_the_built_ins_are_shown(self):
+        page = self.page(Pumped(self))
+        self.assertEqual(page["lenses"]["selected"], "none")
+        self.assertEqual(list(self.lenses(page)), ["none", "architecture", "business"])
+        self.assertTrue(self.lenses(page)["none"]["plain"])
+
+    def test_a_lens_is_selected_edited_and_put_back(self):
+        h = Pumped(self)
+        _s, page = self.post(h, "/api/settings/lens", {"key": "business", "select": True})
+        self.assertEqual(page["lenses"]["selected"], "business")
+        _s, page = self.post(h, "/api/settings/lens",
+                             {"key": "business", "instructions": "Money first."})
+        self.assertTrue(self.lenses(page)["business"]["edited"])
+        _s, page = self.post(h, "/api/settings/lens", {"key": "business", "reset": True})
+        self.assertFalse(self.lenses(page)["business"]["edited"])
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.lens, saved.lens_edits), ("business", {}))
+
+    def test_your_own_lens_is_added_and_deleted(self):
+        h = Pumped(self)
+        _s, page = self.post(h, "/api/settings/lens/new",
+                             {"name": "Reviewer", "instructions": "What could break."})
+        self.assertIn("my:reviewer", self.lenses(page))
+        self.post(h, "/api/settings/lens", {"key": "my:reviewer", "select": True})
+        _s, page = self.post(h, "/api/settings/lens", {"key": "my:reviewer", "delete": True})
+        self.assertNotIn("my:reviewer", self.lenses(page))
+        self.assertEqual(page["lenses"]["selected"], "none")
+
+    def test_what_cannot_be_done_is_refused(self):
+        h = Pumped(self)
+        for path, body in (
+                ("/api/settings/lens", {"key": "none", "instructions": "x"}),
+                ("/api/settings/lens", {"key": "business", "delete": True}),
+                ("/api/settings/lens", {"key": "memo", "select": True}),
+                ("/api/settings/lens/new", {"name": "Business", "instructions": "x"}),
+                ("/api/settings/lens/new", {"name": "X", "instructions": " "})):
+            with self.subTest(path=path, body=body):
+                status, _ = self.post(h, path, body)
+                self.assertEqual(status, 400)
 
 
 class TestTheModelsPageSaysWhichCliIsDown(unittest.TestCase):

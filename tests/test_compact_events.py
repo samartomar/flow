@@ -245,9 +245,14 @@ class TestTheNotesAWordlessPillMustAnswer(unittest.TestCase):
         # announced in a note this surface did not show - so somebody who clicked
         # back into their work during the twelve seconds a rewrite takes saw the
         # counter stop and nothing else.
+        #
+        # "done - ", "Refine writes " and "Ask answers " joined on 2026-11-24: a piece
+        # ended by "done", and a style or lens chosen from the pill's menu, are said
+        # where they were chosen.
         self.assertEqual(uc.SAID_NOTES,
                          ("nothing to", "still ", "only the last",
-                          "discarded", "stopped after", "skipping ", "rewritten"))
+                          "discarded", "stopped after", "skipping ", "rewritten",
+                          "done - ", "Refine writes ", "Ask answers "))
 
     def test_a_rewrite_that_could_not_land_is_said(self):
         self.assertEqual(
@@ -645,6 +650,88 @@ class TestTheDoubleTapStartsHandsFree(unittest.TestCase):
                          "a flag claiming a capture is running must not outlive it")
         self.assertTrue(p._mic_gone)
 
+
+
+class TestHandsFreeOnlyDictates(unittest.TestCase):
+    """decisions.md 2026-11-24: each pause lands what was said, whatever mode the pill
+    is in; the strip says hands-free is on and shows the words; two minutes of silence
+    turns it off. Before, a pause filled a draft nobody could see."""
+
+    def surface(self, mode=DICTATE):
+        p = uc.CompactPill.__new__(uc.CompactPill)
+        p.session = mock.Mock()
+        p.session.mode = mode
+        p.session.state = State.DRAFT
+        p.session.busy = False
+        p.session.draft.text = "the plan for Tuesday"
+        p.session.send.return_value = "the plan for Tuesday"
+        p._handsfree = True
+        p._handsfree_heard_at = uc.time.monotonic()
+        p._press_talking = p._send_pending = p._ask_pending = False
+        p._hold_words = "the plan for"
+        p._deliver = mock.Mock()
+        p._say = mock.Mock()
+        return p
+
+    def test_a_pause_lands_the_words_as_dictation(self):
+        for mode in (DICTATE, REFINE, CONVERSE):
+            with self.subTest(mode=mode):
+                p = self.surface(mode)
+                p._pump_handsfree()
+                p.session.send.assert_called_once_with(dictate=True)
+                p._deliver.assert_called_once_with("the plan for Tuesday", typed=True)
+                self.assertEqual(p._hold_words, "")
+
+    def test_nothing_lands_while_words_are_still_being_decoded(self):
+        p = self.surface()
+        p.session.busy = True
+        p._pump_handsfree()
+        p.session.send.assert_not_called()
+
+    def test_a_hold_owns_its_own_words(self):
+        p = self.surface()
+        p._press_talking = True
+        p._pump_handsfree()
+        p.session.send.assert_not_called()
+
+    def test_two_minutes_of_silence_turn_it_off_and_say_so(self):
+        p = self.surface()
+        p.session.draft.text = ""
+        p._handsfree_heard_at = uc.time.monotonic() - uc.HANDSFREE_IDLE_SEC - 1
+        p._pump_handsfree()
+        self.assertFalse(p._handsfree)
+        p.session.pause.assert_called_once_with()
+        p._say.assert_called_once_with(uc.HANDSFREE_IDLE_TEXT)
+
+    def test_the_strip_says_it_is_on_and_then_shows_the_words(self):
+        p = self.surface()
+        p.panel_flows, p.lite, p.on_send = False, False, lambda *a, **k: ""
+        p.session.state = State.LISTENING
+        p._hold_words = ""
+        self.assertEqual(p._listening_text(), uc.HANDSFREE_TEXT)
+        p._hold_words = "the plan for"
+        self.assertEqual(p._listening_text(), "the plan for")
+
+    def test_off_it_says_nothing(self):
+        p = self.surface()
+        p._handsfree = False
+        p.panel_flows = False
+        self.assertEqual(p._listening_text(), "")
+
+
+class TestARefineSentByTheTriggerStillLands(unittest.TestCase):
+    """2026-11-24: "boom" or the send key in Refine went through `session.send()`
+    alone, which decides no landing, so the result reached a card with Copy only."""
+
+    def test_it_takes_the_releases_door(self):
+        p = pill(on_send=lambda t, target=None, **kw: "")
+        p.panel_flows = False
+        p.session.mode = REFINE
+        p.session.draft.text = "tell them it slips to Friday"
+        p._ask = mock.Mock()
+        p._send()
+        p._ask.assert_called_once_with()
+        p.session.send.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

@@ -191,7 +191,7 @@ class TestRefineWritesForTheWindow(unittest.TestCase):
             # Only what a Refine reads, and a `save` that says it worked: `send()` owes
             # the profile a save, and this test is not about where it lands.
             s.profile = type("P", (), {"apps": {}, "kinds": {}, "name": "",
-                                       "refine_kind": kinds.AUTO,
+                                       "refine_kind": kinds.PROMPT,
                                        "save": lambda self: True, **profile})()
         s.toggle_mode(to=REFINE)
         s.events()
@@ -202,10 +202,6 @@ class TestRefineWritesForTheWindow(unittest.TestCase):
             s.pump_results()
         return s, call
 
-    def test_a_mail_program_gets_an_email(self):
-        s, call = self.refine_in("OUTLOOK.EXE")
-        self.assertEqual(call.call_args.kwargs["kind"], kinds.EMAIL)
-        self.assertEqual(s.refine_kind, kinds.EMAIL)
 
     def test_a_terminal_gets_the_prompt_it_always_got(self):
         _s, call = self.refine_in("WindowsTerminal.exe")
@@ -216,13 +212,9 @@ class TestRefineWritesForTheWindow(unittest.TestCase):
         _s, call = self.refine_in("")
         self.assertEqual(call.call_args.kwargs["kind"], kinds.PROMPT)
 
-    def test_a_browser_tab_is_read_by_its_title(self):
-        _s, call = self.refine_in(
-            "chrome.exe", "Inbox - you@example.com - Gmail - Google Chrome")
-        self.assertEqual(call.call_args.kwargs["kind"], kinds.EMAIL)
 
     def test_the_note_says_what_is_being_written(self):
-        s, _call = self.refine_in("slack.exe")
+        s, _call = self.refine_in("slack.exe", kinds={"slack.exe": kinds.MESSAGE})
         notes = [e.text for e in s.events() if e.kind == "note"]
         self.assertTrue(any(n.startswith("writing that as a chat message via")
                             for n in notes), notes)
@@ -245,28 +237,7 @@ class TestRefineWritesForTheWindow(unittest.TestCase):
         _s, call = self.refine_in("OUTLOOK.EXE", name="Samar")
         self.assertEqual(call.call_args.kwargs["name"], "Samar")
 
-    def test_the_title_is_asked_for_at_the_moment_of_the_refine(self):
-        # A tab is switched without the foreground window changing, so a title
-        # remembered from the last change of window would name the wrong tab.
-        s = session()
-        self.addCleanup(s.close)
-        s.target_app = "chrome.exe"
-        s.target_title = "Docs - Google Chrome"
-        titles = iter(["Inbox - Gmail - Google Chrome"])
-        s.title_probe = lambda: next(titles)
-        self.assertEqual(s.kind_here(), kinds.EMAIL)
 
-    def test_a_probe_that_fails_costs_the_title_not_the_refine(self):
-        s = session()
-        self.addCleanup(s.close)
-        s.target_app = "chrome.exe"
-
-        def broken():
-            raise OSError("the window went away")
-
-        s.title_probe = broken
-        self.assertEqual(s.kind_here(), kinds.TIDY)
-        self.assertEqual(s.target_title, "")
 
     def test_the_title_reaches_neither_the_cli_nor_the_notes(self):
         s, call = self.refine_in(
@@ -303,6 +274,9 @@ class TestTheSecondHoldSaysMore(unittest.TestCase):
         # an email into a prompt.
         s = session()
         self.addCleanup(s.close)
+        s.profile = type("P", (), {"apps": {}, "kinds": {"outlook.exe": kinds.EMAIL},
+                                   "name": "", "refine_kind": kinds.PROMPT,
+                                   "save": lambda self: True})()
         s.target_app = "OUTLOOK.EXE"
         s.toggle_mode(to=REFINE)
         with mock.patch("flow.session.refine",
@@ -365,86 +339,6 @@ class TestTheSecondHoldSaysMore(unittest.TestCase):
         self.assertEqual(call.call_args_list[1].args[0], "try this instead")
 
 
-class TestAKindAskedForOutLoud(unittest.TestCase):
-    """"make it an email", said at a result: the same words, written the other way."""
-
-    FIRST = "tell priya the release moves to tuesday"
-
-    def restyled(self, said="make it an email"):
-        s = session()
-        self.addCleanup(s.close)
-        s.target_app = "WindowsTerminal.exe"
-        call = refine_twice(s, self.FIRST, said)
-        return s, call
-
-    def test_the_first_holds_words_are_written_again_as_that_kind(self):
-        _s, call = self.restyled()
-        second = call.call_args_list[1]
-        self.assertEqual(second.args[0], self.FIRST)
-        self.assertEqual(second.kwargs["kind"], kinds.EMAIL)
-
-    def test_the_request_is_not_dictated_into_the_result(self):
-        _s, call = self.restyled()
-        self.assertNotIn("make it an email", call.call_args_list[1].args[0])
-
-    def test_the_request_is_not_a_turn_of_the_thread(self):
-        # Recalled later it would be a prompt that reads "make it an email".
-        s, _call = self.restyled()
-        self.assertNotIn("make it an email", list(s.thread.turns))
-
-    def test_more_words_after_a_restyle_stay_that_kind(self):
-        s = session()
-        self.addCleanup(s.close)
-        s.target_app = "WindowsTerminal.exe"
-        s.toggle_mode(to=REFINE)
-        with mock.patch("flow.session.refine", return_value=("r", "fake")) as call:
-            for words in (self.FIRST, "make it an email", "and thank her"):
-                s.draft.set(words)
-                s.send()
-                s.wait_idle(timeout=5.0)
-                s.pump_results()
-        third = call.call_args_list[2]
-        self.assertEqual(third.args[0], f"{self.FIRST} and thank her")
-        self.assertEqual(third.kwargs["kind"], kinds.EMAIL)
-
-    def test_with_no_result_on_the_panel_the_same_words_are_dictation(self):
-        # A first hold has nothing to restyle, so it is refined like any other.
-        s = session()
-        self.addCleanup(s.close)
-        s.toggle_mode(to=REFINE)
-        s.draft.set("make it an email")
-        with mock.patch("flow.session.refine", return_value=("r", "fake")) as call:
-            s.send()
-            s.wait_idle(timeout=5.0)
-            s.pump_results()
-        self.assertEqual(call.call_args.args[0], "make it an email")
-
-    def test_over_a_held_draft_it_gets_that_kinds_brief(self):
-        # The shipped surface's form: a draft on screen and a spoken instruction. It
-        # used to go to the CLI as free text to interpret.
-        s = session()
-        self.addCleanup(s.close)
-        s.draft.set(self.FIRST)
-        with mock.patch("flow.session.refine", return_value=("r", "fake")) as call:
-            s._escalate(type("P", (), {"op": "", "payload": "make it an email",
-                                       "escalated": False, "target": ""})())
-            s.wait_idle(timeout=5.0)
-            s.pump_results()
-        self.assertTrue(call.call_args.kwargs["polish"])
-        self.assertEqual(call.call_args.kwargs["kind"], kinds.EMAIL)
-
-    def test_make_it_a_proper_prompt_is_still_a_prompt(self):
-        s = session()
-        self.addCleanup(s.close)
-        s.target_app = "OUTLOOK.EXE"
-        s.draft.set(self.FIRST)
-        with mock.patch("flow.session.refine", return_value=("r", "fake")) as call:
-            s._escalate(type("P", (), {"op": "polish",
-                                       "payload": "make it a proper prompt",
-                                       "escalated": False, "target": ""})())
-            s.wait_idle(timeout=5.0)
-            s.pump_results()
-        self.assertEqual(call.call_args.kwargs["kind"], kinds.PROMPT)
 
 
 class TestAQuestionGetsLongerThanARewrite(unittest.TestCase):
@@ -589,9 +483,13 @@ class TestTheSurfaceDecidesWhenAResultIsGone(unittest.TestCase):
         self.assertEqual(handed.args[0], "a different thought entirely")
         self.assertNotIn(self.FIRST, handed.args[0])
 
-    def test_and_the_kind_is_read_from_the_window_again(self):
+    def test_and_the_next_one_uses_the_style_that_applies_there(self):
+        # decisions.md 2026-11-24: the program's own style, not a reading of the window.
         s = self.refined_once()
         s.end_refine()
+        s.profile = type("P", (), {"apps": {}, "kinds": {"outlook.exe": kinds.EMAIL},
+                                   "name": "", "refine_kind": kinds.PROMPT,
+                                   "save": lambda self: True})()
         s.target_app = "OUTLOOK.EXE"
         handed = self.next_hold(s, "tell priya it moved")
         self.assertEqual(handed.kwargs["kind"], kinds.EMAIL)
@@ -618,10 +516,6 @@ class TestTheSurfaceDecidesWhenAResultIsGone(unittest.TestCase):
         self.assertEqual(s.refine_heard,
                          f"{self.FIRST} and cap it at three attempts")
 
-    def test_after_a_restyle_it_is_still_the_first_holds_words(self):
-        s = self.refined_once()
-        self.next_hold(s, "make it an email")
-        self.assertEqual(s.refine_heard, self.FIRST)
 
     def test_ending_it_leaves_the_follow_up_verb_alone(self):
         # `following_up` is also the shipped surface's "follow up", which is not this
@@ -721,16 +615,45 @@ class TestOnlyAResultOnScreenCanBeExtended(unittest.TestCase):
         s.refine_says_more = False
         self.assertFalse(s.can_say_more)
 
-    def test_the_title_is_used_and_not_left_on_the_session(self):
-        # "Never kept" has to be true of memory too: the probe's answer is a local.
+
+
+
+class TestTheSelectedStyleIsWhatIsWritten(unittest.TestCase):
+    """decisions.md 2026-11-24: the selected style everywhere, a program's own where it
+    has one, and the style's own instructions when it is yours or edited."""
+
+    def refine_with(self, app, styles=(), **profile):
         s = session()
         self.addCleanup(s.close)
-        s.target_app = "chrome.exe"
-        s.title_probe = lambda: "Quarterly numbers DRAFT - Gmail - Google Chrome"
-        self.assertEqual(s.kind_here(), kinds.EMAIL)
-        self.assertEqual(s.target_title, "")
-        self.assertNotIn("Quarterly", repr(vars(s)))
+        # After the session: building one registers its own profile's styles.
+        kinds.register(list(styles))
+        self.addCleanup(kinds.register, [])
+        s.target_app = app
+        fields = {"apps": {}, "kinds": {}, "name": "", "refine_kind": kinds.PROMPT,
+                  "style_used": {}, "save": lambda self: True}
+        fields.update(profile)
+        s.profile = type("P", (), fields)()
+        s.toggle_mode(to=REFINE)
+        with mock.patch("flow.session.refine", return_value=("shaped", "fake")) as call:
+            s.draft.set("tell priya the release moves to tuesday")
+            s.send()
+            s.wait_idle(timeout=5.0)
+            s.pump_results()
+        return s, call
 
+    def test_a_mail_program_gets_the_selected_style_not_a_guess(self):
+        _s, call = self.refine_with("OUTLOOK.EXE")
+        self.assertEqual(call.call_args.kwargs["kind"], kinds.PROMPT)
+        self.assertIsNone(call.call_args.kwargs["instructions"])
+
+    def test_your_own_style_sends_its_instructions_and_is_marked_used(self):
+        key = "my:standup"
+        s, call = self.refine_with(
+            "slack.exe", styles=[{"key": key, "name": "Standup"}], refine_kind=key,
+            style_instructions=lambda self, k: "Three bullets." if k == key else None)
+        self.assertEqual(call.call_args.kwargs["kind"], key)
+        self.assertEqual(call.call_args.kwargs["instructions"], "Three bullets.")
+        self.assertIn(key, s.profile.style_used)
 
 if __name__ == "__main__":
     unittest.main()

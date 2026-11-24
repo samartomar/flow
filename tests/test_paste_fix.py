@@ -34,6 +34,7 @@ from flow.edits import whole_undo  # noqa: E402
 from flow.history import History  # noqa: E402
 from flow.inject import Target, backspaces, take_warnings  # noqa: E402
 from flow.profile import Profile  # noqa: E402
+from flow import kinds  # noqa: E402
 from flow.session import (  # noqa: E402
     CONVERSE, CORRECT_MAX_CHARS, CORRECT_WINDOW_SEC, DICTATE, REFINE, Session, State,
     paste_fits,
@@ -806,19 +807,19 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
             s.pump_results()
         return s, call
 
-    def test_the_cli_is_handed_the_pasted_words_and_the_kind_asked_for(self):
-        _s, call = self.asked("make it an email", (self.MESSAGE, "claude"))
+    def test_the_cli_is_handed_the_pasted_words_in_the_selected_style(self):
+        _s, call = self.asked("polish that", (self.MESSAGE, "claude"))
         self.assertEqual(call.call_args.args[0], self.SAID)
         self.assertTrue(call.call_args.kwargs["polish"])
-        self.assertEqual(call.call_args.kwargs["kind"], "email")
+        self.assertEqual(call.call_args.kwargs["kind"], "prompt")
 
     def test_the_request_is_not_pasted_as_words(self):
-        s, _call = self.asked("make it an email", (self.MESSAGE, "claude"))
+        s, _call = self.asked("polish that", (self.MESSAGE, "claude"))
         self.assertEqual(s.draft.text, "")
         self.assertEqual([e for e in s.events() if e.kind == "draft" and e.text], [])
 
     def test_the_answer_replaces_the_paste_where_it_is(self):
-        s, _call = self.asked("make it a message", (self.MESSAGE, "claude"))
+        s, _call = self.asked("polish that", (self.MESSAGE, "claude"))
         self.assertIn("retype", [e.kind for e in s.events()])
         fix = _fix(s)
         self.assertEqual(fix.after, self.MESSAGE)
@@ -832,9 +833,9 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
         self.assertEqual(fix.remove, self.SAID[len("tell priya the release move"):])
         self.assertEqual(fix.insert, "d")
 
-    def test_polish_that_lets_the_window_decide_the_kind(self):
+    def test_polish_that_uses_the_selected_style(self):
         _s, call = self.asked("polish that", (self.MESSAGE, "claude"), app="slack.exe")
-        self.assertEqual(call.call_args.kwargs["kind"], "message")
+        self.assertEqual(call.call_args.kwargs["kind"], "prompt")
         _s, call = self.asked("polish that", (self.MESSAGE, "claude"),
                               app="WindowsTerminal.exe")
         self.assertEqual(call.call_args.kwargs["kind"], "prompt")
@@ -845,7 +846,7 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
         self.assertFalse(call.call_args.kwargs["polish"])
 
     def test_scratch_that_puts_the_words_as_said_back(self):
-        s, _call = self.asked("make it a message", (self.MESSAGE, "claude"))
+        s, _call = self.asked("polish that", (self.MESSAGE, "claude"))
         _fix(s)
         s._route("scratch that")
         fix = _fix(s)
@@ -854,17 +855,17 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
 
     def test_asking_again_is_written_from_the_words_as_said(self):
         # Not from the first rewrite: two models' choices do not compound.
-        s, _call = self.asked("make it a message", (self.MESSAGE, "claude"))
+        s, _call = self.asked("polish that", (self.MESSAGE, "claude"))
         _fix(s)
         with mock.patch("flow.session.refine", return_value=("again", "claude")) as call, \
                 mock.patch("flow.session.available", return_value=[CLAUDE]):
-            s._route("make it a prompt")
+            s._route("polish that")
             s.wait_idle(timeout=5.0)
             s.pump_results()
         self.assertEqual(call.call_args.args[0], self.SAID)
 
     def test_a_failed_rewrite_changes_nothing_and_says_so(self):
-        s, _call = self.asked("make it an email", (None, "claude timed out after 20s"))
+        s, _call = self.asked("polish that", (None, "claude timed out after 20s"))
         events = s.events()
         self.assertNotIn("retype", [e.kind for e in events])
         self.assertIsNone(s.take_paste_fix())
@@ -873,19 +874,26 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
         self.assertEqual(errors, ["could not rewrite that (claude timed out after 20s) "
                                   "- your words are unchanged"])
 
-    def test_an_email_goes_in_and_ends_what_scratch_that_can_reach(self):
-        # A greeting and paragraphs are more line breaks than a count of Backspaces
-        # can be trusted across, so the promise ends there - and says why.
-        s, _call = self.asked("make it an email", (self.EMAIL, "claude"))
-        s.events()
+    def test_an_email_in_a_mail_program_stays_changeable_as_one_piece(self):
+        # decisions.md 2026-11-24: a pasted email was not reformatted on the way in,
+        # so outside a terminal its line breaks can be counted back over.
+        s, _call = self.asked("polish that", (self.EMAIL, "claude"))
         fix = _fix(s)
         self.assertEqual(fix.after, self.EMAIL)
         self.assertEqual(s.last_handed, self.EMAIL.strip())
+        self.assertIsNotNone(s.paste_run)
+        s._route("scratch that")
+        self.assertEqual(_fix(s).after, self.SAID)
+
+    def test_in_a_terminal_an_email_still_ends_what_scratch_that_can_reach(self):
+        # Enter and line handling there are the shell's: the strict limits stand.
+        s, _call = self.asked("polish that", (self.EMAIL, "claude"),
+                              app="WindowsTerminal.exe")
+        s.events()
+        self.assertEqual(_fix(s).after, self.EMAIL)
         self.assertIsNone(s.paste_run)
-        # The way back that does exist is said at the moment it lands, not after
-        # "scratch that" has been refused.
         said = [e.text for e in s.events() if e.kind == "edit"]
-        self.assertEqual(said, ["written as an email - Ctrl+Z there undoes it"])
+        self.assertEqual(said, ["refined as a prompt"])
         s._route("scratch that")
         notes = [e.text for e in s.events() if e.kind == "note"]
         self.assertEqual(notes, ["nothing to take back - it had more than one line break"])
@@ -893,7 +901,7 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
     def test_with_nothing_pasted_it_is_refused_out_loud_not_typed(self):
         s = _session()
         self.addCleanup(s.close)
-        s._route("make it an email")
+        s._route("polish that")
         self.assertEqual(s.draft.text, "")
         notes = [e.text for e in s.events() if e.kind == "note"]
         self.assertEqual(len(notes), 1)
@@ -936,7 +944,7 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
         with mock.patch("flow.session.refine", side_effect=slow), \
                 mock.patch("flow.session.available", return_value=[CLAUDE]):
             s.events()
-            s._route("make it a message")
+            s._route("polish that")
             s.wait_idle(timeout=5.0)
             s.pump_results()
         events = s.events()
@@ -958,7 +966,7 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
 
         with mock.patch("flow.session.refine", side_effect=typed), \
                 mock.patch("flow.session.available", return_value=[CLAUDE]):
-            s._route("make it a message")
+            s._route("polish that")
             s.wait_idle(timeout=5.0)
             s.pump_results()
         self.assertIsNone(s.take_paste_fix())
@@ -970,7 +978,7 @@ class TestGARewriteIsAskedForAfterTheWordsHaveLanded(unittest.TestCase):
         s.delivered(self.SAID, window=WINDOW)
         s._refine_op = 7
         s.events()
-        s._route("make it an email")
+        s._route("polish that")
         notes = [e.text for e in s.events() if e.kind == "note"]
         self.assertEqual(notes, ["still rewriting - one moment"])
         s._refine_op = None
@@ -1009,11 +1017,12 @@ class TestGBTheRewriteCanBePressedInsteadOfSaid(unittest.TestCase):
         _s, call = self.pressed()
         self.assertEqual(call.call_args.args[0], self.SAID)
         self.assertTrue(call.call_args.kwargs["polish"])
-        self.assertEqual(call.call_args.kwargs["kind"], "message")
+        self.assertEqual(call.call_args.kwargs["kind"], "prompt")
 
-    def test_the_window_decides_what_it_is_written_as(self):
+    def test_the_selected_style_is_what_it_is_written_as(self):
+        # decisions.md 2026-11-24: not a reading of the window.
         _s, call = self.pressed(app="OUTLOOK.EXE")
-        self.assertEqual(call.call_args.kwargs["kind"], "email")
+        self.assertEqual(call.call_args.kwargs["kind"], "prompt")
 
     def test_the_answer_replaces_the_paste_where_it_is(self):
         s, _call = self.pressed()
@@ -1172,16 +1181,16 @@ class TestGDARefineThatLandedIsChangeableToo(unittest.TestCase):
         s._route("change Tuesday to Thursday")
         self.assertEqual(_fix(s).after, self.MESSAGE.replace("Tuesday", "Thursday"))
 
-    def test_asking_for_another_kind_is_written_from_the_words_as_said(self):
+    def test_asking_again_is_written_from_the_words_as_said_in_the_selected_style(self):
         s = self.landed()
         email = "Hi Priya,\n\nThe release moves to Tuesday.\n\nThanks,"
         with mock.patch("flow.session.refine", return_value=(email, "claude")) as call, \
                 mock.patch("flow.session.available", return_value=[CLAUDE]):
-            s._route("make it an email")
+            s._route("polish that")
             s.wait_idle(timeout=5.0)
             s.pump_results()
         self.assertEqual(call.call_args.args[0], self.SAID)
-        self.assertEqual(call.call_args.kwargs["kind"], "email")
+        self.assertEqual(call.call_args.kwargs["kind"], "prompt")
         self.assertEqual(s.draft.text, "")
         self.assertEqual(_fix(s).after, email)
 
@@ -1323,6 +1332,126 @@ class TestGFAChangeThatCouldNotLandIsSaid(unittest.TestCase):
         self.assertIsNone(s.take_paste_fix())
         self.assertEqual(s.paste_run.top.text, self.SAID)
 
+
+
+class TestHARefineGrowsIntoOnePiece(unittest.TestCase):
+    """decisions.md 2026-11-24: in Refine, each hold adds what was said to the piece;
+    the whole of it is rewritten from the words as said and replaces what landed. It
+    ends when you edit it, change window or style, or say "done"."""
+
+    FIRST = "tell priya the release moves to tuesday"
+    LANDED = "Priya, the release moves to Tuesday."
+
+    def landed(self, app="slack.exe"):
+        s = _session()
+        self.addCleanup(s.close)
+        s.refine_lands = True
+        s.refine_says_more = False  # the compact pill's, without the panel flow
+        s.mode = REFINE
+        s.target_app = app
+        s.refine_kind = s.kind_here()
+        s._refined = {"text": self.LANDED, "heard": self.FIRST, "cli": "claude",
+                      "secs": 6.0}
+        s.delivered(self.LANDED, window=WINDOW)
+        s.events()
+        return s
+
+    def hold(self, s, words, result):
+        with mock.patch("flow.session.refine", return_value=result) as call,                 mock.patch("flow.session.available", return_value=[CLAUDE]):
+            s.draft.set(words)
+            s.send()
+            s.wait_idle(timeout=5.0)
+            s.pump_results()
+        return call
+
+    def test_the_second_hold_rewrites_the_whole_piece_in_place(self):
+        s = self.landed()
+        grown = "Priya, the release moves to Tuesday. Please tell QA."
+        call = self.hold(s, "and ask her to tell qa", (grown, "claude"))
+        self.assertEqual(call.call_args.args[0],
+                         "tell priya the release moves to tuesday and ask her to tell qa")
+        self.assertTrue(call.call_args.kwargs["polish"])
+        self.assertEqual(call.call_args.kwargs["kind"], kinds.PROMPT)
+        self.assertEqual([e.kind for e in s.events() if e.kind in ("retype", "reply")],
+                         ["retype"])
+        fix = _fix(s)
+        self.assertEqual(fix.after, grown)
+        self.assertEqual(s.paste_run.top.heard,
+                         "tell priya the release moves to tuesday and ask her to tell qa")
+
+    def test_the_replacement_is_in_the_trace(self):
+        class Recording:
+            path = None
+
+            def __init__(self):
+                self.records = []
+
+            def write(self, kind, /, **fields):
+                self.records.append({"kind": kind, **fields})
+
+        s = self.landed()
+        s.diag = Recording()
+        self.hold(s, "and ask her to tell qa", ("Priya, it moves. Tell QA.", "claude"))
+        _fix(s)
+        landed = [r for r in s.diag.records if r["kind"] == "landed"]
+        self.assertEqual([(r["how"], r["ok"]) for r in landed], [("replaced", True)])
+
+    def test_a_third_hold_carries_all_three(self):
+        s = self.landed()
+        self.hold(s, "and ask her to tell qa", ("two", "claude"))
+        _fix(s)
+        call = self.hold(s, "actually make it wednesday", ("three", "claude"))
+        self.assertEqual(call.call_args.args[0],
+                         "tell priya the release moves to tuesday and ask her to tell qa "
+                         "actually make it wednesday")
+
+    def test_done_ends_the_piece_and_the_next_hold_is_new(self):
+        s = self.landed()
+        s._route("done")
+        self.assertIn("done - the next Refine starts a new piece",
+                      [e.text for e in s.events() if e.kind == "note"])
+        self.assertIsNone(s.open_piece())
+        call = self.hold(s, "a different thought", ("new", "claude"))
+        self.assertEqual(call.call_args.args[0], "a different thought")
+
+    def test_a_piece_does_not_end_on_a_timer(self):
+        s = self.landed()
+        s.paste_run.at -= 10 * 60
+        self.assertIsNotNone(s.open_piece(), "a piece ended on the clock")
+
+    def test_a_dictated_paste_still_expires_after_the_minute(self):
+        s = _session()
+        self.addCleanup(s.close)
+        s.delivered("We are", window=WINDOW)
+        s.paste_run.at -= 61
+        self.assertIsNone(s.paste_run)
+
+    def test_typing_in_the_window_ends_it(self):
+        s = self.landed()
+        s.end_paste_run("you typed after Flow pasted")
+        call = self.hold(s, "and ask her to tell qa", ("new", "claude"))
+        self.assertEqual(call.call_args.args[0], "and ask her to tell qa")
+
+    def test_a_different_style_starts_a_new_piece(self):
+        s = self.landed()
+        s.profile = types.SimpleNamespace(kinds={}, refine_kind=kinds.EMAIL, name="",
+                                          apps={}, save=lambda: True)
+        self.assertIsNone(s.open_piece())
+
+    def test_a_piece_that_cannot_grow_keeps_what_landed_and_says_so(self):
+        s = self.landed()
+        self.hold(s, "and ask her to tell qa", (None, "claude timed out after 20s"))
+        errors = [e.text for e in s.events() if e.kind == "error"]
+        # The release's own fallback line: the surface pastes the new words as said.
+        self.assertEqual(errors, ["refine failed (claude timed out after 20s) - draft unchanged"])
+        self.assertIsNone(s.take_paste_fix())
+        self.assertEqual(s.paste_run.top.text, self.LANDED)
+
+    def test_in_type_mode_done_is_just_a_word(self):
+        s = _session()
+        self.addCleanup(s.close)
+        s.delivered("We are", window=WINDOW)
+        self.assertFalse(s._route_paste("done"))
 
 if __name__ == "__main__":
     unittest.main()
