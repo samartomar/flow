@@ -3018,3 +3018,49 @@ line is shown on the stderr of a call Flow made; (3) somebody's codex hooks are 
 control they are required to run on every call — an audit, a filter — and Flow's calls
 are skipping it: then it is a setting, and which way it defaults is argued again with
 that person's case in hand.
+
+### 2026-11-23 — Parakeet v3 stays: v2, parakeet-ultra and Fluid Speech Pro measured, none better
+
+**What was asked.** The owner asked which models Flow uses, what has changed in them, and
+whether anything since gives a better result, naming NVIDIA's `parakeet-tdt-0.6b-v2`.
+The reading is in [audit-2026-11-23](audit-2026-11-23/README.md). It left three models
+that could run on Flow's helper as they are, and he approved downloading them to measure.
+
+**Decided.** Nothing changes. The GPU build stays Parakeet TDT 0.6B v3 q8_0 at the
+pinned commit. The bar, set before the runs, was a clear win over 14.5 errors per 100
+words with nothing invented on the silent clips and no cost in speed. No candidate
+cleared it.
+
+**Measured.** `scripts/parakeet_bench.py gpu` on the GTX 1070: the 300 EdAcc clips,
+`accent_bench.wer_counts`, parakeet.cpp v0.6.1's CUDA helper, greedy decoding. Each
+candidate ran through the benchmark's own code with only the GGUF swapped, in the
+process and not in the repository, and the shipped model ran through the same route
+first as a control. Each file's size and SHA-256 matched Hugging Face's listing.
+
+| Model | Errors per 100 words | Against the control | 95% interval, paired bootstrap | Median a clip | Invented on 8 silent clips |
+|:---|---:|---:|:---:|---:|:---:|
+| v3 (shipped), control | 14.55 | | | 86 ms | 0 |
+| v3 again | 14.59 | +0.04 | | 82 ms | 0 |
+| v2, `mudler/parakeet-cpp-gguf` at `07a08a3a…` | 15.54 | +0.99 | +0.10 to +1.86 | 86 ms | 0 |
+| parakeet-ultra, the same commit | 14.76 | +0.21 | −0.40 to +0.84 | 83 ms | 0 |
+| Fluid Speech Pro, `FluidVoice-Labs/fluid-speech-pro-gguf` at `fee970d9…` | 14.35 | −0.19 | −0.91 to +0.50 | 90 ms | 0 |
+
+v2 is older than v3 (May against August 2025) and English-only; its published English
+figures are slightly better and its figure here is a point worse, on four groups of
+five. Fluid Speech Pro's published lead over v3 is a point (6.06 against 7.04 on the
+Open ASR Leaderboard, decoded with four beams); here it made 740 errors against 750 and
+was better on 45 clips and worse on 48. The shipped model's own two runs differed by two
+errors. Results: `.bench/accent/results-parakeet-gpu-cuda-2026-11-23-*.json`.
+
+**Not measured, and said so.** Beam decoding, which `parakeet-server` does not offer.
+The other 24 languages. Technical dictation: the benchmark has four such sentences, on
+which Fluid Speech Pro heard "PKCE" three times of three and v3 once, and v3 heard
+"Priya" where both fine-tunes did not. The CPU builds of any candidate.
+
+**Reopens if:** (1) parakeet.cpp's server can decode with a beam or take a vocabulary:
+Fluid Speech Pro is then measured again, since its published figure used a beam; (2) a
+model is published that Flow's helper can run and that is not a fine-tune of v3, such as
+a Parakeet v4 or NVIDIA's unified models in a parakeet.cpp release; (3) Flow gains a
+benchmark of technical dictation and a candidate wins it clearly; (4) Flow drops the
+other 24 languages on purpose, which removes the cost of an English-only model but not
+v2's result above. A leaderboard figure alone reopens nothing.
