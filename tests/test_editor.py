@@ -1616,3 +1616,34 @@ class TestTypingAFixTeachesInLiteToo(unittest.TestCase):
             b._cancel_edit()
         self.assertEqual(s.draft.text, "deploy the roleback plan")
         self.assertFalse(s.profile.pairs)
+
+
+class TestALiteSessionLearnsFromTheSameSeam(unittest.TestCase):
+    """The two cases above that are about learning, asked of the seam itself.
+
+    Ported in stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One
+    surface"). `Bubble._edit` is how the class above reaches `commit_edit` in Lite, and
+    that route goes with the bubble; "Lite has the learning" is a claim about the session
+    Lite builds, and the compact pill's Edit chip calls the same `begin_edit` and
+    `commit_edit`, so this is a Lite session driven through them with no window.
+    """
+
+    def lite(self):
+        s = session(profile=tmp_profile(), lite=True)
+        s.draft.set("deploy the roleback plan")
+        return s
+
+    def test_a_fix_typed_in_lite_teaches_the_same_pair(self):
+        s = self.lite()
+        s.begin_edit()
+        s.commit_edit("deploy the rollback plan")
+        self.assertEqual(s.draft.text, "deploy the rollback plan")
+        self.assertEqual(dict(s.profile.pairs), {"roleback -> rollback": 1})
+        self.assertFalse(s.editing, "the editor was left open")
+
+    def test_escape_in_lite_teaches_nothing(self):
+        s = self.lite()
+        s.begin_edit()
+        s.cancel_edit()
+        self.assertEqual(s.draft.text, "deploy the roleback plan")
+        self.assertFalse(s.profile.pairs)

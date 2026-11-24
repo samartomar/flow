@@ -137,6 +137,25 @@ class TestTheFontSpecs(ScaleCase):
         self.assertEqual(ui.scaled_font(ui.FONT_BODY), (ui.FONT_SANS, -39))
 
 
+class TestTheCompactEditorsFontReadsTheModuleScale(unittest.TestCase):
+    """`ui.scaled_font`, which the compact pill's hand editor and its buttons use.
+
+    Ported in stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One
+    surface"): the case above sets `SCALE` through `apply_scale`, which only
+    `Pill.__init__` calls, so this sets the module value itself and asks the shared
+    helper what it does with it. Where the compact pill's scale should come from is
+    not settled here - today nothing on that path sets it, so it stays at 1.0.
+    """
+
+    def test_a_pixel_spec_is_scaled_by_the_module_value(self):
+        with mock.patch.object(ui, "SCALE", 3.0):
+            self.assertEqual(ui.scaled_font(ui.FONT_BODY), (ui.FONT_SANS, -39))
+
+    def test_at_the_value_nothing_sets_it_is_the_spec_itself(self):
+        with mock.patch.object(ui, "SCALE", 1.0):
+            self.assertEqual(ui.scaled_font(ui.FONT_BODY), ui.FONT_BODY)
+
+
 class TestTheScaledCanvasIsTransparentAtOne(ScaleCase):
     def test_ui_does_not_wrap_at_all(self):
         # Not "wrapped with a factor of one": a 100 % display, a Mac and every test

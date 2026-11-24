@@ -3219,15 +3219,30 @@ nine cards, "The pill" with one row, no error in the console.
 
 **Not done yet, and in this order.**
 
-1. Sort the 33 test files: helpers' tests stay, the Classic windows' tests go, and a
-   test that reaches session behaviour only through a Classic window is ported before
-   its window is deleted. That last kind is the risk in this retirement, and the reason
-   it is not one commit.
+1. **Done, stage 2: the 33 test files are sorted** ([one-surface.md](one-surface.md),
+   "Stage 2", has a row per file). Of 1,659 tests, 1,039 stay (they test shared
+   helpers, or never needed a Classic window), and 531 go with the classes. The other
+   89 reached shared code through a Classic window, and all 89 are now covered without
+   one: the 37 launch tests in `test_main.py`, `test_hotkey.py` and `test_stats.py`
+   were changed in place to launch with no `--design` and `CompactPill` patched; 42
+   were ported into 41 new tests against `Session` or `CompactPill`; and 10 were
+   already asserted by a named test that needs no window. The originals stay until
+   stage 3 deletes them with their classes. Measured: 4,233 tests, 5 skipped.
+   The sort also found five things only the Classic pill guarantees, which no port
+   can carry without product code: the 120 s hold ceiling, the per-frame drain of
+   late paste warnings, refusing a hold while the editor is open, the editor's focus
+   check, and a tested refusal of Flow's own window as the paste target. Reading the
+   compact code also turned up an Edit chip that calls an undefined `dev`, and editor
+   fonts that never scale. All are listed there, for the owner before stage 3.
 2. Port `scripts/selfdrive.py`'s gate to the compact surface, or drop it on the owner's
    word.
 3. Delete `Pill`, `Bubble`, `ConversationCard`, `HelpWindow`, `switch_design` on both
    surfaces, the rebuild loop in `__main__`, `--design`, and `paint.TeeCanvas`; then
-   the `design`, `panel` and `place` profile fields after a release of ignoring them.
+   the `design`, `panel` and `place` profile fields after a release of ignoring them
+   (and `mic` and `mic_at`, which only the Classic pill reads). Move the test fixtures
+   other files import out of `test_menu.py`, `test_pill.py` and `test_bubble.py`
+   first, and cut the Classic classes out of the mixed files rather than deleting
+   those files whole. Stage 2's notes list both.
 4. Move what compact borrows out of `ui.py` into modules of its own.
 5. Rewrite the guide and architecture sections that describe the bubble, the marks row
    and the held draft.

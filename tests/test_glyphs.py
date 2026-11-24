@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from flow import glyphs  # noqa: E402
+from flow.session import CONVERSE, DICTATE, REFINE  # noqa: E402
 from test_ui_compact import Canvas  # noqa: E402
 
 
@@ -313,6 +314,22 @@ class TestTheModeGlyphReadsTheName(unittest.TestCase):
         # fourth is a decision, not whichever branch happens to be last.
         with self.assertRaises(ValueError):
             glyphs.mode(Recording(), 0, 0, "#ABCDEF", "translate")
+
+    def test_the_pen_is_its_own_mark_and_the_bubble_has_its_tail(self):
+        # `test_pill.TestTheRowIcons`' counts, asked of `glyphs.mode` directly: they
+        # reached it only through the Classic row's `_mode_glyph` wrapper, which goes
+        # with that pill (decisions.md 2026-11-23, "One surface"). Three lines of text
+        # for Type; shaft, band and the line it rewrites for the pen, whose nib was
+        # once collinear with the shaft and drew no pen at all; four corner arcs, four
+        # sides and a tail for Ask's bubble.
+        shapes = {}
+        for name in (DICTATE, REFINE, CONVERSE):
+            c = Canvas()
+            glyphs.mode(c, 3.0, 3.0, "#ABCDEF", name, size=14.0, tags=())
+            shapes[name] = (len(c.arcs), len(c.lines))
+        self.assertEqual(shapes[DICTATE], (0, 3))
+        self.assertEqual(shapes[REFINE], (0, 3))
+        self.assertEqual(shapes[CONVERSE], (4, 5))
 
 
 class TestTheTwoSurfacesShareTheDrawings(unittest.TestCase):

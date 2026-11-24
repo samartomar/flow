@@ -403,6 +403,32 @@ class TestTheSettingsFolderOpens(unittest.TestCase):
         self.assertIn(str(self.path.parent), pill.bubble.note.call_args.args[0])
 
 
+class TestTheTemplateIsWrittenOnceAndNeverOver(unittest.TestCase):
+    """`lexicon.ensure`, the half of the settings-folder entry that outlives it.
+
+    Ported in stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One
+    surface"): the two cases above that open the folder reach `ensure` only through
+    `Pill._open_settings`. The opener goes with that class; the file it writes is the
+    lexicon's, and `append_pair` and `append_term` (Flow Home's Add) create it the same
+    way, so these assert `ensure` directly.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.path = Path(self.dir.name) / "settings" / "lexicon.txt"
+
+    def test_the_first_call_writes_the_template_and_the_folder_under_it(self):
+        self.assertTrue(ensure(self.path))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), TEMPLATE)
+
+    def test_a_second_call_keeps_what_the_user_wrote(self):
+        ensure(self.path)
+        self.path.write_text("semir -> Samir\n", encoding="utf-8")
+        self.assertFalse(ensure(self.path))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "semir -> Samir\n")
+
+
 class TestTheMenuOffersIt(unittest.TestCase):
     """The entry has to be *in* the menu, not merely implemented.
 

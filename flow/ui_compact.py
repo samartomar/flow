@@ -3971,13 +3971,15 @@ class CompactPill(tk.Tk):
         shell.configure(bg=SHELL)
         #: The font the panel's own text uses. A `tk.Text` left at the system default
         #: would be a second type size inside a surface that has exactly one.
+        #: The ring and the padding are pixels and go through `self.dev`; `width` and
+        #: `height` are characters and lines of that font, which carries the scale
+        #: itself, so they are left as counts — scaled as well, they would square it.
         box = self._editor = tk.Text(
             shell, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
-            highlightthickness=dev(self, 1), highlightbackground=RING_OUTER,
+            highlightthickness=self.dev(1), highlightbackground=RING_OUTER,
             highlightcolor=RING_OUTER, wrap="word",
             font=scaled_font(FONT_BODY), undo=True,
-            padx=dev(self, 8), pady=dev(self, 8), width=dev(self, 44),
-            height=dev(self, 9),
+            padx=self.dev(8), pady=self.dev(8), width=44, height=9,
         )
         box.pack(fill="both", expand=True)
         box.insert("1.0", text)
@@ -3990,7 +3992,10 @@ class CompactPill(tk.Tk):
         #: they press End first on every single correction.
         box.focus_set()
         box.mark_set("insert", "end-1c")
-        bring_forward()
+        # The editor's own toplevel is the window that has to come forward, and Tk
+        # creates it lazily: `toplevel_hwnd` answers 0 until the first update.
+        shell.update_idletasks()
+        bring_forward(toplevel_hwnd(shell))
         self._editor_note("Esc leaves it as it was  ·  Ctrl+Enter keeps your edits")
 
     def _editor_note(self, message: str) -> None:
@@ -4001,19 +4006,19 @@ class CompactPill(tk.Tk):
         person has to already know is not a way out.
         """
         row = tk.Frame(self._editor_win, bg=SHELL)
-        row.pack(fill="x", padx=dev(self, 8), pady=(0, dev(self, 8)))
+        row.pack(fill="x", padx=self.dev(8), pady=(0, self.dev(8)))
         tk.Label(row, text=message, bg=SHELL, fg=MUTED, anchor="w",
                  font=scaled_font(FONT_TAG)).pack(side="left")
         tk.Button(
             row, text="Cancel", bg=CHIP, fg=CODE, relief="flat", bd=0,
             font=scaled_font(FONT_CHIP), cursor="hand2", takefocus=0,
             command=lambda: self._close_editor(commit=False),
-        ).pack(side="right", ipadx=dev(self, 10), ipady=dev(self, 3))
+        ).pack(side="right", ipadx=self.dev(10), ipady=self.dev(3))
         tk.Button(
             row, text="Done", bg=PRIMARY_FILL, fg=PRIMARY_TEXT, relief="flat", bd=0,
             font=scaled_font(FONT_CHIP_PRIMARY), cursor="hand2", takefocus=0,
             command=lambda: self._close_editor(commit=True),
-        ).pack(side="right", padx=(0, dev(self, 6)), ipadx=dev(self, 10), ipady=dev(self, 3))
+        ).pack(side="right", padx=(0, self.dev(6)), ipadx=self.dev(10), ipady=self.dev(3))
 
     def _close_editor(self, commit: bool) -> None:
         """Close the box, committing or discarding, and take the edit seam back.

@@ -453,6 +453,106 @@ class TestConverseIgnoresTheSuffix(unittest.TestCase):
         s.close()
 
 
+class CompactPressed:
+    """`Pressed`, on the pill Flow ships: `CompactPill._send` where that was `Pill._send`.
+
+    Ported in stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One
+    surface"). The refusals live in `session.send()` whichever surface calls it, and the
+    assertions below are the two classes above, word for word, against the surface that
+    survives. Built with `__new__` like every compact fixture: `_send` and `_deliver` draw
+    nothing and read `on_send`, `paste_target` and the session, and `hotkeys` stays at its
+    class default of None, so no keyboard hook is asked whether a key was typed since the
+    paste. The notes are kept off the event stream here, because the compact pill says
+    them on a strip this fixture has not got.
+    """
+
+    def __init__(self, s: Session) -> None:
+        import flow.ui_compact as uc
+
+        self.pastes: list[tuple[str, bool]] = []
+        self._said: list[str] = []
+        self.pill = uc.CompactPill.__new__(uc.CompactPill)
+        self.pill.session = s
+        self.pill.on_send = self._on_send
+        self.pill.paste_target = 0x22
+        self.session = s
+
+    def _on_send(self, text: str, target=None, submit: bool = False) -> str:
+        self.pastes.append((text, submit))
+        return ""
+
+    def say(self, utterance: str) -> None:
+        """Route an utterance and pump the events the way `CompactPill._pump_events`
+        does: a `send` is `_send(submit=...)`, and a note is kept for the assertion."""
+        self.session._route(utterance)
+        while events := self.session.events():
+            for ev in events:
+                if ev.kind == "send":
+                    self.pill._send(submit=ev.text == "enter")
+                elif ev.kind == "note":
+                    self._said.append(ev.text)
+
+    def notes(self) -> str:
+        return " | ".join(self._said)
+
+
+class TestTheCompactPillPressesTheSameButton(unittest.TestCase):
+    """`TestItPressesTheSameButton`'s five cases through `CompactPill._send`."""
+
+    def test_a_spoken_trigger_pastes_the_draft(self):
+        p = CompactPressed(session())
+        p.session.draft.set(DRAFT)
+        p.say("boom")
+        self.assertEqual(p.pastes, [(DRAFT, False)])
+
+    def test_and_the_enter_variant_asks_for_the_submit(self):
+        p = CompactPressed(session())
+        p.session.draft.set(DRAFT)
+        p.say("enter boom")
+        self.assertEqual(p.pastes, [(DRAFT, True)])
+
+    def test_an_empty_draft_refuses_with_no_paste_and_no_enter(self):
+        p = CompactPressed(session())
+        p.say("enter boom")
+        self.assertEqual(p.pastes, [], "something was pasted with nothing to send")
+        self.assertIn("nothing to send", p.notes())
+
+    def test_a_question_in_flight_refuses_the_same_way_the_chip_does(self):
+        p = CompactPressed(session())
+        p.session.draft.set(DRAFT)
+        p.session._ask_op = 7  # `send()` refuses on the call itself, not on `state`
+        p.say("boom")
+        self.assertEqual(p.pastes, [])
+        self.assertIn("still waiting", p.notes())
+
+    def test_a_rewrite_in_flight_refuses_too(self):
+        p = CompactPressed(session())
+        p.session.draft.set(DRAFT)
+        p.session._refine_op = 7
+        p.say("boom")
+        self.assertEqual(p.pastes, [])
+        self.assertIn("still rewriting", p.notes())
+
+
+class TestConverseIgnoresTheSuffixOnTheCompactPill(unittest.TestCase):
+    """`TestConverseIgnoresTheSuffix`'s first case through `CompactPill._send`."""
+
+    def test_both_variants_ask_and_neither_pastes_anything(self):
+        for word in ("boom", "enter boom"):
+            with self.subTest(word=word):
+                p = CompactPressed(session())
+                p.session.toggle_mode(to=CONVERSE)
+                self.assertEqual(p.session.mode, CONVERSE)
+                p.session.draft.set("what is a rollback")
+                with mock.patch("flow.session.ask",
+                                return_value=("an answer", "codex")):
+                    p.say(word)
+                    p.session.wait_idle(timeout=5.0)
+                self.assertEqual(p.pastes, [], "converse pasted the question")
+                self.assertEqual(p.session.reply, "an answer", "it did not ask either")
+                p.session.close()
+
+
 class TestTheWordsAreThePersonsOwn(unittest.TestCase):
     """Check 5: defaults must work out of the box, because nobody will edit JSON."""
 

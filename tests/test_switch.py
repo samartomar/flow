@@ -358,6 +358,35 @@ class TestASecondTkInOneProcess(unittest.TestCase):
     def test_compact_then_shipped(self):
         self.round_trip(uc.CompactPill, ui.Pill)
 
+    def test_the_compact_pill_is_built_detached_and_built_again(self):
+        # The compact half of the two round trips above, ported in stage 2 of retiring
+        # the Classic pill (decisions.md 2026-11-23, "One surface"): the only real-Tk
+        # build of `CompactPill.__init__` in the suite, and the only proof its `detach`
+        # leaves the process able to build another window. Over a real `Session` rather
+        # than `shots.FakeSession`, because `scripts/shots.py` imports the Classic pill
+        # and a session that has every attribute the window might read is the stronger
+        # stand-in anyway.
+        from test_talk_session import FakeAsr, FakeMic
+        from flow.session import Session
+
+        session = Session(asr=FakeAsr(), mic=FakeMic(), lite=True)
+        self.addCleanup(session.close)
+        session.draft.set("the words that have to survive the rebuild")
+        with mock.patch.object(uc.tray, "available", return_value=False):
+            one = uc.CompactPill(session, lite=True)
+        one.update_idletasks()
+        self.addCleanup(gc.collect)
+        one.detach()
+        self.assertFalse(one._alive)
+        with mock.patch.object(uc.tray, "available", return_value=False):
+            two = uc.CompactPill(session, lite=True)
+        two.update_idletasks()
+        self.addCleanup(two.detach)
+        self.assertTrue(two.winfo_exists())
+        self.assertIs(two.session, session)
+        self.assertEqual(two.session.draft.text,
+                         "the words that have to survive the rebuild")
+
     def test_the_fonts_are_registered_once_however_many_pills_are_built(self):
         # `AddFontResourceExW` counts its callers, and only `quit_app` ever removes
         # one — so a `_load_fonts` that ran per surface would leave a registration

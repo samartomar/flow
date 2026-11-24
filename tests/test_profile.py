@@ -1204,3 +1204,66 @@ class TestThePanelFlowIsRemembered(unittest.TestCase):
         again = Profile(p.path)
         self.assertIs(again.panel_flows, False)
         self.assertEqual(again.faults, [])
+
+
+class TestTheClassicPillsFieldsStillLoad(unittest.TestCase):
+    """`panel` (the Classic panel width) and `mic_at` (its mic view's spot).
+
+    Ported in stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One
+    surface") from `test_overlay.py` and `test_mic.py`, which reach these fields through
+    that pill's width table and its drag. Only the Classic pill reads either field, and
+    both go with it after a release of ignoring them; until then a profile that carries
+    them, or carries junk in them, has to load and save like any other, and that is
+    `profile.py`'s job whatever pill is on screen.
+    """
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.path = Path(d.name) / "profile.json"
+
+    def test_the_panel_survives_a_save_and_a_load(self):
+        p = Profile(self.path)
+        p.panel = "large"
+        self.assertTrue(p.save())
+        again = Profile(self.path)
+        self.assertTrue(again.load())
+        self.assertEqual(again.panel, "large")
+        self.assertNotIn("panel", again.faults)
+
+    def test_a_fresh_profile_asks_for_the_regular_width(self):
+        from flow.profile import PANEL_DEFAULT
+
+        self.assertEqual(PANEL_DEFAULT, "regular")
+        self.assertEqual(Profile(self.path).panel, PANEL_DEFAULT)
+
+    def test_a_nonsense_panel_is_named_and_still_launches(self):
+        from flow.profile import PANEL_DEFAULT
+
+        self.path.write_text(json.dumps({"schema": 1, "panel": 7}), encoding="utf-8")
+        p = Profile(self.path)
+        self.assertTrue(p.load())
+        self.assertIn("panel", p.faults)
+        self.assertEqual(p.panel, PANEL_DEFAULT)
+
+    def test_the_mic_view_and_its_spot_come_back_after_a_save(self):
+        # A spot is written as the tuple a drag hands over and read back as a list.
+        profile = Profile(self.path)
+        profile.mic = True
+        profile.mic_at = (10, 20)
+        self.assertTrue(profile.save())
+        again = Profile(self.path)
+        again.load()
+        self.assertTrue(again.mic)
+        self.assertEqual(again.mic_at, [10, 20])
+
+    def test_a_hand_edited_mic_spot_costs_the_setting_and_not_the_save(self):
+        junk = (None, "somewhere", [1], [1, 2, 3], ["a", "b"], 3.5, [float("inf"), 0])
+        for value in junk:
+            with self.subTest(value=value):
+                profile = Profile(self.path)
+                profile.mic_at = value
+                self.assertTrue(profile.save())
+                again = Profile(self.path)
+                again.load()
+                self.assertIsNone(again.mic_at)

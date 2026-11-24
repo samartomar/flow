@@ -696,6 +696,32 @@ class TestTheLegendIsInTheSheet(unittest.TestCase):
         for gone in ("amber pill", "violet pill"):
             self.assertNotIn(gone, said)
 
+    def test_the_legend_names_no_pill_colour_the_app_stopped_drawing(self):
+        # The `legend_rows` half of the case above, which needs no window: ported in
+        # stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One surface"),
+        # because the half that counts `ui.ACCENT` goes with that pill's palette.
+        said = "\n".join(f"{left} {right}" for _k, left, right in helpfile.legend_rows())
+        for gone in ("amber pill", "violet pill"):
+            self.assertNotIn(gone, said)
+
+
+class TestTheGuideOpensInTheBrowser(unittest.TestCase):
+    """`help.open_guide`, which `TestTheMenuReachesIt` reaches only through the Classic
+    pill's Help menu. Ported in stage 2 of retiring that pill (decisions.md 2026-11-23,
+    "One surface"): the menu row goes with the class, and the call it makes is help.py's.
+    """
+
+    def test_it_hands_the_guide_url_to_the_opener(self):
+        with mock.patch.object(helpfile, "open_path") as opened:
+            helpfile.open_guide()
+        opened.assert_called_once_with(helpfile.GUIDE_URL)
+
+    def test_on_windows_that_opener_is_the_shell(self):
+        with mock.patch.object(helpfile.sys, "platform", "win32"), \
+                mock.patch("os.startfile", create=True) as started:
+            helpfile.open_guide()
+        started.assert_called_once_with(helpfile.GUIDE_URL)
+
 
 class TestTheFirstRunFlagIsAProfileField(unittest.TestCase):
     """`profile.welcomed` now means the first run was finished or skipped — the flag the

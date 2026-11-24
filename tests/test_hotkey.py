@@ -451,7 +451,7 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
 
     def launch(self, hotkeys) -> str:
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -461,9 +461,9 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
                 mock.patch.object(hotkey, "user32", fake), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill") as pill, \
+                mock.patch.object(flow.ui_compact, "CompactPill") as pill, \
                 contextlib.redirect_stdout(out):
-            self.assertEqual(mod.main(["--design", "current", "--no-speak", "--no-lexicon"]), 0)
+            self.assertEqual(mod.main(["--no-speak", "--no-lexicon"]), 0)
             keys = pill.call_args.kwargs["hotkeys"]
             if keys is not None:
                 keys._thread.join(timeout=5.0)
@@ -688,7 +688,7 @@ class TestAltGrKeepsItsCharacters(unittest.TestCase):
 
     def test_the_startup_block_says_it_before_the_combos(self):
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -697,10 +697,9 @@ class TestAltGrKeepsItsCharacters(unittest.TestCase):
                 mock.patch.object(hotkey, "user32", AltGrUser32(GERMAN)), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill") as pill, \
+                mock.patch.object(flow.ui_compact, "CompactPill") as pill, \
                 contextlib.redirect_stdout(out):
-            self.assertEqual(mod.main(["--design", "current", "--no-speak",
-                                       "--no-lexicon"]), 0)
+            self.assertEqual(mod.main(["--no-speak", "--no-lexicon"]), 0)
             keys = pill.call_args.kwargs["hotkeys"]
             if keys is not None:
                 keys._thread.join(timeout=5.0)

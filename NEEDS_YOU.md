@@ -39,6 +39,22 @@ residue.
   checksum into the Scoop and winget manifests. The Scoop bucket and any winget
   submission are yours, as before.
 
+- [ ] **Before the Classic pill's code is deleted: five things only it guarantees.**
+  Found while sorting its tests (2026-11-24); each needs a yes (build it on the compact
+  pill) or a no (let it go). Detail in
+  [docs/one-surface.md](docs/one-surface.md), "Classic guarantees with no compact
+  counterpart".
+  1. A hold whose key-up never arrives is ended after 120 s, keeping the words. Compact
+     leaves the hold open. **Recommend yes.**
+  2. A warning that a paste could not put your clipboard back is shown as it happens.
+     Compact shows it at the next Send. **Recommend yes.**
+  3. A hold while the hand editor is open is refused, with the reason. **Recommend yes.**
+  4. The editor closes if Windows refuses it the keyboard. Not looked at closely yet.
+  5. Pasting into Flow's own window is refused; compact has the code but no test of it.
+     **Recommend a test, nothing more.**
+  Also unchecked on screen: the compact editor's text may not grow with display
+  scaling, and may fall back to a system font.
+
 - [ ] **Try it again — this time it has been driven in the real app.** `uv run flow`,
   then, in this order:
   1. Hold **ctrl+win**. The line under the pill should say *listening - let go to

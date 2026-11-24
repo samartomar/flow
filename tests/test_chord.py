@@ -383,6 +383,17 @@ class TestBTheHoldIsTheUtterance(unittest.TestCase):
             with self.subTest(word=word):
                 self.assertIn('name == "%s"' % word, ui)
 
+    def test_and_they_are_the_words_the_compact_pill_dispatches_on(self):
+        # The same tripwire on the pill Flow ships (decisions.md 2026-11-23, "One
+        # surface"): `CompactPill._drain_hotkeys` matches the four words by literal too.
+        chord, _presses = _chord()
+        compact = (Path(__file__).resolve().parent.parent
+                   / "flow" / "ui_compact.py").read_text(encoding="utf-8")
+        for word in (chord.warm_action, chord.action,
+                     chord.end_action, chord.break_action):
+            with self.subTest(word=word):
+                self.assertIn('name == "%s"' % word, compact)
+
 
 class TestBBBothGesturesShipAndNeitherReplacesTheOther(unittest.TestCase):
     """`Chord.gesture`, and the switch that should have been there from the start.

@@ -2224,6 +2224,90 @@ class TestTheHandEditorLivesOnTheCompactPanel(unittest.TestCase):
         open_editor.assert_not_called()
         copy_result.assert_not_called()
 
+    def opened(self, k=1.0):
+        """`_open_editor`'s own body, run, with only the windows it builds replaced.
+
+        The two press tests above mock `_open_editor` out, and until this ran the body
+        nothing did — so nothing saw it raise on its first widget, *after* `begin_edit`
+        had put the session in `editing`: the chip left a deaf microphone and no box.
+        The widgets are fakes because a Toplevel needs a desktop. `bring_forward` and
+        `toplevel_hwnd` are autospecced rather than bare Mocks, so a call with the
+        wrong arguments fails here the way it does against the real ones.
+        """
+        p = panel_pill(mode=REFINE)
+        p._panel_open = True
+        p._panel_mode = REFINE
+        p.k = k
+        p.session.begin_edit.return_value = "the refined prompt"
+        with mock.patch.multiple(uc.tk, Toplevel=mock.DEFAULT, Text=mock.DEFAULT,
+                                 Frame=mock.DEFAULT, Label=mock.DEFAULT,
+                                 Button=mock.DEFAULT) as tk, \
+                mock.patch.object(uc, "toplevel_hwnd", autospec=True,
+                                  return_value=0x5150) as hwnd, \
+                mock.patch.object(uc, "bring_forward", autospec=True,
+                                  return_value=True) as forward:
+            p._open_editor()
+        return p, tk, hwnd, forward
+
+    def test_a_press_puts_the_box_on_screen_with_the_text_in_it(self):
+        p, tk, _hwnd, _forward = self.opened()
+
+        p.session.begin_edit.assert_called_once_with()
+        self.assertIs(p._editor_win, tk["Toplevel"].return_value)
+        self.assertIs(p._editor, tk["Text"].return_value)
+        p._editor.insert.assert_called_once_with("1.0", "the refined prompt")
+        p.session.cancel_edit.assert_not_called()
+
+    def test_and_the_box_is_the_window_brought_forward(self):
+        # The editor's own toplevel, which is the one that has to take the keyboard —
+        # and asked for after `update_idletasks`, because Tk creates that toplevel
+        # lazily and `toplevel_hwnd` answers 0 until it exists (ui.toplevel_hwnd).
+        p, tk, hwnd, forward = self.opened()
+        shell = tk["Toplevel"].return_value
+
+        shell.update_idletasks.assert_called_with()
+        hwnd.assert_called_once_with(shell)
+        forward.assert_called_once_with(0x5150)
+
+    def test_its_pixels_scale_and_its_character_cells_do_not(self):
+        # Padding and the ring are pixels, so they are device pixels on a scaled display,
+        # the way every other length in this module is. `width` and `height` on a
+        # tk.Text are counted in characters and lines *of its own font*, and the font is
+        # what carries the scale (`scaled_font`): multiplied as well, the box would grow
+        # by the square of the factor — the reason `paint.scale_font` leaves a point
+        # size alone.
+        p, tk, _hwnd, _forward = self.opened(k=2.0)
+        box = tk["Text"].call_args.kwargs
+
+        self.assertEqual((box["highlightthickness"], box["padx"], box["pady"]),
+                         (2, 16, 16))
+        self.assertEqual((box["width"], box["height"]), (44, 9))
+        row = tk["Frame"].return_value.pack.call_args.kwargs
+        self.assertEqual((row["padx"], row["pady"]), (16, (0, 16)))
+
+    def test_every_way_out_of_the_box_reaches_the_session(self):
+        # Cancel and Escape discard, Done and Ctrl+Enter keep. Each is a lambda bound in
+        # the body above, so only a test that runs the body can press them.
+        for way, commit in (("Cancel", False), ("Done", True),
+                            ("<Escape>", False), ("<Control-Return>", True)):
+            with self.subTest(way=way):
+                p, tk, _hwnd, _forward = self.opened()
+                p._editor.get.return_value = "the corrected prompt"
+                if way.startswith("<"):
+                    press = dict(c.args for c in p._editor.bind.call_args_list)[way]
+                    press(mock.Mock())
+                else:
+                    buttons = {c.kwargs["text"]: c.kwargs["command"]
+                               for c in tk["Button"].call_args_list}
+                    buttons[way]()
+
+                if commit:
+                    p.session.commit_edit.assert_called_once_with("the corrected prompt")
+                    p.session.cancel_edit.assert_not_called()
+                else:
+                    p.session.cancel_edit.assert_called_once_with()
+                    p.session.commit_edit.assert_not_called()
+
     def test_it_is_its_own_window_rather_than_a_widget_on_the_composited_one(self):
         # The forced part. This window is layered and GDI+-composited: it shows the
         # bitmap Windows was handed, so a tk.Text inside it would not be on screen at
