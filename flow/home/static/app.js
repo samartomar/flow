@@ -121,10 +121,10 @@
     { id: "history", label: "History", icon: "history", tint: C.type },
     { id: "voice", label: "Voice", icon: "wave", tint: C.type },
     { group: "Refine" },
-    { id: "styles", label: "Styles", icon: "sliders", tint: C.refine },
+    { id: "styles", label: "Styles", icon: "pencil", tint: C.refine },
     { group: "Ask" },
     { id: "ask", label: "Conversations", icon: "chat", tint: C.ask },
-    { id: "lenses", label: "Lenses", icon: "sliders", tint: C.ask },
+    { id: "lenses", label: "Lenses", icon: "search", tint: C.ask },
     { group: "Setup" },
     { id: "models", label: "Models", icon: "layers" },
     { id: "settings", label: "Settings", icon: "sliders" },
@@ -230,7 +230,7 @@
             ${s.all_words != null ? `<div class="stat"><b>${Number(s.all_words).toLocaleString()}</b><span>words all time</span></div>` : ""}
           </div>
           <hr class="rule">
-          <div class="row">${glyph(C.refine, 0.8)}<p class="note grow">Want it written properly? Hold again and say <b>make it an email</b>, <b>polish that</b> or <b>make it shorter</b>${sc.rewrite ? ", or press the keys" : ""}. Flow rewrites what it just pasted, for the window you are in. <a href="#/settings">What Refine writes</a></p>${keys(sc.rewrite)}</div>
+          <div class="row">${glyph(C.refine, 0.8)}<p class="note grow">Want it written properly? Hold again and say <b>polish that</b> or <b>make it shorter</b>${sc.rewrite ? ", or press the keys" : ""}. Flow rewrites what it just pasted, in your selected style. <a href="#/styles">Styles</a></p>${keys(sc.rewrite)}</div>
           ${sc.corrects ? `<div class="row">${icon("pencil", C.soft, 15)}<p class="note grow">Said it wrong? Hold again and say <b>scratch that</b>, or <b>change Tuesday to Thursday</b>. Flow fixes what it just pasted, until you type or click.</p></div>` : ""}
           ${sc.paste_last ? `<div class="row">${icon("copy", C.soft, 15)}<p class="note grow">Pasted in the wrong window? <b>Paste last</b> puts it in the one in front.</p>${keys(sc.paste_last)}</div>` : ""}
         </section>
@@ -630,7 +630,7 @@
           <section class="card">
             <div class="setting"><div class="text"><b>Selected lens</b><span class="note">Stays selected until you change it, here or from the pill's right-click menu.</span></div>
               <select data-change="lens-pick" aria-label="Selected lens">${options}</select></div>
-            ${d.ask.speaks ? `<div class="setting"><div class="text"><b>Read answers aloud</b><span class="note">Off: an answer stays on its card, and nothing speaks unasked.</span></div>${sw(d.ask.read_answers, "read-answers", "Read answers aloud")}</div>` : `<p class="note">Answers stay on their card. Spoken answers are not available on this PC.</p>`}
+            ${d.ask.speaks ? `<div class="setting"><div class="text"><b>Read answers aloud</b><span class="note">${d.ask.read_answers ? "On: each answer is read aloud as it lands, and stays on its card." : "Off: an answer stays on its card, and nothing speaks unasked."}</span></div>${sw(d.ask.read_answers, "read-answers", "Read answers aloud")}</div>` : `<p class="note">Answers stay on their card. Spoken answers are not available on this PC.</p>`}
           </section>
           ${cards}
         </div>
@@ -666,16 +666,6 @@
     const wsRows = ws.recent.map((p) => `
       <div class="ws"><label><input type="radio" name="ws" value="${esc(p)}" data-change="ws" ${p === ws.current ? "checked" : ""}>${icon("folder", C.green, 16)}<span class="mono ellipsis">${esc(p)}</span></label>
         <button type="button" class="icon-btn" aria-label="Forget ${esc(p)}" data-act="ws-forget" data-path="${esc(p)}">${icon("x", C.soft, 14)}</button></div>`).join("");
-    // What Refine writes. One list of kinds, used three times: the default, each
-    // program's own choice, and the row that adds a program.
-    const wr = d.writing;
-    const kindOptions = (chosen, first) => [["auto", first]].concat(wr.kinds.map((k) => [k.key, k.label])).map(([v, t]) =>
-      `<option value="${esc(v)}" ${v === chosen ? "selected" : ""}>${esc(t)}</option>`).join("");
-    const apps = d.apps.map((a) => `
-      <div class="app-row"><span class="mono ellipsis">${esc(a.exe)}</span>
-        <select data-change="app-kind" data-exe="${esc(a.exe)}" aria-label="What Refine writes in ${esc(a.exe)}">${kindOptions(a.kind, "Flow decides")}</select>
-        <span class="note ellipsis" title="${esc(a.instruction)}">${esc(a.instruction)}</span>
-        <button type="button" class="icon-btn" aria-label="Remove ${esc(a.exe)}" data-act="app-remove" data-exe="${esc(a.exe)}">${icon("x", C.soft, 14)}</button></div>`).join("");
     return `
       <div class="page-head"><div class="grow"><h1>Settings</h1><p class="sub">Everything Flow remembers about how you like it. The pill never grows one of these.</p></div></div>
       ${d.profile ? "" : '<section class="card tight"><p class="note warn">Flow was started with --no-profile: changes here last until it quits.</p></section>'}
@@ -1126,7 +1116,7 @@
           : `<span class="row">${k.mode ? keys(k.mode) : ""}<span class="note">${k.mode ? "then hold" : "tap the pill to violet, then hold"}</span></span>`}
           <span class="note">the answer rises above the pill, like ChatGPT</span></div>
       </div>
-      <div class="row">${glyph(C.refine, 0.9)}<p class="note grow">And when the words need work: say them the way you would to a person &ndash; <i>&ldquo;tell Priya the release moves to Tuesday and say sorry for the late notice&rdquo;</i> &ndash; then hold again and say <b>make it an email</b>. Flow rewrites what it just typed, where it stands.</p></div>
+      <div class="row">${glyph(C.refine, 0.9)}<p class="note grow">And when the words need work: say them the way you would to a person &ndash; <i>&ldquo;tell Priya the release moves to Tuesday and say sorry for the late notice&rdquo;</i> &ndash; then hold again and say <b>polish that</b>. Flow rewrites what it just typed, where it stands, in your selected style.</p></div>
       <p class="fine">${icon("shield", C.soft, 13)} Speech is recognised on this PC. No account, no API key.</p>`;
   }
 

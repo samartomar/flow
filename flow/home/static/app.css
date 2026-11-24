@@ -490,3 +490,10 @@ body.first .page { align-items: center; padding: 32px 24px 40px; }
 
 /* A style's instructions, as written: line breaks kept (decisions.md 2026-11-24). */
 .note.pre { white-space: pre-wrap; }
+
+/* A setting's words above its control on a narrow window, rather than squeezed beside
+   it (the Styles page's "Your name" row, 2026-11-24). */
+@media (max-width: 760px) {
+  .setting { flex-wrap: wrap; }
+  .setting .text { flex-basis: 100%; }
+}
