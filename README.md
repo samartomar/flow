@@ -129,10 +129,9 @@ picked the wrong kind. To settle the kind for a program once, use Flow Home ▸ 
 What Refine writes.
 
 Point Refine and Ask at a project folder (Flow Home ▸ Settings ▸ Workspaces, or `--cwd`)
-and the answers are about your code. If you'd rather correct a draft by voice before
-anything is sent, switch to the Classic pill in Settings. The panel that used to hold a
-Refine until you pressed Send is still there too: Settings ▸ The pill ▸ *Show a panel
-while I refine and ask*.
+and the answers are about your code. If you'd rather read a rewrite before it goes
+anywhere, the panel that used to hold a Refine until you pressed Send is still there:
+Settings ▸ The pill ▸ *Show a panel while I refine and ask*.
 
 ## Flow Home
 

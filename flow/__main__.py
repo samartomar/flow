@@ -641,14 +641,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--design", default=None, choices=DESIGNS, metavar="NAME",
-        # A setting, not a one-run override, for `--cli-model`'s reason: the menu has no
-        # way to type a name, so a flag that vanished at exit would be the only place
-        # the choice could ever be made. This is the *launch* answer and stays one —
-        # either menu switches the running surface now, and writes the same field, so a
-        # flag that also applied mid-session would be a second way to say the same
-        # thing.
-        help=f"which UI design to launch ({', '.join(DESIGNS)}; default "
-             f"{DESIGN_DEFAULT}, remembered)",
+        # Retired with the Classic pill (decisions.md 2026-11-23, "One surface"): Flow
+        # has one pill, so this is no longer a choice anybody is offered, which is why it
+        # is not in `--help`. It is still *accepted*, for one run and never remembered,
+        # because the Classic classes are still on disk while their tests are sorted and
+        # those tests launch through it. It goes when `ui.Pill` does.
+        help=argparse.SUPPRESS,
     )
     # Last, because none of these is a way to run Flow: each answers a question about the
     # copy or about what it has already done, and exits. `--version` is argparse's own
@@ -893,9 +891,6 @@ def main(argv: list[str] | None = None) -> int:
     if profile is not None and args.cli_effort is not None:
         profile.cli_effort = args.cli_effort
         profile.save()
-    if profile is not None and args.design is not None:
-        profile.design = args.design
-        profile.save()
     if profile is not None:
         if profile.cli_model:
             say(f"model: {profile.cli_model}")
@@ -1131,14 +1126,17 @@ def main(argv: list[str] | None = None) -> int:
     apply_panel_width(panel_width(profile.panel if profile is not None else None))
     apply_place(profile.place if profile is not None else "bottom")
 
-    # Which surface launches — which is no longer the same question as which surface
-    # runs. An explicit flag is a decision, a stored value is a preference, and the
-    # default is the design Flow shipped; from here the name is a variable, because the
-    # loop at the foot of this function rebuilds whichever surface the menu asks for
-    # next. `--design` keeps its old meaning exactly: a remembered setting, applied at
-    # launch.
-    design = (args.design
-              or (profile.design if profile is not None else DESIGN_DEFAULT))
+    # Which surface launches: the compact pill. It was a choice from 2026-09-03 until
+    # the owner said "compact only" on 2026-11-23 (decisions.md, "One surface"); the
+    # Classic pill had by then nothing the compact one had not absorbed, and nobody was
+    # offered it but one row in Flow Home, which is gone. A profile that still names
+    # Classic is told once and moved, so the line is not said at every launch. The
+    # unlisted `--design` still picks for one run (see the flag) and is never stored.
+    if profile is not None and profile.design != DESIGN_DEFAULT:
+        say("the Classic pill is retired - Flow has one pill now, and this is it")
+        profile.design = DESIGN_DEFAULT
+        profile.save()
+    design = args.design or DESIGN_DEFAULT
     if design != DESIGN_DEFAULT:
         say(f"design: {design}")
     # Before any window exists, which is the only moment this can be said: DPI
@@ -1356,10 +1354,9 @@ def main(argv: list[str] | None = None) -> int:
             settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
             lite=lite,
         )
-        # Home switches designs from its Settings page, and a switch is a method on the
-        # surface that is on screen — so Home is told which one that is, every time.
+        # Home's Settings page talks to the pill that is on screen (the panel-flow
+        # switch applies at once), so Home is told which object that is, every time.
         home.surface = surface
-        home.design = name
         # Set here rather than in `__init__` for the reason `_trace_gesture` gives: the
         # trace belongs to the run, and `build` is the one place that knows what the run
         # turned out to be. Re-run on a design switch, so both designs trace alike.

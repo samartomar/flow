@@ -752,29 +752,53 @@ class TestTheDesignSwitch(unittest.TestCase):
         # launch would be noise about the ordinary case.
         self.assertNotIn("design:", out)
 
-    def test_the_flag_builds_the_classic_pill_and_is_remembered(self):
+    # -- "Compact only" (decisions.md 2026-11-23, "One surface") ------------------
+    #
+    # The Classic pill is retired: nobody is offered it, and a profile that chose it is
+    # moved. Its classes are still on disk while their tests are sorted, and the
+    # unlisted `--design` flag is how those tests - and the cases below that pin the
+    # rebuild loop - still reach them. It picks for one run and is never stored.
+
+    def test_the_flag_still_builds_the_classic_pill_but_is_not_remembered(self):
         code, out, pill, compact = self.launch(["--design", "current"])
         self.assertEqual(code, 0)
         self.assertTrue(pill.called)
         self.assertFalse(compact.called)
         self.assertIn("design: current", out)
         from flow.profile import Profile
-        self.assertEqual(Profile(self.dir / "profile.json").design, "current")
+        self.assertEqual(Profile(self.dir / "profile.json").design, "compact")
 
-    def test_the_remembered_choice_needs_no_flag(self):
+    def test_a_launch_after_the_flag_is_the_compact_pill_again(self):
         self.launch(["--design", "current"])
-        _code, _out, pill, compact = self.launch()
-        self.assertTrue(pill.called)
-        self.assertFalse(compact.called)
+        _code, out, pill, compact = self.launch()
+        self.assertTrue(compact.called)
+        self.assertFalse(pill.called)
+        self.assertNotIn("retired", out, "nothing was stored, so there is nothing to say")
 
-    def test_a_profile_that_names_a_design_keeps_it_after_the_flip(self):
-        # Every save writes the field, so somebody who launched the Classic pill before
-        # the default moved is not moved by it.
+    def test_a_profile_that_chose_classic_is_moved_and_told_once(self):
+        # It used to keep its choice ("nobody who launched the Classic pill is moved by
+        # the flip"). That promise was for the release in which Classic was one switch
+        # away; with the switch gone, a remembered "current" would be a pill nobody can
+        # get back from.
         (self.dir / "profile.json").write_text(
             '{"schema": 1, "welcomed": true, "design": "current"}', encoding="utf-8")
-        _code, _out, pill, compact = self.launch()
-        self.assertTrue(pill.called)
-        self.assertFalse(compact.called)
+        _code, out, pill, compact = self.launch()
+        self.assertTrue(compact.called)
+        self.assertFalse(pill.called)
+        self.assertIn("the Classic pill is retired", out)
+        from flow.profile import Profile
+        self.assertEqual(Profile(self.dir / "profile.json").design, "compact")
+        # Said once: the second launch finds a profile that names the only pill.
+        _code, out, _pill, _compact = self.launch()
+        self.assertNotIn("retired", out)
+
+    def test_the_flag_is_not_offered_in_the_help(self):
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            mod.main(["--help"])
+        self.assertNotIn("--design", out.getvalue())
 
     def test_the_shipped_surface_asks_for_the_compact_one_and_gets_it(self):
         code, out, pill, compact = self.launch(["--design", "current"],

@@ -672,7 +672,6 @@ def build(profile_dir: Path | None = None, kept: bool = False):
     threading.Thread(target=pump, daemon=True, name="demo-pump").start()
     home = Home(session, profile=profile, hotkeys=FakeHotkeys(), lite=False,
                 lexicon_path=folder / "lexicon.txt", trace_path=folder / "diag.jsonl")
-    home.design = "compact"
     home.mic_factory = ReadingMic
     home.packs = DemoPacks(folder)
     return home, session

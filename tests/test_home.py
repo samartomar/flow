@@ -469,8 +469,23 @@ class TestTheSettingsPage(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(page["mic"]["devices"][0]["name"], "Yeti Nano")
         self.assertEqual(page["send"]["word"], "boom")
-        self.assertEqual(page["design"]["current"], "compact")
         self.assertFalse(page["shortcuts"]["available"])
+
+    def test_the_page_offers_one_pill_and_nothing_of_the_classic_one(self):
+        # "Compact only" (decisions.md 2026-11-23, "One surface"). The page carried a
+        # Design row and the Classic panel's width and place; with one pill there is
+        # nothing to switch and nothing of the other to size.
+        h = Pumped(self)
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            _status, page = h.call("GET", "/api/settings")
+        self.assertNotIn("design", page)
+        self.assertNotIn("classic", page)
+        self.assertIn("flows", page, "the panel-flow switch is the compact pill's own")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        for gone in ("settings/design", "settings/classic", "d.design", "d.classic",
+                     "Classic panel"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, js)
 
     def test_the_microphone_is_chosen_by_name(self):
         h = Pumped(self)
@@ -559,18 +574,19 @@ class TestTheSettingsPage(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(Profile(h.profile.path).hotkeys, {"toggle": "ctrl+alt+j"})
 
-    def test_a_design_switch_is_its_own_callback_on_the_pill(self):
-        # It runs inside the pill's frame, and a switch takes that window down — so it
-        # is scheduled like the menu row it replaces, never run inline.
+    def test_there_is_no_route_that_switches_the_pill(self):
+        # The route went with the row. A page from an older tab that still posts to it
+        # is answered as any unknown address is, and the pill on screen is not touched.
         h = Pumped(self)
         surface = mock.Mock()
         h.home.surface = surface
-        with mock.patch.object(audio, "input_devices", return_value=[]):
-            h.call("POST", "/api/settings/design", {"name": "current"})
-        surface.after.assert_called_once()
+        for route, body in (("/api/settings/design", {"name": "current"}),
+                            ("/api/settings/classic", {"place": "corner"})):
+            with self.subTest(route=route):
+                status, _body = h.call("POST", route, body)
+                self.assertEqual(status, 404)
+        surface.after.assert_not_called()
         surface.switch_design.assert_not_called()
-        surface.after.call_args.args[1]()
-        surface.switch_design.assert_called_once_with("current")
 
     def test_only_flows_own_folders_can_be_opened(self):
         h = Pumped(self)

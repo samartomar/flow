@@ -2948,6 +2948,26 @@ codex call is shown to leave a file or a row with `--ephemeral`; (3) kiro-cli sh
 a way not to save — it goes in the same day, measured the same way; (4) somebody needs
 to resume what Flow asked — then it is a setting, off by default.
 
+**What the clean-up of those test runs left on the owner's PC.** Moved here from
+NEEDS_YOU on 2026-11-23, when its ticked items were taken out. On his word the 25 test
+entries were removed from `~/.flow/history.jsonl` (his own 32 kept byte for byte),
+claude's session file for the call that carried overheard speech was deleted, codex's
+was removed with `codex delete`, and the profile's counters were put back to 731 words
+and 406976 ms. Not undone, and left on purpose:
+
+- Bytes of the deleted rows inside codex's SQLite files (`state_5.sqlite` and its
+  `-wal`, checked; `thread_history_1.sqlite`, 1.2 GB, not checked) until that space is
+  reused. Scrubbing them is a `VACUUM` of codex's own databases with every codex session
+  closed; four were open. Recommended against.
+- A dozen words at most in the record of the Claude Code session that did the work.
+- Whatever codex's prompt hook did with the prompt it was handed. `~/.hindsight` holds
+  no copy and the call was refused before any answer; the memory server is not this
+  project's to read.
+- The request itself: codex's refusal was the server's (`400 model_not_found`), so the
+  question travelled, as it did to claude.
+- About 28 other session files from those runs (17 of claude's, 11 of codex's), which
+  hold only "what is two plus two", a test sentence and Flow's own prompt.
+
 ### 2026-11-23 — codex runs none of the user's hooks on a call from Flow: `--disable hooks`
 
 **What was put to the owner, and his answer.** Item 2 of the entry above: codex runs
@@ -3150,3 +3170,70 @@ floor and pin are measured again, not guessed; (2) an update leaves a running Fl
 refused, which would mean dropping the loaded modules is not enough; (3) spoken replies
 after a question go silent often enough that "one press of Preview away" is not an
 answer: then the pill says it, and that is argued with the pill's own rules in hand.
+
+### 2026-11-23 — One surface: compact only. The Classic pill is retired, in stages
+
+**The question, and the owner's answer.** Open since 2026-09-04 ("One surface, and
+which one"). On 2026-11-23 he asked what was left to adopt from the Classic pill, or
+whether to ignore it in full and stay with compact. Checked against the code and put to
+him; he answered **"Compact only"**.
+
+**What the check found.** Nothing left to adopt.
+
+- All five gaps [one-surface.md](one-surface.md) listed are closed: Settings and Help by
+  Flow Home (2026-09-22), the hand editor, the "kept" line and Refine's "say more" on
+  2026-10-02.
+- Compact has been the default since 2026-09-23 and is what the owner's profile runs.
+  Classic was reachable from one row in Flow Home ▸ Settings and from `--design`.
+- Two things Classic has that compact does not get, named to him before he answered: a
+  bubble that holds the words before they paste, and a scrolling conversation card.
+  Compact shows the words under the pill during a hold, Flow Home ▸ Conversations keeps
+  the history, and the panel flow (`Profile.panel_flows`) still holds a Refine for Send.
+- The plan's taste call, whether a Type hold names the window the words are going to,
+  stays at "nothing": the hold says "listening - let go to paste". Reopens on the first
+  wrong-window paste that happens to him.
+
+**What retiring it takes, measured the same day.** `flow/ui.py` is 7,936 lines and
+`ui_compact.py` imports 59 names from it, because the plan's step 2 (move the shared
+code out) was never done. 33 test files import the module, 1,658 tests between them.
+`scripts/selfdrive.py`'s gate drives the Classic `Pill`; nine scripts import it. So it
+is staged, with the suite green at each stage.
+
+**Stage 1, done with this entry: nobody is offered Classic.**
+
+- Flow Home ▸ Settings ▸ The pill lost its Design row and its "Classic panel" row
+  (width and place), with their routes and payload keys. The card holds the panel-flow
+  switch and nothing else.
+- A profile that names Classic is told once, "the Classic pill is retired - Flow has
+  one pill now, and this is it", and moved to compact. This withdraws 2026-09-23's
+  "a profile that names a design keeps it": that promise was for the release in which
+  Classic was one switch away, and with the switch gone a remembered "current" would be
+  a pill nobody could get back from.
+- `--design` is out of `--help` and out of the guide's flag table. It is still accepted,
+  for one run and never stored, because the Classic classes are still on disk and their
+  tests, and the cases that pin the rebuild loop, launch through it. It goes with them.
+- README and guide no longer send anybody to the Classic pill.
+
+Measured: 4192 tests, 5 skipped. The Settings page was read in a browser on the demo:
+nine cards, "The pill" with one row, no error in the console.
+
+**Not done yet, and in this order.**
+
+1. Sort the 33 test files: helpers' tests stay, the Classic windows' tests go, and a
+   test that reaches session behaviour only through a Classic window is ported before
+   its window is deleted. That last kind is the risk in this retirement, and the reason
+   it is not one commit.
+2. Port `scripts/selfdrive.py`'s gate to the compact surface, or drop it on the owner's
+   word.
+3. Delete `Pill`, `Bubble`, `ConversationCard`, `HelpWindow`, `switch_design` on both
+   surfaces, the rebuild loop in `__main__`, `--design`, and `paint.TeeCanvas`; then
+   the `design`, `panel` and `place` profile fields after a release of ignoring them.
+4. Move what compact borrows out of `ui.py` into modules of its own.
+5. Rewrite the guide and architecture sections that describe the bubble, the marks row
+   and the held draft.
+
+**Reopens if:** (1) somebody turns out to rely on holding a draft and correcting it by
+voice before it is sent, which only Classic did for Type: the answer is then that
+feature on the compact surface, not the old window back; (2) a stage cannot keep the
+suite green without deleting a test of session behaviour that nothing else covers: that
+test is ported first or the stage stops and says so.

@@ -74,10 +74,6 @@ VOICE_ENGINES = {
 #: short enough that a dead network does not hold the button for the engine's own 10 s.
 SAY_WAIT_SEC = 5.0
 
-#: The two designs, by the names the page shows. "current" is the stored spelling of
-#: the pill Flow shipped first, kept so older profiles still load.
-DESIGN_LABELS = {"compact": "Compact", "current": "Classic"}
-
 #: The History page's filters, by the name its buttons send.
 HISTORY_FILTERS = {
     "all": DICTATION,
@@ -328,8 +324,6 @@ class Api:
             ("POST", "/api/settings/auto_ask"): self.set_auto_ask,
             ("POST", "/api/settings/warm"): self.set_warm,
             ("POST", "/api/settings/check-update"): self.set_check_update,
-            ("POST", "/api/settings/design"): self.set_design,
-            ("POST", "/api/settings/classic"): self.set_classic,
             ("POST", "/api/settings/apps"): self.set_app,
             ("POST", "/api/settings/writing"): self.set_writing,
             ("POST", "/api/settings/flows"): self.set_flows,
@@ -1708,7 +1702,6 @@ class Api:
                  "override": overrides.get(action, "") if isinstance(overrides.get(action), str)
                  else ""}
                 for action, label in HOTKEY_LABELS.items()]
-        panels, places = _classic_choices()
         paths = {
             "settings": str(profile.path.parent) if profile is not None else "",
             "trace": str(Path(self.home.trace_path).parent) if self.home.trace_path else "",
@@ -1757,19 +1750,12 @@ class Api:
                 # never be wrong about somebody's privacy.
                 "check": bool(getattr(profile, "check_update", False)) if profile else False,
             },
-            "design": {
-                "current": self.home.design,
-                "options": [{"name": n, "label": label} for n, label in DESIGN_LABELS.items()],
-            },
+            # No "design" and no "classic" here since 2026-11-23: Flow has one pill
+            # (decisions.md, "One surface"), so the page has no Design row to draw, no
+            # Classic panel to size or place, and no route for either.
             # Whether Refine and Ask raise a panel while you talk (the earlier flow).
             "flows": {"panel": bool(getattr(profile, "panel_flows", False)) is True
                       if profile is not None else False},
-            "classic": {
-                "panel": getattr(profile, "panel", "") if profile else "",
-                "panels": panels,
-                "place": getattr(profile, "place", "") if profile else "",
-                "places": places,
-            },
             "apps": _app_rows(profile),
             "writing": _writing(profile),
             "paths": paths,
@@ -1994,25 +1980,6 @@ class Api:
         self._save()
         return self.settings({})
 
-    def set_design(self, body: dict) -> dict:
-        name = body.get("name")
-        if name not in DESIGN_LABELS:
-            raise ApiError("there is no design by that name")
-        surface = self.home.surface
-        if surface is None:
-            raise ApiError("the pill is not on screen")
-        if name == self.home.design:
-            return self.settings({})
-
-        def apply() -> None:
-            # A Tk callback of its own rather than inline: this runs inside the pill's
-            # frame, and a switch takes that window down — the menu row it replaces ran
-            # as its own callback for the same reason.
-            surface.after(0, lambda: surface.switch_design(name))
-
-        self._call(apply)
-        return self.settings({})
-
     def set_flows(self, body: dict) -> dict:
         """Turn the earlier panel flow on or off, now: the pill on screen is told as
         well as the profile, so the next hold is already the flow that was chosen."""
@@ -2031,25 +1998,6 @@ class Api:
                 surface.panel_flows = panel
                 session.refine_says_more = panel
                 session.refine_lands = not panel
-
-        self._call(apply)
-        self._save()
-        return self.settings({})
-
-    def set_classic(self, body: dict) -> dict:
-        profile = self._need_profile()
-        panels, places = _classic_choices()
-        panel, place = body.get("panel"), body.get("place")
-        if panel is not None and panel not in panels:
-            raise ApiError("that panel size is not one of the drawn ones")
-        if place is not None and place not in places:
-            raise ApiError("that is not a place the pill can sit")
-
-        def apply() -> None:
-            if panel is not None:
-                profile.panel = panel
-            if place is not None:
-                profile.place = place
 
         self._call(apply)
         self._save()
@@ -2157,17 +2105,6 @@ def _hotkey_module(name: str):
         return getattr(hotkey, name)
     except Exception:
         return None
-
-
-def _classic_choices() -> tuple[list[str], list[str]]:
-    """The panel widths and places the Classic pill draws. Read off `flow.ui` when it
-    loads, and its spelled defaults otherwise, so this page cannot offer one it lacks."""
-    try:
-        from ..ui import PANEL_WIDTHS, PLACES
-
-        return list(PANEL_WIDTHS), list(PLACES)
-    except Exception:
-        return ["regular", "large", "larger"], ["bottom", "corner"]
 
 
 def reveal(folder: Path) -> None:

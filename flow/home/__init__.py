@@ -37,10 +37,8 @@ class Home:
         self.lite = lite
         self.lexicon_path = lexicon_path
         self.trace_path = trace_path
-        #: The pill on screen, and which design it is. Set by `__main__.build` every
-        #: time a surface is built, because a design switch replaces both.
+        #: The pill on screen. Set by `__main__.build` every time a surface is built.
         self.surface = None
-        self.design: str | None = None
         #: A model choice waiting on a download: (partial, final, device). Applied by
         #: `_downloaded` when the model it needs lands. See `Api.model_use`.
         self.pending_models: tuple | None = None

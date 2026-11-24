@@ -573,11 +573,7 @@
           </section>
           <section class="card">
             <h2>The pill</h2>
-            <div class="setting"><div class="text"><b>Design</b><span class="note">Switches now, keeping what you were saying.</span></div>${seg(d.design.options.map((o) => [o.name, o.label]), d.design.current, "design", "Pill design")}</div>
             <div class="setting"><div class="text"><b>Show a panel while I refine and ask</b><span class="note">The earlier flow: a panel rises above the pill and a rewrite waits there for Send. Off, a rewrite goes straight where you were typing and an answer shows on a card.</span></div>${sw(d.flows.panel, "panel-flows", "Show a panel while I refine and ask")}</div>
-            <div class="setting"><div class="text"><b>Classic panel</b><span class="note">Width and place of the Classic pill's panel, from its next start.</span></div>
-              <select data-change="panel" aria-label="Panel width">${d.classic.panels.map((p) => `<option ${p === d.classic.panel ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
-              <select data-change="place" aria-label="Where the pill sits">${d.classic.places.map((p) => `<option ${p === d.classic.place ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></div>
           </section>
           <section class="card">
             <h2>What Refine writes</h2>
@@ -1489,7 +1485,6 @@
     // differently when it is on. The server has already saved by the time this returns,
     // so there is nothing optimistic to do here.
     "check-update": (el) => run(() => api("settings/check-update", { on: el.getAttribute("aria-checked") !== "true" }), "Saved"),
-    design: (el) => run(() => api("settings/design", { name: el.dataset.value }), "Switching the pill"),
     "panel-flows": (el) => run(() => api("settings/flows", { panel: el.getAttribute("aria-checked") !== "true" }), "Saved"),
     "app-add": () => {
       const exe = (value("app-exe") || "").trim(), instruction = (value("app-text") || "").trim();
@@ -1524,8 +1519,6 @@
     ws: (el) => run(() => api("settings/workspace", { path: el.value || null }), "Workspace changed"),
     "refine-kind": (el) => run(() => api("settings/writing", { default: el.value }), "Saved"),
     "app-kind": (el) => run(() => api("settings/apps", { exe: el.dataset.exe, kind: el.value }), "Saved"),
-    panel: (el) => run(() => api("settings/classic", { panel: el.value }), "Saved"),
-    place: (el) => run(() => api("settings/classic", { place: el.value }), "Saved"),
     "history-days": (el) => run(() => api("history/days", { days: Number(el.value), ...historyView }), `Kept for ${el.value} days`),
     "fr-mic": (el) => run(() => api("start/mic", { name: el.value || null }), "Microphone changed"),
   };

@@ -8,6 +8,27 @@ the product, what the compact surface still has to absorb before it can be the *
 surface, and the order to do it in. It is a recommendation for the owner's decision
 ([NEEDS_YOU.md](../NEEDS_YOU.md) carries the open entry); nothing here is decided yet.
 
+**Decided 2026-11-23: compact only.** The owner's words, the same day as the check
+below. [decisions.md](decisions.md), "One surface", is the record, with the stages and
+what reopens it. The first stage is done: nobody is offered the shipped surface (the
+Design row and the Classic panel row are out of Flow Home, a profile that named it is
+told once and moved, and `--design` is unlisted and never stored). This page stays as
+the reasoning; the order of what is left is in that entry, not in the five steps below.
+
+**Update 2026-11-23.** The owner asked what is left to adopt from the shipped surface,
+or whether to ignore it in full. Checked against the code: **nothing is left to adopt.**
+All five gaps below are closed (two by Flow Home, three on 2026-10-02), step 4 happened
+on 2026-09-23 (`DESIGN_DEFAULT` is `"compact"`), and the owner's profile runs compact.
+What stands between here and step 5 is **step 2, which was never done**:
+`ui_compact.py` still imports 59 names from `ui.py` (7,936 lines), and `theme.py`,
+`shell.py` and `menus.py` do not exist. Beyond that, 33 test files import the module
+(1,658 tests between them, not all of them about the shipped window), nine scripts do,
+and `scripts/selfdrive.py`'s gate drives `Pill`, which the order below does not
+mention: it is ported to the compact surface or dropped before the class goes. The taste
+call at the foot of this page stands at "nothing" today: a Type hold says "listening -
+let go to paste" and names no window. The decision is still the owner's
+([NEEDS_YOU.md](../NEEDS_YOU.md)).
+
 **Update 2026-10-02.** Step 3 is **done**: the compact Refine panel carries an Edit chip
 between Copy and Send, opening a `tk.Text` in its own Toplevel over the panel, with
 Escape, Ctrl+Enter, and Cancel/Done buttons. Ask gets none — its panel holds a
