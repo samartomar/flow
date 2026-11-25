@@ -1043,6 +1043,9 @@ class CompactPill(tk.Tk):
     _listening_said = ""
     #: When the last frame ran (`time.perf_counter`), for the `stall` record.
     _frame_at = None
+    #: The kinds of frame failure already written to the trace (`fault`), so one that
+    #: repeats every 30 ms is one line. Replaced, never mutated: a class default.
+    _faults_traced: frozenset = frozenset()
     #: When a talk-keys hold began on Ask, while it waits `SIDE_SETTLE_SEC` to
     #: leave it — or None. See `_settle_side`.
     _side_since = None
@@ -1477,9 +1480,20 @@ class CompactPill(tk.Tk):
             # bytecode next runs — here. Taken as the quit it was, as ui.py
             # does, because the alternative is a microphone left open.
             self.quit_app()
-        except Exception:
+        except Exception as exc:
             self._flash = FLASH_FRAMES
             traceback.print_exc()
+            # Into the trace too, once per kind, by class name and never the message: a
+            # frame that raises before `session.tick()` reads no microphone at all, and
+            # the console it printed to is usually closed by the time anyone asks why
+            # the first holds heard nothing (2026-11-24).
+            kind = type(exc).__name__
+            if self.trace is not None and kind not in self._faults_traced:
+                self._faults_traced = self._faults_traced | {kind}
+                try:
+                    self.trace("fault", reason=kind)
+                except Exception:
+                    pass
             # And repaint anyway, because the line that raised was in front of
             # the one that draws: `_draw()` is the last thing `_frame` does, so
             # anything raising in a pump aborts the frame *before* the repaint.
@@ -2838,10 +2852,16 @@ class CompactPill(tk.Tk):
             # heard. Durations and a category, never a word. A session where the
             # keys "do nothing" used to leave the chord's own lines and nothing else.
             mode = getattr(self.session, "mode", "")
+            # And what the microphone gave it, in numbers (`Session.hold_audio`): a
+            # "silence" with blocks=0 and one with a peak under the gate are different
+            # faults, and the trace could not tell them apart (2026-11-24).
+            audio = getattr(self.session, "hold_audio", None)
+            heard_audio = audio() if callable(audio) else {}
             self.trace("hold", ms=round(held * 1000),
                        mode=mode if isinstance(mode, str) else "",
                        ok=words,
-                       reason="words" if words else "break" if not send else "silence")
+                       reason="words" if words else "break" if not send else "silence",
+                       **(heard_audio if isinstance(heard_audio, dict) else {}))
         if (send and not words and not heard and not self.panel_flows
                 and held >= HEARD_NOTHING_SEC and self._strip_is_free()):
             self._say(HEARD_NOTHING, ERROR_FRAMES)

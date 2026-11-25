@@ -65,6 +65,7 @@ class Home:
         self.packs = VoicePacks(session)
         self.api = Api(self)
         self._server: HomeServer | None = None
+        self._opened_window = False
         self._lock = threading.Lock()
         self._navigate: str | None = None
 
@@ -96,15 +97,18 @@ class Home:
             server = self.server()
         except OSError as exc:
             return f"Flow Home could not start: {exc}"
-        if server.connected():
+        if self._opened_window and server.connected():
             # A window is open and polling: it will go to `page` at its next poll, and
             # this brings it forward. If it was closed a moment ago, `focus` finds
             # nothing and a new one opens below.
             self._navigate = page
-            if window.focus():
+            if window.focus(server.window_title):
                 return ""
         url = self.url(page)
-        how = window.launch(url)
+        app_url = url.replace("/#", f"/?{server.window_query}#", 1)
+        how = window.launch(url, app_url=app_url)
+        if how == window.ISOLATED:
+            self._opened_window = True
         if how == window.SHARED:
             # Opened, but not apart from the person's browsing: said on the pill and the
             # console, not left for somebody to notice (decisions.md 2026-11-08).
@@ -130,7 +134,13 @@ class Home:
         self.voice.listen.stop()
         with self._lock:
             server, self._server = self._server, None
+            opened_window, self._opened_window = self._opened_window, False
         if server is not None:
+            if opened_window:
+                try:
+                    window.close_all(server.window_title)
+                except OSError:
+                    pass
             try:
                 server.stop()
             except Exception:

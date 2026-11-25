@@ -611,21 +611,30 @@ class TestTheSettingsPage(unittest.TestCase):
 class TestOpeningTheWindow(unittest.TestCase):
     def test_the_first_open_starts_the_server_and_launches_a_window(self):
         h = Pumped(self)
-        with mock.patch.object(window_mod, "launch", return_value=True) as launch:
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.ISOLATED) as launch:
             self.assertEqual(h.home.open("models"), "")
         url = launch.call_args.args[0]
         server = h.home.server()
         self.assertTrue(url.startswith(server.origin + "/#token="))
         self.assertIn(server.token, url)
         self.assertTrue(url.endswith("&page=models"))
+        app_url = launch.call_args.kwargs["app_url"]
+        self.assertEqual(app_url, url.replace("/#", f"/?{server.window_query}#", 1))
+        with urllib.request.urlopen(app_url) as response:
+            self.assertIn(f"<title>{server.window_title}</title>".encode(), response.read())
+        with urllib.request.urlopen(url) as response:
+            self.assertIn(b"<title>Flow</title>", response.read())
 
     def test_an_open_window_is_brought_forward_and_moved_instead(self):
         h = Pumped(self)
         server = h.home.server()
         server.last_seen = time.monotonic()
-        with mock.patch.object(window_mod, "focus", return_value=True), \
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.ISOLATED):
+            h.home.open()
+        with mock.patch.object(window_mod, "focus", return_value=True) as focus, \
                 mock.patch.object(window_mod, "launch") as launch:
             self.assertEqual(h.home.open("settings"), "")
+        focus.assert_called_once_with(server.window_title)
         launch.assert_not_called()
         self.assertEqual(h.home.take_navigate(), "settings")
 
@@ -685,6 +694,74 @@ class TestTheWindowIsEdgeInAppMode(unittest.TestCase):
         h = Pumped(self)
         with mock.patch.object(window_mod, "launch", return_value=window_mod.SHARED):
             self.assertEqual(h.home.open(), window_mod.SHARED_NOTICE)
+
+
+class TestTheWindowClosesWithFlow(unittest.TestCase):
+    """Owner, 2026-11-24: "Flow close but Open flow window remains open"."""
+
+    @unittest.skipUnless(sys.platform == "win32", "posts a Win32 message")
+    def test_only_this_servers_app_windows_are_asked_to_close(self):
+        import ctypes
+
+        title = "Flow Home (test-instance)"
+        windows = {
+            11: title, 22: title, 33: "Flow", 44: "Flow Home (other-instance)",
+            55: title + " - Microsoft Edge", 66: title, 77: title,
+        }
+        user32 = mock.Mock()
+        user32.EnumWindows.side_effect = lambda visit, _: [visit(hwnd, 0) for hwnd in windows]
+        user32.IsWindowVisible.side_effect = lambda hwnd: hwnd != 66
+
+        def window_class(hwnd, buffer, _size):
+            buffer.value = "Other" if hwnd == 77 else "Chrome_WidgetWin_1"
+
+        def window_title(hwnd, buffer, _size):
+            buffer.value = windows[hwnd]
+
+        user32.GetClassNameW.side_effect = window_class
+        user32.GetWindowTextW.side_effect = window_title
+        with mock.patch.object(ctypes.windll, "user32", user32):
+            self.assertEqual(window_mod.close_all(title), 2)
+        post = user32.PostMessageW
+        self.assertEqual([c.args for c in post.call_args_list],
+                         [(11, 0x0010, 0, 0), (22, 0x0010, 0, 0)])
+
+    def test_no_window_open_closes_nothing(self):
+        with mock.patch.object(window_mod, "_home_windows", return_value=[]):
+            self.assertEqual(window_mod.close_all("Flow Home (test-instance)"), 0)
+
+    def test_off_windows_there_is_no_window_to_find(self):
+        with mock.patch.object(window_mod.sys, "platform", "darwin"):
+            self.assertEqual(window_mod._home_windows("Flow Home (test-instance)"), [])
+
+    def test_home_closes_its_own_window_before_stopping_its_server(self):
+        h = Pumped(self)
+        other = Pumped(self)
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.ISOLATED):
+            h.home.open()
+            other.home.open()
+        server = h.home.server()
+        expected = server.window_title
+        self.assertNotEqual(expected, other.home.server().window_title)
+
+        def close_window(_title):
+            with urllib.request.urlopen(server.origin) as response:
+                self.assertEqual(response.status, 200)
+
+        with mock.patch.object(window_mod, "close_all", side_effect=close_window) as close:
+            h.home.close()
+            close.assert_called_once_with(expected)
+
+    def test_shared_tabs_and_server_only_launches_leave_browser_windows_alone(self):
+        h = Pumped(self)
+        other = Pumped(self)
+        h.home.server()
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.SHARED):
+            other.home.open()
+        with mock.patch.object(window_mod, "close_all") as close:
+            h.home.close()
+            other.home.close()
+        close.assert_not_called()
 
 
 # ------------------------------------------------------------------------------ session

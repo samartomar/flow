@@ -1377,6 +1377,8 @@ class Session:
         #: Deadline until which the idle unload stands down, set by `warm`. Zero means
         #: nobody has asked, which is the state every session starts and mostly stays in.
         self._warm_until = 0.0
+        #: What the microphone gave the current hold, as numbers: see `hold_audio`.
+        self._reset_hold_audio()
         #: Whether the current push-to-talk hold is the thing that opened the mic. False
         #: when the hold began against a session already capturing, which is what stops
         #: a chord from closing a microphone the toggle hotkey opened.
@@ -1634,6 +1636,7 @@ class Session:
         with self._lifecycle:
             if self._closed:
                 return False
+        self._reset_hold_audio()
         if self._mic_started:
             self._ptt_opened = False
             self.warm()
@@ -1673,7 +1676,7 @@ class Session:
             # bump: a gate left open would resume the next hold mid-utterance with no
             # onset, and blocks captured after the release belong to nobody.
             self.gate.reset()
-            self.mic.drain()
+            self._count_discarded_blocks(self.mic.drain(), "release")
             self._ptt_opened = False
             self._settle_state()
             self._emit("disarm", "push-to-talk")
@@ -2447,6 +2450,37 @@ class Session:
         self._say_exits()
         self._emit("disarm", "microphone")
 
+    def _reset_hold_audio(self) -> None:
+        self._heard_blocks = 0
+        self._heard_peak: float | None = None
+        self._heard_peak_threshold: float | None = None
+        self._deaf_blocks = 0
+        self._deaf_why: str | None = None
+
+    def _count_discarded_blocks(self, blocks: list, why: str) -> None:
+        """Count blocks thrown away unheard, and the reason, for `hold_audio`."""
+        if blocks:
+            self._deaf_blocks += len(blocks)
+            self._deaf_why = why
+
+    def hold_audio(self) -> dict:
+        """What the microphone gave the hold now ending, as numbers and nothing else.
+
+        Written on the pill's `hold` trace line. The owner's first holds after a launch
+        on 2026-11-24 showed a listening pill and printed nothing, and the trace could
+        not say why. The peak is paired with the threshold the gate used for that
+        same block, before the noise floor was updated. Both are null if no block
+        reached the gate. Discards include the queued blocks dropped at release.
+        """
+        peak, threshold = self._heard_peak, self._heard_peak_threshold
+        return {
+            "blocks": self._heard_blocks,
+            "peak_db": round(peak, 1) if peak is not None else None,
+            "gate_db": round(threshold, 1) if threshold is not None else None,
+            "deaf": self._deaf_blocks,
+            "deaf_why": self._deaf_why,
+        }
+
     def _utter_sec(self) -> float:
         return len(self._utter) * BLOCK / SAMPLE_RATE
 
@@ -2487,6 +2521,7 @@ class Session:
             # Flow's own voice to prepend to whatever the user says next.
             self.gate.reset()
             self.echo_blocks += len(blocks)
+            self._count_discarded_blocks(blocks, "speaking")
             return
 
         # The same half-duplex bargain, for the other reason someone can be at the
@@ -2497,10 +2532,16 @@ class Session:
         if self.editing:
             self.gate.reset()
             self.echo_blocks += len(blocks)
+            self._count_discarded_blocks(blocks, "editing")
             return
 
         for block in blocks:
             started, stopped = self.gate.push(block)
+            self._heard_blocks += 1
+            level = self.gate.last_level_db
+            if self._heard_peak is None or level > self._heard_peak:
+                self._heard_peak = level
+                self._heard_peak_threshold = self.gate.last_threshold_db
             if self.gate.speaking:
                 if started:
                     # The gate could only open once it heard something loud, so the

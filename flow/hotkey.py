@@ -912,6 +912,9 @@ class Chord:
         #: question a stuck gesture actually needs answered — *did the hook see two taps,
         #: and what did it decide* — is answerable without one.
         self.trace = None
+        #: The state the last chord line recorded, so a repeat that changed nothing is
+        #: not written again (see `_on_event`).
+        self._traced: tuple | None = None
         #: Chords fed by *this* chord's hook rather than one of their own — Ask's
         #: ctrl+alt+win riding the talk chord's ctrl+win. One hook on the input path of
         #: every keystroke is the cost R16 was narrowed to accept; two would be twice the
@@ -1066,16 +1069,15 @@ class Chord:
             effects = ()
 
         self._sync()
-        #: The machine's verdict, on every event. Four fields and no key code: what the
-        #: machine decided, what state it is now in, and what went on the queue. That is
-        #: the whole chain for a stuck gesture, in one line per keystroke.
         if self.trace is not None and effects:
-            # "." and not "," because `Diag._TOKEN` refuses a comma: a value that does not
-            # qualify is written as `<refused>`, which would have turned the one field
-            # this trace exists for into the one field that never says anything.
-            self.trace("chord", effect=".".join(effects), armed=self._armed,
-                       other=self._other, talking=self._talking,
-                       last_tap=round(self._hold.last_tap_at, 3))
+            # Idle key repeats leave the chord unchanged and can fill the trace
+            # before the first holds of a run can be diagnosed.
+            last_tap = round(self._hold.last_tap_at, 3)
+            reading = (self._armed, self._other, self._talking, last_tap)
+            if tuple(effects) != (IDLE,) or reading != self._traced:
+                self._traced = reading
+                self.trace("chord", effect=".".join(effects), armed=self._armed,
+                           other=self._other, talking=self._talking, last_tap=last_tap)
         for effect in effects:
             if effect == START:
                 self.presses.put(self.warm_action)

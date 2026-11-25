@@ -1456,8 +1456,8 @@ def main(argv: list[str] | None = None) -> int:
         # `quit_app` still owns its own calls, because it is reachable from the menu and
         # the chord and must not depend on this block ever being reached.
         session.close()
-        # The port closes with the process either way; this is so a Home window left
-        # open says "Flow has quit" at its next poll instead of waiting on a socket.
+        # Close this run's Home window and server. Shared browser tabs can report
+        # that Flow has quit at their next poll.
         home.close()
         # The last Send's entry is on a queue until the writer takes it, and the writer
         # is a daemon: without this, a quit right after a paste could lose that paste.
