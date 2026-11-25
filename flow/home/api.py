@@ -807,7 +807,7 @@ class Api:
                 if spec and not complete(spec.repo):
                     raise ApiError(f"Download {selected} on the Models page first")
             self.home.pending_models = None
-            self._call(lambda: self.session.set_models(partial, final, device))
+            self._call(lambda: self.session.set_models(partial, final, device, installed_only=True))
             return self.models({})
         waiting = []
         for tier, value in (("partial", partial), ("final", final)):

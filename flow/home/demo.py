@@ -377,7 +377,7 @@ class FakeSession:
     def warm(self) -> None:
         self.warmed += 1
 
-    def set_models(self, partial, final, device=None) -> bool:
+    def set_models(self, partial, final, device=None, *, installed_only=False) -> bool:
         self.asr.swap(partial, final, device)
         if self.profile is not None:
             self.profile.partial_model, self.profile.final_model = partial, final
