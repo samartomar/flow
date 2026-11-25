@@ -1382,6 +1382,18 @@ class TestThePanelDraws(unittest.TestCase):
         p._deliver.assert_called_once_with("Use ALTER TABLE.")
         p._say.assert_called_once_with("answer inserted")
 
+    def test_insert_label_tracks_target_pin_and_missing_destination(self):
+        p = pill()
+        p.paste_target = 17
+        p.lite = False
+        p.session.target_app = "Outlook.EXE"
+        self.assertEqual(p._insert_label(), "Insert → Outlook")
+        p.pinned, p.pinned_name = 17, "Outlook"
+        self.assertEqual(p._insert_label(), "Insert → Outlook (pinned)")
+        self.assertLess(p._insert_bounds(0)[2], uc._continue_rect(0)[0])
+        p.paste_target = 0
+        self.assertEqual(p._insert_label(), "Insert")
+
     def test_insert_before_the_answer_says_so(self):
         p = self.open()
         p._panel_result = ""
@@ -3926,6 +3938,17 @@ class TestAHoldThatEndsInNothingSaysSo(unittest.TestCase):
             with self.subTest(mode=mode):
                 p = self.released(2.0, mode=mode)
                 p._say.assert_called_once_with(uc.HEARD_NOTHING, uc.ERROR_FRAMES)
+
+    def test_silent_hold_strip_opens_microphone_settings_without_starting_a_hold(self):
+        p = self.released(2.0)
+        p._notice = uc.ERROR_FRAMES
+        p._notice_text = uc.HEARD_NOTHING
+        p._open_home = mock.Mock()
+        p._press_at = None
+        event = mock.Mock(y=p.dev(p._shell_h - 1))
+        p._on_press(event)
+        p._open_home.assert_called_once_with("settings")
+        self.assertIsNone(p._press_at)
 
     def test_a_hold_taken_as_a_command_is_not_called_silence(self):
         # Found driving the real app, 2026-11-24: "done" ended a piece, the draft was
