@@ -19,7 +19,10 @@ the GitHub source archive for the same release tag.
 ## Audio decoding
 
 The **PyAV 18.0.0** Windows x64 wheel includes dynamically linked **FFmpeg
-8.1.2** and external libraries, including the GPL codecs x264 and x265. The
+8.1.2** and external libraries, including x264 and x265, both licensed under
+GPL-2.0-or-later. The vendor patch changes how FFmpeg classifies these
+libraries in its build configuration. Flow distributes the combined FFmpeg
+and GPL codec binaries under GPL-3.0-or-later. The source
 archive includes PyAV, FFmpeg, the codec and header sources, the vendor build
 recipe and patches, and the MSYS2 source packages for GCC runtime, libiconv,
 winpthreads, and zlib. [PyAV release and source distribution](https://github.com/PyAV-Org/PyAV/releases/tag/v18.0.0).
@@ -29,6 +32,11 @@ PyAV's wheel workflow selects the FFmpeg vendor build `8.1.2-1` and uses
 commit recorded by the successful release workflow. Its workflow and
 `scripts/build-ffmpeg.py` describe the Windows MINGW64 build, and
 `scripts/pkg.py` lists exact inputs and checksums. [PyAV wheel workflow](https://github.com/PyAV-Org/PyAV/blob/v18.0.0/.github/workflows/tests.yml) · [FFmpeg vendor release run](https://github.com/PyAV-Org/pyav-ffmpeg/actions/runs/28393781929) · [FFmpeg vendor build commit](https://github.com/PyAV-Org/pyav-ffmpeg/tree/a71bf9279f7a4659154b68ba6783e89be460bcd5).
+
+## Executable bootloader
+
+The **PyInstaller 6.22.3** source distribution contains the bootloader C
+sources and build instructions. [PyInstaller release](https://pypi.org/project/PyInstaller/6.22.3/).
 
 ## Building the source archive
 
