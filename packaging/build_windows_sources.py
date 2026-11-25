@@ -12,7 +12,12 @@ from urllib.request import urlopen
 import zipfile
 
 PACKAGING = Path(__file__).resolve().parent
-LOCKED_PACKAGES = {"av": "18.0.0", "edge-tts": "7.3.1", "piper-tts": "1.8.0"}
+LOCKED_PACKAGES = {
+    "av": "18.0.0",
+    "edge-tts": "7.3.1",
+    "piper-tts": "1.8.0",
+    "pyinstaller": "6.22.3",
+}
 
 
 def download(source, directory, source_dir):
