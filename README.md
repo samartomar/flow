@@ -33,9 +33,6 @@ To rewrite what you just pasted, hold again and say *"polish that"* or *"make it
 Flow uses your agent CLI and your selected writing style. To ask a question, hold
 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Win</kbd>. The answer appears on a card above the pill.
 
-This README describes the development version on `main`. For the current Windows download,
-see the [v0.8.2 instructions](https://github.com/samartomar/flow/blob/v0.8.2/README.md).
-
 I made Flow for people whose English has an accent that speech recognition keeps tripping
 over, often enough that they give up and type. Spanish, Indian, Russian and Japanese
 speakers are who it's designed and benchmarked for. Recognition runs on your own machine,
@@ -209,9 +206,9 @@ scripted session, so it can be re-shot whenever the app changes.
 
 ## License
 
-MIT. Flow is built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and
-OpenAI's [Whisper](https://github.com/openai/whisper) models, and reads answers aloud with
-[Piper](https://github.com/OHF-Voice/piper1-gpl) if you add it.
+Flow's own code is MIT licensed. The Windows zip includes Piper for offline speech,
+edge-tts, and FFmpeg with additional codecs. Their licenses and source locations ship
+beside `flow.exe`. [Third-party notices](packaging/THIRD-PARTY-NOTICES.md)
 
 The Parakeet engine, which Flow uses on a PC with a GPU, runs NVIDIA's
 [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (CC-BY-4.0,

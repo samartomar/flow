@@ -130,6 +130,67 @@ class _Case(unittest.TestCase):
 
 
 class TestSwitching(_Case):
+    def test_whisper_tier_switch_keeps_working_models_when_cpu_fallback_is_missing(self):
+        from flow.asr import WhisperTranscriber, default_models
+
+        current = WhisperTranscriber("old-partial", "old-final", device="cuda")
+        current._resolved = "cuda"
+        current._models = {False: "working partial", True: "working final"}
+        current._built = {False: "old-partial", True: "old-final"}
+        self.session.asr = current
+        self.assertTrue(self.session.worker.swap(current))
+        self.profile.partial_model, self.profile.final_model = current.asked
+        self.profile.save()
+        model = mock.Mock(side_effect=[RuntimeError("GPU unavailable"),
+                                       FileNotFoundError("CPU model missing")])
+        with mock.patch.dict(sys.modules, {"faster_whisper": mock.Mock(WhisperModel=model)}):
+            self.session.set_models(None, None, "cuda", installed_only=True)
+            self.assertTrue(pump(self.session, lambda: any(
+                "CPU model missing" in e.text for e in self.session._events)))
+        self.assertEqual([(c.args[0], c.kwargs["device"], c.kwargs["local_files_only"])
+                          for c in model.call_args_list],
+                         [(default_models("cuda")[0], "cuda", True),
+                          (default_models("cpu")[0], "cpu", True)])
+        self.assertIs(self.session.worker._asr, current)
+        self.assertEqual(current._models, {False: "working partial", True: "working final"})
+        saved = reloaded(self.profile.path)
+        self.assertEqual((saved.partial_model, saved.final_model), current.asked)
+
+    def test_whisper_tier_switch_reuses_unchanged_tier_and_commits_after_load(self):
+        from flow.asr import WhisperTranscriber
+
+        current = WhisperTranscriber("base.en", "old-final", device="cpu")
+        current._models = {False: "working partial", True: "working final"}
+        current._built = {False: "base.en", True: "old-final"}
+        self.session.asr = current
+        self.assertTrue(self.session.worker.swap(current))
+        model = mock.Mock()
+        with mock.patch.dict(sys.modules, {"faster_whisper": mock.Mock(WhisperModel=model)}):
+            self.session.set_models("base.en", "small.en", "cpu", installed_only=True)
+            self.assertTrue(pump(self.session, lambda: self.session.asr is not current))
+        model.assert_called_once()
+        self.assertTrue(model.call_args.kwargs["local_files_only"])
+        self.assertIs(self.session.asr, self.session.worker._asr)
+        self.assertEqual(self.session.asr._models[False], "working partial")
+        self.assertIs(self.session.asr._models[True], model.return_value)
+        saved = reloaded(self.profile.path)
+        self.assertEqual((saved.partial_model, saved.final_model), ("base.en", "small.en"))
+
+    def test_missing_whisper_stays_offline_and_keeps_parakeet_running(self):
+        from flow.asr import WhisperTranscriber
+
+        current = FakeEngine("parakeet")
+        self.session.asr = current
+        candidate = WhisperTranscriber("small.en", "small.en", device="cpu")
+        self.session.engine_factory = mock.Mock(return_value=candidate)
+        with mock.patch("flow.home.models.complete", return_value=False), \
+                mock.patch.object(candidate, "load") as load:
+            self.assertTrue(self.session.set_engine("whisper"))
+            self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
+            load.assert_not_called()
+        self.assertIs(self.session.asr, current)
+        self.assertIn("Download small.en", self.session.engine_switch()["reason"])
+
     def test_it_loads_the_new_engine_swaps_it_in_and_unloads_the_old_one(self):
         self.switch()
         new = self.built[0]

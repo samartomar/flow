@@ -1040,6 +1040,8 @@ class Session:
         #: Every transcriber this session has run, by engine name, so switching back
         #: reuses the one that already holds the user's tier choice and baseline.
         self._engines: dict[str, Transcriber] = {}
+        self._model_request: object | None = None
+        self._ready_whisper: WhisperTranscriber | None = None
         self._switching_engine = False
         #: A switch waiting for idle, as (engine, variant) - see `set_engine`.
         self._pending_engine: tuple[str, str | None] | None = None
@@ -4226,17 +4228,12 @@ class Session:
         self._emit("note", f"the agent CLI gets {self._cli_timeout:.0f} s per call")
 
     def set_models(self, partial: str | None, final: str | None,
-                   device: str | None = None) -> bool:
+                   device: str | None = None, *, installed_only: bool = False) -> bool:
         """Choose the speech models, mid-session. None means what this device should run.
 
-        Flow Home's Models page is the caller. Remembered in the profile, and applied now
-        rather than at the next launch: `asr.swap` drops whichever tier changed and the
-        preload builds the new model in the background, so the next utterance decodes on
-        it or waits on its load — which the pill already names.
-
-        The swap itself runs on a thread of its own, because it waits out any build in
-        progress, and on a first run that build is a download measured in gigabytes. The
-        choice is recorded here, on the session's thread, before it starts.
+        An installed-only choice loads in parallel with the live decoder. Once the tiers
+        are ready and the session is idle, the worker takes them and the profile is saved.
+        Other callers retain the lazy swap followed by a background preload.
         """
         swap = getattr(self.asr, "swap", None)
         if not callable(swap):
@@ -4244,6 +4241,32 @@ class Session:
             return False
         partial = (partial or "").strip() or None
         final = (final or "").strip() or None
+        self._model_request = None
+        self._ready_whisper = None
+        if installed_only:
+            current = self.asr
+            request = self._model_request = object()
+            self._engine_result = None
+
+            def ready(candidate: WhisperTranscriber | None, error: str = "") -> None:
+                if self._model_request is not request or self.asr is not current or self._closed:
+                    return
+                self._model_request = None
+                self._ready_whisper = candidate
+                if error:
+                    self._engine_failed("whisper", "", f"could not switch speech models: {error}")
+
+            def prepare() -> None:
+                try:
+                    candidate = current.installed_replacement(partial, final, device)
+                except Exception as exc:
+                    self.post(lambda error=str(exc): ready(None, error))
+                    return
+                self.post(lambda: ready(candidate))
+
+            threading.Thread(target=prepare, daemon=True, name="swap-models").start()
+            self._emit("note", "loading the installed speech models")
+            return True
         if self.profile is not None:
             self.profile.partial_model = partial
             self.profile.final_model = final
@@ -4284,6 +4307,13 @@ class Session:
     @staticmethod
     def _engine_key(name: str, variant: str) -> str:
         return f"{name}:{variant}" if variant else name
+
+    def whisper_model_names(self):
+        """The tiers a switch back to Whisper would load, including launch overrides."""
+        whisper = self._engines.get("whisper")
+        if whisper is None and self.engine_factory is not None:
+            whisper = self.engine_factory("whisper", "")
+        return getattr(whisper, "names", None)
 
     def engine_hard_refusal(self, name: str, variant: str | None = None) -> str:
         """Why the engine can never change to `name` *as things stand*, or "".
@@ -4374,6 +4404,7 @@ class Session:
             self._pending_engine = None
             self._emit("note", f"speech engine: {why}")
             return False
+        self._model_request = self._ready_whisper = None
         want = self._parakeet_variant(variant) if name == "parakeet" else ""
         label = f"{name} ({want})" if want else name
         if self._switching_engine:
@@ -4421,6 +4452,7 @@ class Session:
             self._engine_result = {"state": "done", "engine": name, "variant": want,
                                    "reason": "", "at": time.monotonic()}
             self.asr = new
+            self._model_request = self._ready_whisper = None
             self._engines[self._engine_key(getattr(old, "engine", "whisper"),
                                            getattr(old, "variant", ""))] = old
             self._engines[key] = new
@@ -4443,7 +4475,16 @@ class Session:
 
         def run() -> None:
             try:
-                new.load()
+                if isinstance(new, WhisperTranscriber):
+                    from .home.models import BY_NAME, BY_RETIRED, complete
+
+                    for model_name in dict.fromkeys(new.names):
+                        spec = BY_NAME.get(model_name) or BY_RETIRED.get(model_name)
+                        if spec and not complete(spec.repo):
+                            raise ValueError(f"Download {model_name} on the Models page first")
+                    new.load(local_files_only=True)
+                else:
+                    new.load()
                 warm = getattr(new, "warmup", None)
                 if callable(warm):
                     warm()
@@ -4475,9 +4516,10 @@ class Session:
         A switch whose engine is already loading cannot be taken back - the load is on a
         thread that cannot be interrupted - so this is only for the wait.
         """
-        if self._pending_engine is None:
+        if self._pending_engine is None and self._ready_whisper is None:
             return False
         self._pending_engine = None
+        self._ready_whisper = None
         self._engine_result = None
         self._emit("note", "speech engine: switch cancelled")
         return True
@@ -4500,6 +4542,10 @@ class Session:
 
         if self._switching_engine and self._switching_to is not None:
             return shape("loading", *self._switching_to)
+        if self._model_request is not None:
+            return shape("loading", "whisper", "")
+        if self._ready_whisper is not None:
+            return shape("waiting", "whisper", "", "waiting for the decoder")
         if self._pending_engine is not None:
             name, variant = self._pending_engine
             want = self._parakeet_variant(variant) if name == "parakeet" else ""
@@ -4521,6 +4567,15 @@ class Session:
         noticed on the frame it happens, with no timer and no polling of its own. Cheap
         when nothing is queued: one attribute test.
         """
+        candidate = getattr(self, "_ready_whisper", None)
+        if candidate is not None and not self._engine_busy() and self.worker.swap(candidate):
+            self._ready_whisper = None
+            self.asr = self._engines["whisper"] = candidate
+            if self.profile is not None:
+                self.profile.partial_model, self.profile.final_model = candidate.asked
+                self.profile.decode_device = candidate._device
+                self.profile.save()
+            self._emit("note", "speech models switched")
         pending = getattr(self, "_pending_engine", None)
         if pending is None or self._switching_engine or self._engine_busy():
             return

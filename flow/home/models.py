@@ -648,8 +648,18 @@ class ModelManager:
         if not (isinstance(asked, tuple) and len(asked) == 2):
             asked = (None, None)
         auto_partial, auto_final = default_models(device)
+        required = (asked[0] or auto_partial, asked[1] or auto_final)
+        if getattr(asr, "engine", "whisper") == "parakeet":
+            whisper_names = getattr(self.session, "whisper_model_names", None)
+            if callable(whisper_names):
+                required = whisper_names() or required
+        # Only catalog models can be downloaded here. The offline engine loader
+        # resolves local directories, retired models and other launch overrides.
+        missing = [row["name"] for row in rows if row["name"] in required
+                   and row["name"] in BY_NAME and not row["installed"]]
         return {
             "models": rows,
+            "whisper_downloads_needed": missing,
             "engine": getattr(asr, "engine", "whisper"),
             "switch": self._switch(jobs),
             "engines": engine_list,

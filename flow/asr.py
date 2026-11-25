@@ -638,7 +638,7 @@ class WhisperTranscriber:
             self._drops.clear()
             return out
 
-    def load(self, final: bool | None = None) -> None:
+    def load(self, final: bool | None = None, *, local_files_only: bool = False) -> None:
         """Load one tier, or both when called with no argument.
 
         `Session.start()` preloads both on a background thread. The order matters:
@@ -668,6 +668,7 @@ class WhisperTranscriber:
                             name, device=self.device,
                             compute_type=self._compute_type,
                             revision=whisper_revision(name),
+                            local_files_only=local_files_only,
                         )
                     except Exception:
                         # A GPU that will not build a model is a GPU this session does
@@ -686,6 +687,7 @@ class WhisperTranscriber:
                             name, device="cpu",
                             compute_type=self._compute_type,
                             revision=whisper_revision(name),
+                            local_files_only=local_files_only,
                         )
                     with self._lock:
                         self._models[tier] = model
@@ -742,6 +744,30 @@ class WhisperTranscriber:
         """Release both models after a long idle period (R8)."""
         with self._lock:
             self._models = {False: None, True: None}
+
+    def installed_replacement(self, partial: str | None, final: str | None,
+                              device: str | None) -> "WhisperTranscriber":
+        """Prepare both tiers offline while this transcriber keeps decoding."""
+        candidate = WhisperTranscriber(partial, final, self._compute_type, self.lexicon,
+                                       self.baseline, device or self._device)
+        if candidate._device == self._device:
+            candidate._resolved = self.device
+        initial_device = candidate.device
+        if initial_device == self.device:
+            with self._lock:
+                for tier in (False, True):
+                    if candidate.names[tier] == self._built[tier]:
+                        candidate._models[tier] = self._models[tier]
+                        candidate._built[tier] = self._built[tier]
+        for tier in (False, True):
+            candidate.load(tier, local_files_only=True)
+            if candidate.device != initial_device:
+                # This tier fell back to CPU. The other may still hold a GPU model.
+                candidate._models[not tier] = None
+                candidate.load(not tier, local_files_only=True)
+                break
+        candidate.warmup()
+        return candidate
 
     def swap(self, partial_model: str | None, final_model: str | None,
              device: str | None = None) -> bool:

@@ -46,3 +46,9 @@ design/build/
 # rebuilds it from docs/flow.gif in about half a minute. Ignored here, it also stays out
 # of the sdist, which it alone would put over its size guard.
 docs/social-preview.gif
+
+# Local Windows release artifacts also stay out of the Python source distribution.
+/build/
+/dist/
+/flow-windows-x64*.zip
+/flow-windows-x64.zip.sha256
