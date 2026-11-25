@@ -23,6 +23,7 @@ import queue
 import sys
 import tempfile
 import threading
+import types
 import time
 import unittest
 import urllib.error
@@ -33,7 +34,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flow import audio, stats  # noqa: E402
+from flow import audio, kinds, stats  # noqa: E402
 from flow.asr import WhisperTranscriber  # noqa: E402
 from flow.home import Home  # noqa: E402
 from flow.home import api as api_mod  # noqa: E402
@@ -468,8 +469,23 @@ class TestTheSettingsPage(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(page["mic"]["devices"][0]["name"], "Yeti Nano")
         self.assertEqual(page["send"]["word"], "boom")
-        self.assertEqual(page["design"]["current"], "compact")
         self.assertFalse(page["shortcuts"]["available"])
+
+    def test_the_page_offers_one_pill_and_nothing_of_the_classic_one(self):
+        # "Compact only" (decisions.md 2026-11-23, "One surface"). The page carried a
+        # Design row and the Classic panel's width and place; with one pill there is
+        # nothing to switch and nothing of the other to size.
+        h = Pumped(self)
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            _status, page = h.call("GET", "/api/settings")
+        self.assertNotIn("design", page)
+        self.assertNotIn("classic", page)
+        self.assertIn("flows", page, "the panel-flow switch is the compact pill's own")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        for gone in ("settings/design", "settings/classic", "d.design", "d.classic",
+                     "Classic panel"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, js)
 
     def test_the_microphone_is_chosen_by_name(self):
         h = Pumped(self)
@@ -558,18 +574,19 @@ class TestTheSettingsPage(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(Profile(h.profile.path).hotkeys, {"toggle": "ctrl+alt+j"})
 
-    def test_a_design_switch_is_its_own_callback_on_the_pill(self):
-        # It runs inside the pill's frame, and a switch takes that window down — so it
-        # is scheduled like the menu row it replaces, never run inline.
+    def test_there_is_no_route_that_switches_the_pill(self):
+        # The route went with the row. A page from an older tab that still posts to it
+        # is answered as any unknown address is, and the pill on screen is not touched.
         h = Pumped(self)
         surface = mock.Mock()
         h.home.surface = surface
-        with mock.patch.object(audio, "input_devices", return_value=[]):
-            h.call("POST", "/api/settings/design", {"name": "current"})
-        surface.after.assert_called_once()
+        for route, body in (("/api/settings/design", {"name": "current"}),
+                            ("/api/settings/classic", {"place": "corner"})):
+            with self.subTest(route=route):
+                status, _body = h.call("POST", route, body)
+                self.assertEqual(status, 404)
+        surface.after.assert_not_called()
         surface.switch_design.assert_not_called()
-        surface.after.call_args.args[1]()
-        surface.switch_design.assert_called_once_with("current")
 
     def test_only_flows_own_folders_can_be_opened(self):
         h = Pumped(self)
@@ -594,21 +611,30 @@ class TestTheSettingsPage(unittest.TestCase):
 class TestOpeningTheWindow(unittest.TestCase):
     def test_the_first_open_starts_the_server_and_launches_a_window(self):
         h = Pumped(self)
-        with mock.patch.object(window_mod, "launch", return_value=True) as launch:
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.ISOLATED) as launch:
             self.assertEqual(h.home.open("models"), "")
         url = launch.call_args.args[0]
         server = h.home.server()
         self.assertTrue(url.startswith(server.origin + "/#token="))
         self.assertIn(server.token, url)
         self.assertTrue(url.endswith("&page=models"))
+        app_url = launch.call_args.kwargs["app_url"]
+        self.assertEqual(app_url, url.replace("/#", f"/?{server.window_query}#", 1))
+        with urllib.request.urlopen(app_url) as response:
+            self.assertIn(f"<title>{server.window_title}</title>".encode(), response.read())
+        with urllib.request.urlopen(url) as response:
+            self.assertIn(b"<title>Flow</title>", response.read())
 
     def test_an_open_window_is_brought_forward_and_moved_instead(self):
         h = Pumped(self)
         server = h.home.server()
         server.last_seen = time.monotonic()
-        with mock.patch.object(window_mod, "focus", return_value=True), \
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.ISOLATED):
+            h.home.open()
+        with mock.patch.object(window_mod, "focus", return_value=True) as focus, \
                 mock.patch.object(window_mod, "launch") as launch:
             self.assertEqual(h.home.open("settings"), "")
+        focus.assert_called_once_with(server.window_title)
         launch.assert_not_called()
         self.assertEqual(h.home.take_navigate(), "settings")
 
@@ -668,6 +694,74 @@ class TestTheWindowIsEdgeInAppMode(unittest.TestCase):
         h = Pumped(self)
         with mock.patch.object(window_mod, "launch", return_value=window_mod.SHARED):
             self.assertEqual(h.home.open(), window_mod.SHARED_NOTICE)
+
+
+class TestTheWindowClosesWithFlow(unittest.TestCase):
+    """Owner, 2026-11-24: "Flow close but Open flow window remains open"."""
+
+    @unittest.skipUnless(sys.platform == "win32", "posts a Win32 message")
+    def test_only_this_servers_app_windows_are_asked_to_close(self):
+        import ctypes
+
+        title = "Flow Home (test-instance)"
+        windows = {
+            11: title, 22: title, 33: "Flow", 44: "Flow Home (other-instance)",
+            55: title + " - Microsoft Edge", 66: title, 77: title,
+        }
+        user32 = mock.Mock()
+        user32.EnumWindows.side_effect = lambda visit, _: [visit(hwnd, 0) for hwnd in windows]
+        user32.IsWindowVisible.side_effect = lambda hwnd: hwnd != 66
+
+        def window_class(hwnd, buffer, _size):
+            buffer.value = "Other" if hwnd == 77 else "Chrome_WidgetWin_1"
+
+        def window_title(hwnd, buffer, _size):
+            buffer.value = windows[hwnd]
+
+        user32.GetClassNameW.side_effect = window_class
+        user32.GetWindowTextW.side_effect = window_title
+        with mock.patch.object(ctypes.windll, "user32", user32):
+            self.assertEqual(window_mod.close_all(title), 2)
+        post = user32.PostMessageW
+        self.assertEqual([c.args for c in post.call_args_list],
+                         [(11, 0x0010, 0, 0), (22, 0x0010, 0, 0)])
+
+    def test_no_window_open_closes_nothing(self):
+        with mock.patch.object(window_mod, "_home_windows", return_value=[]):
+            self.assertEqual(window_mod.close_all("Flow Home (test-instance)"), 0)
+
+    def test_off_windows_there_is_no_window_to_find(self):
+        with mock.patch.object(window_mod.sys, "platform", "darwin"):
+            self.assertEqual(window_mod._home_windows("Flow Home (test-instance)"), [])
+
+    def test_home_closes_its_own_window_before_stopping_its_server(self):
+        h = Pumped(self)
+        other = Pumped(self)
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.ISOLATED):
+            h.home.open()
+            other.home.open()
+        server = h.home.server()
+        expected = server.window_title
+        self.assertNotEqual(expected, other.home.server().window_title)
+
+        def close_window(_title):
+            with urllib.request.urlopen(server.origin) as response:
+                self.assertEqual(response.status, 200)
+
+        with mock.patch.object(window_mod, "close_all", side_effect=close_window) as close:
+            h.home.close()
+            close.assert_called_once_with(expected)
+
+    def test_shared_tabs_and_server_only_launches_leave_browser_windows_alone(self):
+        h = Pumped(self)
+        other = Pumped(self)
+        h.home.server()
+        with mock.patch.object(window_mod, "launch", return_value=window_mod.SHARED):
+            other.home.open()
+        with mock.patch.object(window_mod, "close_all") as close:
+            h.home.close()
+            other.home.close()
+        close.assert_not_called()
 
 
 # ------------------------------------------------------------------------------ session
@@ -1123,3 +1217,356 @@ class TestEdgeCatalogueIsAskedOnlyWhenSomeoneLooks(unittest.TestCase):
                 mock.patch("flow.speak.voices_changed") as changed:
             self.Api._edge_catalogue_once(mock.Mock())
         changed.assert_not_called()
+
+class TestWhatRefineWritesIsASetting(unittest.TestCase):
+    """Flow Home's "What Refine writes" card: a default, a name, and a kind per
+    program - the three things a window's name cannot tell Flow (flow/kinds.py)."""
+
+    def page(self, h):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, page = h.call("GET", "/api/settings")
+        self.assertEqual(status, 200)
+        return page
+
+    def post(self, h, path, body):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            return h.call("POST", path, body)
+
+    def test_a_fresh_profile_selects_prompt_and_signs_with_nothing(self):
+        # decisions.md 2026-11-24: the user chooses and Flow does not guess.
+        page = self.page(Pumped(self))
+        self.assertEqual(page["writing"]["default"], "prompt")
+        self.assertEqual(page["writing"]["selected"], "prompt")
+        self.assertEqual(page["writing"]["name"], "")
+        self.assertEqual([k["key"] for k in page["writing"]["kinds"]],
+                         ["prompt", "email", "message", "tidy"])
+
+    def test_the_default_is_saved(self):
+        h = Pumped(self)
+        status, page = self.post(h, "/api/settings/writing", {"default": "prompt"})
+        self.assertEqual(status, 200)
+        self.assertEqual(page["writing"]["default"], "prompt")
+        self.assertEqual(Profile(h.profile.path).refine_kind, "prompt")
+
+    def test_a_default_that_is_not_a_kind_is_refused(self):
+        h = Pumped(self)
+        status, _ = self.post(h, "/api/settings/writing", {"default": "memo"})
+        self.assertEqual(status, 400)
+        self.assertEqual(h.profile.refine_kind, "prompt")
+
+    def test_the_name_is_saved_with_its_spaces_tidied(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/writing", {"name": "  Samar   Tomar "})
+        self.assertEqual(Profile(h.profile.path).name, "Samar Tomar")
+
+    def test_the_name_can_be_cleared(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/writing", {"name": "Samar"})
+        self.post(h, "/api/settings/writing", {"name": ""})
+        self.assertEqual(Profile(h.profile.path).name, "")
+
+    def test_a_paragraph_is_not_a_name(self):
+        h = Pumped(self)
+        status, _ = self.post(h, "/api/settings/writing", {"name": "x" * 200})
+        self.assertEqual(status, 400)
+
+    def test_changing_one_leaves_the_other(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/writing", {"name": "Samar"})
+        self.post(h, "/api/settings/writing", {"default": "tidy"})
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.name, saved.refine_kind), ("Samar", "tidy"))
+
+    def test_a_program_can_be_given_a_kind(self):
+        h = Pumped(self)
+        status, page = self.post(h, "/api/settings/apps",
+                                 {"exe": "Notepad.exe", "kind": "email"})
+        self.assertEqual(status, 200)
+        self.assertEqual(Profile(h.profile.path).kinds, {"notepad.exe": "email"})
+        self.assertEqual(page["apps"], [{"exe": "notepad.exe", "instruction": "",
+                                         "kind": "email"}])
+
+    def test_a_kind_that_is_not_one_is_refused(self):
+        h = Pumped(self)
+        status, _ = self.post(h, "/api/settings/apps",
+                              {"exe": "notepad.exe", "kind": "memo"})
+        self.assertEqual(status, 400)
+        self.assertEqual(h.profile.kinds, {})
+
+    def test_changing_the_kind_does_not_wipe_the_instruction(self):
+        # The page's kind picker posts a kind and nothing else.
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps",
+                  {"exe": "slack.exe", "instruction": "keep it to one line"})
+        self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": "message"})
+        saved = Profile(h.profile.path)
+        self.assertEqual(saved.apps, {"slack.exe": "keep it to one line"})
+        self.assertEqual(saved.kinds, {"slack.exe": "message"})
+
+    def test_letting_flow_decide_again_removes_only_the_kind(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps",
+                  {"exe": "slack.exe", "instruction": "one line", "kind": "message"})
+        self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": "auto"})
+        saved = Profile(h.profile.path)
+        self.assertEqual(saved.kinds, {})
+        self.assertEqual(saved.apps, {"slack.exe": "one line"})
+
+    def test_removing_a_program_removes_both(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps",
+                  {"exe": "slack.exe", "instruction": "one line", "kind": "message"})
+        _status, page = self.post(h, "/api/settings/apps",
+                                  {"exe": "slack.exe", "instruction": "", "kind": ""})
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.apps, saved.kinds), ({}, {}))
+        self.assertEqual(page["apps"], [])
+
+    def test_a_program_with_either_setting_gets_one_row(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/apps", {"exe": "code.exe", "instruction": "terse"})
+        self.post(h, "/api/settings/apps", {"exe": "notepad.exe", "kind": "email"})
+        rows = self.page(h)["apps"]
+        self.assertEqual([r["exe"] for r in rows], ["code.exe", "notepad.exe"])
+        self.assertEqual([r["kind"] for r in rows], ["auto", "email"])
+
+    def test_a_hand_edited_kind_that_is_not_one_reads_as_flow_decides(self):
+        h = Pumped(self)
+        h.profile.kinds = {"notepad.exe": "memo"}
+        self.assertEqual(self.page(h)["apps"][0]["kind"], "auto")
+
+
+class TestStylesAreSeenEditedAndYourOwn(unittest.TestCase):
+    """decisions.md 2026-11-24: the Styles page shows each style's real instructions and
+    where it is used; a built-in can be edited and put back; your own can be added,
+    selected, renamed and deleted."""
+
+    def setUp(self):
+        self.addCleanup(kinds.register, [])
+
+    page = TestWhatRefineWritesIsASetting.page
+    post = TestWhatRefineWritesIsASetting.post
+
+    def styles(self, page):
+        return {st["key"]: st for st in page["writing"]["styles"]}
+
+    def test_the_built_ins_show_the_brief_refine_sends(self):
+        from flow import refine
+        st = self.styles(self.page(Pumped(self)))
+        self.assertEqual(list(st), ["prompt", "email", "message", "tidy"])
+        self.assertEqual(st["tidy"]["instructions"], refine.style_text("tidy"))
+        self.assertFalse(st["email"]["edited"])
+
+    def test_a_built_in_is_edited_and_put_back(self):
+        h = Pumped(self)
+        _s, page = self.post(h, "/api/settings/style",
+                             {"key": "email", "instructions": "Two lines at most."})
+        self.assertEqual(self.styles(page)["email"]["instructions"], "Two lines at most.")
+        self.assertTrue(self.styles(page)["email"]["edited"])
+        self.assertEqual(Profile(h.profile.path).style_edits, {"email": "Two lines at most."})
+        _s, page = self.post(h, "/api/settings/style", {"key": "email", "reset": True})
+        self.assertFalse(self.styles(page)["email"]["edited"])
+        self.assertEqual(Profile(h.profile.path).style_edits, {})
+
+    def test_your_own_style_is_added_selected_and_used_by_a_program(self):
+        h = Pumped(self)
+        status, page = self.post(h, "/api/settings/style/new",
+                                 {"name": "Standup update", "instructions": "Three bullets."})
+        self.assertEqual(status, 200)
+        key = "my:standup-update"
+        self.assertEqual(self.styles(page)[key]["label"], "Standup update")
+        self.assertTrue(kinds.valid(key), "a new style is a style at once")
+        self.post(h, "/api/settings/writing", {"default": key})
+        _s, page = self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": key})
+        self.assertEqual(page["writing"]["selected"], key)
+        self.assertEqual(self.styles(page)[key]["programs"], ["slack.exe"])
+
+    def test_deleting_your_own_style_lets_go_of_it_everywhere(self):
+        h = Pumped(self)
+        self.post(h, "/api/settings/style/new", {"name": "Standup", "instructions": "x"})
+        self.post(h, "/api/settings/writing", {"default": "my:standup"})
+        self.post(h, "/api/settings/apps", {"exe": "slack.exe", "kind": "my:standup"})
+        _s, page = self.post(h, "/api/settings/style", {"key": "my:standup", "delete": True})
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.styles, saved.kinds, saved.refine_kind), ([], {}, "prompt"))
+        self.assertNotIn("my:standup", self.styles(page))
+        self.assertFalse(kinds.valid("my:standup"))
+
+    def test_what_cannot_be_done_is_refused(self):
+        h = Pumped(self)
+        for path, body in (
+                ("/api/settings/style", {"key": "email", "delete": True}),
+                ("/api/settings/style", {"key": "email", "name": "Mail"}),
+                ("/api/settings/style", {"key": "memo", "instructions": "x"}),
+                ("/api/settings/style", {"key": "email", "instructions": "  "}),
+                ("/api/settings/style/new", {"name": "Email", "instructions": "x"}),
+                ("/api/settings/style/new", {"name": "", "instructions": "x"}),
+                ("/api/settings/style/new", {"name": "Notes", "instructions": ""})):
+            with self.subTest(path=path, body=body):
+                status, _ = self.post(h, path, body)
+                self.assertEqual(status, 400)
+
+
+class TestLensesAreSeenEditedAndYourOwn(unittest.TestCase):
+    """decisions.md 2026-11-24: the Lenses page, the Styles page's twin for Ask."""
+
+    page = TestWhatRefineWritesIsASetting.page
+    post = TestWhatRefineWritesIsASetting.post
+
+    def lenses(self, page):
+        return {l["key"]: l for l in page["lenses"]["lenses"]}
+
+    def test_no_lens_is_selected_and_the_built_ins_are_shown(self):
+        page = self.page(Pumped(self))
+        self.assertEqual(page["lenses"]["selected"], "none")
+        self.assertEqual(list(self.lenses(page)), ["none", "architecture", "business"])
+        self.assertTrue(self.lenses(page)["none"]["plain"])
+
+    def test_a_lens_is_selected_edited_and_put_back(self):
+        h = Pumped(self)
+        _s, page = self.post(h, "/api/settings/lens", {"key": "business", "select": True})
+        self.assertEqual(page["lenses"]["selected"], "business")
+        _s, page = self.post(h, "/api/settings/lens",
+                             {"key": "business", "instructions": "Money first."})
+        self.assertTrue(self.lenses(page)["business"]["edited"])
+        _s, page = self.post(h, "/api/settings/lens", {"key": "business", "reset": True})
+        self.assertFalse(self.lenses(page)["business"]["edited"])
+        saved = Profile(h.profile.path)
+        self.assertEqual((saved.lens, saved.lens_edits), ("business", {}))
+
+    def test_your_own_lens_is_added_and_deleted(self):
+        h = Pumped(self)
+        _s, page = self.post(h, "/api/settings/lens/new",
+                             {"name": "Reviewer", "instructions": "What could break."})
+        self.assertIn("my:reviewer", self.lenses(page))
+        self.post(h, "/api/settings/lens", {"key": "my:reviewer", "select": True})
+        _s, page = self.post(h, "/api/settings/lens", {"key": "my:reviewer", "delete": True})
+        self.assertNotIn("my:reviewer", self.lenses(page))
+        self.assertEqual(page["lenses"]["selected"], "none")
+
+    def test_what_cannot_be_done_is_refused(self):
+        h = Pumped(self)
+        for path, body in (
+                ("/api/settings/lens", {"key": "none", "instructions": "x"}),
+                ("/api/settings/lens", {"key": "business", "delete": True}),
+                ("/api/settings/lens", {"key": "memo", "select": True}),
+                ("/api/settings/lens/new", {"name": "Business", "instructions": "x"}),
+                ("/api/settings/lens/new", {"name": "X", "instructions": " "})):
+            with self.subTest(path=path, body=body):
+                status, _ = self.post(h, path, body)
+                self.assertEqual(status, 400)
+
+
+class TestTheModelsPageSaysWhichCliIsDown(unittest.TestCase):
+    def models(self, h):
+        status, page = h.call("GET", "/api/models")
+        self.assertEqual(status, 200)
+        return page
+
+    def test_a_cli_being_passed_over_is_named_with_its_reason(self):
+        from flow import refine as refine_mod
+
+        h = Pumped(self)
+        h.session.cli_health = refine_mod.Health()
+        h.session.cli_health.failed("codex", "codex exited 1: no such model")
+        self.assertEqual(self.models(h)["agent"]["down"],
+                         [{"name": "codex", "why": "codex exited 1: no such model"}])
+
+    def test_a_session_with_no_record_has_nobody_down(self):
+        self.assertEqual(self.models(Pumped(self))["agent"]["down"], [])
+
+class TestTheRewriteShortcutIsNamedWhereTheOthersAre(unittest.TestCase):
+    """`rewrite` (alt+shift+X): a thing asked for by voice cannot be found by looking,
+    so the page that teaches the product shows the key and Settings lets it be moved."""
+
+    def keyed(self):
+        h = Pumped(self)
+        h.home.hotkeys = types.SimpleNamespace(
+            chosen={"paste_last": "alt+shift+Z", "rewrite": "alt+shift+X"},
+            failed=[], chord=None, ask_chord=None)
+        return h
+
+    def test_the_home_page_is_given_the_keys_that_registered(self):
+        api = self.keyed().home.api
+        self.assertEqual(api._shortcut_names()["rewrite"], "alt+shift+X")
+
+    def test_with_no_hotkeys_it_is_blank_not_missing(self):
+        self.assertEqual(Pumped(self).home.api._shortcut_names()["rewrite"], "")
+
+    def test_settings_lists_it_between_paste_last_and_quit(self):
+        h = self.keyed()
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, page = h.call("GET", "/api/settings")
+        self.assertEqual(status, 200)
+        listed = page["shortcuts"]["hotkeys"]
+        rows = {row["action"]: row for row in listed}
+        self.assertEqual(rows["rewrite"]["label"], "Rewrite what I just said")
+        self.assertEqual(rows["rewrite"]["combo"], "alt+shift+X")
+        order = [row["action"] for row in listed]
+        self.assertEqual(order[order.index("paste_last") + 1], "rewrite")
+
+    def test_it_can_be_moved_like_any_other(self):
+        h = self.keyed()
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, _page = h.call("POST", "/api/settings/hotkey",
+                                   {"action": "rewrite", "combo": "alt+shift+r"})
+        self.assertEqual(status, 200)
+        self.assertEqual(Profile(h.profile.path).hotkeys.get("rewrite"), "alt+shift+r")
+
+
+class TestTheEarlierPanelFlowIsASwitch(unittest.TestCase):
+    """`Profile.panel_flows`: off is the product (a rewrite lands, an answer shows on a
+    card); on is the flow before 2026-11-22, kept as a way back."""
+
+    def page(self, h):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            status, page = h.call("GET", "/api/settings")
+        self.assertEqual(status, 200)
+        return page
+
+    def post(self, h, body):
+        with mock.patch.object(audio, "input_devices", return_value=[]):
+            return h.call("POST", "/api/settings/flows", body)
+
+    def test_a_fresh_profile_has_it_off(self):
+        self.assertFalse(self.page(Pumped(self))["flows"]["panel"])
+
+    def test_turning_it_on_is_saved(self):
+        h = Pumped(self)
+        status, page = self.post(h, {"panel": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(page["flows"]["panel"])
+        self.assertTrue(Profile(h.profile.path).panel_flows)
+
+    def test_the_pill_on_screen_is_told_now_not_at_the_next_start(self):
+        h = Pumped(self)
+
+        class Surface:
+            panel_flows = False
+
+        h.home.surface = Surface()
+        self.post(h, {"panel": True})
+        self.assertTrue(h.home.surface.panel_flows)
+        self.assertTrue(h.session.refine_says_more)
+        self.post(h, {"panel": False})
+        self.assertFalse(h.home.surface.panel_flows)
+        self.assertFalse(h.session.refine_says_more)
+
+    def test_a_surface_with_no_such_flow_is_left_alone(self):
+        # The shipped surface: it has no `panel_flows`, and gains none.
+        h = Pumped(self)
+
+        class Shipped:
+            pass
+
+        h.home.surface = Shipped()
+        self.post(h, {"panel": True})
+        self.assertFalse(hasattr(h.home.surface, "panel_flows"))
+        self.assertTrue(Profile(h.profile.path).panel_flows)
+
+    def test_anything_but_a_boolean_is_refused(self):
+        h = Pumped(self)
+        for bad in ("yes", 1, None):
+            status, _ = self.post(h, {"panel": bad})
+            self.assertEqual(status, 400, bad)
+        self.assertFalse(h.profile.panel_flows)

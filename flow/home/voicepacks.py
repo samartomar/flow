@@ -43,8 +43,17 @@ from .models import human
 #: for the engine to be there, `size` what the install fetches, measured 2026-09-23 on
 #: PyPI for piper-tts 1.8.0, the version pinned below: its
 #: Windows wheel is 34.1 MB (onnxruntime, which it runs on,
-#: already came with faster-whisper); edge-tts 7.2.8 and aiohttp with its eight small
+#: already came with faster-whisper); edge-tts and aiohttp with its eight small
 #: dependencies are about 2 MB.
+#:
+#: The number after `>=` is also the oldest copy that works, and `outdated` reads it: an
+#: engine already here but below it is offered an update instead of being called "Added".
+#: That is not hypothetical. Microsoft's speech service began refusing edge-tts 7.2.8 and
+#: older around 2026-10-10 (measured 2026-11-23 from this repository: 7.2.8 is answered
+#: HTTP 403 on the handshake, 7.3.1 speaks; the voice *list* still loads on both, which
+#: is how a Natural voice could be chosen and say nothing). Every Flow that had added
+#: the Microsoft voices before then held a copy that could not speak and said "Added".
+#: `old` is what the page says about a copy below the floor.
 #:
 #: `pin` is what is actually installed: the exact version `uv.lock` resolved for that
 #: extra (a test holds them equal). The range alone let a press of "Add" fetch whatever
@@ -56,10 +65,20 @@ from .models import human
 #: exact; what it depends on is resolved by the installer, as `uv tool install` does.
 ENGINES = {
     "piper": {"spec": "piper-tts>=1.6", "pin": "piper-tts==1.8.0", "module": "piper",
-              "extra": "voice", "size": 34_119_688},
-    "edge": {"spec": "edge-tts>=7.2", "pin": "edge-tts==7.2.8", "module": "edge_tts",
-             "extra": "edge", "size": 2_000_000},
+              "extra": "voice", "size": 34_119_688,
+              "old": "This copy of Piper is older than this Flow can use."},
+    "edge": {"spec": "edge-tts>=7.3", "pin": "edge-tts==7.3.1", "module": "edge_tts",
+             "extra": "edge", "size": 2_000_000,
+             "old": "Microsoft's voice service no longer answers this copy of its "
+                    "voices, so they are silent."},
 }
+
+#: Engines whose update is picked up without a restart: pure Python, and imported by
+#: Flow at the moment of use (`flow/edge.py` imports `edge_tts` inside each call), so
+#: dropping the loaded copy is enough for the next reply to load the new one. Piper is
+#: not here: it holds a model and native code, and a second copy of those in one process
+#: is not something to find out about in the middle of an answer.
+RELOADS = frozenset({"edge"})
 
 #: How long an install may take before it is given up on. A slow connection and a cold
 #: uv cache are minutes, not hours.
@@ -151,6 +170,38 @@ def importable(module: str) -> bool:
         return False
 
 
+def installed_version(package: str) -> str:
+    """The version of `package` on this PC's disk now, or "" when it cannot be read."""
+    import importlib.metadata
+
+    importlib.invalidate_caches()
+    try:
+        return importlib.metadata.version(package)
+    except Exception:
+        return ""
+
+
+def _numbers(version: str) -> tuple[int, ...] | None:
+    try:
+        return tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return None
+
+
+def too_old(have: str, floor: str) -> bool:
+    """Whether version `have` is below `floor`. False when either cannot be read as
+    numbers: a version Flow cannot compare is left alone, never called old."""
+    a, b = _numbers(have), _numbers(floor)
+    return a is not None and b is not None and a < b
+
+
+def _forget(module: str) -> None:
+    """Drop a loaded engine, so its next use imports what was just installed."""
+    for name in [n for n in sys.modules if n == module or n.startswith(module + ".")]:
+        sys.modules.pop(name, None)
+    importlib.invalidate_caches()
+
+
 def installer(spec: str) -> tuple[list[str] | None, str]:
     """The command that installs `spec` into this Flow's own environment, or None and why
     not.
@@ -215,10 +266,23 @@ class VoicePacks:
     def _folder(self) -> Path:
         return voices_dir()
 
+    def _version(self, package: str) -> str:
+        return installed_version(package)
+
+    def _loaded(self, module: str) -> bool:
+        return module in sys.modules
+
     # -- the engines -----------------------------------------------------------------
 
+    def outdated(self, engine: str) -> bool:
+        """Whether `engine` is here but older than the oldest copy that works."""
+        about = ENGINES[engine]
+        package, floor = about["spec"].split(">=")
+        return self._importable(about["module"]) and too_old(self._version(package), floor)
+
     def install(self, engine: str) -> Job:
-        """Install `engine`, or return the install already running."""
+        """Install `engine` - or update it, which is the same command - or return the
+        install already running."""
         if engine not in ENGINES:
             raise ValueError(f"no engine called {engine}")
         with self._lock:
@@ -232,6 +296,9 @@ class VoicePacks:
 
     def _install(self, engine: str, job: Job) -> None:
         about = ENGINES[engine]
+        # Read before the install: afterwards the disk holds the new copy, and whether
+        # this process is still running the old one is what decides the last step.
+        stale = self.outdated(engine) and self._loaded(about["module"])
         command, why = self._installer(about["pin"])
         if command is None:
             job.state, job.error = "failed", why
@@ -254,6 +321,21 @@ class VoicePacks:
             job.state = "failed"
             job.error = "installed, but this Flow cannot load it yet - restart Flow"
             return
+        if self.outdated(engine):
+            # The installer said yes and the copy on disk is still the old one: another
+            # environment was written to, or the pin itself is below the floor.
+            job.state = "failed"
+            job.error = "the update did not replace the old copy - restart Flow and try again"
+            return
+        if stale:
+            # An update, into a process that has the old copy loaded and would go on
+            # being refused with it.
+            if engine in RELOADS:
+                _forget(about["module"])
+            else:
+                job.state = "failed"
+                job.error = "updated - restart Flow to use it"
+                return
         job.state, job.done = "done", job.total
         # Listed now, not at the next launch: the engine's voices join the list, and for
         # the Microsoft voices that is one request to the service for its catalogue.
@@ -357,12 +439,18 @@ class VoicePacks:
             about = ENGINES[name]
             job = engines.get(name)
             here = self._importable(about["module"])
-            command, why = (None, "") if here else self._installer(about["spec"])
+            # Here, and too old to work: the page offers an update, and `can` then means
+            # what it means for an engine that is absent - whether this Flow can install.
+            old = here and self.outdated(name)
+            ready = here and not old
+            command, why = (None, "") if ready else self._installer(about["spec"])
             return {
                 "installed": here,
+                "outdated": old,
+                "old": about["old"] if old else "",
                 "job": job.public() if job is not None else None,
-                "can": here or command is not None,
-                "why": "" if here or command is not None else why,
+                "can": ready or command is not None,
+                "why": "" if ready or command is not None else why,
                 "size_text": human(about["size"]),
                 "spec": about["spec"],
             }

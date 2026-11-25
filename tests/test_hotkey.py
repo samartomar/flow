@@ -381,10 +381,11 @@ class TestWhatRegisteredIsWhatIsReported(Registered):
         self.assertEqual(len(keys.ignored), 1)
         self.assertEqual(keys.chosen["toggle"], "ctrl+alt+space")
 
-    def test_all_six_actions_still_register_with_nothing_overridden(self):
+    def test_all_seven_actions_still_register_with_nothing_overridden(self):
         keys, _fake = self.register()
         self.assertEqual(list(keys.chosen),
-                         ["toggle", "send", "cancel", "mode", "quit", "paste_last"])
+                         ["toggle", "send", "cancel", "mode", "quit", "paste_last",
+                          "rewrite"])
         self.assertEqual(keys.failed, [])
         self.assertEqual(keys.ignored, [])
 
@@ -450,7 +451,7 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
 
     def launch(self, hotkeys) -> str:
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -460,9 +461,9 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
                 mock.patch.object(hotkey, "user32", fake), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill") as pill, \
+                mock.patch.object(flow.ui_compact, "CompactPill") as pill, \
                 contextlib.redirect_stdout(out):
-            self.assertEqual(mod.main(["--design", "current", "--no-speak", "--no-lexicon"]), 0)
+            self.assertEqual(mod.main(["--no-speak", "--no-lexicon"]), 0)
             keys = pill.call_args.kwargs["hotkeys"]
             if keys is not None:
                 keys._thread.join(timeout=5.0)
@@ -504,7 +505,7 @@ class TestTheStartupBlockSaysWhatItRefusedAndWhatItRegistered(unittest.TestCase)
 
     def test_a_launch_with_no_hotkeys_block_prints_only_what_registered(self):
         lines = self.hotkey_lines({})
-        self.assertEqual(len(lines), 6)
+        self.assertEqual(len(lines), 7)
         self.assertNotIn("ignored", " ".join(lines))
 
     def test_a_block_typed_by_hand_survives_the_whole_way_to_registration(self):
@@ -687,7 +688,7 @@ class TestAltGrKeepsItsCharacters(unittest.TestCase):
 
     def test_the_startup_block_says_it_before_the_combos(self):
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -696,10 +697,9 @@ class TestAltGrKeepsItsCharacters(unittest.TestCase):
                 mock.patch.object(hotkey, "user32", AltGrUser32(GERMAN)), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill") as pill, \
+                mock.patch.object(flow.ui_compact, "CompactPill") as pill, \
                 contextlib.redirect_stdout(out):
-            self.assertEqual(mod.main(["--design", "current", "--no-speak",
-                                       "--no-lexicon"]), 0)
+            self.assertEqual(mod.main(["--no-speak", "--no-lexicon"]), 0)
             keys = pill.call_args.kwargs["hotkeys"]
             if keys is not None:
                 keys._thread.join(timeout=5.0)

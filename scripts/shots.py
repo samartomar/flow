@@ -70,6 +70,7 @@ from flow import paint  # noqa: E402
 paint.make_dpi_aware()
 
 import flow.ui as ui  # noqa: E402
+from flow import kinds  # noqa: E402
 from flow.session import CONVERSE, DICTATE, Activity, Event, State  # noqa: E402
 from flow.ui import Pill  # noqa: E402
 
@@ -217,6 +218,16 @@ class FakeSession:
         self.can_take_reply = False
         #: Read by the mic view's resting frame, and by the full row's app slot.
         self.target_app = "claude.exe"
+        #: What the compact panel reads to say what a Refine is (flow/kinds.py): the
+        #: kind the result was written as, and how long the call in flight has been
+        #: out. Spelled here, not left to a `getattr` default, for this class's own
+        #: reason - a shot of the default is not a picture of the feature.
+        self.refine_kind = kinds.PROMPT
+        self.waited = 0.0
+        #: What the rewrite in flight is doing, as the real session words it.
+        self.refine_doing = kinds.KINDS[kinds.PROMPT].doing
+        self.target_title = ""
+        self.title_probe = None
         #: Read by `_pump_talk` while a paste is waiting.
         self.busy = False
         self._events: list[Event] = []
@@ -228,6 +239,10 @@ class FakeSession:
     def _provider(self) -> str:
         """The CLI the setup box names and the no-CLI cycle asks about."""
         return "claude"
+
+    def kind_here(self) -> str:
+        """`Session.kind_here`, by the real rule, for the window the fake is aimed at."""
+        return kinds.detect(self.target_app, self.target_title)
 
     @property
     def provider(self) -> str:

@@ -23,7 +23,7 @@ import time
 import traceback
 from pathlib import Path
 
-from .. import stats
+from .. import kinds, lenses, stats
 from ..edits import SEND_WORD_PRESETS, enter_word
 from ..history import (
     ANSWERED,
@@ -39,7 +39,8 @@ from ..history import (
     matches,
 )
 from ..history import DAYS as HISTORY_DAYS
-from ..refine import EFFORTS, available, named
+from ..profile import STYLES_MAX
+from ..refine import EFFORTS, NAME_MAX, STYLE_MAX, available, named, style_text
 from ..session import CONVERSE, DICTATE, REFINE, RECENT_ANSWERED, RECENT_ASKED
 from ..version import check_update, version
 from .bridge import Busy
@@ -56,6 +57,7 @@ HOTKEY_LABELS = {
     "cancel": "Cancel",
     "mode": "Switch mode",
     "paste_last": "Paste last",
+    "rewrite": "Rewrite what I just said",
     "quit": "Quit Flow",
 }
 
@@ -66,9 +68,11 @@ VOICE_ENGINES = {
     "edge": "Natural - the text goes to Microsoft",
 }
 
-#: The two designs, by the names the page shows. "current" is the stored spelling of
-#: the pill Flow shipped first, kept so older profiles still load.
-DESIGN_LABELS = {"compact": "Compact", "current": "Classic"}
+#: How long a press of Preview or Read aloud waits to learn whether the voice will be
+#: heard (`Api._say`). Measured 2026-11-23 against Microsoft's service: a refusal came
+#: back in 0.7 s and a first chunk of sound in 1.8 s. Long enough for both with room,
+#: short enough that a dead network does not hold the button for the engine's own 10 s.
+SAY_WAIT_SEC = 5.0
 
 #: The History page's filters, by the name its buttons send.
 HISTORY_FILTERS = {
@@ -218,6 +222,92 @@ def _entry_view(e: dict, now: float) -> dict:
     return view
 
 
+def _app_rows(profile) -> list[dict]:
+    """Every program Flow has a setting for: its instruction, its kind, or both.
+
+    One row a program, from the union of the two tables, because that is how somebody
+    thinks about it - "what does Flow do in Slack" - and two lists would show a
+    program twice.
+    """
+    if profile is None:
+        return []
+    notes = getattr(profile, "apps", {}) or {}
+    chosen = getattr(profile, "kinds", {}) or {}
+    rows = []
+    for exe in sorted({*notes, *chosen}, key=str):
+        note, kind = notes.get(exe), chosen.get(exe)
+        rows.append({"exe": exe,
+                     "instruction": note if isinstance(note, str) else "",
+                     "kind": kind if kinds.valid(kind) else kinds.AUTO})
+    return rows
+
+
+def _writing(profile) -> dict:
+    """What the Styles page needs (decisions.md 2026-11-24): every style with the
+    instructions Refine sends for it, which programs use it, and when it was last used;
+    which one is selected; and the name an email is signed with.
+
+    A built-in's instructions are its brief as shipped (`refine.style_text`) unless the
+    user edited it, and the page says which. The selected style is a real style: the
+    retired "auto" and a deleted style both read as Prompt, as `kinds.resolve` reads them.
+    """
+    name = (getattr(profile, "name", "") or "") if profile is not None else ""
+    edits = getattr(profile, "style_edits", {}) or {} if profile is not None else {}
+    used = getattr(profile, "style_used", {}) or {} if profile is not None else {}
+    own = getattr(profile, "styles", []) or [] if profile is not None else []
+    table = getattr(profile, "kinds", {}) or {} if profile is not None else {}
+    keys = [*kinds.ORDER, *(e["key"] for e in own if isinstance(e, dict) and "key" in e)]
+    selected = getattr(profile, "refine_kind", kinds.PROMPT) if profile is not None else kinds.PROMPT
+    if selected not in keys:
+        selected = kinds.PROMPT
+
+    def programs(key: str) -> list[str]:
+        return sorted(exe for exe, k in table.items() if k == key and isinstance(exe, str))
+
+    styles = []
+    for key in kinds.ORDER:
+        edited = edits.get(key)
+        styles.append({"key": key, "label": kinds.KINDS[key].label, "builtin": True,
+                       "edited": bool(edited),
+                       "instructions": edited or style_text(key, name),
+                       "programs": programs(key), "used": used.get(key)})
+    for entry in own:
+        if not isinstance(entry, dict) or "key" not in entry:
+            continue
+        styles.append({"key": entry["key"], "label": entry.get("name", ""), "builtin": False,
+                       "edited": False, "instructions": entry.get("instructions", ""),
+                       "programs": programs(entry["key"]), "used": used.get(entry["key"])})
+    return {"selected": selected, "default": selected, "name": name, "styles": styles,
+            "max": STYLES_MAX,
+            "kinds": [{"key": st["key"], "label": st["label"]} for st in styles]}
+
+
+def _lenses(profile) -> dict:
+    """What the Lenses page needs (decisions.md 2026-11-24): every lens with the
+    instructions a question carries through it, which is selected, and when each was
+    last used. The Styles page's shape, for Ask."""
+    selected = getattr(profile, "lens", lenses.NONE) if profile is not None else lenses.NONE
+    edits = getattr(profile, "lens_edits", {}) or {} if profile is not None else {}
+    used = getattr(profile, "lens_used", {}) or {} if profile is not None else {}
+    own = getattr(profile, "lenses", []) or [] if profile is not None else []
+    rows = []
+    for key in lenses.ORDER:
+        lens = lenses.BUILT_IN[key]
+        rows.append({"key": key, "label": lens.label, "builtin": True,
+                     "plain": key == lenses.NONE, "edited": bool(edits.get(key)),
+                     "instructions": edits.get(key) or lens.instructions,
+                     "used": used.get(key)})
+    for entry in own:
+        if isinstance(entry, dict) and "key" in entry:
+            rows.append({"key": entry["key"], "label": entry.get("name", ""),
+                         "builtin": False, "plain": False, "edited": False,
+                         "instructions": entry.get("instructions", ""),
+                         "used": used.get(entry["key"])})
+    if selected not in [r["key"] for r in rows]:
+        selected = lenses.NONE
+    return {"selected": selected, "lenses": rows}
+
+
 class ApiError(Exception):
     """A request the page made that cannot be done, said the way the page shows it."""
 
@@ -279,6 +369,7 @@ class Api:
             ("GET", "/api/settings"): self.settings,
             ("POST", "/api/settings/mic"): self.set_mic,
             ("POST", "/api/settings/gesture"): self.set_gesture,
+            ("POST", "/api/settings/read_answers"): self.set_read_answers,
             ("POST", "/api/settings/hotkey"): self.set_hotkey,
             ("POST", "/api/settings/chord"): self.set_chord,
             ("POST", "/api/settings/ask_chord"): self.set_ask_chord,
@@ -286,12 +377,15 @@ class Api:
             ("POST", "/api/settings/workspace"): self.set_workspace,
             ("POST", "/api/settings/workspace/add"): self.add_workspace,
             ("POST", "/api/settings/workspace/forget"): self.forget_workspace,
-            ("POST", "/api/settings/auto_ask"): self.set_auto_ask,
             ("POST", "/api/settings/warm"): self.set_warm,
             ("POST", "/api/settings/check-update"): self.set_check_update,
-            ("POST", "/api/settings/design"): self.set_design,
-            ("POST", "/api/settings/classic"): self.set_classic,
             ("POST", "/api/settings/apps"): self.set_app,
+            ("POST", "/api/settings/writing"): self.set_writing,
+            ("POST", "/api/settings/style"): self.set_style,
+            ("POST", "/api/settings/style/new"): self.new_style,
+            ("POST", "/api/settings/lens"): self.set_lens,
+            ("POST", "/api/settings/lens/new"): self.new_lens,
+            ("POST", "/api/settings/flows"): self.set_flows,
             ("POST", "/api/update"): self.update,
             ("POST", "/api/open"): self.open_folder,
         }
@@ -525,6 +619,8 @@ class Api:
             if hotkeys is not None else "",
             "paste_last": (getattr(hotkeys, "chosen", {}) or {}).get("paste_last", "")
             if hotkeys is not None else "",
+            "rewrite": (getattr(hotkeys, "chosen", {}) or {}).get("rewrite", "")
+            if hotkeys is not None else "",
         }
 
     # -- Models ---------------------------------------------------------------
@@ -537,12 +633,17 @@ class Api:
             pinned = getattr(s, "cli", None)
             profile = getattr(s, "profile", None)
             speaker = getattr(s, "speaker", None)
+            health = getattr(s, "cli_health", None)
             return {
                 "pinned": pinned.name if pinned is not None else None,
                 "model": getattr(s, "cli_model", "") or "",
                 "models": list(getattr(profile, "cli_models", ()) or ()),
                 "effort": getattr(s, "cli_effort", "") or "",
                 "timeout": float(getattr(s, "cli_timeout", 0) or 0),
+                "ask_timeout": float(getattr(s, "ask_timeout", 0) or 0),
+                # The CLIs being passed over, each with what it said (`refine.Health`).
+                # The pill has room for one clipped line about it; this is "the rest".
+                "down": dict(health.down()) if health is not None else {},
                 "voice": getattr(speaker, "voice", None) if speaker is not None else None,
                 "speaks": speaker is not None,
                 "muted": bool(getattr(s, "muted", False)),
@@ -576,6 +677,9 @@ class Api:
                 "models": live["models"],
                 "effort": live["effort"],
                 "efforts": list(EFFORTS),
+                "ask_timeout": live["ask_timeout"],
+                "down": [{"name": name, "why": why}
+                         for name, why in sorted(live["down"].items())],
                 "timeout": live["timeout"],
             },
             "voice": {
@@ -816,12 +920,39 @@ class Api:
             self._call(lambda: s.toggle_speech() if bool(s.muted) != want else None)
         return self.models({})
 
+    def _say(self, speaker, text: str) -> None:
+        """Say `text` because somebody pressed a button to hear it, and raise with the
+        reason when they will not.
+
+        A reply read out after an answer may fail quietly: the answer is on the screen.
+        A press of Preview or Read aloud asked for sound and nothing else, and silence
+        with no word of why is what the owner reported on 2026-11-23 ("Clicking preview
+        nothing happens"): Microsoft's service had refused his copy of its voices for six
+        weeks. The wait is on this request's own thread, never the session's.
+        """
+        if self._call(lambda: speaker.say(text)) is False:
+            raise ApiError("that voice did not start - choose another in the list on "
+                           "the Models page")
+        ask = getattr(speaker, "trouble", None)
+        why = ask(SAY_WAIT_SEC) if ask is not None else ""
+        if not why or not isinstance(why, str):
+            return
+        from .. import edge
+
+        packs = getattr(self.home, "packs", None)
+        if why == edge.REFUSED:
+            why += (" - this PC's copy of the Microsoft voices is too old for it. Update "
+                    "them under Better voices on the Models page."
+                    if packs is not None and packs.outdated("edge") else
+                    ". Choose a Windows or Piper voice for now.")
+        raise ApiError(why)
+
     def replies_preview(self, _body: dict) -> dict:
         s = self.session
         speaker = getattr(s, "speaker", None)
         if speaker is None:
             raise ApiError("spoken replies are not available on this PC")
-        self._call(lambda: speaker.say("This is how Flow will read its answers to you."))
+        self._say(speaker, "This is how Flow will read its answers to you.")
         return {"ok": True}
 
     def voice_engine(self, body: dict) -> dict:
@@ -1341,7 +1472,7 @@ class Api:
         if speaker is None:
             raise ApiError("no voice on this PC - answers are shown and not read")
         text, _question = self._answer(body)
-        self._call(lambda: speaker.say(text))
+        self._say(speaker, text)
         return self.ask_page({"conv": body.get("conv")})
 
     # -- The first run -----------------------------------------------------------
@@ -1620,7 +1751,7 @@ class Api:
                 "flag": (getattr(mic, "pinned", None) is not None
                          and not getattr(mic, "want", None)),
                 "workspace": getattr(s, "workspace", None),
-                "auto_ask": bool(getattr(s, "auto_ask", True)),
+                "read_answers": not bool(getattr(s, "muted", True)),
             }
 
         live = self._call(read)
@@ -1630,7 +1761,6 @@ class Api:
                  "override": overrides.get(action, "") if isinstance(overrides.get(action), str)
                  else ""}
                 for action, label in HOTKEY_LABELS.items()]
-        panels, places = _classic_choices()
         paths = {
             "settings": str(profile.path.parent) if profile is not None else "",
             "trace": str(Path(self.home.trace_path).parent) if self.home.trace_path else "",
@@ -1670,7 +1800,8 @@ class Api:
                 "current": live["workspace"],
                 "recent": list(getattr(profile, "workspaces", []) or []) if profile else [],
             },
-            "ask": {"auto_ask": live["auto_ask"]},
+            "ask": {"read_answers": live["read_answers"],
+                    "speaks": getattr(s, "speaker", None) is not None},
             "startup": {
                 "warm": bool(getattr(profile, "warm", True)) if profile else True,
                 # Read the same way `warm` is - through getattr, defaulting to the safe
@@ -1679,19 +1810,15 @@ class Api:
                 # never be wrong about somebody's privacy.
                 "check": bool(getattr(profile, "check_update", False)) if profile else False,
             },
-            "design": {
-                "current": self.home.design,
-                "options": [{"name": n, "label": label} for n, label in DESIGN_LABELS.items()],
-            },
-            "classic": {
-                "panel": getattr(profile, "panel", "") if profile else "",
-                "panels": panels,
-                "place": getattr(profile, "place", "") if profile else "",
-                "places": places,
-            },
-            "apps": [{"exe": exe, "instruction": text}
-                     for exe, text in sorted((getattr(profile, "apps", {}) or {}).items())]
-            if profile is not None else [],
+            # No "design" and no "classic" here since 2026-11-23: Flow has one pill
+            # (decisions.md, "One surface"), so the page has no Design row to draw, no
+            # Classic panel to size or place, and no route for either.
+            # Whether Refine and Ask raise a panel while you talk (the earlier flow).
+            "flows": {"panel": bool(getattr(profile, "panel_flows", False)) is True
+                      if profile is not None else False},
+            "apps": _app_rows(profile),
+            "writing": _writing(profile),
+            "lenses": _lenses(profile),
             "paths": paths,
             "profile": profile is not None,
             "version": version(),
@@ -1873,10 +2000,14 @@ class Api:
         self._save()
         return self.settings({})
 
-    def set_auto_ask(self, body: dict) -> dict:
+    def set_read_answers(self, body: dict) -> dict:
+        """Whether Ask's answers are read aloud (decisions.md 2026-11-24). Off by
+        default; the same switch as the Voice page's mute, remembered in the profile."""
         want = bool(body.get("on"))
         s = self.session
-        self._call(lambda: s.toggle_auto_ask() if bool(s.auto_ask) != want else None)
+        if getattr(s, "speaker", None) is None:
+            raise ApiError("spoken replies are not available on this PC")
+        self._call(lambda: s.toggle_speech() if (not bool(s.muted)) != want else None)
         return self.settings({})
 
     def set_warm(self, body: dict) -> dict:
@@ -1914,60 +2045,249 @@ class Api:
         self._save()
         return self.settings({})
 
-    def set_design(self, body: dict) -> dict:
-        name = body.get("name")
-        if name not in DESIGN_LABELS:
-            raise ApiError("there is no design by that name")
-        surface = self.home.surface
-        if surface is None:
-            raise ApiError("the pill is not on screen")
-        if name == self.home.design:
-            return self.settings({})
-
-        def apply() -> None:
-            # A Tk callback of its own rather than inline: this runs inside the pill's
-            # frame, and a switch takes that window down — the menu row it replaces ran
-            # as its own callback for the same reason.
-            surface.after(0, lambda: surface.switch_design(name))
-
-        self._call(apply)
-        return self.settings({})
-
-    def set_classic(self, body: dict) -> dict:
+    def set_flows(self, body: dict) -> dict:
+        """Turn the earlier panel flow on or off, now: the pill on screen is told as
+        well as the profile, so the next hold is already the flow that was chosen."""
         profile = self._need_profile()
-        panels, places = _classic_choices()
-        panel, place = body.get("panel"), body.get("place")
-        if panel is not None and panel not in panels:
-            raise ApiError("that panel size is not one of the drawn ones")
-        if place is not None and place not in places:
-            raise ApiError("that is not a place the pill can sit")
+        panel = body.get("panel")
+        if not isinstance(panel, bool):
+            raise ApiError("say true or false")
+        surface = self.home.surface
+        session = self.session
 
         def apply() -> None:
-            if panel is not None:
-                profile.panel = panel
-            if place is not None:
-                profile.place = place
+            profile.panel_flows = panel
+            # Only a surface that has the flow is told. The shipped surface has no
+            # such attribute and keeps its own.
+            if surface is not None and hasattr(type(surface), "panel_flows"):
+                surface.panel_flows = panel
+                session.refine_says_more = panel
+                session.refine_lands = not panel
 
         self._call(apply)
         self._save()
         return self.settings({})
 
     def set_app(self, body: dict) -> dict:
+        """One program's two settings: the kind Refine writes there, and an extra
+        instruction for it. Each is changed only when the request names it, so the
+        page's kind picker cannot wipe an instruction and the reverse.
+
+        An instruction that is absent keeps its old meaning - remove the entry - only
+        when no kind is named either, which is the request every caller made before
+        kinds existed.
+        """
         profile = self._need_profile()
         exe = str(body.get("exe") or "").strip().lower()
         text = body.get("instruction")
+        kind = body.get("kind")
         if not exe.endswith(".exe") or len(exe) > 80 or "\\" in exe or "/" in exe:
             raise ApiError("name the program as its file is called, like code.exe")
         if text is not None and (not isinstance(text, str) or len(text) > 400):
             raise ApiError("keep the instruction to a sentence or two")
+        if kind is not None and kind not in ("", kinds.AUTO) and not kinds.valid(kind):
+            raise ApiError("that is not one of your styles")
 
         def apply() -> None:
-            table = dict(profile.apps)
-            if text and text.strip():
-                table[exe] = text.strip()
-            else:
-                table.pop(exe, None)
-            profile.apps = table
+            if text is not None or kind is None:
+                table = dict(profile.apps)
+                if text and text.strip():
+                    table[exe] = text.strip()
+                else:
+                    table.pop(exe, None)
+                profile.apps = table
+            if kind is not None:
+                chosen = dict(getattr(profile, "kinds", {}) or {})
+                if kinds.valid(kind):
+                    chosen[exe] = kind
+                else:
+                    # "" and "auto" both mean: let Flow work it out from the window.
+                    chosen.pop(exe, None)
+                profile.kinds = chosen
+
+        self._call(apply)
+        self._save()
+        return self.settings({})
+
+    def _styles_changed(self) -> None:
+        """A style was added, renamed or deleted: every caller of `kinds` sees it now."""
+        kinds.register(getattr(self.profile, "styles", None))
+
+    def set_style(self, body: dict) -> dict:
+        """Change one style (decisions.md 2026-11-24): its instructions, a built-in back
+        to the original, one of yours renamed, or one of yours deleted.
+
+        A deleted style that was selected, or chosen for a program, falls back to Prompt
+        there, as `kinds.resolve` would read it anyway - said by the page, not guessed.
+        """
+        profile = self._need_profile()
+        key = body.get("key")
+        text, name = body.get("instructions"), body.get("name")
+        if key not in profile.style_keys():
+            raise ApiError("that is not one of your styles")
+        if text is not None and (not isinstance(text, str) or not text.strip()
+                                 or len(text) > STYLE_MAX):
+            raise ApiError(f"a style needs instructions, at most {STYLE_MAX} characters")
+        builtin = key in kinds.ORDER
+        if name is not None:
+            if builtin:
+                raise ApiError("a built-in style keeps its name")
+            if not isinstance(name, str) or not name.strip() or len(name.strip()) > kinds.NAME_MAX:
+                raise ApiError(f"give it a name of at most {kinds.NAME_MAX} characters")
+        if body.get("delete") and builtin:
+            raise ApiError("a built-in style cannot be deleted - put it back to the original")
+
+        def apply() -> None:
+            if body.get("delete"):
+                profile.styles = [e for e in profile.styles if e["key"] != key]
+                profile.kinds = {exe: k for exe, k in profile.kinds.items() if k != key}
+                profile.style_used.pop(key, None)
+                if profile.refine_kind == key:
+                    profile.refine_kind = kinds.PROMPT
+                return
+            if builtin:
+                edits = dict(profile.style_edits)
+                if body.get("reset"):
+                    edits.pop(key, None)
+                elif text is not None:
+                    edits[key] = text.strip()
+                profile.style_edits = edits
+                return
+            for entry in profile.styles:
+                if entry["key"] == key:
+                    if text is not None:
+                        entry["instructions"] = text.strip()
+                    if name is not None:
+                        entry["name"] = " ".join(name.split())
+
+        self._call(apply)
+        self._styles_changed()
+        self._save()
+        return self.settings({})
+
+    def new_style(self, body: dict) -> dict:
+        """A style of your own: a name you can pick it by, and instructions."""
+        profile = self._need_profile()
+        name, text = body.get("name"), body.get("instructions")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > kinds.NAME_MAX:
+            raise ApiError(f"give it a name of at most {kinds.NAME_MAX} characters")
+        if not isinstance(text, str) or not text.strip() or len(text) > STYLE_MAX:
+            raise ApiError(f"a style needs instructions, at most {STYLE_MAX} characters")
+        if len(profile.styles) >= STYLES_MAX:
+            raise ApiError(f"that is {STYLES_MAX} styles already - delete one first")
+        clean = " ".join(name.split())
+        if any(e["name"].lower() == clean.lower() for e in profile.styles) or any(
+                kinds.KINDS[k].label.lower() == clean.lower() for k in kinds.ORDER):
+            raise ApiError("there is a style with that name already")
+        base = key = kinds.custom_key(clean)
+        n = 2
+        while key in profile.style_keys():
+            key = f"{base}-{n}"
+            n += 1
+
+        def apply() -> None:
+            profile.styles = [*profile.styles,
+                              {"key": key, "name": clean, "instructions": text.strip()}]
+
+        self._call(apply)
+        self._styles_changed()
+        self._save()
+        return self.settings({})
+
+    def set_lens(self, body: dict) -> dict:
+        """Select a lens, change its instructions, put a built-in back, or rename or
+        delete one of yours (decisions.md 2026-11-24). No lens has nothing to change."""
+        profile = self._need_profile()
+        key = body.get("key")
+        text, name = body.get("instructions"), body.get("name")
+        if key not in profile.lens_keys():
+            raise ApiError("that is not one of your lenses")
+        builtin = key in lenses.BUILT_IN
+        if key == lenses.NONE and (text is not None or body.get("reset") or name is not None
+                                   or body.get("delete")):
+            raise ApiError("No lens is the plain answer - there is nothing to change")
+        if text is not None and (not isinstance(text, str) or not text.strip()
+                                 or len(text) > lenses.TEXT_MAX):
+            raise ApiError(f"a lens needs instructions, at most {lenses.TEXT_MAX} characters")
+        if name is not None:
+            if builtin:
+                raise ApiError("a built-in lens keeps its name")
+            if not isinstance(name, str) or not name.strip() or len(name.strip()) > lenses.NAME_MAX:
+                raise ApiError(f"give it a name of at most {lenses.NAME_MAX} characters")
+        if body.get("delete") and builtin:
+            raise ApiError("a built-in lens cannot be deleted - put it back to the original")
+
+        def apply() -> None:
+            if body.get("select"):
+                profile.lens = key
+            if body.get("delete"):
+                profile.lenses = [e for e in profile.lenses if e["key"] != key]
+                profile.lens_used.pop(key, None)
+                if profile.lens == key:
+                    profile.lens = lenses.NONE
+                return
+            if builtin:
+                edits = dict(profile.lens_edits)
+                if body.get("reset"):
+                    edits.pop(key, None)
+                elif text is not None:
+                    edits[key] = text.strip()
+                profile.lens_edits = edits
+                return
+            for entry in profile.lenses:
+                if entry["key"] == key:
+                    if text is not None:
+                        entry["instructions"] = text.strip()
+                    if name is not None:
+                        entry["name"] = " ".join(name.split())
+
+        self._call(apply)
+        self._save()
+        return self.settings({})
+
+    def new_lens(self, body: dict) -> dict:
+        """A lens of your own: a name and how to look at a question."""
+        profile = self._need_profile()
+        name, text = body.get("name"), body.get("instructions")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > lenses.NAME_MAX:
+            raise ApiError(f"give it a name of at most {lenses.NAME_MAX} characters")
+        if not isinstance(text, str) or not text.strip() or len(text) > lenses.TEXT_MAX:
+            raise ApiError(f"a lens needs instructions, at most {lenses.TEXT_MAX} characters")
+        if len(profile.lenses) >= STYLES_MAX:
+            raise ApiError(f"that is {STYLES_MAX} lenses already - delete one first")
+        clean = " ".join(name.split())
+        taken = [profile.lens_label(k).lower() for k in profile.lens_keys()]
+        if clean.lower() in taken:
+            raise ApiError("there is a lens with that name already")
+        base = key = lenses.custom_key(clean)
+        n = 2
+        while key in profile.lens_keys():
+            key = f"{base}-{n}"
+            n += 1
+
+        def apply() -> None:
+            profile.lenses = [*profile.lenses,
+                              {"key": key, "name": clean, "instructions": text.strip()}]
+
+        self._call(apply)
+        self._save()
+        return self.settings({})
+
+    def set_writing(self, body: dict) -> dict:
+        """What Refine writes when no program's own entry decides it, and the name an
+        email is signed with."""
+        profile = self._need_profile()
+        default, name = body.get("default"), body.get("name")
+        if default is not None and default not in profile.style_keys():
+            raise ApiError("that is not one of your styles")
+        if name is not None and (not isinstance(name, str) or len(name.strip()) > NAME_MAX):
+            raise ApiError(f"keep the name under {NAME_MAX} characters")
+
+        def apply() -> None:
+            if default is not None:
+                profile.refine_kind = default
+            if name is not None:
+                profile.name = " ".join(name.split())
 
         self._call(apply)
         self._save()
@@ -2014,17 +2334,6 @@ def _hotkey_module(name: str):
         return getattr(hotkey, name)
     except Exception:
         return None
-
-
-def _classic_choices() -> tuple[list[str], list[str]]:
-    """The panel widths and places the Classic pill draws. Read off `flow.ui` when it
-    loads, and its spelled defaults otherwise, so this page cannot offer one it lacks."""
-    try:
-        from ..ui import PANEL_WIDTHS, PLACES
-
-        return list(PANEL_WIDTHS), list(PLACES)
-    except Exception:
-        return ["regular", "large", "larger"], ["bottom", "corner"]
 
 
 def reveal(folder: Path) -> None:

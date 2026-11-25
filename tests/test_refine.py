@@ -1595,6 +1595,143 @@ class TestThePromptLeavesTheProcessListing(unittest.TestCase):
     def test_the_one_that_was_not_measured_still_carries_it_on_the_argv(self):
         self.assertFalse(refine_mod.named("kiro-cli").stdin_ok)
 
+
+class TestTheCourierLeavesNoRecordBehind(unittest.TestCase):
+    """Flow's History setting never reached the CLI that answers.
+
+    Each agent CLI keeps its own history of what it is asked. With Flow's History off,
+    every rewrite and every question was still on disk in a folder that is not Flow's:
+    claude wrote a session file per call under `~/.claude/projects/` (about 310 KB
+    each), and codex a rollout file under `~/.codex/sessions/` plus rows in two of its
+    databases, where the prompt is the session's title in codex's own picker - even for
+    a call the server refused. Found on 2026-11-23, by having to clean up after a test
+    run of this app that had carried something it should not have.
+
+    Both vendors ship a switch, and both were measured through `_invoke` before they
+    were written down: a multi-line prompt carrying a random marker, then every file
+    either CLI had changed searched for it. claude 2.1.330 with
+    `--no-session-persistence`: answered in 6.0 s at exit 0, no file held the marker,
+    session files 795 -> 795; without it, one new session file that did. codex-cli
+    0.171.0 with `--ephemeral`: answered in 8.7 s, no rollout and no row; without it,
+    one new rollout, one new `threads` row, and the marker in three files. The same
+    pair on 0.163.0, for a call the server refused.
+
+    A unit test cannot run either CLI. What these hold is that the measured switches are
+    still in the argv a process is started with, and that nothing was invented for a
+    CLI that has none.
+    """
+
+    def started_with(self, name: str, **tuning) -> list[str]:
+        proc = fake_proc("ok")
+        with mock.patch("shutil.which", resolves_to(fake_exe(name))), \
+                mock.patch("subprocess.Popen", return_value=proc) as started:
+            refine_mod._invoke(refine_mod.tuned(refine_mod.named(name), **tuning),
+                               "what was dictated", timeout=30)
+        return list(started.call_args.args[0])
+
+    def test_claude_is_told_not_to_save_the_session(self):
+        self.assertIn("--no-session-persistence", self.started_with("claude"))
+
+    def test_claudes_switch_is_given_in_the_only_mode_it_works_in(self):
+        # "only works with --print", by claude's own help. A claude started any other
+        # way would take the switch and save the session regardless.
+        self.assertIn("-p", self.started_with("claude"))
+
+    def test_codex_is_told_to_keep_no_session_on_disk(self):
+        self.assertIn("--ephemeral", self.started_with("codex"))
+
+    def test_codexs_switch_belongs_to_exec_and_sits_where_exec_reads_it(self):
+        # After the subcommand, because a flag before `exec` belongs to another parser;
+        # before the `-`, because anything after that is read as the prompt.
+        argv = self.started_with("codex")
+        self.assertLess(argv.index("exec"), argv.index("--ephemeral"))
+        self.assertLess(argv.index("--ephemeral"), argv.index("-"))
+        self.assertEqual(argv[-1], "-")
+
+    def test_choosing_a_model_and_an_effort_does_not_cost_the_switch(self):
+        # `tuned` builds a new argv around `tune_at`. The switch has to survive that,
+        # because Flow Home's Models page is how most calls are made.
+        for name, switch in (("codex", "--ephemeral"),
+                             ("claude", "--no-session-persistence")):
+            with self.subTest(cli=name):
+                argv = self.started_with(name, model="some-model", effort="high")
+                self.assertIn(switch, argv)
+                self.assertIn("some-model", argv)
+
+    def test_nothing_was_invented_for_a_cli_that_has_no_such_switch(self):
+        # kiro-cli 3.1.0's `chat --help` offers `--resume` and `--list-sessions` and no
+        # way not to save. Borrowing another vendor's flag would exit 2 on every call.
+        kiro = refine_mod.named("kiro-cli").argv
+        for borrowed in ("--ephemeral", "--no-session-persistence"):
+            self.assertNotIn(borrowed, kiro)
+        for cli in refine_mod.CANDIDATES:
+            if not cli.verified:
+                with self.subTest(cli=cli.name):
+                    self.assertEqual(cli.argv, (cli.name,))
+
+
+class TestCodexRunsNobodysHooksOnTheCall(unittest.TestCase):
+    """What somebody dictates is not handed to the hooks their codex is set up to run.
+
+    codex runs its user's hooks on every `exec`, and a call from Flow is an `exec`. On
+    the machine this was built on that meant a memory plugin's three programs - session
+    start, prompt, stop - and the one on the prompt is handed the prompt: the dictated
+    sentence, on every rewrite and every question. It also cost about four seconds of a
+    wait the user is watching. The owner was shown both numbers and chose to switch
+    them off for Flow's calls (2026-11-23).
+
+    `--disable hooks` is codex's own switch for one invocation, read from `exec --help`
+    and `codex features list` on 0.171.0, and then measured from the repository: with
+    it 5.5 s and 5.6 s and no `hook:` line on stderr; without it 9.9 s and 9.8 s and
+    eight. It changes nothing in the user's codex settings.
+
+    A unit test cannot run codex. What these hold is that the measured pair is still in
+    the argv a process is started with, intact and where `exec` reads it.
+    """
+
+    started_with = TestTheCourierLeavesNoRecordBehind.started_with
+
+    def assertSwitchedOff(self, argv):
+        self.assertIn("--disable", argv)
+        self.assertEqual(argv[argv.index("--disable") + 1], "hooks")
+
+    def test_codex_is_told_to_run_no_hooks(self):
+        self.assertSwitchedOff(self.started_with("codex"))
+
+    def test_the_feature_is_named_once_and_nothing_else_is_switched_off(self):
+        # `--disable` is repeatable and takes any feature name. One, and this one.
+        argv = self.started_with("codex")
+        self.assertEqual(argv.count("--disable"), 1)
+        self.assertEqual(argv.count("hooks"), 1)
+
+    def test_the_pair_sits_where_exec_reads_it(self):
+        # After the subcommand and before the `-` that says the prompt is on stdin.
+        argv = self.started_with("codex")
+        self.assertLess(argv.index("exec"), argv.index("--disable"))
+        self.assertLess(argv.index("hooks"), argv.index("-"))
+        self.assertEqual(argv[-1], "-")
+
+    def test_choosing_a_model_and_an_effort_does_not_come_between_the_two(self):
+        # `tuned` inserts at `tune_at`. A model name landing between `--disable` and
+        # `hooks` would switch off a feature called after the model and exit 1.
+        argv = self.started_with("codex", model="some-model", effort="high")
+        self.assertSwitchedOff(argv)
+        self.assertIn("some-model", argv)
+
+    def test_it_did_not_cost_the_switch_that_keeps_no_record(self):
+        self.assertIn("--ephemeral", self.started_with("codex"))
+
+    def test_claude_is_covered_by_its_own_switch_and_not_given_codexs(self):
+        # `--safe-mode` disables claude's hooks, by its own help. `--disable` is not a
+        # claude flag.
+        argv = self.started_with("claude")
+        self.assertIn("--safe-mode", argv)
+        self.assertNotIn("--disable", argv)
+
+    def test_nothing_was_borrowed_for_kiro(self):
+        self.assertNotIn("--disable", refine_mod.named("kiro-cli").argv)
+
+
 class TestTuning(unittest.TestCase):
     """`tuned`, which is how a model and an effort level reach the CLI.
 
@@ -1773,3 +1910,275 @@ class TestAgentProcessBoundary(unittest.TestCase):
     def test_posix_calls_get_a_process_group_of_their_own(self):
         kw = self.launch(refine_mod.named("codex"))
         self.assertEqual(kw["start_new_session"], os.name != "nt")
+
+class TestTheReasonIsTheErrorNotTheBanner(unittest.TestCase):
+    """`_why`, re-measured 2026-11-22 against codex-cli 0.163.0. The first line of its
+    stderr is always a banner, so the note read "codex exited 1: OpenAI Codex v0.163.0"
+    while the line that said what to do sat eleven lines further down."""
+
+    #: codex's stderr on a model its account cannot use, in the order it was written.
+    CODEX = "\n".join([
+        "OpenAI Codex v0.163.0",
+        "--------",
+        "workdir: C:\\dev\\products\\flow",
+        "model: gpt-6.2-astra",
+        "--------",
+        "user",
+        "Reply with exactly: PONG",
+        "warning: Model metadata for `gpt-6.2-astra` not found.",
+        "hook: SessionStart",
+        '2026-11-23T03:37:44.972007Z ERROR rmcp::transport::worker: worker quit with '
+        'fatal: Transport channel closed',
+        "hook: UserPromptSubmit Completed",
+        'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error",'
+        '"message":"The \'gpt-6.2-astra\' model is not supported when using Codex with '
+        'a ChatGPT account.","code":"model_not_found"}}',
+    ])
+
+    def test_codexs_own_sentence_is_what_the_note_says(self):
+        self.assertEqual(
+            refine_mod._why(self.CODEX, ""),
+            "The 'gpt-6.2-astra' model is not supported when using Codex with a "
+            "ChatGPT account.")
+
+    def test_the_banner_is_not_the_reason(self):
+        self.assertNotIn("OpenAI Codex", refine_mod._why(self.CODEX, ""))
+
+    def test_the_last_error_wins_over_one_the_cli_survived(self):
+        # The transport error above is logged and carried on from; the model error is
+        # the one that ended the call.
+        self.assertNotIn("rmcp", refine_mod._why(self.CODEX, ""))
+
+    def test_a_log_lines_timestamp_and_level_are_dropped(self):
+        line = ("2026-11-23T03:36:14.367726Z ERROR codex_skills::host: failed to "
+                "install system skills")
+        self.assertEqual(refine_mod._why(line, ""),
+                         "codex_skills::host: failed to install system skills")
+
+    def test_a_cli_that_prints_one_line_still_gets_that_line(self):
+        # claude's refusal, on stdout with stderr empty - the 2026-09-03 measurement,
+        # which this change must leave exactly as it was.
+        self.assertEqual(refine_mod._why("", "Not logged in - Please run /login"),
+                         "Not logged in - Please run /login")
+        self.assertEqual(refine_mod._why("boom: it broke\nand a second line", ""),
+                         "boom: it broke")
+
+    def test_a_sentence_that_mentions_an_error_is_not_an_error_line(self):
+        said = "the error was in the first step\nmore detail follows"
+        self.assertEqual(refine_mod._why(said, ""), "the error was in the first step")
+
+    def test_stderr_still_comes_before_stdout(self):
+        self.assertEqual(refine_mod._why("ERROR: from stderr", "ERROR: from stdout"),
+                         "from stderr")
+
+    def test_it_is_still_one_bounded_line(self):
+        long = "ERROR: " + "x" * 500
+        self.assertLessEqual(len(refine_mod._why(long, "")), refine_mod._WHY_CHARS)
+        self.assertNotIn("\n", refine_mod._why(self.CODEX, ""))
+
+
+class TestACliThatDidNotAnswerIsTriedLast(unittest.TestCase):
+    """`Health`. Measured 2026-11-22: a codex that exits 1 on every call cost ~8 s of
+    every Refine before claude was asked - 16.3 s for a rewrite claude returns in 8.2."""
+
+    THREE = (refine_mod.Cli("codex", ("codex",)), refine_mod.Cli("claude", ("claude",)),
+             refine_mod.Cli("kiro-cli", ("kiro-cli",)))
+
+    def walk(self, results, health):
+        tried = []
+
+        def fake(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            tried.append(cli.name)
+            return results[cli.name]
+
+        with mock.patch.object(refine_mod, "available", lambda: list(self.THREE)), \
+                mock.patch.object(refine_mod, "_invoke", fake):
+            out, _reason, who = refine_mod._invoke_any(None, "p", timeout=1.0,
+                                                       health=health)
+        return tried, out, who
+
+    BROKEN_CODEX = {"codex": (None, "codex exited 1: no such model"),
+                    "claude": ("answer", ""), "kiro-cli": ("never asked", "")}
+
+    def test_the_first_call_pays_for_the_broken_cli_and_the_second_does_not(self):
+        health = refine_mod.Health()
+        first, _out, _who = self.walk(self.BROKEN_CODEX, health)
+        second, out, who = self.walk(self.BROKEN_CODEX, health)
+        self.assertEqual(first, ["codex", "claude"])
+        self.assertEqual(second, ["claude"], "codex was asked first again")
+        self.assertEqual((out, who.name), ("answer", "claude"))
+
+    def test_without_a_record_the_walk_has_no_memory(self):
+        # Every caller that predates `Health`, and every test with a fake that fails.
+        first, _out, _who = self.walk(self.BROKEN_CODEX, None)
+        second, _out, _who = self.walk(self.BROKEN_CODEX, None)
+        self.assertEqual(first, second)
+
+    def test_it_is_tried_last_not_never(self):
+        # With every other CLI failing too, the walk is the walk it always was.
+        health = refine_mod.Health()
+        health.failed("codex", "codex exited 1")
+        tried, out, who = self.walk(
+            {"codex": ("codex is back", ""), "claude": (None, "claude exited 1"),
+             "kiro-cli": (None, "kiro-cli exited 1")}, health)
+        self.assertEqual(tried, ["claude", "kiro-cli", "codex"])
+        self.assertEqual((out, who.name), ("codex is back", "codex"))
+
+    def test_an_answer_restores_it_at_once(self):
+        health = refine_mod.Health()
+        health.failed("codex", "codex exited 1")
+        self.walk({"codex": ("back", ""), "claude": (None, "claude exited 1"),
+                   "kiro-cli": (None, "kiro-cli exited 1")}, health)
+        self.assertNotIn("codex", health.down())
+
+    def test_the_reason_is_kept_in_the_clis_own_words(self):
+        health = refine_mod.Health()
+        self.walk(self.BROKEN_CODEX, health)
+        self.assertEqual(health.down(), {"codex": "codex exited 1: no such model"})
+
+    def test_a_timeout_counts_too(self):
+        # The one failure that had ever happened in the trace, 11 of 11.
+        health = refine_mod.Health()
+        self.walk({"codex": (None, "codex timed out after 20s"),
+                   "claude": ("answer", ""), "kiro-cli": ("never", "")}, health)
+        self.assertIn("codex", health.down())
+
+    def test_a_call_the_user_cancelled_says_nothing_about_the_cli(self):
+        import threading
+
+        cancel = threading.Event()
+        health = refine_mod.Health()
+
+        def fake(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            cancel.set()
+            return None, f"{cli.name} was cancelled"
+
+        with mock.patch.object(refine_mod, "available", lambda: list(self.THREE)), \
+                mock.patch.object(refine_mod, "_invoke", fake):
+            refine_mod._invoke_any(None, "p", timeout=1.0, cancel=cancel, health=health)
+        self.assertEqual(health.down(), {})
+
+    def test_it_comes_back_on_its_own_after_a_while(self):
+        now = [1000.0]
+        health = refine_mod.Health(clock=lambda: now[0])
+        health.failed("codex", "codex exited 1")
+        self.assertEqual([c.name for c in health.order(list(self.THREE))],
+                         ["claude", "kiro-cli", "codex"])
+        now[0] += refine_mod.DEMOTE_SEC + 1
+        self.assertEqual(health.down(), {})
+        self.assertEqual([c.name for c in health.order(list(self.THREE))],
+                         ["codex", "claude", "kiro-cli"])
+
+    def test_a_pinned_cli_is_never_second_guessed(self):
+        # `--cli codex` is a decision. It is asked, it fails, and it is not demoted
+        # in favour of something nobody chose.
+        health = refine_mod.Health()
+        calls = []
+
+        def fake(cli, prompt, *, timeout, cwd=None, cancel=None, cap=None):
+            calls.append(cli.name)
+            return None, "codex exited 1"
+
+        with mock.patch.object(refine_mod, "_invoke", fake):
+            refine_mod._invoke_any(self.THREE[0], "p", timeout=1.0, health=health)
+            refine_mod._invoke_any(self.THREE[0], "p", timeout=1.0, health=health)
+        self.assertEqual(calls, ["codex", "codex"])
+        self.assertEqual(health.down(), {})
+
+
+class TestCodexIsAskedForTheEffortToo(unittest.TestCase):
+    """Flow Home's Effort row moved claude and kiro-cli and did nothing to codex, which
+    ran every rewrite at its own config's level. Measured on codex-cli 0.163.0: the
+    banner answered `reasoning effort: <level>` for each of `EFFORTS`."""
+
+    def test_the_level_goes_as_a_config_override_after_the_subcommand(self):
+        argv = refine_mod.tuned(refine_mod.named("codex"), effort="low").argv
+        self.assertEqual(argv[:4], ("codex", "exec", "-c", "model_reasoning_effort=low"))
+        # And the prompt still arrives on stdin: `-` stays last.
+        self.assertEqual(argv[-1], "-")
+
+    def test_every_level_flow_offers_is_one_codex_was_seen_to_accept(self):
+        for level in refine_mod.EFFORTS:
+            argv = refine_mod.tuned(refine_mod.named("codex"), effort=level).argv
+            self.assertIn(f"model_reasoning_effort={level}", argv)
+
+    def test_default_leaves_codex_to_its_own_config(self):
+        self.assertEqual(refine_mod.tuned(refine_mod.named("codex"), effort="default"),
+                         refine_mod.named("codex"))
+
+    def test_a_cli_with_a_flag_still_gets_the_flag(self):
+        self.assertEqual(
+            refine_mod.tuned(refine_mod.named("claude"), effort="low").argv[1:3],
+            ("--effort", "low"))
+
+
+class TestAskWaitsLongerThanARewrite(unittest.TestCase):
+    def test_the_floor_is_above_every_grounded_answer_measured(self):
+        # 14.9, 19.2, 13.8 s (2026-08-06) and 11.1-26.5 s (2026-11-22), against a wall
+        # that was 20. Three times the slowest, and well under the widest wait allowed.
+        self.assertGreaterEqual(refine_mod.ASK_TIMEOUT_SEC, 3 * 19.2)
+        self.assertGreater(refine_mod.ASK_TIMEOUT_SEC, refine_mod.TIMEOUT_SEC)
+        self.assertLess(refine_mod.ASK_TIMEOUT_SEC, refine_mod.MAX_TIMEOUT_SEC)
+
+class TestAFailureReasonIsNeverTheUsersWords(unittest.TestCase):
+    """The independent review, 2026-11-22. codex echoes the prompt to stderr, so the
+    stream `_why` reads has the user's dictation in it - and a loose "error line" shape
+    returned a line of it as the reason a CLI failed. That reason is shown on the pill,
+    held for ten minutes by `Health`, and printed on Flow Home."""
+
+    PROMPT = ("Write the dictated text below as an email.\n\n"
+              "DICTATED TEXT:\n"
+              "the error is that priya's salary letter went to the wrong list\n"
+              "error: I sent it twice")
+
+    def echoed(self, tail: str = "") -> str:
+        """codex's stderr: its banner, the prompt back, then whatever came after."""
+        return "OpenAI Codex v0.163.0\n--------\nuser\n" + self.PROMPT + "\n" + tail
+
+    def test_a_dictated_line_that_mentions_an_error_is_not_the_reason(self):
+        why = refine_mod._why(self.echoed(), "", self.PROMPT)
+        self.assertNotIn("salary", why)
+        self.assertNotIn("sent it twice", why)
+        self.assertEqual(why, "OpenAI Codex v0.163.0")
+
+    def test_not_even_one_that_is_shaped_exactly_like_an_error(self):
+        # "error: I sent it twice" passes the strictest shape there is. It is refused
+        # because it is a line of the prompt, which is the guard that does not depend
+        # on what people happen to say.
+        why = refine_mod._why(self.echoed(), "", self.PROMPT)
+        self.assertNotEqual(why, "I sent it twice")
+
+    def test_the_real_error_after_the_echo_still_wins(self):
+        why = refine_mod._why(self.echoed("ERROR: quota exceeded"), "", self.PROMPT)
+        self.assertEqual(why, "quota exceeded")
+
+    def test_a_sentence_about_an_error_is_not_an_error_line_wherever_it_sits(self):
+        # The earlier version of this test put the sentence first, where the old
+        # first-line rule would have picked it anyway.
+        for stream in ("starting up\nthe error was in the first step",
+                       "starting up\nan error occurred somewhere\nmore detail",
+                       "starting up\n- error handling is described below"):
+            self.assertEqual(refine_mod._why(stream, ""), "starting up", stream)
+
+    def test_error_on_a_line_of_its_own_gives_the_sentence_under_it(self):
+        self.assertEqual(refine_mod._why("Error:\n  model not found", ""),
+                         "model not found")
+
+    def test_a_json_body_printed_over_several_lines_is_read_whole(self):
+        stream = 'ERROR: {\n  "type": "error",\n  "message": "No such model."\n}'
+        self.assertEqual(refine_mod._why(stream, ""), "No such model.")
+
+    def test_a_launcher_saying_that_it_exited_is_not_the_reason(self):
+        stream = 'Not logged in - Please run /login\nerror: script "claude" exited with code 1'
+        self.assertEqual(refine_mod._why(stream, ""), "Not logged in - Please run /login")
+
+    def test_a_json_message_is_unescaped_properly(self):
+        stream = 'ERROR: {"message":"It\\u2019s over the \\"limit\\"\\nfor today"}'
+        self.assertEqual(refine_mod._why(stream, ""),
+                         "It’s over the \"limit\" for today")
+
+    def test_the_run_hands_the_prompt_over(self):
+        # The guard is only as good as the call that feeds it.
+        import inspect
+
+        self.assertIn("_why(err, out, prompt)", inspect.getsource(refine_mod._run))

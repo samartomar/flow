@@ -225,11 +225,11 @@ class FakeSession:
         self.level_db = -48.0
         self.activity = None
         self.talking = False
-        self.muted = False
+        self.muted = True
         self.workspace = None
         self.provider = "claude"
         self.pastes = True
-        self.auto_ask = True
+        self.auto_ask = False
         self.cli = None
         self.cli_model = ""
         self.cli_effort = "low"
@@ -489,10 +489,6 @@ class FakeSession:
         self.muted = not self.muted
         return not self.muted
 
-    def toggle_auto_ask(self) -> bool:
-        self.auto_ask = not self.auto_ask
-        return self.auto_ask
-
     def set_workspace(self, path) -> bool:
         self.workspace = path or None
         if self.profile is not None and path:
@@ -581,10 +577,20 @@ class DemoPacks:
             def __init__(self) -> None:
                 super().__init__(None, run=self._pretend_install)
                 self._have: set[str] = set()
+                #: A pretended version per package, for `--old-voices`. Absent means
+                #: "current": the demo must not read the versions of the real
+                #: environment it runs from, any more than it installs into it.
+                self._versions: dict[str, str] = {}
                 self._dir = folder / "voices"
 
             def _importable(self, module: str) -> bool:
                 return module in self._have
+
+            def _version(self, package: str) -> str:
+                return self._versions.get(package, "")
+
+            def _loaded(self, module: str) -> bool:
+                return False
 
             def _installer(self, spec: str):
                 return ["uv", "pip", "install", spec], ""
@@ -597,6 +603,8 @@ class DemoPacks:
 
                 time.sleep(2.5)
                 self._have.add("piper" if command[-1].startswith("piper") else "edge_tts")
+                # What was installed is the pinned version, so an old copy is old no more.
+                self._versions.pop(command[-1].split("==")[0], None)
                 return subprocess.CompletedProcess(command, 0, "", "")
 
             def _fetch_to(self, path, dest, md5, job) -> None:
@@ -630,7 +638,7 @@ class FakeHotkeys:
     def __init__(self) -> None:
         self.chosen = {"toggle": "ctrl+alt+space", "send": "ctrl+alt+enter",
                        "cancel": "ctrl+alt+esc", "mode": "ctrl+alt+M", "quit": "ctrl+alt+Q",
-                       "paste_last": "alt+shift+Z"}
+                       "paste_last": "alt+shift+Z", "rewrite": "alt+shift+X"}
         self.failed: list[str] = []
         self.chord = FakeChord("ctrl+win")
         self.ask_chord = FakeChord("ctrl+alt+win")
@@ -660,10 +668,27 @@ def build(profile_dir: Path | None = None, kept: bool = False):
     threading.Thread(target=pump, daemon=True, name="demo-pump").start()
     home = Home(session, profile=profile, hotkeys=FakeHotkeys(), lite=False,
                 lexicon_path=folder / "lexicon.txt", trace_path=folder / "diag.jsonl")
-    home.design = "compact"
     home.mic_factory = ReadingMic
     home.packs = DemoPacks(folder)
     return home, session
+
+
+def old_voices(home, session) -> None:
+    """Put the demo where a PC that added the Microsoft voices before October 2026 is:
+    a Natural voice chosen, and a copy of the engine the service no longer answers."""
+    from .. import edge
+    from ..speak import Voice
+
+    ava = Voice("Natural en-US-AvaNeural", "Female", "en-US", engine="edge",
+                path="en-US-AvaNeural")
+    listed = session.voices()
+    session.voices = lambda: listed + [ava]
+    session.speaker.voice = ava.name
+    home.packs._have.add("edge_tts")
+    home.packs._versions["edge-tts"] = "7.2.8"
+    # Refused for as long as the old copy is the one here, as the service does.
+    session.speaker.trouble = lambda wait=0.0: (
+        edge.REFUSED if home.packs.outdated("edge") else "")
 
 
 def main(argv=None) -> int:
@@ -680,6 +705,10 @@ def main(argv=None) -> int:
                     help="pretend a first run on a PC with a GPU: the Parakeet GPU build is "
                          "not installed and its background download is part way through, so "
                          "the first run's model step shows that instead of Whisper's pair")
+    ap.add_argument("--old-voices", action="store_true",
+                    help="pretend the Microsoft voices were added before October 2026 and "
+                         "one is chosen: the service refuses that copy, so Preview says why "
+                         "and Better voices offers the update")
     args = ap.parse_args(argv)
     if args.gpu_first_run:
         args.first_run = True
@@ -691,6 +720,8 @@ def main(argv=None) -> int:
         parakeet.model_present = lambda key, model_dir=None: not (
             args.gpu_first_run and key == "gpu")
     home, _session = build(kept=args.history)
+    if args.old_voices:
+        old_voices(home, _session)
     if args.gpu_first_run:
         import threading as _threading
 

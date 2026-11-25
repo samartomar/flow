@@ -383,6 +383,17 @@ class TestBTheHoldIsTheUtterance(unittest.TestCase):
             with self.subTest(word=word):
                 self.assertIn('name == "%s"' % word, ui)
 
+    def test_and_they_are_the_words_the_compact_pill_dispatches_on(self):
+        # The same tripwire on the pill Flow ships (decisions.md 2026-11-23, "One
+        # surface"): `CompactPill._drain_hotkeys` matches the four words by literal too.
+        chord, _presses = _chord()
+        compact = (Path(__file__).resolve().parent.parent
+                   / "flow" / "ui_compact.py").read_text(encoding="utf-8")
+        for word in (chord.warm_action, chord.action,
+                     chord.end_action, chord.break_action):
+            with self.subTest(word=word):
+                self.assertIn('name == "%s"' % word, compact)
+
 
 class TestBBBothGesturesShipAndNeitherReplacesTheOther(unittest.TestCase):
     """`Chord.gesture`, and the switch that should have been there from the start.
@@ -901,14 +912,24 @@ class TestDItLearnsNothingAboutTheKeysItRejects(unittest.TestCase):
         # suite proves a keystroke cannot get in there. A sink that could be told *what*
         # was pressed would be a different field, and this is where that would be argued
         # about instead.
+        # Argued again on 2026-11-22 for `own_key` (decisions.md, "The pill is an
+        # indicator"): one boolean the *surface* sets, "a shortcut of Flow's own is
+        # held down", cleared here by the first key to come up - any key, so nothing
+        # is compared that was not compared before. It lets the rewrite shortcut's
+        # key repeat without reading as typing, and it cannot say which key that is.
+        # Argued again on 2026-11-24 for `_traced`: the last line the trace wrote, as
+        # the same four derived fields that line carried (armed, other, talking, the
+        # tap clock), so a key repeat that changed none of them is not written again.
+        # It is a copy of the trace's own verdict and cannot hold a key.
         chord, _presses = _chord()
         _Keyboard(chord).down(VK_LCONTROL, VK_LWIN, VK_A).up(VK_A, VK_LWIN, VK_LCONTROL)
         self.assertEqual(
             set(vars(chord)),
             {"presses", "mods", "action", "warm_action", "end_action", "break_action",
              "toggle_action", "gesture", "clock", "installed", "_down", "_other",
-             "_extra", "_armed", "_talking", "_hold", "riders", "touched", "_hook",
-             "_tid", "_ready", "_proc", "_thread", "trace"},
+             "_extra", "_armed", "_talking", "_hold", "riders", "touched", "own_key",
+             "_hook",
+             "_tid", "_ready", "_proc", "_thread", "trace", "_traced"},
         )
 
 
@@ -1059,6 +1080,23 @@ class TestTheGestureLeavesATrace(unittest.TestCase):
             # A virtual key code is a small int; the trace's numbers are a clock and a
             # count, both of which are floats or obviously a length.
             json.dumps(fields)  # a non-serialisable value would raise here
+
+    def test_a_held_chord_repeating_writes_one_line_not_thirty_a_second(self):
+        # Windows repeats held keys about 30 times a second; each repeat was a line from
+        # each chord, and a few holds pushed the start of the run out of the 1 MB trace
+        # (owner's report, 2026-11-24). The press and the release still get theirs.
+        self.c._feed(WM_KEYDOWN, 0x11)
+        self.c._feed(WM_KEYDOWN, 0x5B)
+        before = len(self.lines)
+        for _ in range(60):
+            self.c._feed(WM_KEYDOWN, 0x5B)
+        repeats = self.lines[before:]
+        self.assertLessEqual(len(repeats), 1, f"repeats traced: {repeats}")
+        self.c._feed(WM_KEYUP, 0x5B)
+        self.c._feed(WM_KEYUP, 0x11)
+        self.assertTrue(any(f["effect"] != "idle" or not f["armed"]
+                            for _, f in self.lines[before + len(repeats):]),
+                        f"the release went unrecorded: {self.lines}")
 
     def test_no_trace_is_not_an_error(self):
         """The default matters more than the feature: `None` must stay silent."""

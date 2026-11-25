@@ -65,12 +65,14 @@ def run_main(mod, platform: str, argv=()) -> tuple[int, str]:
 
 
 #: Enough of a launch to be real and none of it heavy. `Session` and the transcriber are
-#: the two that would open a microphone and reach for a 141 MB model; `Pill.mainloop` is
-#: the one that would never return. Everything between them — the CLI lookup, the
-#: lexicon, the workspace, every startup line — runs for real, which is the point.
+#: the two that would open a microphone and reach for a 141 MB model;
+#: `CompactPill.mainloop` is the one that would never return. Everything between them —
+#: the CLI lookup, the lexicon, the workspace, every startup line — runs for real, which
+#: is the point. No `--design`: a launch builds the one pill Flow has (decisions.md
+#: 2026-11-23, "One surface"), so that is the class patched.
 def launch(platform: str, argv=(), **patches):
     import flow.asr
-    import flow.ui
+    import flow.ui_compact
 
     import flow.__main__ as mod
 
@@ -78,10 +80,9 @@ def launch(platform: str, argv=(), **patches):
     with mock.patch.object(sys, "platform", platform), \
             mock.patch.object(mod, "Session") as session, \
             mock.patch.object(flow.asr, "WhisperTranscriber"), \
-            mock.patch.object(flow.ui, "Pill") as pill:
+            mock.patch.object(flow.ui_compact, "CompactPill") as pill:
         with contextlib.redirect_stdout(out):
-            code = mod.main(["--design", "current",
-                             "--no-profile", "--no-speak", "--no-lexicon", *argv])
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", *argv])
     return code, out.getvalue(), pill, session
 
 
@@ -204,7 +205,7 @@ class TestTheOptInUpdateCheck(unittest.TestCase):
     def launch_with(self, check):
         """A launch whose profile says `check`, and the output plus the mocked call."""
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
         import flow.__main__ as mod
         import flow.profile as profile_mod
 
@@ -221,14 +222,14 @@ class TestTheOptInUpdateCheck(unittest.TestCase):
         with mock.patch.object(sys, "platform", "linux"), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill"), \
+                mock.patch.object(flow.ui_compact, "CompactPill"), \
                 mock.patch.object(profile_mod, "resolve_workspace", return_value=(None, "")), \
                 mock.patch.object(profile_mod, "Profile", return_value=profile), \
                 mock.patch.object(
                     mod, "check_update",
                     return_value=("flow 0.6.0 is out (you have 0.5.1)", True)) as asked:
             with contextlib.redirect_stdout(out):
-                mod.main(["--design", "current", "--no-speak", "--no-lexicon", "--no-paste"])
+                mod.main(["--no-speak", "--no-lexicon", "--no-paste"])
         return out.getvalue(), asked
 
     def test_off_by_default_so_the_enumeration_is_still_one(self):
@@ -290,8 +291,8 @@ class TestTheOptInUpdateCheck(unittest.TestCase):
 class TestCtrlCIsAQuitAndNotAnAbandonment(unittest.TestCase):
     """What happens to the session when the interrupt does not land in the frame pump.
 
-    Nearly every ctrl+C is caught by `Pill._tick` and never reaches here, because that
-    callback is where the main thread spends its time. The one that lands at the entry
+    Nearly every ctrl+C is caught by the pill's `_tick` and never reaches here, because
+    that callback is where the main thread spends its time. The one that lands at the entry
     to a Tkinter callback — before Tkinter's own `try`, so it is not reported and
     swallowed — comes out of `mainloop`, and that is the exit that used to skip teardown
     completely: `main()` has no `with` around the session and never had one.
@@ -302,18 +303,17 @@ class TestCtrlCIsAQuitAndNotAnAbandonment(unittest.TestCase):
 
     def _interrupted(self):
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
         with mock.patch.object(sys, "platform", "darwin"), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill") as pill:
+                mock.patch.object(flow.ui_compact, "CompactPill") as pill:
             pill.return_value.mainloop.side_effect = KeyboardInterrupt
             with contextlib.redirect_stdout(io.StringIO()):
-                code = mod.main(["--design", "current",
-                                 "--no-profile", "--no-speak", "--no-lexicon"])
+                code = mod.main(["--no-profile", "--no-speak", "--no-lexicon"])
         return code, pill.return_value
 
     def test_it_tears_down_rather_than_leaving_the_mic_and_the_cli_behind(self):
@@ -383,8 +383,7 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(sys, "platform", "win32"), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--design", "current",
-                             "--no-profile", "--no-speak", "--no-lexicon", *argv])
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", *argv])
         return code, out.getvalue()
 
     def test_an_unverified_pin_says_why_and_does_not_blame_the_path(self):
@@ -408,7 +407,7 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         # must agree with the probe, or `--cli kiro-cli` would be refused on the machine
         # the entry was verified on.
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -419,10 +418,9 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
                            lambda p: str(p).endswith("kiro-cli.exe")), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill"), \
+                mock.patch.object(flow.ui_compact, "CompactPill"), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--design", "current",
-                             "--no-profile", "--no-speak", "--no-lexicon", "--lite",
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite",
                              "--cli", "kiro-cli"])
         self.assertEqual(code, 0)
         self.assertIn("refine CLI: kiro-cli", out.getvalue())
@@ -434,8 +432,7 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         with mock.patch.object(sys, "platform", "win32"), \
                 mock.patch("shutil.which", lambda *a, **kw: None), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--design", "current",
-                             "--no-profile", "--no-speak", "--no-lexicon",
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon",
                              "--cli", "claude"])
         self.assertEqual(code, 2)
         self.assertIn("not on PATH", out.getvalue())
@@ -444,7 +441,7 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
         # Silence would make an installed-and-unused CLI look exactly like one Flow could
         # not find, and the person who installed it is the one who can end that.
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -457,10 +454,9 @@ class TestThePinKnowsWhyItRefused(unittest.TestCase):
                            fake_exe("gemini") if cmd == "gemini" else None), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill"), \
+                mock.patch.object(flow.ui_compact, "CompactPill"), \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--design", "current",
-                             "--no-profile", "--no-speak", "--no-lexicon", "--lite"])
+            code = mod.main(["--no-profile", "--no-speak", "--no-lexicon", "--lite"])
         self.assertEqual(code, 0)
         self.assertIn("found gemini, not yet verified", out.getvalue())
         self.assertIn("refine CLI: NONE", out.getvalue())
@@ -488,7 +484,7 @@ class TestACwdLaunchFeedsTheRecents(unittest.TestCase):
         import flow.diag
         import flow.profile
         import flow.refine
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -499,10 +495,9 @@ class TestACwdLaunchFeedsTheRecents(unittest.TestCase):
                 mock.patch.object(flow.diag, "Diag"), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill"), \
+                mock.patch.object(flow.ui_compact, "CompactPill"), \
                 contextlib.redirect_stdout(out):
-            return mod.main(["--design", "current",
-                             "--no-speak", "--no-lexicon", "--lite", *argv])
+            return mod.main(["--no-speak", "--no-lexicon", "--lite", *argv])
 
     def profile_on_disk(self):
         from flow.profile import Profile
@@ -556,7 +551,7 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
         import flow.asr
         import flow.diag
         import flow.profile
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
@@ -582,9 +577,9 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
                 mock.patch.object(flow.diag, "Diag"), \
                 mock.patch.object(mod, "Session"), \
                 mock.patch.object(flow.asr, "WhisperTranscriber"), \
-                mock.patch.object(flow.ui, "Pill") as pill, \
+                mock.patch.object(flow.ui_compact, "CompactPill") as pill, \
                 contextlib.redirect_stdout(out):
-            code = mod.main(["--design", "current", "--no-speak", "--no-lexicon", *argv])
+            code = mod.main(["--no-speak", "--no-lexicon", *argv])
         self.assertIsNone(pill.call_args.kwargs["hotkeys"])
         return code, out.getvalue()
 
@@ -752,29 +747,61 @@ class TestTheDesignSwitch(unittest.TestCase):
         # launch would be noise about the ordinary case.
         self.assertNotIn("design:", out)
 
-    def test_the_flag_builds_the_classic_pill_and_is_remembered(self):
+    def test_the_process_is_made_dpi_aware_before_the_pill_exists(self):
+        # The half of the case below that outlives `--design` and the rebuild loop:
+        # awareness is fixed for the process by its first window, and the one pill Flow
+        # builds is that window.
+        self.launch()
+        self.assertEqual(self.order, ["dpi", "compact"])
+        self.dpi.assert_called_once_with()
+
+    # -- "Compact only" (decisions.md 2026-11-23, "One surface") ------------------
+    #
+    # The Classic pill is retired: nobody is offered it, and a profile that chose it is
+    # moved. Its classes are still on disk while their tests are sorted, and the
+    # unlisted `--design` flag is how those tests - and the cases below that pin the
+    # rebuild loop - still reach them. It picks for one run and is never stored.
+
+    def test_the_flag_still_builds_the_classic_pill_but_is_not_remembered(self):
         code, out, pill, compact = self.launch(["--design", "current"])
         self.assertEqual(code, 0)
         self.assertTrue(pill.called)
         self.assertFalse(compact.called)
         self.assertIn("design: current", out)
         from flow.profile import Profile
-        self.assertEqual(Profile(self.dir / "profile.json").design, "current")
+        self.assertEqual(Profile(self.dir / "profile.json").design, "compact")
 
-    def test_the_remembered_choice_needs_no_flag(self):
+    def test_a_launch_after_the_flag_is_the_compact_pill_again(self):
         self.launch(["--design", "current"])
-        _code, _out, pill, compact = self.launch()
-        self.assertTrue(pill.called)
-        self.assertFalse(compact.called)
+        _code, out, pill, compact = self.launch()
+        self.assertTrue(compact.called)
+        self.assertFalse(pill.called)
+        self.assertNotIn("retired", out, "nothing was stored, so there is nothing to say")
 
-    def test_a_profile_that_names_a_design_keeps_it_after_the_flip(self):
-        # Every save writes the field, so somebody who launched the Classic pill before
-        # the default moved is not moved by it.
+    def test_a_profile_that_chose_classic_is_moved_and_told_once(self):
+        # It used to keep its choice ("nobody who launched the Classic pill is moved by
+        # the flip"). That promise was for the release in which Classic was one switch
+        # away; with the switch gone, a remembered "current" would be a pill nobody can
+        # get back from.
         (self.dir / "profile.json").write_text(
             '{"schema": 1, "welcomed": true, "design": "current"}', encoding="utf-8")
-        _code, _out, pill, compact = self.launch()
-        self.assertTrue(pill.called)
-        self.assertFalse(compact.called)
+        _code, out, pill, compact = self.launch()
+        self.assertTrue(compact.called)
+        self.assertFalse(pill.called)
+        self.assertIn("the Classic pill is retired", out)
+        from flow.profile import Profile
+        self.assertEqual(Profile(self.dir / "profile.json").design, "compact")
+        # Said once: the second launch finds a profile that names the only pill.
+        _code, out, _pill, _compact = self.launch()
+        self.assertNotIn("retired", out)
+
+    def test_the_flag_is_not_offered_in_the_help(self):
+        import flow.__main__ as mod
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            mod.main(["--help"])
+        self.assertNotIn("--design", out.getvalue())
 
     def test_the_shipped_surface_asks_for_the_compact_one_and_gets_it(self):
         code, out, pill, compact = self.launch(["--design", "current"],

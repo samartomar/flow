@@ -78,6 +78,8 @@ class HomeServer(ThreadingHTTPServer):
     def __init__(self, handle, token: str | None = None) -> None:
         self.handle_api = handle
         self.token = token or secrets.token_urlsafe(32)
+        # The native caption identifies this launch without displaying its API token.
+        self._window_id = secrets.token_hex(8)
         #: Monotonic time of the last authenticated API call: a Home window polls every
         #: second or so, so a recent one means a window is open. See `connected`.
         self.last_seen = 0.0
@@ -91,6 +93,14 @@ class HomeServer(ThreadingHTTPServer):
     @property
     def origin(self) -> str:
         return f"http://127.0.0.1:{self.port}"
+
+    @property
+    def window_query(self) -> str:
+        return f"window={self._window_id}"
+
+    @property
+    def window_title(self) -> str:
+        return f"Flow Home ({self._window_id})"
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self.serve_forever, daemon=True,
@@ -205,7 +215,8 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             self._json(421, {"error": "wrong host"})
             return
-        path = urlsplit(self.path).path
+        url = urlsplit(self.path)
+        path = url.path
         if path.startswith("/api/"):
             if not self._origin_ok():
                 self._json(403, {"error": "not from Flow Home"})
@@ -237,4 +248,7 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send(404, b"not found", "text/plain; charset=utf-8")
             return
+        if path == "/" and url.query == self.server.window_query:
+            data = data.replace(b"<title>Flow</title>",
+                                f"<title>{self.server.window_title}</title>".encode(), 1)
         self._send(200, data, ctype)

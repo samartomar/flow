@@ -91,6 +91,20 @@ FIELDS = frozenset({
     "other",      # whether an outside key has gone down since it last looked
     "talking",    # whether it believes it is capturing
     "last_tap",   # the clock reading of the tap it last latched, for the pairing window
+    # `hold` (one per hold: `ms`, `mode`, `ok`, and `reason` as words | silence | break)
+    # and `stall` (`ms` the frame loop did not run for) use fields already above.
+    # --- `landed`, one per handover (decisions.md 2026-11-24): whether words reached a
+    # window, so a report from the desk can be read from the trace. Both are the code's
+    # own vocabulary, never the words or the window.
+    "how",        # pasted | not_pasted | copied | not_copied | replaced | not_replaced
+    "pinned",     # whether a pin chose the window
+    # --- what the microphone gave a hold, on its `hold` line (2026-11-24): levels and
+    # counts, which cannot be played back.
+    "blocks",     # microphone blocks the speech gate was handed
+    "peak_db",    # the loudest of them, in dB
+    "gate_db",    # the threshold applied to the peak block, in dB
+    "deaf",       # blocks thrown away unheard
+    "deaf_why",   # latest discard reason: speaking | editing | release
 })
 
 #: Named so that adding one to FIELDS fails loudly. These are the words themselves —

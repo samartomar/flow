@@ -608,6 +608,8 @@ user32.GetForegroundWindow.argtypes = []
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetClassNameW.restype = ctypes.c_int
+user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.GetWindowTextW.restype = ctypes.c_int
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -918,6 +920,46 @@ def window_pid(hwnd) -> int:
         return _pid_of(hwnd) if hwnd else 0
     except OSError:
         return 0
+
+
+#: The most of a window's title worth reading. A site's own name is in the last two or
+#: three segments, and a tab whose page title runs past this has put them out of reach
+#: anyway - which reads as a page Flow does not recognise, the cheap answer.
+TITLE_CHARS = 512
+
+
+def window_title(hwnd) -> str:
+    """The caption of one top-level window, or "". Never raises.
+
+    Read for `flow/kinds.py`, which needs it for one thing: a browser is a single
+    process whether the tab is mail, chat or an AI, and the tab's title is where the
+    site names itself. `classify` cannot answer that, and the alternative that can - UI
+    Automation, for the focused child - is the dependency R16 keeps out.
+
+    Not folded into `classify`, deliberately. That one is asked on the *edge*, when the
+    foreground window changes, because it opens a process handle; a title changes while
+    the window stays the same one, every time a tab is switched. So this is its own call
+    and its caller asks it at the moment the answer is used.
+
+    It cannot hang on a busy app, which is the property a call made from the UI thread
+    needs: for a window that belongs to another process `GetWindowTextW` reads the
+    caption Windows itself keeps, and sends that window no message.
+
+    **The title is returned to a caller that classifies it and lets it go.** Nothing in
+    this module stores it, and `diag.NEVER` refuses `title` and `window` as trace fields
+    by name, so it cannot be logged by accident either.
+    """
+    try:
+        if not hwnd:
+            return ""
+        buf = ctypes.create_unicode_buffer(TITLE_CHARS)
+        user32.GetWindowTextW(hwnd, buf, TITLE_CHARS)
+        return buf.value
+    except (OSError, ctypes.ArgumentError, TypeError, ValueError):
+        # Not only what Windows can refuse: a handle that is not one - a stale value, a
+        # fixture's stand-in - is refused by ctypes before the call is made. "Never
+        # raises" has to cover the argument as well as the answer.
+        return ""
 
 
 def window_alive(hwnd, pid: int = 0) -> bool:

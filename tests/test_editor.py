@@ -274,29 +274,6 @@ class TestTheCountdownIsHeld(unittest.TestCase):
         self.assertEqual(s.draft.text, "what is a rollback")
         s.close()
 
-    def test_the_countdown_starts_again_from_the_commit_not_from_before_it(self):
-        s = session()
-        s.toggle_mode(to=CONVERSE)
-        s.draft.set("what is a rollback")
-        s._after_draft_change()
-        s.begin_edit()
-        s._settled_at = time.perf_counter() - (AUTO_ASK_SEC + 1.0)
-        s.commit_edit("what is a rollback in postgres")
-        left = s.auto_ask_in
-        self.assertIsNotNone(left, "the countdown never came back")
-        self.assertGreater(left, AUTO_ASK_SEC - 1.0)
-        s.close()
-
-    def test_a_cancel_releases_the_hold_as_well(self):
-        s = session()
-        s.toggle_mode(to=CONVERSE)
-        s.draft.set("what is a rollback")
-        s._after_draft_change()
-        s.begin_edit()
-        s.cancel_edit()
-        self.assertIsNotNone(s.auto_ask_in)
-        s.close()
-
 
 @unittest.skipUnless(sys.platform == "win32", "Windows-only: ctypes.WinDLL")
 class TestFlowStillCannotPasteIntoItself(unittest.TestCase):
@@ -1614,5 +1591,36 @@ class TestTypingAFixTeachesInLiteToo(unittest.TestCase):
                 mock.patch.object(ui.Bubble, "_render"):
             b._edit()
             b._cancel_edit()
+        self.assertEqual(s.draft.text, "deploy the roleback plan")
+        self.assertFalse(s.profile.pairs)
+
+
+class TestALiteSessionLearnsFromTheSameSeam(unittest.TestCase):
+    """The two cases above that are about learning, asked of the seam itself.
+
+    Ported in stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One
+    surface"). `Bubble._edit` is how the class above reaches `commit_edit` in Lite, and
+    that route goes with the bubble; "Lite has the learning" is a claim about the session
+    Lite builds, and the compact pill's Edit chip calls the same `begin_edit` and
+    `commit_edit`, so this is a Lite session driven through them with no window.
+    """
+
+    def lite(self):
+        s = session(profile=tmp_profile(), lite=True)
+        s.draft.set("deploy the roleback plan")
+        return s
+
+    def test_a_fix_typed_in_lite_teaches_the_same_pair(self):
+        s = self.lite()
+        s.begin_edit()
+        s.commit_edit("deploy the rollback plan")
+        self.assertEqual(s.draft.text, "deploy the rollback plan")
+        self.assertEqual(dict(s.profile.pairs), {"roleback -> rollback": 1})
+        self.assertFalse(s.editing, "the editor was left open")
+
+    def test_escape_in_lite_teaches_nothing(self):
+        s = self.lite()
+        s.begin_edit()
+        s.cancel_edit()
         self.assertEqual(s.draft.text, "deploy the roleback plan")
         self.assertFalse(s.profile.pairs)

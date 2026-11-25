@@ -310,17 +310,6 @@ class TestTheGroundIsNamedAtEgress(Temp):
             s.close()
         return [n for n in said if "no more speech" in n]
 
-    def test_the_countdown_final_state_carries_it_too(self):
-        # Auto-ask is the one path where words leave with no press, which is exactly
-        # why its firing note cannot stay anonymous about where they are going.
-        ws = self.dir / "acme"
-        ws.mkdir()
-        self.assertEqual(self.fired(str(ws)),
-                         ["no more speech - asking · acme"])
-
-    def test_and_without_a_workspace_the_countdown_note_is_untouched(self):
-        self.assertEqual(self.fired(None), ["no more speech - asking"])
-
 
 class TestSwitchingTheGround(Temp):
     """Item 36's second half: one tap switches, and a switch is a topic switch.

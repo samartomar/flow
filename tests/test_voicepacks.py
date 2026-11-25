@@ -38,14 +38,25 @@ def _wait(job, timeout=5.0):
 class _Packs(VoicePacks):
     """VoicePacks over a temporary folder, with the machine's answers set by the test."""
 
-    def __init__(self, folder, *, have=(), command=(["uv", "pip", "install"], ""), **kw):
+    def __init__(self, folder, *, have=(), command=(["uv", "pip", "install"], ""),
+                 versions=None, loaded=(), **kw):
         super().__init__(None, **kw)
         self.have = set(have)
         self.command = command
         self.dir = Path(folder)
+        #: package -> the version "on disk". Absent reads as unknown, which is never old,
+        #: so no case here depends on what the suite's own environment has installed.
+        self.versions = dict(versions or {})
+        self.loaded = set(loaded)
 
     def _importable(self, module):
         return module in self.have
+
+    def _version(self, package):
+        return self.versions.get(package, "")
+
+    def _loaded(self, module):
+        return module in self.loaded
 
     def _installer(self, spec):
         cmd, why = self.command
@@ -370,6 +381,7 @@ class TestHPageAndRoutes(unittest.TestCase):
     def test_every_button_is_wired_to_its_route(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         for act, route in (('"pack-add"', 'api("voices/engine"'),
+                           ('"pack-update"', 'api("voices/engine"'),
                            ('"piper-download"', 'api("voices/piper"'),
                            ('"piper-cancel"', 'api("voices/piper"'),
                            ('"piper-delete"', 'api("voices/piper"')):
@@ -403,6 +415,228 @@ class TestITheDownloadShipsBothEngines(unittest.TestCase):
         spec = (ROOT / "packaging" / "flow.spec").read_text(encoding="utf-8")
         self.assertIn('UNUSED_DATA = {"nakdimon.onnx"}', spec)
         self.assertIn("os.path.basename(src) not in UNUSED_DATA", spec)
+
+
+class TestJAnOldCopyIsOfferedAnUpdate(unittest.TestCase):
+    """2026-11-23: the owner chose a Natural voice, pressed Preview, and nothing happened.
+
+    Microsoft's speech service had refused edge-tts 7.2.8 since about 10 October (HTTP
+    403 on the handshake; 7.3.1 spoke, both measured from this repository), and the card
+    under the voice said "Added". An engine that is here but older than the oldest copy
+    that works is now told apart from one that is added, offered the update, and - where
+    Flow imports it at the moment of use - picked up without a restart.
+    """
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.changed = mock.patch.object(vp, "_voices_changed").start()
+        self.forget = mock.patch.object(vp, "_forget").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def _updating(self, engine_module, package, old, *, lands=True, loaded=True):
+        """Packs holding `old` of `package`, whose installer writes the pinned version."""
+        def run(command, **kwargs):
+            self.command = command
+            if lands:
+                packs.versions[package] = command[-1].split("==")[1]
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        packs = _Packs(self.folder, have={engine_module}, versions={package: old},
+                       loaded={engine_module} if loaded else (), run=run)
+        return packs
+
+    def test_versions_are_compared_as_numbers(self):
+        self.assertTrue(vp.too_old("7.2.8", "7.3"))
+        self.assertFalse(vp.too_old("7.3.0", "7.3"))
+        self.assertFalse(vp.too_old("7.3.1", "7.3"))
+        # As text "7.10.0" sorts before "7.3"; as numbers it is newer.
+        self.assertFalse(vp.too_old("7.10.0", "7.3"))
+
+    def test_a_version_that_cannot_be_read_is_never_called_old(self):
+        # Offering an update is a claim that the copy here does not work. Flow makes it
+        # only about a version it could read and compare.
+        for have in ("", "7.3rc1", "unknown"):
+            with self.subTest(have=have):
+                self.assertFalse(vp.too_old(have, "7.3"))
+
+    def test_the_floor_refuses_what_the_service_refuses_and_passes_the_pin(self):
+        package, floor = ENGINES["edge"]["spec"].split(">=")
+        self.assertEqual(package, "edge-tts")
+        self.assertTrue(vp.too_old("7.2.8", floor), "7.2.8 is the copy measured refused")
+        self.assertFalse(vp.too_old(ENGINES["edge"]["pin"].split("==")[1], floor))
+
+    def test_an_old_copy_is_not_called_added(self):
+        packs = _Packs(self.folder, have={"edge_tts"}, versions={"edge-tts": "7.2.8"})
+        edge = packs.snapshot()["edge"]
+        self.assertTrue(edge["installed"])
+        self.assertTrue(edge["outdated"])
+        self.assertIn("silent", edge["old"])
+        self.assertTrue(edge["can"], "there is an installer, so it can be updated")
+
+    def test_a_current_copy_and_an_unreadable_one_are_left_alone(self):
+        for versions in ({"edge-tts": "7.3.1"}, {}):
+            with self.subTest(versions=versions):
+                packs = _Packs(self.folder, have={"edge_tts"}, versions=versions)
+                edge = packs.snapshot()["edge"]
+                self.assertEqual((edge["installed"], edge["outdated"], edge["old"]),
+                                 (True, False, ""))
+                self.assertTrue(edge["can"])
+
+    def test_an_engine_that_is_not_here_is_not_outdated(self):
+        # A stale dist-info with no importable package beside it is "not added".
+        packs = _Packs(self.folder, versions={"edge-tts": "7.2.8"})
+        self.assertFalse(packs.outdated("edge"))
+        self.assertFalse(packs.snapshot()["edge"]["outdated"])
+
+    def test_a_download_that_cannot_install_says_it_cannot_update(self):
+        packs = _Packs(self.folder, have={"edge_tts"}, versions={"edge-tts": "7.2.8"},
+                       command=(None, "this download of Flow cannot add packages"))
+        edge = packs.snapshot()["edge"]
+        self.assertTrue(edge["outdated"])
+        self.assertFalse(edge["can"])
+        self.assertIn("cannot add packages", edge["why"])
+
+    def test_the_update_installs_the_pin_and_drops_the_loaded_copy(self):
+        packs = self._updating("edge_tts", "edge-tts", "7.2.8")
+        job = _wait(packs.install("edge"))
+        self.assertEqual((job.state, job.error), ("done", ""))
+        self.assertEqual(self.command[-1], ENGINES["edge"]["pin"])
+        # The running Flow imported the old copy when the voice was first tried; without
+        # this the update would sit on disk and the next reply would be refused again.
+        self.forget.assert_called_once_with("edge_tts")
+        self.assertFalse(packs.snapshot()["edge"]["outdated"])
+        self.changed.assert_called_once_with("edge")
+
+    def test_a_copy_nothing_had_loaded_is_updated_without_touching_modules(self):
+        packs = self._updating("edge_tts", "edge-tts", "7.2.8", loaded=False)
+        self.assertEqual(_wait(packs.install("edge")).state, "done")
+        self.forget.assert_not_called()
+
+    def test_a_first_add_drops_nothing(self):
+        def run(command, **kwargs):
+            packs.have.add("edge_tts")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        packs = _Packs(self.folder, run=run)
+        self.assertEqual(_wait(packs.install("edge")).state, "done")
+        self.forget.assert_not_called()
+
+    def test_an_update_that_left_the_old_copy_says_so(self):
+        packs = self._updating("edge_tts", "edge-tts", "7.2.8", lands=False)
+        job = _wait(packs.install("edge"))
+        self.assertEqual(job.state, "failed")
+        self.assertIn("did not replace the old copy", job.error)
+        self.forget.assert_not_called()
+        self.changed.assert_not_called()
+
+    def test_piper_is_never_reloaded_into_a_running_flow(self):
+        # It holds a model and native code; an update is used after a restart, and says so.
+        self.assertNotIn("piper", vp.RELOADS)
+        packs = self._updating("piper", "piper-tts", "1.5.0")
+        job = _wait(packs.install("piper"))
+        self.assertEqual(job.state, "failed")
+        self.assertIn("restart Flow", job.error)
+        self.forget.assert_not_called()
+
+
+class TestKForgettingAnEngine(unittest.TestCase):
+
+    def test_the_package_and_its_submodules_go_and_nothing_else(self):
+        names = ("zz_engine", "zz_engine.sub", "zz_engine.sub.deep", "zz_engine_other")
+        with mock.patch.dict(sys.modules, {n: mock.MagicMock() for n in names}):
+            vp._forget("zz_engine")
+            self.assertEqual([n for n in names if n in sys.modules], ["zz_engine_other"])
+
+    def test_edge_is_imported_at_the_moment_of_use(self):
+        # What makes forgetting enough: `flow/edge.py` holds no module-level reference to
+        # `edge_tts`, so the next reply imports whatever is on disk by then.
+        import ast
+
+        tree = ast.parse((ROOT / "flow" / "edge.py").read_text(encoding="utf-8"))
+        top = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+        names = {a.name for n in top if isinstance(n, ast.Import) for a in n.names}
+        names |= {n.module for n in top if isinstance(n, ast.ImportFrom) and n.module}
+        self.assertFalse({n for n in names if n.split(".")[0] == "edge_tts"})
+        self.assertIn("edge", vp.RELOADS)
+
+
+class TestLThePageSaysWhyAVoiceIsSilent(unittest.TestCase):
+
+    def setUp(self):
+        from flow.home import demo
+
+        self.demo = demo
+        self.home, self.session = demo.build()
+        self.addCleanup(self.home.close)
+
+    def test_preview_of_a_working_voice_is_an_acknowledgment(self):
+        self.assertEqual(self.home.api.replies_preview({}), {"ok": True})
+        self.assertEqual(len(self.session.speaker.said), 1)
+
+    def test_preview_of_a_refused_voice_says_so_and_names_the_update(self):
+        from flow import edge
+        from flow.home.api import ApiError
+
+        self.demo.old_voices(self.home, self.session)
+        with self.assertRaises(ApiError) as caught:
+            self.home.api.replies_preview({})
+        said = str(caught.exception)
+        self.assertTrue(said.startswith(edge.REFUSED), said)
+        self.assertIn("Update them under Better voices", said)
+
+    def test_a_refusal_of_a_current_copy_does_not_offer_an_update_that_is_not_there(self):
+        from flow import edge
+        from flow.home.api import ApiError
+
+        self.session.speaker.trouble = lambda wait=0.0: edge.REFUSED
+        with self.assertRaises(ApiError) as caught:
+            self.home.api.replies_preview({})
+        self.assertNotIn("Update", str(caught.exception))
+        self.assertIn("Windows or Piper voice", str(caught.exception))
+
+    def test_no_connection_is_said_as_it_is(self):
+        from flow import edge
+        from flow.home.api import ApiError
+
+        self.session.speaker.trouble = lambda wait=0.0: edge.UNREACHABLE
+        with self.assertRaises(ApiError) as caught:
+            self.home.api.replies_preview({})
+        self.assertEqual(str(caught.exception), edge.UNREACHABLE)
+
+    def test_a_voice_that_did_not_start_is_not_an_ok(self):
+        from flow.home.api import ApiError
+
+        self.session.speaker.say = lambda text: False
+        with self.assertRaises(ApiError) as caught:
+            self.home.api.replies_preview({})
+        self.assertIn("did not start", str(caught.exception))
+
+    def test_the_wait_is_bounded_and_asked_of_the_speaker(self):
+        from flow.home import api as api_mod
+
+        waits = []
+        self.session.speaker.trouble = lambda wait=0.0: waits.append(wait) or ""
+        self.home.api.replies_preview({})
+        self.assertEqual(waits, [api_mod.SAY_WAIT_SEC])
+        self.assertLessEqual(api_mod.SAY_WAIT_SEC, 6.0)
+
+    def test_the_models_page_carries_what_the_card_and_the_voice_row_read(self):
+        self.demo.old_voices(self.home, self.session)
+        voice = self.home.api.models({})["voice"]
+        self.assertTrue(voice["packs"]["edge"]["outdated"])
+        self.assertTrue(voice["packs"]["edge"]["old"])
+        current = next(v for v in voice["voices"] if v["name"] == voice["current"])
+        self.assertEqual(current["engine"], "edge")
+
+    def test_the_page_draws_the_update_and_the_line_beside_the_voice(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('pk.edge.outdated ? updateEngine("edge", pk.edge, "Microsoft voices")',
+                      js)
+        self.assertIn('data-act="pack-update"', js)
+        self.assertIn("This voice is silent until", js)
+        # An old copy is never drawn as "Added": the update is tested first.
+        line = next(l for l in js.splitlines() if "Added - choose one in the list" in l)
+        self.assertLess(line.index("pk.edge.outdated"), line.index("pk.edge.installed"))
 
 
 if __name__ == "__main__":

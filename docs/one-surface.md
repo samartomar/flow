@@ -8,6 +8,29 @@ the product, what the compact surface still has to absorb before it can be the *
 surface, and the order to do it in. It is a recommendation for the owner's decision
 ([NEEDS_YOU.md](../NEEDS_YOU.md) carries the open entry); nothing here is decided yet.
 
+**Decided 2026-11-23: compact only.** The owner's words, the same day as the check
+below. [decisions.md](decisions.md), "One surface", is the record, with the stages and
+what reopens it. The first stage is done: nobody is offered the shipped surface (the
+Design row and the Classic panel row are out of Flow Home, a profile that named it is
+told once and moved, and `--design` is unlisted and never stored). This page stays as
+the reasoning; the order of what is left is in that entry, not in the five steps below.
+The second stage, the tests sorted and the ones that reached shared code through a
+Classic window ported, is recorded at the foot of this page ("Stage 2").
+
+**Update 2026-11-23.** The owner asked what is left to adopt from the shipped surface,
+or whether to ignore it in full. Checked against the code: **nothing is left to adopt.**
+All five gaps below are closed (two by Flow Home, three on 2026-10-02), step 4 happened
+on 2026-09-23 (`DESIGN_DEFAULT` is `"compact"`), and the owner's profile runs compact.
+What stands between here and step 5 is **step 2, which was never done**:
+`ui_compact.py` still imports 59 names from `ui.py` (7,936 lines), and `theme.py`,
+`shell.py` and `menus.py` do not exist. Beyond that, 33 test files import the module
+(1,658 tests between them, not all of them about the shipped window), nine scripts do,
+and `scripts/selfdrive.py`'s gate drives `Pill`, which the order below does not
+mention: it is ported to the compact surface or dropped before the class goes. The taste
+call at the foot of this page stands at "nothing" today: a Type hold says "listening -
+let go to paste" and names no window. The decision is still the owner's
+([NEEDS_YOU.md](../NEEDS_YOU.md)).
+
 **Update 2026-10-02.** Step 3 is **done**: the compact Refine panel carries an Edit chip
 between Copy and Send, opening a `tk.Text` in its own Toplevel over the panel, with
 Escape, Ctrl+Enter, and Cancel/Done buttons. Ask gets none — its panel holds a
@@ -227,3 +250,131 @@ panel is where it would grow — the mechanism is the same band, taller.
 
 Everything else the shipped surface does, the session does, and the compact surface
 inherits by driving the same session.
+
+## Stage 2: the tests sorted (2026-11-23)
+
+The 33 test files that import `flow/ui.py` hold 1,659 tests. Each one was sorted by
+the production code its assertion checks, and whether that code survives deleting
+`Pill`, `Bubble`, `ConversationCard`, `HelpWindow` and the `ui.py` code only they use:
+
+- **a, stays.** It tests a helper the compact pill also runs (window classification,
+  Win32 reads, work area, fonts and palette, `scaled_font`, `bottom_centre`), or code
+  that is not in `ui.py` at all and never needed a Classic window.
+- **b, goes with the classes.** The code under test is the Classic windows': their
+  drawing, chips, menus, marks row, mic view, panel widths, placement, push-to-talk
+  wait, or the `--design` rebuild loop. Listed here and left in place.
+- **c, ported.** It checks session or other shared code, and a Classic window was only
+  the route. Each is now asserted against `Session` directly or through `CompactPill`,
+  or was found already asserted that way by a named test. The originals are left in
+  place: each goes with its class in stage 3, and its coverage stays behind.
+
+A first pass was mechanical. An AST walk of each test, through its fixtures and its
+helpers, including helpers imported from other test files, split the tests that never
+reach a Classic window or a Classic-only `ui.py` name from the 610 that do. Those 610
+were then read one by one. "Mixed" below is a test with both a (b) half and an (a) or
+(c) half.
+
+| File | Tests | a | b | c | Kind c: ported to, or already asserted by |
+|---|---:|---:|---:|---:|---|
+| `test_ask_chord.py` | 55 | 52 | 3 | 0 | — (b: `TestGTheClassicPillSwitchesSidesToo`; compact's is `TestFTheCompactPillSwitchesSides`) |
+| `test_bubble.py` | 37 | 0 | 37 | 0 | — |
+| `test_card.py` | 56 | 1 | 55 | 0 | — |
+| `test_chord.py` | 74 | 69 | 4 | 1 | The tripwire on the chord's four words in `ui.py`'s dispatch → `test_and_they_are_the_words_the_compact_pill_dispatches_on`, same class, reading `ui_compact.py`. Mixed (a): `test_a_pill_fixture_can_never_reach_for_tk` loses its `Pill` line in stage 3 |
+| `test_compact_pass.py` | 15 | 0 | 15 | 0 | — (the Classic pill's 2026-09-01 "compact pass", not `CompactPill`) |
+| `test_compact_screen.py` | 31 | 31 | 0 | 0 | — |
+| `test_composite.py` | 46 | 18 | 28 | 0 | — |
+| `test_converse.py` | 85 | 84 | 1 | 0 | — (b: the Classic row's CLI marker) |
+| `test_editor.py` | 93 | 52 | 37 | 4 | `TestTypingAFixTeachesInLiteToo` (2) → `TestALiteSessionLearnsFromTheSameSeam`. `TestAnEditorThatCannotHearIsClosed` (2, mixed): the session half is already asserted by `TestTheEditIsAnOrdinaryDraftChange` |
+| `test_glyphs.py` | 15 | 14 | 1 | 0 | — Mixed (a): `test_the_compact_mic_and_the_shipped_mic_are_one_drawing` loses its `ui.glyphs` line in stage 3 |
+| `test_help.py` | 62 | 36 | 19 | 7 | `test_the_guide_still_shells_out_to_the_browser` → `TestTheGuideOpensInTheBrowser` (2). The `legend_rows` half of `test_the_legend_matches_...` → `test_the_legend_names_no_pill_colour_the_app_stopped_drawing`. Five mixed (`TestTheWindowShowsTheGeneratedContent` 3, `TestTheMenuReachesIt` 2): the `help.rows` half is already asserted by `TestItNamesWhatRegistered`, `TestItNamesTheWordsCurrentlyConfigured` and `TestEveryExampleIsRealSpeech` |
+| `test_history.py` | 84 | 81 | 3 | 0 | — (b: `TestTheClassicSurface`; compact's is `TestTheCompactSurfaceHandsOver`) |
+| `test_hotkey.py` | 56 | 48 | 0 | 8 | The startup-block launches (7, and the AltGr one): changed in place to launch with no `--design` and `flow.ui_compact.CompactPill` patched. The file no longer imports `flow.ui` |
+| `test_icon.py` | 14 | 14 | 0 | 0 | — Mixed (a): `test_both_pills_call_it` drops `"ui.py"` from its loop in stage 3 |
+| `test_indicator.py` | 35 | 20 | 15 | 0 | — |
+| `test_inject_target.py` | 111 | 110 | 1 | 0 | — (b, and not portable: see the gaps below) |
+| `test_lexicon.py` | 49 | 45 | 2 | 2 | The `lexicon.ensure` half of the settings-folder first and second open → `TestTheTemplateIsWrittenOnceAndNeverOver` (2) |
+| `test_lite.py` | 34 | 20 | 13 | 1 | `test_both_spoken_triggers_reach_it_through_the_router` (mixed): the router half is already asserted by `test_triggers.py`'s `test_the_session_asks_rather_than_pasting_on_its_own` and `test_no_profile_at_all_still_has_working_defaults` |
+| `test_main.py` | 49 | 12 | 8 | 29 | 28 launch tests changed in place: `launch()` and its siblings launch with no `--design` and `CompactPill` patched. The default-launch half of `test_the_process_is_made_dpi_aware_before_any_window_exists` → `test_the_process_is_made_dpi_aware_before_the_pill_exists`. The 8 b are the `TestTheDesignSwitch` cases that pin `--design current` and the rebuild loop |
+| `test_menu.py` | 35 | 0 | 35 | 0 | — (its fixtures are imported elsewhere: see stage 3) |
+| `test_mic.py` | 77 | 3 | 71 | 3 | The profile halves (`mic` and `mic_at` round trip, a junk `mic_at` still saves) → `test_profile.py` `TestTheClassicPillsFieldsStillLoad` (2) |
+| `test_offers.py` | 23 | 16 | 7 | 0 | — (b: the Classic draft menu; the lexicon and profile halves are asserted by this file's other classes) |
+| `test_overlay.py` | 17 | 0 | 14 | 3 | `TestTheProfileRemembersIt` (`panel` survives a save, its default, a nonsense value is named) → `test_profile.py` `TestTheClassicPillsFieldsStillLoad` (3) |
+| `test_paint.py` | 30 | 30 | 0 | 0 | — |
+| `test_pill.py` | 130 | 47 | 80 | 3 | `test_the_mode_glyph_is_a_pen_in_refine_not_a_bubble` → `test_glyphs.py` `test_the_pen_is_its_own_mark_and_the_bubble_has_its_tail`. The unknown-mode and muted-speaker cases are already asserted by `test_a_fourth_mode_raises_rather_than_drawing_the_third` and `test_the_speakers_mute_is_one_more_line_and_no_waves` |
+| `test_resilience.py` | 78 | 70 | 7 | 1 | `test_no_state_the_pill_paints_green_survives_the_loss` → `test_no_state_the_compact_ring_paints_green_survives_the_loss`, same class, against `ui_compact.RING` |
+| `test_scale.py` | 37 | 19 | 17 | 1 | `test_the_editor_asks_the_module_for_its_own` → `TestTheCompactEditorsFontReadsTheModuleScale` (2), which sets `ui.SCALE` itself |
+| `test_stats.py` | 60 | 54 | 0 | 6 | `test_it_exits_before_a_model_a_microphone_or_a_window` changed in place to watch `CompactPill`. `TestTheHelpSheetCarriesTodaysWords` (5, mixed): the `stats.today_note` half → `TestTodaysRowSaysWhatTheTraceHolds` (5) |
+| `test_switch.py` | 20 | 16 | 2 | 2 | `TestASecondTkInOneProcess`'s two round trips → `test_the_compact_pill_is_built_detached_and_built_again`, same class: a real Tk over a real `Session`. 15 of the 16 a loop over `SURFACES`, so stage 3 drops the `current` row rather than the test |
+| `test_talk.py` | 49 | 0 | 37 | 12 | → new `tests/test_talk_session.py` (11): the stream that lingers after a release, the hold that gives back what it took, the commit a release makes, nothing heard between holds |
+| `test_tray.py` | 25 | 9 | 16 | 0 | — |
+| `test_triggers.py` | 49 | 43 | 0 | 6 | `TestItPressesTheSameButton` (5) and `TestConverseIgnoresTheSuffix` (1) → `TestTheCompactPillPressesTheSameButton` and `TestConverseIgnoresTheSuffixOnTheCompactPill`, through `CompactPill._send` over a real `Session` |
+| `test_version.py` | 28 | 25 | 3 | 0 | — |
+| **33 files** | **1,659** | **1,039** | **531** | **89** | 37 launch tests changed in place; 42 ported into 41 new tests; 10 already asserted elsewhere |
+
+One file outside the 33 belongs in the same list: `test_notes.py`
+`TestTheMenuIsTheFloor` (5 tests, kind b) builds the Classic menu through
+`test_menu.py`'s `Menu` fixture.
+
+### Classic guarantees with no compact counterpart
+
+These are kind b, because the code under test is the Classic pill's. But the
+guarantees they pin are gone the day it is deleted. None can be ported without product
+code, so none was, and they are the owner's to decide before stage 3:
+
+1. **The hold ceiling.** `Pill._pump_talk` ends a hold whose release never arrives
+   after `PTT_MAX_HOLD_SEC` (120 s), and keeps the words (`test_talk.py`
+   `TestTheTwoTimeoutsAreNotHypothetical`, 3 cases). `CompactPill` has the paste-wait
+   ceiling and not this one: a dropped keyup leaves the hold open.
+2. **Late paste warnings.** `Pill._pump_warnings` drains `inject`'s warnings every
+   frame (`test_inject_target.py` `TestLateWarningsReachTheBubble`). `ui_compact.py`
+   never calls `take_warnings`, so the clipboard-restore skip waits for the next Send.
+3. **A hold while the hand editor is open.** `Pill._talk_start` refuses it and says
+   why. `CompactPill._talk_start` has no such check.
+4. **The editor's focus check.** `Bubble._edit` closes the editor when Windows refuses
+   it the focus. `CompactPill._open_editor` does not check.
+5. **Flow's own window as the paste target.** `Pill._track_target` refusing it is
+   tested. Compact's copy of the method is tested only with `owned_by_flow` patched to
+   False.
+
+### Found on the way, in the compact pill (read, not run)
+
+- **Fixed 2026-11-24.** `CompactPill._open_editor` called a bare `dev(self, …)`, so the
+  Edit chip raised `NameError` after `session.begin_edit()` had run, leaving the session
+  in `editing` with no box; behind it, `bring_forward()` was called with no window
+  handle. Both fixed, and four tests now run the method's body (they failed before).
+  Checked on real windows with a Mock session: the box opens with the text and the
+  focus, and Escape, Ctrl+Enter, Cancel and Done each reach the session and close it.
+- `ui.SCALE` is set only by `apply_scale`, which only `Pill.__init__` calls, so the
+  compact editor's fonts (`scaled_font`) never scale above 100 %.
+- `ui._load_fonts`, the GDI registration Tk-drawn text needs, is called only by
+  `Pill.__init__`. A compact launch hands IBM Plex to GDI+ alone, so the compact
+  surface's Tk text (the editor, the menus) may be falling back to a system face.
+
+Left with no caller when the classes go: `help.rows`, `help.legend_rows` and
+`help.open_guide` (Flow Home imports only `help.COMMANDS`); `stats.today_note`;
+`refine.Cli.marker`; and the profile fields `mic` and `mic_at` as well as `design`,
+`panel` and `place`. `help.exits_note` still names Classic affordances ("click the draft
+to edit"), and `test_editor.py` `test_the_note_that_promises_it_still_does` pins that
+wording.
+
+### What stage 3 has to move before it deletes
+
+- **Fixtures other files import.** From `test_menu.py`: `FakeMenu` and `FakeVar`
+  (`test_ui_compact.py`, `test_compact_events.py`, `test_history.py`), and `Menu`
+  (`test_mic.py`, `test_notes.py`). From `test_pill.py`: `pill` and `Canvas`
+  (`test_ask_chord.py`, `test_chord.py`, `test_compact_pass.py`, and `test_history.py`
+  and `test_mic.py` at module level). From `test_bubble.py`: `bubble` and `draft`
+  (`test_compact_pass.py`). From `test_editor.py`: `WORK` and `MeasuringCanvas`
+  (`test_bubble.py`, `test_card.py`, `test_composite.py`).
+- **Kind a tests inside mostly-Classic files.** The Classic tests are cut out of these
+  files class by class; the files are not deleted whole. `test_pill.py` (47: the work
+  area, `_mix`, parking, the window styles), `test_composite.py` (18), `test_scale.py`
+  (19, and their `ScaleCase` resets `ui.apply_scale`), `test_indicator.py` (20),
+  `test_lite.py` (20), `test_switch.py` (16), `test_tray.py` (9), `test_mic.py` (3),
+  `test_card.py` (1).
+- **Tests that read `flow/ui.py` as text.** `test_pill.py` `TestTheMacFrame` (2, a)
+  follows the shared code when step 4 moves it. Outside the 33,
+  `test_ui_compact.py`'s `test_a_shipped_surface_ignores_it_because_it_already_said_more`
+  and its `refine_says_more` assertion name `ui.py` too.
+- **`scripts/shots.py`** imports the Classic pill. Its `FakeSession` is why the new
+  round trip in `test_switch.py` uses a real `Session` instead.

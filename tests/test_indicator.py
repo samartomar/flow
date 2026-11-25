@@ -97,7 +97,90 @@ class FakeSpeaker:
 
 
 def session(**kw) -> Session:
-    return Session(asr=kw.pop("asr", None) or FakeAsr(), mic=FakeMic(), **kw)
+    s = Session(asr=kw.pop("asr", None) or FakeAsr(), mic=FakeMic(), **kw)
+    if kw.get("speaker") is not None:
+        # Answers are silent unless the user turns reading on (decisions.md
+        # 2026-11-24); these tests are about what happens when it is on.
+        s.muted = False
+    return s
+
+
+class TestAHoldSaysWhatTheMicrophoneGaveIt(unittest.TestCase):
+    """`hold_audio`, for the `hold` trace line (owner's report, 2026-11-24: the first
+    holds after a launch showed a listening pill and printed nothing, and the trace could
+    not say whether any audio had arrived)."""
+
+    def test_blocks_heard_and_the_loudest_against_the_gate(self):
+        s = session()
+        s.talk_start()
+        s.mic._blocks.extend([LOUD] * 5)
+        s.tick()
+        heard = s.hold_audio()
+        self.assertEqual(heard["blocks"], 5)
+        self.assertAlmostEqual(heard["peak_db"], -14.0, delta=0.1)
+        self.assertEqual(heard["gate_db"], round(s.gate.floor_db + s.gate.margin_db, 1))
+        self.assertEqual((heard["deaf"], heard["deaf_why"]), (0, None))
+
+    def test_blocks_thrown_away_while_flow_talks_say_so(self):
+        sp = FakeSpeaker()
+        s = session(speaker=sp)
+        s.talk_start()
+        sp.say("an answer")
+        s.mic._blocks.extend([LOUD] * 7)
+        s.tick()
+        heard = s.hold_audio()
+        self.assertEqual((heard["blocks"], heard["deaf"], heard["deaf_why"]),
+                         (0, 7, "speaking"))
+
+    def test_peak_is_paired_with_its_threshold_before_the_floor_adapts(self):
+        s = session()
+        s.talk_start()
+        threshold = round(s.gate.floor_db + s.gate.margin_db, 1)
+        quiet = np.full(BLOCK, 0.001, dtype=np.float32)
+        s.mic._blocks.extend([quiet, quiet / 10])
+        s.tick()
+        heard = s.hold_audio()
+        self.assertAlmostEqual(heard["peak_db"], -60.0, delta=0.1)
+        self.assertEqual(heard["gate_db"], threshold)
+        self.assertNotEqual(heard["gate_db"], round(s.gate.floor_db + s.gate.margin_db, 1))
+
+    def test_blocks_queued_at_release_are_counted_without_feeding_the_gate(self):
+        s = session()
+        s.talk_start()
+        s.mic._blocks.extend([LOUD] * 3)
+        self.assertFalse(s.talk_end())
+        self.assertEqual(s.hold_audio(), {
+            "blocks": 0, "peak_db": None, "gate_db": None,
+            "deaf": 3, "deaf_why": "release",
+        })
+
+    def test_each_hold_starts_counting_again(self):
+        s = session()
+        s.talk_start()
+        s.mic._blocks.extend([LOUD] * 3)
+        s.tick()
+        s.talk_end()
+        s.talk_start()
+        self.assertEqual(s.hold_audio()["blocks"], 0)
+
+    def test_every_number_gets_through_the_real_trace(self):
+        import tempfile
+
+        from flow.diag import REFUSED, Diag
+
+        s = session()
+        s.talk_start()
+        s.mic._blocks.extend([LOUD] * 2)
+        s.tick()
+        with tempfile.TemporaryDirectory() as tmp:
+            diag = Diag(path=Path(tmp) / "diag.jsonl", background=False)
+            diag.write("hold", ms=10, mode="dictate", ok=False, reason="silence",
+                       **s.hold_audio())
+            diag.close()
+            written = (Path(tmp) / "diag.jsonl").read_text(encoding="utf-8")
+            self.assertEqual(diag.rejected, 0, written)
+        self.assertNotIn(REFUSED, written)
+        self.assertIn('"peak_db"', written)
 
 
 class TestTheMeterDoesNotClaimToHear(unittest.TestCase):

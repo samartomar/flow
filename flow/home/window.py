@@ -26,10 +26,6 @@ from pathlib import Path
 #: removes it with everything else Flow wrote.
 PROFILE_DIR = Path.home() / ".flow" / "home"
 
-#: The page's `<title>`, which is what Edge puts on the window — and so what `focus`
-#: looks for.
-TITLE = "Flow"
-
 #: The first size the window opens at. Edge remembers where somebody moved it.
 SIZE = (1200, 800)
 
@@ -173,10 +169,10 @@ def edge_args(edge: str, url: str, profile: Path | None = None) -> list[str]:
     ]
 
 
-def launch(url: str) -> str:
+def launch(url: str, *, app_url: str | None = None) -> str:
     """Open `url` as a Flow Home window: `ISOLATED` when a Chromium browser was started
     with Home's own profile, `SHARED` when only the default browser could take it, and
-    "" when nothing opened at all."""
+    "" when nothing opened at all. Only the isolated window gets `app_url`."""
     browser = find_browser()
     if browser is not None:
         name, path = browser
@@ -189,7 +185,7 @@ def launch(url: str) -> str:
                 # inherit it: its own process group, and no console window of its own.
                 flags = (subprocess.CREATE_NEW_PROCESS_GROUP
                          | getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            subprocess.Popen(edge_args(path, url, profile), close_fds=True,
+            subprocess.Popen(edge_args(path, app_url or url, profile), close_fds=True,
                              creationflags=flags, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return ISOLATED
@@ -203,16 +199,10 @@ def launch(url: str) -> str:
         return ""
 
 
-def focus() -> bool:
-    """Bring an open Flow Home window to the front. True if one was found.
-
-    Windows only: a top-level window of Chromium's class with exactly the page's title.
-    Restored first if it was minimised. Windows may still refuse the foreground to a
-    process the user did not just click — the window then flashes in the taskbar, which
-    is the OS's own answer to "somebody wants your attention".
-    """
+def _home_windows(expected_title: str) -> list[int]:
+    """Find this server's app windows by exact caption. Browser tabs have a suffix."""
     if sys.platform != "win32":
-        return False
+        return []
     import ctypes
     from ctypes import wintypes
 
@@ -229,16 +219,49 @@ def focus() -> bool:
             return True
         title = ctypes.create_unicode_buffer(128)
         user32.GetWindowTextW(hwnd, title, 128)
-        if title.value == TITLE:
+        if title.value == expected_title:
             found.append(hwnd)
-            return False
         return True
 
     user32.EnumWindows(proc(visit), 0)
+    return found
+
+
+def focus(title: str) -> bool:
+    """Bring an open Flow Home window to the front. True if one was found.
+
+    Restored first if it was minimised. Windows may still refuse the foreground to a
+    process the user did not just click — the window then flashes in the taskbar, which
+    is the OS's own answer to "somebody wants your attention".
+    """
+    found = _home_windows(title)
     if not found:
         return False
+    import ctypes
+
+    user32 = ctypes.windll.user32
     hwnd = found[0]
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, 9)  # SW_RESTORE
     user32.SetForegroundWindow(hwnd)
     return True
+
+
+def close_all(title: str) -> int:
+    """Post a close to each app window for this server. Return the number matched.
+
+    Called when Flow quits (owner's report, 2026-11-24: "Flow close but Open flow window
+    remains open"). The window is a browser process Flow started and let go of, so it
+    does not end with Flow; left open it could only say that Flow had quit. `WM_CLOSE`
+    is posted, not sent, so a busy browser cannot hold Flow's exit, and it is the
+    graceful close: the browser still saves where the window was.
+    """
+    found = _home_windows(title)
+    if not found:
+        return 0
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    for hwnd in found:
+        user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+    return len(found)

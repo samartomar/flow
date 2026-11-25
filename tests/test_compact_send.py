@@ -319,6 +319,17 @@ class TestABrokenFrameStillRepaints(unittest.TestCase):
         self.assertTrue(any(fill == uc.SHELL for _c, fill, _o in p.canvas.polys))
         p.after.assert_called_once_with(30, p._tick)
 
+    def test_a_frame_that_raises_is_traced_once_per_kind(self):
+        # A frame that raises before `session.tick()` reads no microphone, and the
+        # console that printed it is usually gone by the time anyone asks (2026-11-24).
+        p = self.broken()
+        lines = []
+        p.trace = lambda kind, **fields: lines.append((kind, fields))
+        with mock.patch.object(uc.traceback, "print_exc"):
+            for _ in range(5):
+                p._tick()
+        self.assertEqual(lines, [("fault", {"reason": "RuntimeError"})])
+
     def test_a_draw_that_also_raises_leaves_the_clock_running(self):
         p = self.broken()
         p._draw = mock.Mock(side_effect=RuntimeError("and the painter, too"))

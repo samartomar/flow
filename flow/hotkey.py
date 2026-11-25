@@ -232,7 +232,9 @@ def kernel_thread_id() -> int:
 VK_BACKSLASH, VK_SEMICOLON = 0xDC, 0xBA
 VK_M = 0x4D  # P9 mode toggle
 VK_Q = 0x51  # quit
+VK_C = 0x43  # rewrite, when X is taken
 VK_V = 0x56  # paste last, when Z is taken
+VK_X = 0x58  # rewrite what was just said
 VK_Z = 0x5A  # paste last
 
 #: Ordered alternatives per action. ctrl+alt+space is first because it is the most
@@ -282,12 +284,23 @@ DEFAULT_BINDINGS: dict[str, list[tuple[int, int]]] = {
         (MOD_ALT | MOD_SHIFT, VK_Z),
         (MOD_ALT | MOD_SHIFT, VK_V),
     ],
+    # Have the agent CLI write what was just dictated properly, for the window it is
+    # in, and put it where the words are: "polish that", pressed instead of said
+    # (decisions.md 2026-11-22, "The pill is an indicator"). Every tool Flow was
+    # compared against that day has a key for this, and a person in a meeting or an
+    # open office will not say a command out loud. Beside Paste last on the keyboard
+    # and in its family for its reasons: no Ctrl, so no AltGr layout can collide. C
+    # behind it, for the machine where something else owns X.
+    "rewrite": [
+        (MOD_ALT | MOD_SHIFT, VK_X),
+        (MOD_ALT | MOD_SHIFT, VK_C),
+    ],
 }
 
 
 # -- rebinding, by hand, in the file ----------------------------------------
 #
-# The table above is six opinions, and the standing answer to "let me change them" has
+# The table above is seven opinions, and the standing answer to "let me change them" has
 # been a settings dialog, which this project does not build. So the answer is the file
 # somebody already owns: an optional `hotkeys` object in `~/.flow/profile.json`, read
 # once at launch. No new surface, no new dependency, and nothing to discover in a menu.
@@ -701,7 +714,10 @@ CHORD_IGNORED_LINE = "chord   in profile.json ignored: {combo} - {reason}"
 #: action names are the talk chord's with "ask" in front, so the surfaces can tell
 #: which hand is down: `ask` starts a hold that always asks, `ask-end` sends the
 #: question, `ask-break` is Windows meaning something else.
-ASK_ACTIONS = {"action": "ask", "end_action": "ask-end", "break_action": "ask-break"}
+#: `toggle_action` is empty: a tap of Ask's chord does nothing (decisions.md 2026-11-24).
+#: Hands-free belongs to the talk chord alone, and only dictates.
+ASK_ACTIONS = {"action": "ask", "end_action": "ask-end", "break_action": "ask-break",
+               "toggle_action": ""}
 ASK_CHORD_LINE = "chord   ask      {keys}  (hold to ask, release to send the question)"
 ASK_CHORD_IGNORED_LINE = "chord   ask_chord in profile.json ignored: {combo} - {reason}"
 ASK_CHORD_UNAVAILABLE = ("chord   ask unavailable (keyboard hook refused); "
@@ -879,7 +895,11 @@ class Chord:
         #: the two agree. What it costs is one attribute per chord and one dict copy per
         #: key event on the input path, which is why `_sync` writes only the three
         #: fields that changed rather than re-deriving them.
-        self._hold = Hold(self.mods, gesture=self.gesture, on_latch=_tap_enabled)
+        #: A chord with no `toggle_action` has no tap: Ask's chord (decisions.md
+        #: 2026-11-24), whose quick tap used to switch hands-free on *and* turn the pill
+        #: to Ask, so a hand that brushed it found the microphone open with nothing said.
+        self._hold = Hold(self.mods, gesture=self.gesture,
+                          on_latch=_tap_enabled if self.toggle_action else None)
         #: **Where the machine's verdict goes, when something is listening.** A callable
         #: taking `Diag.write`'s shape, or None. Set from `__main__` because this object
         #: is built before the session is, and the trace is a property of the run rather
@@ -892,6 +912,9 @@ class Chord:
         #: question a stuck gesture actually needs answered — *did the hook see two taps,
         #: and what did it decide* — is answerable without one.
         self.trace = None
+        #: The state the last chord line recorded, so a repeat that changed nothing is
+        #: not written again (see `_on_event`).
+        self._traced: tuple | None = None
         #: Chords fed by *this* chord's hook rather than one of their own — Ask's
         #: ctrl+alt+win riding the talk chord's ctrl+win. One hook on the input path of
         #: every keystroke is the cost R16 was narrowed to accept; two would be twice the
@@ -905,6 +928,15 @@ class Chord:
         #: only safe while nobody has typed there since (`inject.INPUT_MARK` is how
         #: Flow's own keystrokes are told apart).
         self.touched = False
+        #: True while a shortcut of Flow's own is being held down, as far as the surface
+        #: has said (`CompactPill._rewrite_last`). `RegisterHotKey` keeps that key - no
+        #: window receives it, however long it repeats - so while this is set a key
+        #: going down is not `touched`. The first key to come *up* clears it, whichever
+        #: key that is: this hook still compares a key against the modifiers and
+        #: nothing else, so it cannot know the shortcut's own key and does not need to.
+        #: If its key came up, nothing more goes down; if a modifier did, what follows
+        #: is no longer the shortcut and counts again.
+        self.own_key = False
         self._hook = None
         self._tid = None
         self._ready = threading.Event()
@@ -948,9 +980,13 @@ class Chord:
             self._feed(wparam, vk)
             for rider in self.riders:
                 rider._feed(wparam, vk)
-            if ((wparam == WM_KEYDOWN or wparam == WM_SYSKEYDOWN)
-                    and vk not in _CHORD_VKS and info.dwExtraInfo != INPUT_MARK):
-                self.touched = True
+            if wparam == WM_KEYDOWN or wparam == WM_SYSKEYDOWN:
+                if (vk not in _CHORD_VKS and info.dwExtraInfo != INPUT_MARK
+                        and not self.own_key):
+                    self.touched = True
+            elif self.own_key:
+                # Something came up: Flow's own shortcut is not held any more.
+                self.own_key = False
         return user32.CallNextHookEx(self._hook, code, wparam, lparam)
 
     #: The effect words `hold.Hold` answers with, and what this chord puts for each.
@@ -1033,16 +1069,15 @@ class Chord:
             effects = ()
 
         self._sync()
-        #: The machine's verdict, on every event. Four fields and no key code: what the
-        #: machine decided, what state it is now in, and what went on the queue. That is
-        #: the whole chain for a stuck gesture, in one line per keystroke.
         if self.trace is not None and effects:
-            # "." and not "," because `Diag._TOKEN` refuses a comma: a value that does not
-            # qualify is written as `<refused>`, which would have turned the one field
-            # this trace exists for into the one field that never says anything.
-            self.trace("chord", effect=".".join(effects), armed=self._armed,
-                       other=self._other, talking=self._talking,
-                       last_tap=round(self._hold.last_tap_at, 3))
+            # Idle key repeats leave the chord unchanged and can fill the trace
+            # before the first holds of a run can be diagnosed.
+            last_tap = round(self._hold.last_tap_at, 3)
+            reading = (self._armed, self._other, self._talking, last_tap)
+            if tuple(effects) != (IDLE,) or reading != self._traced:
+                self._traced = reading
+                self.trace("chord", effect=".".join(effects), armed=self._armed,
+                           other=self._other, talking=self._talking, last_tap=last_tap)
         for effect in effects:
             if effect == START:
                 self.presses.put(self.warm_action)

@@ -693,15 +693,17 @@ class TestTheStatsFlagPrintsExactlyThis(Planted):
     def test_it_exits_before_a_model_a_microphone_or_a_window(self):
         # The whole point of short-circuiting right after `parse_args`. A stats flag that
         # loaded a 141 MB model to print three lines would not be run twice.
+        # The window watched is the one a launch builds: the compact pill, Flow's only
+        # one since 2026-11-23 (decisions.md, "One surface").
         import flow.asr
-        import flow.ui
+        import flow.ui_compact
 
         import flow.__main__ as mod
 
         self.an_ordinary_day()
         with mock.patch.object(mod, "Session") as session, \
                 mock.patch.object(flow.asr, "WhisperTranscriber") as asr, \
-                mock.patch.object(flow.ui, "Pill") as pill:
+                mock.patch.object(flow.ui_compact, "CompactPill") as pill:
             code, _lines = self.run_flag()
         self.assertEqual(code, 0)
         self.assertEqual((session.call_count, asr.call_count, pill.call_count), (0, 0, 0))
@@ -845,6 +847,43 @@ class TestTheHelpSheetCarriesTodaysWords(Planted):
 
         self.plant([self.said(self.at(9), 500_000, 900 * 60 * 1000)])
         self.assertLessEqual(len(self.sheet()[-2][1]), MAX_NOTE)
+
+
+class TestTodaysRowSaysWhatTheTraceHolds(Planted):
+    """`stats.today_note` itself: the sentence the class above finds on the sheet.
+
+    Ported in stage 2 of retiring the Classic pill (decisions.md 2026-11-23, "One
+    surface"). The class above reaches the note only through `Pill._open_commands`, and
+    where the row sits on that sheet goes with the class; what the row says is
+    `stats.py`'s, and these are the same five cases asked of it directly.
+    """
+
+    def note(self):
+        return stats.today_note(self.trace, self.now)
+
+    def test_an_ordinary_day_is_one_sentence(self):
+        self.plant([self.said(self.at(9), 1_240, 9 * 60 * 1000)])
+        self.assertEqual(
+            self.note(),
+            "Dictated today: 1,240 words - about 31 minutes of typing at 40 wpm")
+
+    def test_it_is_absent_on_a_day_with_nothing_on_it(self):
+        self.plant([{"t": self.at(9), "kind": "state"}])
+        self.assertIsNone(self.note())
+
+    def test_and_absent_when_there_is_no_trace_to_read_at_all(self):
+        self.assertIsNone(self.note())
+
+    def test_it_says_since_when_the_trace_cannot_see_the_whole_day(self):
+        self.plant([{"t": self.at(9.25), "kind": "state"}], self.dir / "diag.jsonl.1")
+        self.plant([self.said(self.at(10), 320, 120_000)])
+        self.assertIn("Dictated since 09:15: 320 words", self.note())
+
+    def test_and_it_fits_the_row_budget_at_a_years_worth_of_dictation(self):
+        from flow.help import MAX_NOTE
+
+        self.plant([self.said(self.at(9), 500_000, 900 * 60 * 1000)])
+        self.assertLessEqual(len(self.note()), MAX_NOTE)
 
 
 if __name__ == "__main__":

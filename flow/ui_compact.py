@@ -114,9 +114,11 @@ from .ui import (
     toplevel_hwnd,
     window_alive,
     window_pid,
+    window_title,
 )
 from .ui import PANEL_BOTTOM_OFFSET, bottom_centre
 from .ui import RING as SEAM
+from . import kinds
 
 # The same five files `ui._load_fonts` registers, handed to GDI+ as well.
 # `AddFontResourceExW(FR_PRIVATE)` is a GDI registration, and GDI+ keeps its
@@ -203,6 +205,17 @@ COPIED_ENTER_TEXT = "copied — press Ctrl+V, then Enter"
 #: Air either side of a notice's words. The strip is as wide as it needs
 #: to be and never narrower than the pill.
 NOTICE_PAD = 14
+#: The colour of the strip's words. `MUTED`, where it was `DIM` until 2026-11-22.
+#:
+#: `DIM` on the strip's fill is **3.16:1**, measured - under the 4.5:1 that 10 px
+#: text needs to be read by somebody who was not already looking at it. That was a
+#: fair trade while the strip said "copied" to a person who had just pressed the
+#: key. It now carries why a paste was refused and which CLI is being passed over,
+#: to a person looking at another window, and a sentence that cannot be read is the
+#: wordless pill again with extra steps. `MUTED` is 5.97:1 and is still the resting
+#: grey: the rule the strip was drawn under - quiet, and never an error colour -
+#: is about hue, and holds.
+NOTICE_TEXT = MUTED
 
 #: The notes the strip says out loud, matched on their opening words.
 #:
@@ -225,7 +238,102 @@ NOTICE_PAD = 14
 #: draft-shaped notes have the panel. A 400 px sentence under the pill on
 #: every tap is noise, and noise is how the strip that matters gets ignored.
 SAID_NOTES = ("nothing to", "still ", "only the last", "discarded",
-              "stopped after")
+              "stopped after", "skipping ", "rewritten",
+              # decisions.md 2026-11-24: a piece ended by "done", and a style chosen
+              # from the menu, are said where the choice was made.
+              "done - ", "Refine writes ", "Ask answers ")
+
+#: A hold this long that heard nothing says so when it ends. Shorter is a tap, or a hand
+#: that changed its mind, and silence is the right answer to those. Longer is somebody
+#: who spoke - and until 2026-11-23 a microphone that was muted, turned down or simply
+#: not the one in use answered them with nothing at all, which from the chair is
+#: indistinguishable from an app that is not running.
+HEARD_NOTHING_SEC = 0.7
+
+#: What that hold is told. It names the one thing worth checking and where.
+HEARD_NOTHING = "heard nothing - if you spoke, check the microphone in Flow Home"
+
+#: And a hold that heard *something* the decoder made no words of, where the session
+#: has not already said why.
+NO_WORDS = "did not catch any words - hold and say it again"
+
+#: How much of what is being heard the strip shows while the keys are down: the tail,
+#: because the newest words are the ones somebody is checking.
+HEARD_TAIL = 64
+
+#: The strip while hands-free is on and nothing is being heard (decisions.md 2026-11-24).
+#: It names what a pause does, because the pill shows no other sign that the microphone
+#: is open and what will happen to the words.
+HANDSFREE_TEXT = "hands-free - each pause pastes"
+HANDSFREE_COPY_TEXT = "hands-free - each pause copies"
+
+#: Hands-free turns itself off after this long with nothing heard, and says so.
+HANDSFREE_IDLE_SEC = 120.0
+HANDSFREE_IDLE_TEXT = "hands-free off - two minutes of silence"
+
+#: A frame this late is written to the trace (`stall`). Frames are 30 ms apart; a
+#: second is a loop that was not running - a native menu left open, a call that
+#: blocked - and while it is not running the keys do nothing and Flow Home's buttons
+#: do nothing, with nothing on screen to say so. The record is what is left behind.
+STALL_SEC = 1.0
+
+#: **Two things that paragraph ruled out are said after all, and each on evidence
+#: (decisions.md, 2026-11-22).**
+#:
+#: *A chosen mode says its name, once.* "The glyph's own hue, said a second time" was
+#: true while a mode was one thing. Refine now writes a prompt, an email, a chat message
+#: or tidied text depending on the window in front (`flow/kinds.py`), and no hue says
+#: which - the 2026-09-04 decision's own reopen bar, a sixth meaning that needs "a
+#: different channel, not a sixth hue". And the hue was never read in the first place:
+#: on the owner's own profile, after 731 dictated words, `converse_seen` was still false
+#: and not one Refine had run. So a tap, a menu choice and the mode key each put one
+#: line on the strip - the mode's name and what the next hold will do (`_mode_line`).
+#: The session's own mode notes stay unsaid; they are longer, and they are about egress,
+#: which the panel's strip already carries. A mode the *keys* change for one hold
+#: (`_to_side`) says nothing: that is the hand choosing, not the mode being explored.
+#:
+#: *A failure says why.* An `error` used to be a red flash and nothing else unless a
+#: panel happened to be open, so "model failed to load: ..." was a colour, and a paste
+#: that was refused was a colour, and the five reports that opened the 2026-09-04
+#: decision - "I cannot explain the failure to you" - were this, one level down. The
+#: flash stays; the sentence goes under it.
+#:
+#: How long a failure stays up (~6 s): twice an ordinary line, because it is read by
+#: somebody who was looking at another window when it happened.
+ERROR_FRAMES = 200
+
+#: The most of a sentence the strip will show. The strip sizes to its sentence, and a
+#: CLI's own last line can be a paragraph; past this the window would be wider than the
+#: band it sits under, and the end of an error is the part worth least. Sized so that
+#: the longest sentence Flow itself wrote for the strip - the 95 characters of "stopped
+#: after 5 min ... press Send when you want it" - is never the one that gets cut.
+#: How long a key the hook saw go down is doubted before a Type paste stops being
+#: changeable over it. The rewrite shortcut's own key is such a key - the hook does not
+#: know which key it was - and the shortcut is reported on another thread, a moment
+#: later. A fifth of a second is many times that moment and far less than the time it
+#: takes to type a letter and then ask for anything.
+TOUCH_GRACE_SEC = 0.2
+
+SAY_MAX = 112
+
+#: What a tap says when there is nothing to cycle to. The design's rule for a machine
+#: with no agent CLI is "grey, not red: no flash, no error" - and it had become "no
+#: anything", which on a pill is indistinguishable from a tap that was not registered.
+#: Still grey, still no flash; one line saying what the other two modes need.
+NO_CLI_LINE = "Refine and Ask need claude or codex - right-click, Open Flow"
+
+
+def _reason(error: str) -> str:
+    """The reason inside "refine failed (reason) - draft unchanged", for a sentence
+    that has already said what happened to the words."""
+    start, end = error.find("("), error.rfind(")")
+    return error[start + 1:end] if 0 <= start < end else error
+
+
+def _clip(text: str, limit: int = SAY_MAX) -> str:
+    """`text` on one line and inside `limit`, for the strip."""
+    line = " ".join((text or "").split())
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "\u2026"
 
 #: The mic glyph's frame in the window, from gen.py's `.pill`: a 14×18
 #: viewBox after the 12 px left padding, centred in the 34 px height. The
@@ -384,6 +492,16 @@ def _edit_rect(footer_y: int) -> tuple:
             PANEL_W - 74 - CHIP_H - 8, footer_y + CHIP_H)
 
 
+#: The answer card's Insert chip (decisions.md 2026-11-24), right of Copy.
+INSERT_LABEL = "Insert"
+INSERT_W = 62
+
+
+def _insert_rect(footer_y: int) -> tuple:
+    """Where Insert sits: right of Copy, before the hold hint."""
+    return (80, footer_y, 80 + INSERT_W, footer_y + CHIP_H)
+
+
 def _continue_rect(footer_y: int) -> tuple:
     """Where Continue in Flow sits in a footer whose chips start at `footer_y`."""
     return (PANEL_W - 16 - CONTINUE_W, footer_y, PANEL_W - 16, footer_y + CHIP_H)
@@ -423,7 +541,11 @@ PANEL_SPEC = {
         # came back.
         "heard_tag": "heard",
         "heard_fill": PLACEHOLDER,
-        "result_tag": "refined for this repo",
+        # What the tag says when nothing else knows better. The words drawn are
+        # `_result_tag`'s: the kind the session wrote the result as. It used to
+        # read "refined for this repo" over every result, including an email and
+        # including one written with no workspace set at all.
+        "result_tag": kinds.KINDS[kinds.PROMPT].tag,
         "result_accent": REFINE_GOLD,
         "hint": "hold the mic to say more",
         "send": True,
@@ -437,10 +559,15 @@ PANEL_SPEC = {
         "heard_fill": TEXT,
         "result_tag": None,
         "result_accent": CARD_ACCENT,
-        "hint": "hold the mic to reply",
+        # Shorter than Refine's: Insert sits between Copy and the hint now.
+        "hint": "hold to reply",
         "send": False,
         # The conversation's way to the page: every turn, typed follow-ups, notes.
         "continue": True,
+        # The answer into the window you were working in, or the pinned one
+        # (decisions.md 2026-11-24): Copy, click and Ctrl+V was three steps for the
+        # thing most often done with an answer.
+        "insert": True,
     },
 }
 
@@ -753,6 +880,8 @@ class CompactPill(tk.Tk):
     #: so the double tap stopped hands-free instead of starting it. Class-level for
     #: `lite`'s reason: a fixture built with `__new__` must not recurse into `self.tk`.
     _handsfree = False
+    #: When hands-free last heard something, for its two-minute way out.
+    _handsfree_heard_at = 0.0
     hotkeys = None
     on_send = None
     settings_path = None
@@ -881,6 +1010,11 @@ class CompactPill(tk.Tk):
     #: `_paste_last`. Class-level so the frame's pump finds a real None on a
     #: `__new__`-built fixture instead of recursing into `self.tk`.
     _paste_last_wait = None
+
+    #: When the hook's "a key went down" was first seen and not yet believed
+    #: (`_typed_since`, `time.perf_counter`), or None. Class-level for the reason
+    #: `_paste_last_wait` is: a fixture that never ran `__init__` finds a real None.
+    _touched_at = None
     #: Where the talk keys go back to (decisions.md 2026-09-23, "Ask's own hold"):
     #: the dictation mode the Ask keys took the pill away from — Type or Refine —
     #: and Type when the pill was tapped to Ask by hand. The hand picks the side;
@@ -890,6 +1024,28 @@ class CompactPill(tk.Tk):
     #: end, and an Ask hold that was refused (no agent CLI) must not end a
     #: hands-free utterance the toggle started.
     _ask_hold = False
+    #: Whether Refine and Ask raise the panel while you talk, as they did until
+    #: 2026-11-22 (`Profile.panel_flows`, and decisions.md of that date, "The pill is an
+    #: indicator"). False is the product: a Refine lands where you were typing, an
+    #: answer shows on a card that needs nothing, and a tap does not change the mode.
+    #: `__init__` reads it from the profile; a fixture built with `__new__` gets this.
+    panel_flows = False
+    #: A Refine that will land when it comes back: the window it was said into and the
+    #: words as said, which are what goes in if the CLI does not answer. None when
+    #: nothing is on its way.
+    _landing = None
+    #: Whether the strip is carrying the waiting line, so it can be let go of.
+    _waiting_said = False
+    #: The newest words heard in the hold that is down, for the strip. "" between holds.
+    _hold_words = ""
+    #: The listening line as it was last put under the pill, so what a hold ended in
+    #: can be said over it: that line is the hold talking, not an answer to it.
+    _listening_said = ""
+    #: When the last frame ran (`time.perf_counter`), for the `stall` record.
+    _frame_at = None
+    #: The kinds of frame failure already written to the trace (`fault`), so one that
+    #: repeats every 30 ms is one line. Replaced, never mutated: a class default.
+    _faults_traced: frozenset = frozenset()
     #: When a talk-keys hold began on Ask, while it waits `SIDE_SETTLE_SEC` to
     #: leave it — or None. See `_settle_side`.
     _side_since = None
@@ -996,6 +1152,16 @@ class CompactPill(tk.Tk):
         super().__init__()
         set_icon(self)
         self.session = session
+        # The session asks this pill for the front window's title when Refine is
+        # about to write (`Session.kind_here`); see `_front_title`.
+        session.title_probe = self._front_title
+        self.panel_flows = getattr(getattr(session, "profile", None),
+                                   "panel_flows", False) is True
+        # A second hold may say more only where a result stays up to say more about:
+        # the panel flow (`Session.refine_says_more`). Landed text is changed the way
+        # any paste is, by saying so.
+        session.refine_says_more = self.panel_flows
+        session.refine_lands = not self.panel_flows
         self.on_send = on_send
         self.hotkeys = hotkeys
         self.lite = lite
@@ -1314,9 +1480,20 @@ class CompactPill(tk.Tk):
             # bytecode next runs — here. Taken as the quit it was, as ui.py
             # does, because the alternative is a microphone left open.
             self.quit_app()
-        except Exception:
+        except Exception as exc:
             self._flash = FLASH_FRAMES
             traceback.print_exc()
+            # Into the trace too, once per kind, by class name and never the message: a
+            # frame that raises before `session.tick()` reads no microphone at all, and
+            # the console it printed to is usually closed by the time anyone asks why
+            # the first holds heard nothing (2026-11-24).
+            kind = type(exc).__name__
+            if self.trace is not None and kind not in self._faults_traced:
+                self._faults_traced = self._faults_traced | {kind}
+                try:
+                    self.trace("fault", reason=kind)
+                except Exception:
+                    pass
             # And repaint anyway, because the line that raised was in front of
             # the one that draws: `_draw()` is the last thing `_frame` does, so
             # anything raising in a pump aborts the frame *before* the repaint.
@@ -1343,6 +1520,13 @@ class CompactPill(tk.Tk):
 
     def _frame(self) -> None:
         """One pull of the session: tick or collect, drain, ease, draw."""
+        now = time.perf_counter()
+        last, self._frame_at = self._frame_at, now
+        if last is not None and now - last >= STALL_SEC and self.trace is not None:
+            # This loop did not run for that long. Everything Flow does goes through
+            # it, so the gap is the reason nothing answered - written down, because
+            # there was nothing on screen to say it and nobody can see it afterwards.
+            self.trace("stall", ms=round((now - last) * 1000))
         # Hotkeys arrive on their own thread; Tk is only ever touched from
         # this one.
         if not self._drain_hotkeys():
@@ -1368,11 +1552,21 @@ class CompactPill(tk.Tk):
         # waiting for arrive as a `draft` event, and `_pump_send` reads the
         # draft the event has just settled.
         self._pump_send()
+        self._pump_handsfree()
         self._pump_press()
         self._pump_paste_last()
         self._pump_retype()
-        if self._panel_open and self._outside_click_now():
-            self._close_panel()
+        if self.panel_flows:
+            if self._panel_open and self._outside_click_now():
+                self._close_panel()
+        else:
+            # An answer card is not closed by a click somewhere else: going back to
+            # your own work is exactly when you still want to glance at it, and a
+            # surface that holds text and vanishes on a click-away is a complaint the
+            # field has already had and walked back. It stays until its close mark,
+            # the cancel key, or the next time you talk.
+            self._pump_listening()
+            self._pump_waiting()
         if self._flash:
             self._flash -= 1
         if self._recover:
@@ -1509,6 +1703,8 @@ class CompactPill(tk.Tk):
                 self._cycle_mode()
             elif name == "paste_last":
                 self._paste_last()
+            elif name == "rewrite":
+                self._rewrite_last()
             elif name == "quit":
                 self.quit_app()
                 return False
@@ -1614,9 +1810,46 @@ class CompactPill(tk.Tk):
         menu's radios, which change the mode just as completely, did not.
         """
         if self._cli_offered():
-            self._choose_mode(None)
+            self._pick_mode(None)
         elif self.session.mode != DICTATE:
-            self._choose_mode(DICTATE)
+            self._pick_mode(DICTATE)
+        else:
+            self._say(NO_CLI_LINE)
+
+    def _pick_mode(self, to: str | None) -> None:
+        """A mode somebody chose - a tap, the mode key, a menu radio - and one
+        line saying what they got. See `ERROR_FRAMES`' neighbour above for why
+        this is said and `_to_side`'s switches are not."""
+        self._choose_mode(to)
+        self._say(self._mode_line())
+
+    def _mode_line(self) -> str:
+        """The mode's name and what the next hold will do, for the strip.
+
+        Refine's half is the session's own answer to "what would you write
+        here" (`Session.kind_here`), so this sentence and the rewrite cannot
+        disagree. Asked defensively: a fixture's session may not have it.
+        """
+        session = self.session
+        mode = getattr(session, "mode", DICTATE)
+        if mode == REFINE:
+            here = getattr(session, "kind_here", None)
+            kind = here() if callable(here) else kinds.PROMPT
+            app = getattr(session, "target_app", "")
+            does = kinds.describe(kind, app if isinstance(app, str) else "")
+            if self.panel_flows:
+                return f"Refine - {does}, then you press Send"
+            return (f"Refine - {does} and copies it" if self.lite
+                    else f"Refine - {does} and pastes it")
+        if mode == CONVERSE:
+            who = getattr(session, "provider", "")
+            ws = getattr(session, "workspace", "") or ""
+            leaf = Path(ws).name if isinstance(ws, str) and ws else ""
+            who = who if isinstance(who, str) and who else "your agent CLI"
+            return (f"Ask - {who} answers, about {leaf}" if leaf
+                    else f"Ask - {who} answers")
+        return ("Type - copies what you say" if self.lite
+                else "Type - pastes what you say")
 
     def _choose_mode(self, to: str | None) -> None:
         """Change mode, from whichever gesture asked. `None` is the cycle.
@@ -1729,6 +1962,11 @@ class CompactPill(tk.Tk):
                 # of them, pasting half an utterance and stranding the rest.
                 self._last_draft = ev.text
             elif ev.kind == "partial":
+                if not self.panel_flows and (self._press_talking or self._handsfree):
+                    # What is being heard, for the strip under the pill: the only
+                    # proof on screen that the words are arriving.
+                    self._hold_words = ev.text or ""
+                    self._handsfree_heard_at = time.monotonic()
                 # Not while a talk-keys hold waits to leave Ask: those words
                 # are dictation, and Ask's heard block is not theirs.
                 if self._panel_open and self._side_since is None:
@@ -1776,6 +2014,11 @@ class CompactPill(tk.Tk):
                     # follow-up, which is a fact arriving and being taken away.
                     self._hold_fresh = False
                     self._panel_failed = False
+                    if not self.panel_flows and self._landing is not None:
+                        # A Refine: it goes where the words were said, not onto
+                        # a panel.
+                        self._land(ev.text)
+                        continue
                     self._panel_result = ev.text
                     # Never silent (P2): if the panel was closed while the CLI
                     # was working, the answer reopens it rather than landing
@@ -1786,7 +2029,12 @@ class CompactPill(tk.Tk):
                 self._close_panel()
             elif ev.kind == "error":
                 self._flash = FLASH_FRAMES
-                if (self._panel_open
+                if (not self.panel_flows and self._landing is not None
+                        and ev.text.startswith("refine failed")):
+                    # The CLI did not answer. What was said goes in as it was said:
+                    # words are never the price of a rewrite that did not happen.
+                    self._land("", failed=ev.text)
+                elif (self._panel_open
                         and ev.text.startswith(("refine failed", "ask failed"))):
                     # The panel opens holding the raw dictation; the CLI's own
                     # last line is the message, not a generic failure
@@ -1797,6 +2045,11 @@ class CompactPill(tk.Tk):
                     # surface the artboards draw.
                     self._panel_failed = True
                     self._panel_result = ev.text
+                else:
+                    # Every other failure, and the same two with no panel to
+                    # hold them. A flash with no sentence is a colour nobody can
+                    # report (`ERROR_FRAMES`).
+                    self._say(_clip(ev.text), ERROR_FRAMES)
             elif ev.kind == "disarm":
                 # **Only a *release* can be stale, and only a release is guarded.**
                 #
@@ -1815,7 +2068,32 @@ class CompactPill(tk.Tk):
                 # dead microphone keep a green ring, which is the one failure this
                 # whole branch exists to prevent. `test_a_disarm_that_is_not_a_
                 # release_means_the_device_died` is what caught that.
-                if ev.text in ("push-to-talk", "lent"):
+                #
+                # **And a hold that is down now is not that release either**
+                # (2026-11-23). Speech is not the only proof a capture is running:
+                # for the first half second of a hold nobody has spoken yet, so the
+                # state is still IDLE and the test above let a stale release through.
+                # It arrived every time the Ask keys were pressed in the order they
+                # sit - Ctrl, Win, Alt - on a pill already on Ask: Ctrl+Win forms for
+                # a moment, Alt breaks it, and the break's release and the new hold
+                # are read off the queue together. The hold started, this event took
+                # its `armed` away a frame later, and the microphone was never read
+                # again: a question asked into a pill that showed nothing, heard
+                # nothing and said nothing. From Type it happened to work, because
+                # changing sides drains the events first (`_to_side`).
+                #
+                # **And the test is whether a capture is *wanted*, not whether speech
+                # is being heard.** The guard used to be "the session is LISTENING",
+                # which is true of any room louder than the gate. There the release's
+                # own event was taken for a stale one, `armed` stayed up, and the
+                # frame went on reading a microphone nobody was holding open - for as
+                # long as the stream lingered, with whatever the room said going into
+                # the draft and out with the next release. A hold that is down, or
+                # hands-free that is on, is what a later capture looks like.
+                if ev.text == "push-to-talk":
+                    if not (self._press_talking or self._handsfree):
+                        self.armed = False
+                elif ev.text == "lent":
                     if self.session.state is not State.LISTENING:
                         self.armed = False
                 else:
@@ -1859,11 +2137,16 @@ class CompactPill(tk.Tk):
                 # an `edit`), not now — until then it has not happened.
                 self._retype_wait = time.perf_counter()
                 self._quicken()
+                # A Refine that grew its piece (decisions.md 2026-11-24) answers with
+                # this, not a `reply`: the landing the release decided is spent, and
+                # left set it would put the next answer into the window.
+                self._landing = None
             elif ev.kind == "note" and ev.text.startswith(SAID_NOTES):
                 # The few notes no colour on this pill can carry — see
                 # `SAID_NOTES`, which is also the list of what stays silent
-                # and why.
-                self._say(ev.text)
+                # and why. Clipped like a failure is: one of them now carries
+                # a CLI's own error sentence, and the strip sizes to its words.
+                self._say(_clip(ev.text))
             elif ev.kind == "kept":
                 # The notes loop (one-surface.md step 4). A word, or the file's name
                 # when the notes were written to one — the user asked for a file and
@@ -1907,6 +2190,11 @@ class CompactPill(tk.Tk):
             self._send_pending = self._ask_pending = False
             self._send_since = None
             if not self.session.draft.text.strip():
+                if not self.panel_flows and self._strip_is_free():
+                    # Sound came in and no words came out, and the session has not
+                    # said why (a rejected utterance says its own reason). Never
+                    # nothing: the hand is waiting to see what that hold did.
+                    self._say(NO_WORDS)
                 return
             if paste:
                 self._send()
@@ -1944,6 +2232,28 @@ class CompactPill(tk.Tk):
         self._send_since = None
         self._hold_fresh = False
         self._panel_failed = False
+        if not self.panel_flows:
+            # Decided now, at the release: which window a Refine was said into, and
+            # the words as said. Both are needed when it comes back - the first to know
+            # whether the user is still there, the second to put in if nothing came.
+            held = self.session.draft.text
+            if self.session.mode == REFINE and isinstance(held, str) and not held.strip():
+                # The hold was a change to what just landed - "make it shorter",
+                # "scratch that" - and the session has already taken it
+                # (`Session._route_paste`), or it was nothing at all. Either way there
+                # is no dictation here to rewrite, and asking would refuse out loud on
+                # top of the change's own line.
+                self._landing = None
+                return
+            said = self.session.draft.text or self._last_draft
+            self._panel_mode = self.session.mode
+            self._landing = ((self.paste_target, said)
+                             if self.session.mode == REFINE else None)
+            self._panel_heard = said
+            self._panel_heard_final = True
+            self._panel_result = ""
+            self.session.send()
+            return
         # The draft at *fire* time, not the last `draft` event's text: a hold
         # that queued two finals has two of those events, and the second
         # carries only its own half. `session.send()` is about to hand the CLI
@@ -1954,6 +2264,22 @@ class CompactPill(tk.Tk):
         self._panel_heard_final = True
         self._panel_result = ""
         self.session.send()
+        self._show_heard()
+
+    def _show_heard(self) -> None:
+        """After a Refine has been sent, put what the CLI was handed under "heard".
+
+        On a second hold that is everything heard so far, and on a spoken "make it an
+        email" it is the first hold's words - not the eight words of this release.
+        The heard block is the user's only evidence of what a rewrite was made from.
+        Shared by the release (`_ask`) and by a Send that is not one (`_send`): the
+        `send` key and the spoken trigger reach the same rewrite by another door.
+        """
+        if self._panel_mode != REFINE or getattr(self.session, "mode", None) != REFINE:
+            return
+        heard = getattr(self.session, "refine_heard", "")
+        if isinstance(heard, str) and heard.strip():
+            self._panel_heard = heard
 
     def _send(self, submit: bool = False) -> None:
         """Hand the draft over: the words paste, or the ring says they could not.
@@ -1980,11 +2306,22 @@ class CompactPill(tk.Tk):
         here needs to know which happened: an empty return delivers nothing,
         and the refusal notes say why when the answer is neither.
         """
+        if (not self.panel_flows and getattr(self.session, "mode", None) == REFINE
+                and (self.session.draft.text or "").strip()):
+            # Refine by the send key or "boom" takes the release's door, which is the
+            # one that decides where the result lands. Through `session.send()` alone
+            # there was no landing, and the result fell through to a card with Copy
+            # and nothing else - Refine "tells me but does not paste" (2026-11-24).
+            self._send_pending = False
+            self._ask()
+            return
         self._send_pending = self._ask_pending = False
         self._send_since = None
         text = self.session.send()
         if text:
             self._deliver(text, submit=submit, typed=True)
+        else:
+            self._show_heard()
 
     def _deliver(self, text: str, submit: bool = False, typed: bool = False) -> None:
         """The words' way out, shared by both sends: paste where the user
@@ -2016,7 +2353,7 @@ class CompactPill(tk.Tk):
                 # And a paste that continues the last one gets the space between
                 # them — decided now, not on the last frame: a key or a click in
                 # the 30 ms since means the caret may be somewhere else.
-                self._watch_paste_run()
+                self._watch_paste_run(now=True)
                 join = getattr(self.session, "join_paste", None)
                 joined = join(text, self.paste_target) if callable(join) else text
                 if isinstance(joined, str):
@@ -2056,6 +2393,8 @@ class CompactPill(tk.Tk):
                 extra["window"] = window
             if submitted:
                 extra["submitted"] = True
+            if self.pinned:
+                extra["pinned"] = True
             delivered(text, problem, copied, **extra)
 
     def _key_hook(self):
@@ -2079,15 +2418,69 @@ class CompactPill(tk.Tk):
         return not (x <= pt.x < x + self.dev(self._shell_w)
                     and y <= pt.y < y + self.dev(self._shell_h))
 
-    def _watch_paste_run(self) -> None:
+    def _rewrite_last(self) -> None:
+        """The rewrite shortcut (decisions.md 2026-11-22, "The pill is an
+        indicator"): what was just dictated, written properly for the window it
+        is in - "polish that" without saying it.
+
+        **Its own key is not typing.** The key that completes the shortcut went
+        down a moment ago, and the hook that watches for typing counted it: the
+        hook never learns which key was pressed, which is the promise the guide
+        makes about it, so it cannot tell this one from a letter. It is claimed
+        here instead. `RegisterHotKey` is what reported the press, and a key it
+        reports is a key the OS kept - no window received it. `_watch_paste_run`
+        waits `TOUCH_GRACE_SEC` before it believes a key, for exactly this.
+
+        And held, the key repeats. While the shortcut is still down the hook is
+        told so (`Chord.own_key`), and it stops counting until something comes
+        up. Set first and checked after, so a release between the two cannot
+        leave it set with no hand on the keyboard.
+        """
+        rewrite = getattr(self.session, "rewrite_last", None)
+        if not callable(rewrite):
+            return
+        hook = self._key_hook()
+        if hook is not None and getattr(self.session, "paste_run", None) is not None:
+            hook.touched = False
+            self._touched_at = None
+            hook.own_key = True
+            if not modifiers_held():
+                hook.own_key = False
+        rewrite()
+
+    def _typed_since(self, hook, now: bool) -> bool:
+        """Whether a key Flow did not send has gone down since the last paste, and
+        long enough ago to be believed (`TOUCH_GRACE_SEC`). `now` skips the wait:
+        a paste about to go in has to know this frame, not the next."""
+        if getattr(hook, "own_key", False) is True and not modifiers_held():
+            # Belt for `_rewrite_last`'s set-then-check: no modifier is down, so no
+            # shortcut is. A frame at most, and never while anything is held.
+            hook.own_key = False
+        if getattr(hook, "touched", True) is False:
+            self._touched_at = None
+            return False
+        if now:
+            return True
+        t = time.perf_counter()
+        if self._touched_at is None:
+            self._touched_at = t
+        return t - self._touched_at >= TOUCH_GRACE_SEC
+
+    def _watch_paste_run(self, now: bool = False) -> None:
         """End what a spoken correction could change, the moment Flow cannot know
         the words are still where it put them: a key typed that Flow did not
         send, a click anywhere but the pill, another window in front
         (decisions.md 2026-09-23, "Correcting a Type paste"). One boolean from
         the hook and a few reads of the mouse, and only while there is
-        something to watch."""
+        something to watch.
+
+        A key is believed `TOUCH_GRACE_SEC` after it is seen, not at once, so the
+        rewrite shortcut can say the key was its own (`_rewrite_last`). Nothing is
+        made on the strength of the wait: a change still reads the hook itself on
+        its way out (`_pump_retype`), and a paste asks with `now`."""
         run = getattr(self.session, "paste_run", None)
         if run is None:
+            self._touched_at = None
             return
         if self._pinned_away(run.window):
             # Pinned, the words went to a window you are not in, and nothing typed
@@ -2100,7 +2493,7 @@ class CompactPill(tk.Tk):
         hook = self._key_hook()
         if hook is None:
             why = "that paste can't be changed"
-        elif getattr(hook, "touched", True) is not False:
+        elif self._typed_since(hook, now):
             why = "you typed after it was pasted"
         elif self._clicked_off_pill():
             why = "you clicked after it was pasted"
@@ -2256,6 +2649,16 @@ class CompactPill(tk.Tk):
                 self.session.target_app = target.process
             self.paste_target = hwnd
 
+    def _front_title(self) -> str:
+        """The title of the window a paste would go to, read now.
+
+        The session's `title_probe`. `paste_target` and not the live foreground, for
+        the pin's reason: while a window is pinned the words go *there*, so that is the
+        window whose kind of writing matters, whatever is in front. Lite has no target
+        and `window_title` answers "" for it.
+        """
+        return window_title(self.paste_target)
+
     def _note_front(self) -> None:
         """While pinned, keep `_last_front`: the window you are in, which the
         target no longer follows. `_track_target`'s rules for it — never Flow's
@@ -2366,7 +2769,12 @@ class CompactPill(tk.Tk):
         # against: what is in there *now* was not said into this hold.
         self._draft_at_hold = self.session.draft.text
         self._recover = 0  # a hold ends the launch notice: seen, and moved on
-        if panel and self.session.mode in PANEL_SPEC:
+        self._hold_words = ""
+        if not self.panel_flows:
+            # Nothing rises while you talk. An answer card still up goes now: the pill
+            # is the pill again for as long as it is listening.
+            self._close_panel()
+        elif panel and self.session.mode in PANEL_SPEC:
             self._panel_mode = self.session.mode
             if not self._panel_open:
                 # Nothing is on screen to keep. The deferred clear above
@@ -2380,6 +2788,12 @@ class CompactPill(tk.Tk):
                 self._panel_heard_final = False
                 self._panel_result = ""
                 self._panel_failed = False
+                # And the session is told, because it cannot see a panel. A Refine
+                # result it still held would make this hold "say more" about words
+                # that are no longer on screen (`Session.end_refine`).
+                ended = getattr(self.session, "end_refine", None)
+                if callable(ended):
+                    ended()
             self._hold_fresh = True
             self._open_panel()
 
@@ -2418,13 +2832,39 @@ class CompactPill(tk.Tk):
         has nothing to show, so it goes back down — silence is a normal thing
         to do with a push-to-talk button.
         """
+        held = (time.perf_counter() - self._hold_since
+                if self._hold_since is not None else 0.0)
         self._hold_since = None
         self._press_talking = False
+        # Words the strip showed during the hold. A hold the session took as a command -
+        # "done", "scratch that", "make it shorter" - leaves the draft as it was, and
+        # without this it was told "heard nothing - check the microphone" (found driving
+        # the real app, 2026-11-24). Heard is heard, whatever became of the words.
+        heard = bool((self._hold_words or "").strip())
+        self._hold_words = ""
         pending = self.session.talk_end()
         draft = self.session.draft.text
         words = bool(pending or (draft.strip()
                                  and draft != self._draft_at_hold))
         self._draft_at_hold = draft
+        if self.trace is not None:
+            # One line per hold: how long, in which mode, and whether anything was
+            # heard. Durations and a category, never a word. A session where the
+            # keys "do nothing" used to leave the chord's own lines and nothing else.
+            mode = getattr(self.session, "mode", "")
+            # And what the microphone gave it, in numbers (`Session.hold_audio`): a
+            # "silence" with blocks=0 and one with a peak under the gate are different
+            # faults, and the trace could not tell them apart (2026-11-24).
+            audio = getattr(self.session, "hold_audio", None)
+            heard_audio = audio() if callable(audio) else {}
+            self.trace("hold", ms=round(held * 1000),
+                       mode=mode if isinstance(mode, str) else "",
+                       ok=words,
+                       reason="words" if words else "break" if not send else "silence",
+                       **(heard_audio if isinstance(heard_audio, dict) else {}))
+        if (send and not words and not heard and not self.panel_flows
+                and held >= HEARD_NOTHING_SEC and self._strip_is_free()):
+            self._say(HEARD_NOTHING, ERROR_FRAMES)
         if send and words:
             self._send_since = time.perf_counter()
             if self.session.mode == DICTATE:
@@ -2460,9 +2900,7 @@ class CompactPill(tk.Tk):
         on its way to becoming one must not be mistaken for one that already is.
         """
         if self._handsfree:
-            self._handsfree = False
-            self.armed = False
-            self.session.pause()
+            self._handsfree_off()
         else:
             try:
                 self.session.start()
@@ -2473,6 +2911,46 @@ class CompactPill(tk.Tk):
             self._mic_gone = False
             self._handsfree = True
             self.armed = True
+            self._hold_words = ""
+            self._handsfree_heard_at = time.monotonic()
+
+    def _handsfree_off(self, why: str = "") -> None:
+        """Hands-free ends: the microphone closes, and the strip says so when it was not
+        the user's own tap that ended it."""
+        self._handsfree = False
+        self.armed = False
+        self._hold_words = ""
+        self.session.pause()
+        if why:
+            self._say(why)
+
+    def _pump_handsfree(self) -> None:
+        """Hands-free only dictates (decisions.md 2026-11-24): each pause lands what was
+        said, whatever mode the pill is in, and two minutes of silence turns it off.
+
+        Before, a pause added the words to a draft that landed only on "boom", the send
+        key or a hold. The pill showed nothing of it, and the owner's report was the
+        honest reading: "looks engaged but does nothing". A hold that is down owns its
+        own words, and so does a release still waiting to send them.
+        """
+        if not self._handsfree:
+            return
+        now = time.monotonic()
+        if self._press_talking or self._send_pending or self._ask_pending:
+            self._handsfree_heard_at = now
+            return
+        session = self.session
+        held = getattr(getattr(session, "draft", None), "text", "")
+        if (isinstance(held, str) and held.strip() and not getattr(session, "busy", False)
+                and getattr(session, "state", None) is State.DRAFT):
+            text = session.send(dictate=True)
+            self._hold_words = ""
+            self._handsfree_heard_at = now
+            if text:
+                self._deliver(text, typed=True)
+            return
+        if now - self._handsfree_heard_at >= HANDSFREE_IDLE_SEC:
+            self._handsfree_off(HANDSFREE_IDLE_TEXT)
 
     def _on_press(self, e=None) -> None:
         """The button going down: remember when and where, decide nothing yet.
@@ -2586,7 +3064,39 @@ class CompactPill(tk.Tk):
             if self._on_pin():
                 self._toggle_pin()
             else:
-                self._cycle_mode()
+                self._tap()
+
+    def _tap(self) -> None:
+        """A tap on the pill, which is not the mode key (decisions.md 2026-11-22).
+
+        It cycled Type, Refine, Ask - so a click that missed the pin, or was meant to
+        start a drag, left the next dictation going to a cloud CLI instead of onto the
+        page, with a change of hue as the only sign. With keys to hold there is nothing
+        a tap needs to do, so it says what the keys are. Without them - Lite, or
+        `--no-hotkeys` - the pill is the only way to choose, and a tap still cycles.
+        The mode key and the menu choose a mode on purpose and are unchanged.
+        """
+        if self.panel_flows or not self._keys_line():
+            self._cycle_mode()
+        else:
+            self._say(self._keys_line())
+
+    def _keys_line(self) -> str:
+        """The keys there are to hold, as one line - "" when there are none."""
+        hotkeys = self.hotkeys
+
+        def keys(name: str) -> str:
+            chord = getattr(hotkeys, name, None) if hotkeys is not None else None
+            said = chord.describe() if chord is not None else ""
+            return said if isinstance(said, str) else ""
+
+        talk, ask = keys("chord"), keys("ask_chord")
+        if not talk:
+            return ""
+        line = f"hold {talk} to talk"
+        if ask and self._cli_offered():
+            line += f" - {ask} to ask"
+        return line + " - right-click for more"
 
     # -- the pin ---------------------------------------------------------------
 
@@ -2723,9 +3233,16 @@ class CompactPill(tk.Tk):
             kw = {} if mode == DICTATE or offered else {"state": "disabled"}
             m.add_radiobutton(
                 label=name, value=name, variable=self._mode_var,
-                command=lambda t=mode: self._choose_mode(t), **kw)
-        m.add_command(label="tap the pill to cycle", state="disabled")
+                command=lambda t=mode: self._pick_mode(t), **kw)
+        # What the three rows are for depends on whether a tap still chooses among
+        # them (`_tap`): with keys to hold it does not, and they are what holding the
+        # pill itself does.
+        m.add_command(label="tap the pill to cycle"
+                      if self.panel_flows or not self._keys_line()
+                      else "what holding the pill does", state="disabled")
         m.add_separator()
+        self._add_style_rows(m)
+        self._add_lens_rows(m)
         # Paste last (the canvas's Pill artboard, and Wispr Flow's, FluidVoice's
         # and VoiceInk's menus): the words it would paste, so the row says what
         # a click does. After a frame, not now — the menu is still handing the
@@ -2746,6 +3263,42 @@ class CompactPill(tk.Tk):
         m.add_command(label="Open Flow", command=self._open_home)
         m.add_command(label="models, microphone, shortcuts, settings",
                       state="disabled")
+
+    def _add_style_rows(self, m) -> None:
+        """The style Refine writes in, ticked (decisions.md 2026-11-24): the same setting
+        as Flow Home's Styles page, a click away while moving from code to email. Absent
+        when there is no profile to keep a choice in."""
+        profile = getattr(self.session, "profile", None)
+        if profile is None or not hasattr(self.session, "select_style"):
+            return
+        chosen = getattr(profile, "refine_kind", kinds.PROMPT)
+        # On the instance for the reason `_mode_var` is: a Tk variable dies with the
+        # frame that made it, and a radio row with no variable draws no tick.
+        self._style_var = tk.StringVar(value=chosen if kinds.valid(chosen) else kinds.PROMPT)
+        m.add_command(label="Refine writes", state="disabled")
+        for key in kinds.keys():
+            m.add_radiobutton(label=kinds.get(key).label, value=key, variable=self._style_var,
+                              command=lambda k=key: self.session.select_style(k))
+        m.add_command(label="Styles...", command=lambda: self._open_home("styles"))
+        m.add_separator()
+
+    def _add_lens_rows(self, m) -> None:
+        """The lens Ask answers through, ticked - the Styles rows' twin for Ask."""
+        profile = getattr(self.session, "profile", None)
+        keys = getattr(profile, "lens_keys", None) if profile is not None else None
+        if not callable(keys) or not hasattr(self.session, "select_lens"):
+            return
+        offered = keys()
+        if not isinstance(offered, (tuple, list)):
+            return
+        chosen = getattr(profile, "lens", "none")
+        self._lens_var = tk.StringVar(value=chosen)
+        m.add_command(label="Ask answers through", state="disabled")
+        for key in offered:
+            m.add_radiobutton(label=profile.lens_label(key), value=key, variable=self._lens_var,
+                              command=lambda k=key: self.session.select_lens(k))
+        m.add_command(label="Lenses...", command=lambda: self._open_home("lenses"))
+        m.add_separator()
 
     def _open_home(self, page: str = "home") -> None:
         """Open Flow Home, or say on the strip why it could not open.
@@ -3074,6 +3627,183 @@ class CompactPill(tk.Tk):
         """
         return PANEL_SPEC.get(self._panel_mode, PANEL_SPEC[CONVERSE])
 
+    def _result_tag(self) -> str:
+        """What the gold tag over a Refine result says: the kind it was written
+        as (`flow/kinds.py`), which the session decided when the words left.
+
+        "written as an email", not "refined for this repo". The old tag was one
+        sentence for every result, and it was wrong twice over - an email is
+        not for a repo, and with no workspace set nothing was.
+        """
+        return kinds.get(getattr(self.session, "refine_kind", kinds.PROMPT)).tag
+
+    def _waiting_line(self) -> str:
+        """What the panel says while the agent CLI is out, or "" when it is not.
+
+        "writing that as an email via claude - 6 s". Three facts the ring
+        cannot carry: what is being made, who is making it, and how long it
+        has been - the last because a wait with no number on it reads as a hang
+        well before it is one. The seconds appear from the second one, so a
+        fast call never shows a counter at all.
+
+        Every read is checked for its type, for `_draw_key`'s reason: a fixture
+        that can be drawn has to be able to answer this.
+        """
+        if not self._panel_open or self._panel_failed:
+            # A failure standing in the result block is the answer to the call
+            # that just ended. Nothing is out, whatever a state that has not
+            # caught up yet says, and "writing that" over the CLI's last line
+            # would claim work that is not happening.
+            return ""
+        return self._waiting_text()
+
+    def _waiting_text(self) -> str:
+        """What the agent CLI is doing right now and for how long, or "".
+
+        One sentence with two places to stand: the panel's tag row while a panel
+        is up (`_waiting_line`), and the strip under the pill when there is none
+        (`_pump_waiting`) - which, since a Refine lands instead of raising a
+        panel, is where most waits are said.
+        """
+        session = self.session
+        state = getattr(session, "state", None)
+        if state not in (State.REFINING, State.ASKING):
+            return ""
+        who = getattr(session, "provider", "")
+        who = who if isinstance(who, str) and who else "the agent CLI"
+        if state is State.REFINING:
+            doing = getattr(session, "refine_doing", None)
+            if not isinstance(doing, str) or not doing:
+                doing = kinds.get(getattr(session, "refine_kind", kinds.PROMPT)).doing
+            head = f"{doing} via {who}"
+        else:
+            head = f"asking {who}"
+        waited = getattr(session, "waited", 0.0)
+        secs = int(waited) if isinstance(waited, (int, float)) else 0
+        return f"{head} - {secs} s" if secs >= 2 else head
+
+    def _listening_text(self) -> str:
+        """What the strip says while the keys are down: what letting go will do, and
+        then the words as they are heard. "" when no hold is down.
+
+        **A hold has to answer the moment it starts** (2026-11-23). Until the panel
+        went, holding the Ask keys raised 400 px of window; after it, a hold changed
+        a ring 1.5 px wide and nothing else, and the owner's report was the honest
+        reading of that: "does not respond". The pill stays the pill - nothing rises
+        - but the line under it says it is listening and what the release will do,
+        which is also the one place a mode is named at the moment it matters.
+        """
+        if not (self._press_talking or self._handsfree) or self.panel_flows:
+            return ""
+        if getattr(self.session, "state", None) in (State.REFINING, State.ASKING):
+            # A pause before letting go ends the utterance, and what was said can be
+            # on its way to the CLI while the keys are still down. The wait is what
+            # is true then, and two lines taking turns a frame each is neither.
+            return ""
+        heard = " ".join((self._hold_words or "").split())
+        if heard:
+            return heard if len(heard) <= HEARD_TAIL else "\u2026" + heard[-HEARD_TAIL:]
+        if self._handsfree and not self._press_talking:
+            # Hands-free only dictates (decisions.md 2026-11-24), so this line does
+            # not name a mode: it says the microphone is open and what a pause does.
+            return (HANDSFREE_COPY_TEXT if self.lite or not self.on_send
+                    else HANDSFREE_TEXT)
+        session = self.session
+        mode = getattr(session, "mode", DICTATE)
+        if mode == CONVERSE:
+            who = getattr(session, "provider", "")
+            who = who if isinstance(who, str) and who else "the agent CLI"
+            return f"listening - let go to ask {who}"
+        if mode == REFINE:
+            # The style it will be written in, named at the moment it matters
+            # (decisions.md 2026-11-24: the line names the style a Refine uses).
+            here = getattr(session, "kind_here", None)
+            key = here() if callable(here) else kinds.PROMPT
+            return f"listening - let go and it is written {kinds.written(key)}"
+        return ("listening - let go to copy" if self.lite or not self.on_send
+                else "listening - let go to paste")
+
+    def _pump_listening(self) -> None:
+        """Keep the listening line under the pill while a hold is down. Three frames
+        at a time, as the waiting line is, so it cannot outlive the hold."""
+        text = self._listening_text()
+        if text and (text != self._notice_text or self._notice < 2):
+            self._say(text, 3)
+            self._listening_said = text
+
+    def _strip_is_free(self) -> bool:
+        """Whether the strip has nothing on it that answers the hold just ended: empty,
+        or still carrying that hold's own listening line."""
+        return not self._notice or self._notice_text == self._listening_said
+
+    def _pump_waiting(self) -> None:
+        """Keep the waiting line under the pill for as long as a call is out and no
+        panel is carrying it, and let it go the frame the call ends.
+
+        Re-said each frame it is still true, three frames at a time, so it needs no
+        timer of its own and cannot outlive the wait. Whatever was said in its place
+        when the call ended - what landed, or why it did not - is left alone.
+        """
+        text = "" if self._panel_open else self._waiting_text()
+        if text:
+            if text != self._notice_text or self._notice < 2:
+                self._say(text, 3)
+            self._waiting_said = True
+        elif self._waiting_said:
+            self._waiting_said = False
+
+    def _land(self, text: str, failed: str = "") -> None:
+        """Put a Refine where it was said, or say why it is somewhere else.
+
+        **This replaces the panel, the Send button and the second action**
+        (decisions.md 2026-11-22). Every comparable tool lands a rewrite where the
+        cursor is - Wispr Flow's own help says its rewrite "replaces your selection,
+        or inserts the result at your cursor" - and the panel that held it here was
+        the part of Flow its owner called flaky: it rose over the work, closed when
+        that work was clicked, and took a press of its own to do what Type does on
+        the release. Nothing is *sent* by landing. The words go into a text box and
+        no Enter is pressed, which is the rule Type has always had.
+
+        Three outcomes, and words are lost in none of them:
+
+        - **It came back, and you are where you were:** it is pasted, and the strip
+          says what it was written as.
+        - **It did not come back** (`failed` is the CLI's reason): what you said is
+          pasted as you said it. Wispr Flow does the same, "pastes the original
+          dictation instead".
+        - **You have moved to another window:** nothing is pasted anywhere. A rewrite
+          dropped into a window that was not the one it was written for is the paste
+          `inject.paste` exists to refuse. It is kept as what Paste last pastes.
+        """
+        target, said = self._landing
+        self._landing = None
+        words = said if failed else text
+        kind = kinds.get(getattr(self.session, "refine_kind", kinds.PROMPT))
+        if not words.strip():
+            self._say(_clip(failed or "nothing came back"), ERROR_FRAMES)
+            return
+        if self.on_send and target and self.paste_target != target:
+            # Kept, not pasted: `delivered` with a problem is how the session learns
+            # the words left without landing, and what Paste last will paste.
+            self._handed_over(words, "not pasted: you moved to another window")
+            self._say("your words are ready - Paste last puts them where you are"
+                      if failed else
+                      f"{kind.tag} - you moved, so Paste last puts it where you are",
+                      ERROR_FRAMES)
+            return
+        self._flash = FLASH_FRAMES if failed else 0
+        self._deliver(words, typed=True)
+        if failed:
+            self._say(_clip("no rewrite - your words went in as you said them: "
+                            + _reason(failed)), ERROR_FRAMES)
+        elif self.on_send:
+            # Lite's own line ("copied - press Ctrl+V") is already up, and is the
+            # one that tells somebody what to do next. Here, what it was written
+            # as, and the way back: the window's own undo, where it has one.
+            app = getattr(self.session, "target_app", "")
+            self._say(kind.tag if kinds.is_terminal(app)
+                      else f"{kind.tag} - {kinds.UNDO_HINT}")
+
     def _line_height(self, spec) -> int:
         """One line of `spec`, through whatever is drawing.
 
@@ -3127,6 +3857,7 @@ class CompactPill(tk.Tk):
         line_h = self._line_height(FONT_BODY)
         room = max(PANEL_H, int(self.design(self._capsule_y - self.work[1])))
         heard = _fit(self._panel_heard, LINE_CHARS, HEARD_LINES_MAX)
+        waiting = bool(self._waiting_line())
 
         def lay(result_cap: int) -> _Layout:
             result = _fit(self._panel_result, LINE_CHARS, result_cap)
@@ -3137,12 +3868,14 @@ class CompactPill(tk.Tk):
             heard_y = y
             y += _lines(heard) * line_h
             result_tag_y = None
-            if result:
+            if result or waiting:
                 y += BLOCK_GAP
-                if spec["result_tag"] is not None and not self._panel_failed:
-                    # Suppressed on a failure for `_draw_panel`'s reason:
-                    # "refined for this repo" over the CLI's last line would
-                    # claim a refinement that did not happen.
+                if waiting or (spec["result_tag"] is not None
+                               and not self._panel_failed):
+                    # The tag's row, which the waiting line borrows while the
+                    # CLI is out. Suppressed on a failure for `_draw_panel`'s
+                    # reason: "refined as a prompt" over the CLI's last line
+                    # would claim a refinement that did not happen.
                     result_tag_y = y
                     y += TAG_GAP
             result_y = y
@@ -3200,6 +3933,15 @@ class CompactPill(tk.Tk):
             return
         self._panel_open = False
         self._ask_pending = False
+        # The one door, so the one place the session is told a Refine result has gone
+        # from the screen (`Session.end_refine`). Without it a Send that does not
+        # begin with a hold - the `send` key, the spoken trigger after hands-free
+        # dictation - was read as more of a result closed minutes ago, and the CLI was
+        # handed the old dictation in front of the new one. After `_panel_send` it is
+        # a no-op: delivering the text has already ended it.
+        ended = getattr(self.session, "end_refine", None)
+        if callable(ended):
+            ended()
         self._sync_shell()
 
     def _sync_shell(self) -> None:
@@ -3279,10 +4021,12 @@ class CompactPill(tk.Tk):
         the session arms when it delivers a refine as a result rather than as a rewrite.
 
         That last one is why this asks the session instead of tracking its own flag: the
-        flag the session owns is the one that also decides whether the CLI gets the
-        previous result as thread context. A surface that kept its own copy would be able
-        to say "extending" while the CLI was asked cold, which is the exact mismatch
-        step 5 exists to close.
+        answer the session gives here (`can_say_more`) is the one it acts on when the
+        words are sent, so the heard block appends on exactly the holds whose words go
+        to the CLI together. A surface that kept its own copy would be able to say
+        "extending" while the CLI was asked cold, which is the exact mismatch step 5
+        exists to close. (It read `session.following_up` until 2026-11-22; that flag
+        also means "follow up" and "bring back my last prompt".)
 
         `was_failed` is passed in rather than read because the caller clears the flag on
         the line before asking — read it here and the answer would always be "no".
@@ -3291,7 +4035,10 @@ class CompactPill(tk.Tk):
             return False
         if was_failed:
             return False
-        return bool(getattr(self.session, "following_up", False))
+        # The session's own answer to "is the next hold more of this result", and the
+        # one it will act on when the words are sent (`Session.can_say_more`). `is
+        # True`, because a fixture's Mock answers every attribute with something truthy.
+        return getattr(self.session, "can_say_more", False) is True
 
     def _panel_click(self, e) -> None:
         """A press in the band: the only live things there are the strip's
@@ -3312,6 +4059,9 @@ class CompactPill(tk.Tk):
             self._open_editor()
         elif self._spec()["send"] and _hit(layout.send, x, y):
             self._panel_send()
+        elif (self._spec().get("insert")
+              and _hit(_insert_rect(layout.footer_y), x, y)):
+            self._insert_answer()
         elif (self._spec().get("continue")
               and _hit(_continue_rect(layout.footer_y), x, y)):
             self._continue_in_flow()
@@ -3381,13 +4131,15 @@ class CompactPill(tk.Tk):
         shell.configure(bg=SHELL)
         #: The font the panel's own text uses. A `tk.Text` left at the system default
         #: would be a second type size inside a surface that has exactly one.
+        #: The ring and the padding are pixels and go through `self.dev`; `width` and
+        #: `height` are characters and lines of that font, which carries the scale
+        #: itself, so they are left as counts — scaled as well, they would square it.
         box = self._editor = tk.Text(
             shell, bg=SHELL, fg=TEXT, insertbackground=TEXT, relief="flat",
-            highlightthickness=dev(self, 1), highlightbackground=RING_OUTER,
+            highlightthickness=self.dev(1), highlightbackground=RING_OUTER,
             highlightcolor=RING_OUTER, wrap="word",
             font=scaled_font(FONT_BODY), undo=True,
-            padx=dev(self, 8), pady=dev(self, 8), width=dev(self, 44),
-            height=dev(self, 9),
+            padx=self.dev(8), pady=self.dev(8), width=44, height=9,
         )
         box.pack(fill="both", expand=True)
         box.insert("1.0", text)
@@ -3400,7 +4152,10 @@ class CompactPill(tk.Tk):
         #: they press End first on every single correction.
         box.focus_set()
         box.mark_set("insert", "end-1c")
-        bring_forward()
+        # The editor's own toplevel is the window that has to come forward, and Tk
+        # creates it lazily: `toplevel_hwnd` answers 0 until the first update.
+        shell.update_idletasks()
+        bring_forward(toplevel_hwnd(shell))
         self._editor_note("Esc leaves it as it was  ·  Ctrl+Enter keeps your edits")
 
     def _editor_note(self, message: str) -> None:
@@ -3411,19 +4166,19 @@ class CompactPill(tk.Tk):
         person has to already know is not a way out.
         """
         row = tk.Frame(self._editor_win, bg=SHELL)
-        row.pack(fill="x", padx=dev(self, 8), pady=(0, dev(self, 8)))
+        row.pack(fill="x", padx=self.dev(8), pady=(0, self.dev(8)))
         tk.Label(row, text=message, bg=SHELL, fg=MUTED, anchor="w",
                  font=scaled_font(FONT_TAG)).pack(side="left")
         tk.Button(
             row, text="Cancel", bg=CHIP, fg=CODE, relief="flat", bd=0,
             font=scaled_font(FONT_CHIP), cursor="hand2", takefocus=0,
             command=lambda: self._close_editor(commit=False),
-        ).pack(side="right", ipadx=dev(self, 10), ipady=dev(self, 3))
+        ).pack(side="right", ipadx=self.dev(10), ipady=self.dev(3))
         tk.Button(
             row, text="Done", bg=PRIMARY_FILL, fg=PRIMARY_TEXT, relief="flat", bd=0,
             font=scaled_font(FONT_CHIP_PRIMARY), cursor="hand2", takefocus=0,
             command=lambda: self._close_editor(commit=True),
-        ).pack(side="right", padx=(0, dev(self, 6)), ipadx=dev(self, 10), ipady=dev(self, 3))
+        ).pack(side="right", padx=(0, self.dev(6)), ipadx=self.dev(10), ipady=self.dev(3))
 
     def _close_editor(self, commit: bool) -> None:
         """Close the box, committing or discarding, and take the edit seam back.
@@ -3468,6 +4223,18 @@ class CompactPill(tk.Tk):
             return
         if _copy_to_clipboard(self, text):
             self._flash = FLASH_FRAMES
+
+    def _insert_answer(self) -> None:
+        """The Insert chip (decisions.md 2026-11-24): the answer goes where a Refine
+        lands - the window you were working in, or the pinned one - by the same door
+        every paste takes. The card stays: it is closed by its own mark, as before."""
+        text = (self._panel_result or "").strip()
+        if not text:
+            self._say("nothing to insert yet - the answer has not come back")
+            return
+        self._deliver(text)
+        if not self._flash:
+            self._say("answer inserted")
 
     def _continue_in_flow(self) -> None:
         """Ask's footer chip: the conversation, carried on in Flow Home's
@@ -3634,6 +4401,10 @@ class CompactPill(tk.Tk):
             # its own would otherwise be a mode change nothing could see.
             getattr(session, "workspace", "") or "",
             getattr(session, "mode", DICTATE),
+            # The tag over a Refine result, and the line that stands in for it
+            # while the CLI is out - whose seconds are the one thing here that
+            # moves on its own, once a second, for as long as a call is waiting.
+            self._result_tag(), self._waiting_line(),
         )
 
     def _draw(self) -> None:
@@ -3765,7 +4536,7 @@ class CompactPill(tk.Tk):
         _capsule_ring(c, 0, y, w, self._shell_h, RING_OUTER,
                       square_top=True, top=False)
         c.create_text(w // 2, y + NOTICE_H // 2, text=self._notice_text,
-                      font=FONT_TAG, fill=DIM)
+                      font=FONT_TAG, fill=NOTICE_TEXT)
 
     def _draw_foot(self, c, y0: int) -> None:
         """The pill as the panel's foot: the same face, 400 wide, squared on
@@ -3892,18 +4663,24 @@ class CompactPill(tk.Tk):
                           else FONT_PARTIAL,
                           fill=spec["heard_fill"])
         # The result block: the answer, on its accent bar (Ask.dc.html's
-        # card) or under its tag (Refine.dc.html). Nothing at all while the
-        # CLI is still working — the foot's blue ring is already saying that.
+        # card) or under its tag (Refine.dc.html). While the CLI is still
+        # working the tag's row says what it is doing and for how long
+        # (`_waiting_line`): the foot's blue ring says *that* something is out,
+        # and for a wait measured in tens of seconds that was not enough.
         result = layout.result
+        waiting = self._waiting_line()
+        if waiting and layout.result_tag_y is not None:
+            c.create_text(PAD_X, layout.result_tag_y, anchor="w", text=waiting,
+                          font=FONT_TAG, fill=WAITING)
         if result:
             accent = spec["result_accent"]
-            if layout.result_tag_y is not None:
+            if layout.result_tag_y is not None and not waiting:
                 # Refine.dc.html: the tag carries the hue, the text is plain.
-                # `result_tag_y` is None on a failure — "refined for this repo"
+                # `result_tag_y` is None on a failure — "refined as a prompt"
                 # over the CLI's last line would claim a refinement that did
                 # not happen — and the block simply starts where the tag would.
                 c.create_text(PAD_X, layout.result_tag_y, anchor="w",
-                              text=spec["result_tag"], font=FONT_TAG,
+                              text=self._result_tag(), font=FONT_TAG,
                               fill=accent)
                 c.create_text(PAD_X, layout.result_y, anchor="nw", text=result,
                               font=FONT_BODY, fill=TEXT)
@@ -3936,6 +4713,11 @@ class CompactPill(tk.Tk):
         glyphs.copy(c, x1 + 6, gy - 6.5, MUTED, size=13)
         c.create_text(gx + 13, gy, anchor="w", text="Copy",
                       font=FONT_CHIP, fill=CODE)
+        if spec.get("insert"):
+            x1, y1, x2, y2 = _insert_rect(layout.footer_y)
+            _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
+            c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=INSERT_LABEL,
+                          font=FONT_CHIP, fill=CODE)
         c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
                       text=spec["hint"], font=FONT_TAG, fill=DIM)
         if spec["send"]:

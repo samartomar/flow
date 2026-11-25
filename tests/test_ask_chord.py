@@ -161,6 +161,54 @@ class TestBTheHookKnowsWhetherAKeyWasTyped(unittest.TestCase):
         self.assertEqual(states[0], states[1])
 
 
+class TestBAFlowsOwnShortcutIsNotTyping(unittest.TestCase):
+    """`Chord.own_key`: the rewrite shortcut's key, held, repeats - and `RegisterHotKey`
+    keeps every one of them. The surface says the shortcut is down; this stops counting
+    until something comes up."""
+
+    def held(self):
+        talk, _ask, _presses = _pair()
+        talk.own_key = True
+        return talk
+
+    def test_while_it_is_down_a_key_going_down_is_not_typing(self):
+        talk = self.held()
+        keys = _Keyboard(talk)
+        for _ in range(5):
+            keys.down(0x58)  # the key repeating, as the OS sends it
+        self.assertIs(talk.touched, False)
+
+    def test_its_own_key_coming_up_ends_it(self):
+        talk = self.held()
+        keys = _Keyboard(talk).down(0x58).up(0x58)
+        self.assertIs(talk.own_key, False)
+        self.assertIs(talk.touched, False)
+        keys.down(VK_A)
+        self.assertIs(talk.touched, True)
+
+    def test_a_modifier_coming_up_ends_it_and_the_key_still_down_is_typing_again(self):
+        # Alt comes up first with the letter still held: from here the letter reaches
+        # the window, and it counts.
+        talk = self.held()
+        keys = _Keyboard(talk).down(0x58).up(VK_LMENU)
+        self.assertIs(talk.own_key, False)
+        keys.down(0x58)
+        self.assertIs(talk.touched, True)
+
+    def test_it_is_never_set_from_here(self):
+        talk, _ask, _presses = _pair()
+        _Keyboard(talk).down(VK_LMENU, VK_A).up(VK_A, VK_LMENU)
+        self.assertIs(talk.own_key, False)
+
+    def test_it_cannot_say_which_key_either(self):
+        states = []
+        for vk in (VK_A, 0x58):
+            talk = self.held()
+            _Keyboard(talk).down(vk).up(vk).down(vk)
+            states.append((talk.touched, talk.own_key, talk._other))
+        self.assertEqual(states[0], states[1])
+
+
 class TestCHotkeysOwnsTheTeardownOfBoth(unittest.TestCase):
 
     def test_the_hook_is_whichever_chord_installed_one(self):
@@ -565,6 +613,30 @@ class TestJFlowHomeTurnsTheChordOff(unittest.TestCase):
         with self.assertRaises(ApiError):
             self._api().set_chord({"keys": "ctrl"})
 
+
+
+class TestATapOfTheAskKeysDoesNothing(unittest.TestCase):
+    """decisions.md 2026-11-24: hands-free belongs to the talk chord and only dictates.
+    A quick tap of ctrl+alt+win used to switch it on *and* turn the pill to Ask."""
+
+    def test_a_quick_tap_is_only_a_short_question(self):
+        from flow import hold
+        from test_chord import _fired
+        presses = queue.Queue()
+        ask = Chord(presses, frozenset({"ctrl", "alt", "win"}), gesture="hold",
+                    **ASK_ACTIONS)
+        _Keyboard(ask, hold_ms=hold.TAP_MAX_MS - 50).down(
+            VK_LCONTROL, VK_LMENU, VK_LWIN).up(VK_LWIN, VK_LMENU, VK_LCONTROL)
+        self.assertEqual(_fired(presses), ["warm", "ask", "ask-end"])
+
+    def test_the_talk_chords_tap_still_toggles(self):
+        from flow import hold
+        from test_chord import _fired
+        presses = queue.Queue()
+        talk = Chord(presses, frozenset({"ctrl", "win"}))
+        _Keyboard(talk, hold_ms=hold.TAP_MAX_MS - 50).down(
+            VK_LCONTROL, VK_LWIN).up(VK_LWIN, VK_LCONTROL)
+        self.assertEqual(_fired(presses), ["warm", "talk", "talk-end", "toggle"])
 
 if __name__ == "__main__":
     unittest.main()

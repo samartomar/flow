@@ -542,6 +542,8 @@ class SpeechGate:
         self.margin_db = margin_db
         self.hang_blocks = max(1, int(hang_ms / block_ms))
         self.floor_db = floor_db
+        self.last_level_db = 0.0
+        self.last_threshold_db = 0.0
         self.speaking = False
         self._quiet_blocks = 0
         #: The last few blocks heard while quiet, so the onset that opened the gate is
@@ -550,8 +552,9 @@ class SpeechGate:
 
     def push(self, block: np.ndarray) -> tuple[bool, bool]:
         """Feed one block. Returns (started, stopped) edge flags."""
-        level = rms_db(block)
-        loud = level > self.floor_db + self.margin_db
+        level = self.last_level_db = rms_db(block)
+        self.last_threshold_db = self.floor_db + self.margin_db
+        loud = level > self.last_threshold_db
 
         if not self.speaking:
             if loud:

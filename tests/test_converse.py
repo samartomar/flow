@@ -6,7 +6,6 @@ answer costs the user nothing, and that the second question inherits the first.
 """
 
 import sys
-import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -17,14 +16,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flow.audio import BLOCK  # noqa: E402
-from flow.help import (  # noqa: E402
-    AUTO_ASK_OFF_LABEL,
-    AUTO_ASK_ON_LABEL,
-    auto_ask_notice,
-)
-from flow.profile import Profile  # noqa: E402
 from flow.session import (  # noqa: E402
-    AUTO_ASK_SEC,
     CONVERSE,
     DICTATE,
     REFINE,
@@ -86,7 +78,12 @@ class FakeSpeaker:
 
 
 def session(**kw) -> Session:
-    return Session(asr=FakeAsr(), mic=FakeMic(), **kw)
+    s = Session(asr=FakeAsr(), mic=FakeMic(), **kw)
+    if kw.get("speaker") is not None:
+        # Reading answers aloud is opt-in (decisions.md 2026-11-24). A test that hands
+        # the session a speaker is asking about what is said when it is on.
+        s.muted = False
+    return s
 
 
 class TestModeSwitch(unittest.TestCase):
@@ -261,86 +258,6 @@ class TestNewConversationIsOneAct(unittest.TestCase):
         self.assertEqual(s.mode, CONVERSE)
 
 
-class TestTheFirstConverseEntrySaysAPauseSends(unittest.TestCase):
-    """Decision part 4. Auto-ask stays ON, and the price is that it is said out loud.
-
-    The reopen bar on that default is one stranger reporting a surprise send — a report
-    only somebody who was never told can make. It printed to a console before this,
-    which is a surface no GUI user has open.
-    """
-
-    def setUp(self):
-        d = tempfile.TemporaryDirectory()
-        self.addCleanup(d.cleanup)
-        self.dir = Path(d.name)
-
-    def profile(self):
-        return Profile(self.dir / "profile.json")
-
-    def entered(self, profile=None):
-        s = session(profile=profile)
-        s.toggle_mode(to=CONVERSE)
-        return " | ".join(e.text for e in s.events() if e.kind == "note")
-
-    def test_the_first_entry_names_the_pause_and_the_setting(self):
-        said = self.entered(self.profile())
-        self.assertIn(f"{AUTO_ASK_SEC:.0f}s", said)
-        self.assertIn(AUTO_ASK_ON_LABEL, said)
-        self.assertIn("Settings", said)
-
-    def test_and_the_second_entry_does_not(self):
-        p = self.profile()
-        self.entered(p)
-        self.assertNotIn(AUTO_ASK_ON_LABEL, self.entered(p))
-
-    def test_it_survives_a_reload_so_a_new_launch_is_still_quiet(self):
-        p = self.profile()
-        self.entered(p)
-        self.assertNotIn(AUTO_ASK_ON_LABEL, self.entered(Profile(p.path)))
-
-    def test_an_older_profile_is_told_once(self):
-        # Absent means "has not been told", the opposite way round from `auto_ask`: an
-        # upgrade is the first time this warning has existed at all.
-        p = self.profile()
-        p.path.write_text('{"schema": 1}', encoding="utf-8")
-        self.assertTrue(Profile(p.path).converse_seen is False)
-        self.assertIn(AUTO_ASK_ON_LABEL, self.entered(Profile(p.path)))
-
-    def test_no_profile_is_told_every_time_rather_than_never(self):
-        # `--no-profile` has nothing to remember it in, and a warning a user never
-        # receives is worse than one they receive twice.
-        self.assertIn(AUTO_ASK_ON_LABEL, self.entered(None))
-        self.assertIn(AUTO_ASK_ON_LABEL, self.entered(None))
-
-    def test_the_label_is_a_control_that_exists_and_not_a_restatement(self):
-        # A notice naming a control that has since been reworded points at nothing, and
-        # costs the reader a hunt through a menu for a line that is not there.
-        #
-        # It used to be checked against `ui.AUTO_ASK_OFF_LABEL`, because the toggle was
-        # a row in the pill's own Settings menu and the notice had to name that row.
-        # **The row is gone from the pill** — it lives in Flow Home, which draws it as
-        # "Ask after a pause" — so what has to hold now is that the notice names a
-        # control that exists somewhere, and that the pill's old wording is not it.
-        notice = auto_ask_notice(6.0)
-        self.assertIn(AUTO_ASK_ON_LABEL, notice)
-        self.assertNotIn(AUTO_ASK_OFF_LABEL, notice)
-
-    def test_the_notice_says_which_window_the_setting_is_in(self):
-        # The path is part of the sentence. "Settings ▸ Ask after a pause" without the
-        # window named reads as the pill's menu, which no longer has it — and this
-        # notice is the only place a first-time converse user is told any of this.
-        notice = auto_ask_notice(6.0)
-        self.assertIn("Flow Home", notice)
-        self.assertNotIn("right-click", notice)
-
-    def test_going_back_to_dictate_says_nothing_about_it(self):
-        p = self.profile()
-        s = session(profile=p)
-        s.toggle_mode(to=CONVERSE)
-        s.events()
-        s.toggle_mode(to=DICTATE)
-        said = " | ".join(e.text for e in s.events() if e.kind == "note")
-        self.assertNotIn(AUTO_ASK_OFF_LABEL, said)
 
 
 class TestTheThreadStoresTheCleanedAnswer(unittest.TestCase):
@@ -725,6 +642,80 @@ class TestCorrectionLoopStillApplies(unittest.TestCase):
         self.assertIn("MySQL", spy.call_args.args[0])
 
 
+
+class TestAQuestionIsNeverSentOnItsOwn(unittest.TestCase):
+    """decisions.md 2026-11-24: auto-ask is gone. It only ever ran while hands-free,
+    and hands-free only dictates; a settled question waits for its release or Send."""
+
+    def test_a_settled_draft_is_not_asked(self):
+        s = session()
+        s.toggle_mode(to=CONVERSE)
+        s.draft.set("how do I widen a column")
+        s._settled_at = time.perf_counter() - 60
+        with mock.patch("flow.session.ask") as asked:
+            s.tick()
+            s.pump_results()
+        asked.assert_not_called()
+        self.assertIsNone(s.auto_ask_in)
+        self.assertEqual(s.draft.text, "how do I widen a column")
+
+
+class TestAQuestionGoesThroughTheSelectedLens(unittest.TestCase):
+    """decisions.md 2026-11-24: the selected lens is a viewpoint the answer is given
+    from. No lens, the default, adds nothing - today's Ask."""
+
+    def ask_with(self, lens="none", **profile):
+        from flow.profile import Profile
+        import tempfile
+        p = Profile(Path(tempfile.mkdtemp()) / "profile.json")
+        p.lens = lens
+        for k, v in profile.items():
+            setattr(p, k, v)
+        s = Session(asr=FakeAsr(), mic=FakeMic(), profile=p)
+        self.addCleanup(s.close)
+        s.toggle_mode(to=CONVERSE)
+        s.events()
+        s.draft.set("should we ship the mac build first")
+        with mock.patch("flow.session.ask", return_value=("Yes.", "codex")) as call:
+            s.send()
+            s.wait_idle(timeout=5.0)
+            s.pump_results()
+        return s, call.call_args.args[0], p
+
+    def test_no_lens_adds_nothing(self):
+        _s, sent, _p = self.ask_with()
+        self.assertNotIn("lens", sent)
+
+    def test_a_built_in_lens_is_carried_after_the_question(self):
+        s, sent, p = self.ask_with("business")
+        self.assertTrue(sent.startswith("should we ship the mac build first"))
+        self.assertIn("Answer through the Business lens", sent)
+        self.assertIn("business point of view", sent)
+        notes = [e.text for e in s.events() if e.kind == "note"]
+        self.assertTrue(any("through the Business lens" in n for n in notes), notes)
+        self.assertIn("business", p.lens_used)
+
+    def test_your_own_and_edited_lenses_send_their_own_words(self):
+        _s, sent, _p = self.ask_with(
+            "my:pm", lenses=[{"key": "my:pm", "name": "PM", "instructions": "Scope first."}])
+        self.assertIn("Answer through the PM lens", sent)
+        self.assertIn("Scope first.", sent)
+        _s, sent, _p = self.ask_with("architecture",
+                                     lens_edits={"architecture": "Boxes and arrows."})
+        self.assertIn("Boxes and arrows.", sent)
+
+    def test_selecting_a_lens_is_saved_and_said(self):
+        from flow.profile import Profile
+        import tempfile
+        p = Profile(Path(tempfile.mkdtemp()) / "profile.json")
+        s = Session(asr=FakeAsr(), mic=FakeMic(), profile=p)
+        self.addCleanup(s.close)
+        self.assertTrue(s.select_lens("architecture"))
+        self.assertEqual(Profile(p.path).lens, "architecture")
+        self.assertIn("Ask answers through the Architecture lens now",
+                      [e.text for e in s.events() if e.kind == "note"])
+        self.assertFalse(s.select_lens("memo"))
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -742,8 +733,10 @@ class TestSpeechIsARuntimeChoice(unittest.TestCase):
             s.send()
             s.wait_idle(timeout=5.0)
 
-    def test_a_session_starts_unmuted(self):
-        self.assertFalse(session().muted)
+    def test_a_session_starts_silent(self):
+        # decisions.md 2026-11-24: an answer stays on its card, and nothing speaks
+        # unasked until the user turns reading on.
+        self.assertTrue(Session(asr=FakeAsr(), mic=FakeMic()).muted)
 
     def test_muting_silences_the_next_reply(self):
         sp = FakeSpeaker()
@@ -778,100 +771,6 @@ class TestSpeechIsARuntimeChoice(unittest.TestCase):
         self.assertEqual(s.reply, "Use ALTER TABLE.")
 
 
-class TestAutoAsk(unittest.TestCase):
-    """P9: converse mode is a conversation, so a settled draft goes on its own.
-
-    product.md states the acceptance as "speak, the reply appears, speak again" — no
-    button in that sentence — while R5 says a draft is never auto-sent. The
-    reconciliation is that R5 protects the *irreversible* act: pasting into a focused
-    window stays manual forever, asking a question does not. So this is converse-only,
-    it is visible the whole time it is counting, and anything the user does resets it.
-    """
-
-    def _armed(self, **kw):
-        s = session(**kw)
-        s.toggle_mode(to=CONVERSE)
-        s.draft.set("can you hear me")
-        s._after_draft_change()
-        s.events()
-        return s
-
-    def _fire(self, s):
-        """Wind the clock past the delay rather than sleeping through it."""
-        s._settled_at -= AUTO_ASK_SEC + 0.1
-        s._pump_auto_ask()
-
-    def test_a_settled_draft_is_asked_without_a_press(self):
-        s = self._armed()
-        with mock.patch("flow.session.ask", return_value=("yes", "codex")) as ask:
-            self._fire(s)
-            self.assertIs(s.state, State.ASKING)
-        # The user's words go first and whole; the grounding clause follows them (it
-        # trails deliberately — see `ask_framing`). What this pins is that auto-ask sends
-        # the draft as spoken, not a summary or a fragment of it.
-        sent = ask.call_args.args[0]
-        self.assertTrue(sent.startswith("can you hear me"), sent[:80])
-
-    def test_dictate_mode_never_sends_itself(self):
-        # R5 in full force: this one pastes into whatever has focus.
-        s = self._armed()
-        s.toggle_mode(to=DICTATE)
-        self.assertEqual(s.mode, DICTATE)
-        self._fire(s)
-        self.assertEqual(s.draft.text, "can you hear me")
-
-    def test_it_does_not_fire_while_the_user_is_speaking(self):
-        s = self._armed()
-        s.gate.speaking = True
-        self._fire(s)
-        self.assertEqual(s.draft.text, "can you hear me")
-
-    def test_it_does_not_fire_while_a_reply_is_playing(self):
-        # The mic is gated then, so silence says nothing about the user.
-        sp = FakeSpeaker()
-        s = self._armed(speaker=sp)
-        sp.say("still talking")
-        self._fire(s)
-        self.assertEqual(s.draft.text, "can you hear me")
-
-    def test_a_correction_restarts_the_countdown(self):
-        s = self._armed()
-        s._settled_at -= AUTO_ASK_SEC - 0.5  # nearly out of time
-        s._route("change hear to see")
-        self.assertGreater(s.auto_ask_in, AUTO_ASK_SEC - 0.5,
-                           "editing the draft did not buy any time back")
-
-    def test_reaching_for_a_chip_holds_it(self):
-        s = self._armed()
-        s._settled_at -= AUTO_ASK_SEC - 0.2
-        s.hold_auto_ask()
-        self.assertGreater(s.auto_ask_in, AUTO_ASK_SEC - 0.5)
-
-    def test_the_countdown_is_readable_the_whole_time(self):
-        # A silent timer that sends the user's words is the thing this must never be.
-        s = self._armed()
-        self.assertIsNotNone(s.auto_ask_in)
-        self.assertLessEqual(s.auto_ask_in, AUTO_ASK_SEC)
-        s.auto_ask = False
-        self.assertIsNone(s.auto_ask_in, "nothing should count down when it is off")
-
-    def test_turning_it_off_stops_it_firing(self):
-        s = self._armed()
-        s.auto_ask = False
-        self._fire(s)
-        self.assertEqual(s.draft.text, "can you hear me")
-
-    def test_an_emptied_draft_is_not_counting(self):
-        s = self._armed()
-        s.draft.set("")
-        s._after_draft_change()
-        self.assertIsNone(s.auto_ask_in)
-
-    def test_it_is_not_armed_after_the_question_has_gone(self):
-        s = self._armed()
-        with mock.patch("flow.session.ask", return_value=("yes", "codex")):
-            s.send()
-            self.assertIsNone(s.auto_ask_in)
 
 
 class TestTheProviderIsNamedBeforeTheFact(unittest.TestCase):
@@ -1147,15 +1046,6 @@ class TestTheReplyCanBecomeTheDraft(unittest.TestCase):
             asked.assert_not_called()
         s.close()
 
-    def test_but_speaking_afterwards_settles_it_the_ordinary_way(self):
-        # The guard is "a taken reply is not an utterance", not "this draft is frozen".
-        # Once the user says something in converse, the countdown is theirs again.
-        s = self.answered()
-        s.take_reply()
-        s.mode = CONVERSE
-        s._route("and mention the rollback plan")
-        self.assertIsNotNone(s.auto_ask_in, "speech no longer settles the draft")
-        s.close()
 
     def test_taking_it_stops_the_reply_being_read_aloud(self):
         # Reaching for the text is "I have what I need".

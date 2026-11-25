@@ -30,7 +30,7 @@ from .profile import DESIGN_DEFAULT, DESIGNS
 from .refine import MAX_TIMEOUT_SEC
 from .refine import TIMEOUT_SEC as REFINE_TIMEOUT_SEC
 from .refine import CANDIDATES, EFFORT_DEFAULT, EFFORTS, available, named, unverified, unverified_note
-from .session import AUTO_ASK_SEC, CONVERSE, Session
+from .session import CONVERSE, Session
 from .stats import TYPING_WPM
 from .stats import report as stats_report
 from .version import check_update, version
@@ -596,10 +596,9 @@ def main(argv: list[str] | None = None) -> int:
         help="voice for spoken replies: a name, part of one, or male/female "
              "(list them with scripts/voices.py)",
     )
-    ap.add_argument(
-        "--no-auto-ask", action="store_true",
-        help="in converse mode, wait for the Ask button instead of a pause",
-    )
+    # Accepted and ignored: auto-ask is gone (decisions.md 2026-11-24), and a script
+    # that still passes the flag should not stop launching.
+    ap.add_argument("--no-auto-ask", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument(
         "--cli", default=None, metavar="NAME",
         help="pin the agent CLI instead of trying each in turn "
@@ -641,14 +640,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--design", default=None, choices=DESIGNS, metavar="NAME",
-        # A setting, not a one-run override, for `--cli-model`'s reason: the menu has no
-        # way to type a name, so a flag that vanished at exit would be the only place
-        # the choice could ever be made. This is the *launch* answer and stays one —
-        # either menu switches the running surface now, and writes the same field, so a
-        # flag that also applied mid-session would be a second way to say the same
-        # thing.
-        help=f"which UI design to launch ({', '.join(DESIGNS)}; default "
-             f"{DESIGN_DEFAULT}, remembered)",
+        # Retired with the Classic pill (decisions.md 2026-11-23, "One surface"): Flow
+        # has one pill, so this is no longer a choice anybody is offered, which is why it
+        # is not in `--help`. It is still *accepted*, for one run and never remembered,
+        # because the Classic classes are still on disk while their tests are sorted and
+        # those tests launch through it. It goes when `ui.Pill` does.
+        help=argparse.SUPPRESS,
     )
     # Last, because none of these is a way to run Flow: each answers a question about the
     # copy or about what it has already done, and exits. `--version` is argparse's own
@@ -893,9 +890,6 @@ def main(argv: list[str] | None = None) -> int:
     if profile is not None and args.cli_effort is not None:
         profile.cli_effort = args.cli_effort
         profile.save()
-    if profile is not None and args.design is not None:
-        profile.design = args.design
-        profile.save()
     if profile is not None:
         if profile.cli_model:
             say(f"model: {profile.cli_model}")
@@ -1102,8 +1096,6 @@ def main(argv: list[str] | None = None) -> int:
     # The flag wins over the profile, and the profile over the default — the same order
     # `--voice` follows. This used to assign unconditionally, so the absence of a flag
     # overwrote a stored preference and switching auto-ask off never survived a restart.
-    if args.no_auto_ask:
-        session.auto_ask = False
     if args.converse:
         # `to=`, not a bare cycle: with three modes, one blind flip from
         # DICTATE lands on REFINE — exactly the defect a three-way cycle
@@ -1111,11 +1103,6 @@ def main(argv: list[str] | None = None) -> int:
         session.toggle_mode(to=CONVERSE)
         say("mode: CONVERSE - the Ask button puts the draft to the agent CLI "
             "and the reply appears in Flow")
-        if session.auto_ask:
-            say(f"auto-ask: on - a pause of {AUTO_ASK_SEC:.0f}s sends the question "
-                "(--no-auto-ask to press it yourself)")
-        else:
-            say("auto-ask: off - press Ask when you are ready")
     elif paste is None:
         say("mode: DICTATE - Send copies the draft, and you paste it "
             "(--converse, or the right-click menu, to ask instead)")
@@ -1131,14 +1118,17 @@ def main(argv: list[str] | None = None) -> int:
     apply_panel_width(panel_width(profile.panel if profile is not None else None))
     apply_place(profile.place if profile is not None else "bottom")
 
-    # Which surface launches — which is no longer the same question as which surface
-    # runs. An explicit flag is a decision, a stored value is a preference, and the
-    # default is the design Flow shipped; from here the name is a variable, because the
-    # loop at the foot of this function rebuilds whichever surface the menu asks for
-    # next. `--design` keeps its old meaning exactly: a remembered setting, applied at
-    # launch.
-    design = (args.design
-              or (profile.design if profile is not None else DESIGN_DEFAULT))
+    # Which surface launches: the compact pill. It was a choice from 2026-09-03 until
+    # the owner said "compact only" on 2026-11-23 (decisions.md, "One surface"); the
+    # Classic pill had by then nothing the compact one had not absorbed, and nobody was
+    # offered it but one row in Flow Home, which is gone. A profile that still names
+    # Classic is told once and moved, so the line is not said at every launch. The
+    # unlisted `--design` still picks for one run (see the flag) and is never stored.
+    if profile is not None and profile.design != DESIGN_DEFAULT:
+        say("the Classic pill is retired - Flow has one pill now, and this is it")
+        profile.design = DESIGN_DEFAULT
+        profile.save()
+    design = args.design or DESIGN_DEFAULT
     if design != DESIGN_DEFAULT:
         say(f"design: {design}")
     # Before any window exists, which is the only moment this can be said: DPI
@@ -1286,8 +1276,16 @@ def main(argv: list[str] | None = None) -> int:
             # A compact user has no other route to it.
             hands_free = (f" | tap {chord.describe()} for hands-free"
                           if chord is not None and chord.gesture == "hold" else "")
-            say(f"hold {held} to talk{asks}{hands_free} | tap the pill to cycle "
-                f"Type / Refine / Ask | right-click for the menu | {quits}")
+            # With keys to hold, a tap on the pill no longer changes the mode
+            # (decisions.md 2026-11-22), and what a rewrite takes is a sentence said
+            # after the words have landed - so that is what this line teaches. Without
+            # keys, or in the earlier panel flow, the pill is still how a mode is chosen.
+            panel = getattr(profile, "panel_flows", False) is True
+            does = ("tap the pill to cycle Type / Refine / Ask"
+                    if chord is None or panel
+                    else 'say "polish that" to rewrite what you just said')
+            say(f"hold {held} to talk{asks}{hands_free} | {does} "
+                f"| right-click for the menu | {quits}")
         else:
             say(
                 ("listening | " if armed else "click the pill to arm | ")
@@ -1348,10 +1346,9 @@ def main(argv: list[str] | None = None) -> int:
             settings_path=DEFAULT_PATH if args.no_lexicon else lexicon.path,
             lite=lite,
         )
-        # Home switches designs from its Settings page, and a switch is a method on the
-        # surface that is on screen — so Home is told which one that is, every time.
+        # Home's Settings page talks to the pill that is on screen (the panel-flow
+        # switch applies at once), so Home is told which object that is, every time.
         home.surface = surface
-        home.design = name
         # Set here rather than in `__init__` for the reason `_trace_gesture` gives: the
         # trace belongs to the run, and `build` is the one place that knows what the run
         # turned out to be. Re-run on a design switch, so both designs trace alike.
@@ -1459,8 +1456,8 @@ def main(argv: list[str] | None = None) -> int:
         # `quit_app` still owns its own calls, because it is reachable from the menu and
         # the chord and must not depend on this block ever being reached.
         session.close()
-        # The port closes with the process either way; this is so a Home window left
-        # open says "Flow has quit" at its next poll instead of waiting on a socket.
+        # Close this run's Home window and server. Shared browser tabs can report
+        # that Flow has quit at their next poll.
         home.close()
         # The last Send's entry is on a queue until the writer takes it, and the writer
         # is a daemon: without this, a quit right after a paste could lose that paste.

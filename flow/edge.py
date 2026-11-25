@@ -124,6 +124,33 @@ PREBUFFER_SEC = 0.5
 CHUNK_FRAMES = 4096
 LATENCY = "high"
 
+#: Why a reply made no sound, in words for the person who asked for it. A silent reply
+#: is still this engine's contract when the service fails - the session carries on - but
+#: it used to be silent about *why* as well, and that is how "Preview does nothing"
+#: reached the owner on 2026-11-23: the service had been refusing the installed copy for
+#: six weeks (HTTP 403) and nothing on the screen had ever said so. `Synth.trouble` hands
+#: one of these to whoever asked for the sound.
+REFUSED = "Microsoft's voice service refused to speak"
+UNREACHABLE = "could not reach Microsoft's voice service - check the connection"
+NO_SOUND = "Microsoft's voice service answered with no sound - try again"
+
+
+def why_silent(exc: BaseException) -> str:
+    """Which of the reasons above an exception from the service is.
+
+    Read off the exception's shape, not its class: the classes are aiohttp's and
+    edge-tts's, neither is imported until a reply is spoken, and both have renamed theirs
+    before. A refusal carries the HTTP status; a network failure is an `OSError` or a
+    timeout; anything else is the service answering and sending nothing usable.
+    """
+    import asyncio
+
+    if getattr(exc, "status", None) in (401, 403):
+        return REFUSED
+    if isinstance(exc, (OSError, asyncio.TimeoutError, TimeoutError)):
+        return UNREACHABLE
+    return NO_SOUND
+
 
 def available() -> bool:
     """Whether the `edge` extra is installed. False is the ordinary case."""
@@ -315,10 +342,32 @@ class Synth:
         self._epoch = 0
         self._speaking = False
         self._deadline = 0.0
+        #: The latest reply's outcome: set when its first sound arrives from the service
+        #: or when it is known that none will, with `_trouble` saying why in the second
+        #: case. One event per reply, so a reader waiting on an earlier one is not woken
+        #: by a later one's success.
+        self._settled: threading.Event | None = None
+        self._trouble = ""
 
     @property
     def voice(self) -> Voice:
         return self._voice
+
+    def trouble(self, wait: float = 0.0) -> str:
+        """Why the reply last asked for makes no sound, or "" if it has not failed.
+
+        Waits up to `wait` seconds for the service to either send sound or fail, which
+        is under a second for a refusal and about one for a first chunk. "" after the
+        wait means "nothing wrong yet", not "it spoke": a slow network may still deliver.
+        A reply the user cut off is not trouble.
+        """
+        with self._lock:
+            settled = self._settled
+        if settled is None:
+            return ""
+        settled.wait(max(0.0, wait))
+        with self._lock:
+            return self._trouble if settled is self._settled else ""
 
     @property
     def ready(self) -> bool:
@@ -343,13 +392,19 @@ class Synth:
                 return False
             return True
 
-    def _pull(self, text: str, q: queue.Queue, epoch: int) -> None:
-        """Fetch MP3 from the service into `q`. Always terminates the queue with None."""
+    def _pull(self, text: str, q: queue.Queue, epoch: int,
+              settled: threading.Event | None = None) -> None:
+        """Fetch MP3 from the service into `q`. Always terminates the queue with None,
+        and always settles the reply: sound arrived, or `_trouble` says why not."""
         import asyncio
 
-        import edge_tts
+        heard = False
+        why = ""
 
         async def go():
+            nonlocal heard
+            import edge_tts
+
             c = edge_tts.Communicate(text, self._voice.path, rate=rate_percent(self._rate))
             async for chunk in c.stream():
                 with self._lock:
@@ -357,14 +412,28 @@ class Synth:
                         return
                 if chunk.get("type") == "audio" and chunk.get("data"):
                     q.put(chunk["data"])
+                    if not heard:
+                        heard = True
+                        if settled is not None:
+                            settled.set()
 
         try:
             asyncio.run(go())
-        except Exception:
+            if not heard:
+                why = NO_SOUND
+        except Exception as exc:
             # No network, a refused connection, a service error. The reply is silent and
             # the session carries on — the same contract every other engine here has.
-            pass
+            # What changed on 2026-11-23 is that the reason is kept, for `trouble`.
+            if not heard:
+                why = why_silent(exc)
         finally:
+            with self._lock:
+                # Only for the reply still wanted: one the user cut off was not refused.
+                if why and epoch == self._epoch:
+                    self._trouble = why
+            if settled is not None:
+                settled.set()
             q.put(None)
 
     def _play(self, q: queue.Queue, epoch: int) -> None:
@@ -453,6 +522,7 @@ class Synth:
         ceiling = (len(text.split()) / WORDS_PER_SEC + CEILING_SLACK_SEC
                    + LIST_TIMEOUT_SEC)
         q: queue.Queue = queue.Queue()
+        settled = threading.Event()
         with self._lock:
             self._epoch += 1
             epoch = self._epoch
@@ -461,7 +531,8 @@ class Synth:
             # opening syllable is transcribed as the user's.
             self._speaking = True
             self._deadline = time.monotonic() + ceiling
-        threading.Thread(target=self._pull, args=(text, q, epoch),
+            self._settled, self._trouble = settled, ""
+        threading.Thread(target=self._pull, args=(text, q, epoch, settled),
                          daemon=True, name="edge-pull").start()
         threading.Thread(target=self._play, args=(q, epoch),
                          daemon=True, name="edge-play").start()

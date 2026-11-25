@@ -573,6 +573,19 @@ class TestADeadStreamNeverLooksLive(DeviceLossCase):
         s.tick()
         self.assertNotEqual(ACCENT.get(s.state), HEARING)
 
+    def test_no_state_the_compact_ring_paints_green_survives_the_loss(self):
+        # The case above against the table of the pill Flow ships (decisions.md
+        # 2026-11-23, "One surface"): `ui_compact.RING` is the state ring's colour
+        # per session state, and the session is what must leave every green one.
+        import flow.ui_compact as uc
+
+        mic = DyingMic(reopens=False)
+        s = self.session(mic)
+        self.speak(s, mic)
+        mic.die()
+        s.tick()
+        self.assertNotEqual(uc.RING.get(s.state), uc.HEARING)
+
     def test_the_loss_is_said_out_loud_with_a_reason(self):
         mic = DyingMic(reopens=False)
         s = self.session(mic)

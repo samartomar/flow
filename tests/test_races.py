@@ -231,7 +231,6 @@ class TestAnAnswerDoesNotOwnTheDraftItCameBackTo(unittest.TestCase):
         self.assertEqual(s.reply, "Use ALTER TABLE.")
         self.assertEqual(s.draft.text, "and use the users table")
         self.assertIs(s.state, State.DRAFT, "a held draft was reported as idle")
-        self.assertIsNotNone(s.auto_ask_in, "the countdown never came back")
 
 
 if __name__ == "__main__":

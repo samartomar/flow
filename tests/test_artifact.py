@@ -72,6 +72,9 @@ class FakeSpeaker:
 
 def converse_session(speaker=None) -> Session:
     s = Session(asr=FakeAsr(), mic=FakeMic(), speaker=speaker)
+    # Reading answers aloud is off by default (decisions.md 2026-11-24); these tests
+    # are about what is said when it is on.
+    s.muted = speaker is None
     s.toggle_mode(to=CONVERSE)
     return s
 

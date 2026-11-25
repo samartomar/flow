@@ -235,9 +235,36 @@ class TestTheNotesAWordlessPillMustAnswer(unittest.TestCase):
                 self.assertEqual(self.note(text), [])
 
     def test_the_list_is_prefixes_and_says_which(self):
+        # "skipping " joined on 2026-11-22: an agent CLI being passed over because it
+        # did not answer. It used to be half of a "refined via claude, after codex
+        # exited 1" note this surface never showed, so a broken first choice cost
+        # eight seconds a call for as long as nobody was told.
+        #
+        # "rewritten" joined on 2026-11-23: a rewrite that came back after the window
+        # had stopped being Flow's to change. It was built, kept for Paste last, and
+        # announced in a note this surface did not show - so somebody who clicked
+        # back into their work during the twelve seconds a rewrite takes saw the
+        # counter stop and nothing else.
+        #
+        # "done - ", "Refine writes " and "Ask answers " joined on 2026-11-24: a piece
+        # ended by "done", and a style or lens chosen from the pill's menu, are said
+        # where they were chosen.
         self.assertEqual(uc.SAID_NOTES,
                          ("nothing to", "still ", "only the last",
-                          "discarded", "stopped after"))
+                          "discarded", "stopped after", "skipping ", "rewritten",
+                          "done - ", "Refine writes ", "Ask answers "))
+
+    def test_a_rewrite_that_could_not_land_is_said(self):
+        self.assertEqual(
+            self.note("rewritten, but you clicked after it was pasted - "
+                      "Paste last has it"),
+            ["rewritten, but you clicked after it was pasted - Paste last has it"])
+
+    def test_a_cli_being_passed_over_is_said(self):
+        self.assertEqual(
+            self.note("skipping codex exited 1: no such model - Flow Home, "
+                      "Models has the rest"),
+            ["skipping codex exited 1: no such model - Flow Home, Models has the rest"])
 
     def test_a_conversation_event_needs_nothing(self):
         # Nothing of the conversation is on this screen to clear.
@@ -518,7 +545,7 @@ class TestTheStripIsTheChannelForAllOfIt(unittest.TestCase):
         p._draw()
         self.assertIn("dropped 3 words", [t[1] for t in p.canvas.texts])
 
-    def test_it_is_dim_and_never_an_error_colour(self):
+    def test_it_is_quiet_and_never_an_error_colour(self):
         # A rejection and a refusal are things to know, not failures of
         # Flow's — the same argument the muted-mic line was written under.
         p = panel_pill(x=100, y=400)
@@ -527,8 +554,21 @@ class TestTheStripIsTheChannelForAllOfIt(unittest.TestCase):
         p._shell_h = uc.PILL_H + uc.NOTICE_H
         p._draw_notice(p.canvas)
         fills = {t[2] for t in p.canvas.texts}
-        self.assertIn(uc.DIM, fills)
+        self.assertEqual(fills, {uc.NOTICE_TEXT})
         self.assertNotIn(uc.ERROR, fills)
+
+    def test_its_words_can_be_read(self):
+        # The strip is where the pill says why something failed, to somebody looking
+        # at another window. `DIM` was 3.16:1 on this fill; 10 px text needs 4.5.
+        def luminance(colour: str) -> float:
+            parts = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                   for c in parts]
+            return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+        light, dark = sorted((luminance(uc.NOTICE_TEXT), luminance(uc.SHELL)),
+                             reverse=True)
+        self.assertGreaterEqual((light + 0.05) / (dark + 0.05), 4.5)
 
 
 class TestTheDoubleTapStartsHandsFree(unittest.TestCase):
@@ -610,6 +650,88 @@ class TestTheDoubleTapStartsHandsFree(unittest.TestCase):
                          "a flag claiming a capture is running must not outlive it")
         self.assertTrue(p._mic_gone)
 
+
+
+class TestHandsFreeOnlyDictates(unittest.TestCase):
+    """decisions.md 2026-11-24: each pause lands what was said, whatever mode the pill
+    is in; the strip says hands-free is on and shows the words; two minutes of silence
+    turns it off. Before, a pause filled a draft nobody could see."""
+
+    def surface(self, mode=DICTATE):
+        p = uc.CompactPill.__new__(uc.CompactPill)
+        p.session = mock.Mock()
+        p.session.mode = mode
+        p.session.state = State.DRAFT
+        p.session.busy = False
+        p.session.draft.text = "the plan for Tuesday"
+        p.session.send.return_value = "the plan for Tuesday"
+        p._handsfree = True
+        p._handsfree_heard_at = uc.time.monotonic()
+        p._press_talking = p._send_pending = p._ask_pending = False
+        p._hold_words = "the plan for"
+        p._deliver = mock.Mock()
+        p._say = mock.Mock()
+        return p
+
+    def test_a_pause_lands_the_words_as_dictation(self):
+        for mode in (DICTATE, REFINE, CONVERSE):
+            with self.subTest(mode=mode):
+                p = self.surface(mode)
+                p._pump_handsfree()
+                p.session.send.assert_called_once_with(dictate=True)
+                p._deliver.assert_called_once_with("the plan for Tuesday", typed=True)
+                self.assertEqual(p._hold_words, "")
+
+    def test_nothing_lands_while_words_are_still_being_decoded(self):
+        p = self.surface()
+        p.session.busy = True
+        p._pump_handsfree()
+        p.session.send.assert_not_called()
+
+    def test_a_hold_owns_its_own_words(self):
+        p = self.surface()
+        p._press_talking = True
+        p._pump_handsfree()
+        p.session.send.assert_not_called()
+
+    def test_two_minutes_of_silence_turn_it_off_and_say_so(self):
+        p = self.surface()
+        p.session.draft.text = ""
+        p._handsfree_heard_at = uc.time.monotonic() - uc.HANDSFREE_IDLE_SEC - 1
+        p._pump_handsfree()
+        self.assertFalse(p._handsfree)
+        p.session.pause.assert_called_once_with()
+        p._say.assert_called_once_with(uc.HANDSFREE_IDLE_TEXT)
+
+    def test_the_strip_says_it_is_on_and_then_shows_the_words(self):
+        p = self.surface()
+        p.panel_flows, p.lite, p.on_send = False, False, lambda *a, **k: ""
+        p.session.state = State.LISTENING
+        p._hold_words = ""
+        self.assertEqual(p._listening_text(), uc.HANDSFREE_TEXT)
+        p._hold_words = "the plan for"
+        self.assertEqual(p._listening_text(), "the plan for")
+
+    def test_off_it_says_nothing(self):
+        p = self.surface()
+        p._handsfree = False
+        p.panel_flows = False
+        self.assertEqual(p._listening_text(), "")
+
+
+class TestARefineSentByTheTriggerStillLands(unittest.TestCase):
+    """2026-11-24: "boom" or the send key in Refine went through `session.send()`
+    alone, which decides no landing, so the result reached a card with Copy only."""
+
+    def test_it_takes_the_releases_door(self):
+        p = pill(on_send=lambda t, target=None, **kw: "")
+        p.panel_flows = False
+        p.session.mode = REFINE
+        p.session.draft.text = "tell them it slips to Friday"
+        p._ask = mock.Mock()
+        p._send()
+        p._ask.assert_called_once_with()
+        p.session.send.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,7 +23,7 @@ from .server import HomeServer
 
 #: The pages the window has, by the name the URL and the rail use. "start" is the first
 #: run, which the rail does not list: it is opened once, by `__main__`, and left for good.
-PAGES = ("home", "history", "voice", "ask", "models", "settings", "start")
+PAGES = ("home", "history", "voice", "styles", "ask", "lenses", "models", "settings", "start")
 
 
 class Home:
@@ -37,10 +37,8 @@ class Home:
         self.lite = lite
         self.lexicon_path = lexicon_path
         self.trace_path = trace_path
-        #: The pill on screen, and which design it is. Set by `__main__.build` every
-        #: time a surface is built, because a design switch replaces both.
+        #: The pill on screen. Set by `__main__.build` every time a surface is built.
         self.surface = None
-        self.design: str | None = None
         #: A model choice waiting on a download: (partial, final, device). Applied by
         #: `_downloaded` when the model it needs lands. See `Api.model_use`.
         self.pending_models: tuple | None = None
@@ -67,6 +65,7 @@ class Home:
         self.packs = VoicePacks(session)
         self.api = Api(self)
         self._server: HomeServer | None = None
+        self._opened_window = False
         self._lock = threading.Lock()
         self._navigate: str | None = None
 
@@ -98,15 +97,18 @@ class Home:
             server = self.server()
         except OSError as exc:
             return f"Flow Home could not start: {exc}"
-        if server.connected():
+        if self._opened_window and server.connected():
             # A window is open and polling: it will go to `page` at its next poll, and
             # this brings it forward. If it was closed a moment ago, `focus` finds
             # nothing and a new one opens below.
             self._navigate = page
-            if window.focus():
+            if window.focus(server.window_title):
                 return ""
         url = self.url(page)
-        how = window.launch(url)
+        app_url = url.replace("/#", f"/?{server.window_query}#", 1)
+        how = window.launch(url, app_url=app_url)
+        if how == window.ISOLATED:
+            self._opened_window = True
         if how == window.SHARED:
             # Opened, but not apart from the person's browsing: said on the pill and the
             # console, not left for somebody to notice (decisions.md 2026-11-08).
@@ -132,7 +134,13 @@ class Home:
         self.voice.listen.stop()
         with self._lock:
             server, self._server = self._server, None
+            opened_window, self._opened_window = self._opened_window, False
         if server is not None:
+            if opened_window:
+                try:
+                    window.close_all(server.window_title)
+                except OSError:
+                    pass
             try:
                 server.stop()
             except Exception:

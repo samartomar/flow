@@ -60,7 +60,15 @@ boundary is this:
 
 - **Always local.** Microphone audio, the utterance buffers, the lexicon, the profile,
   every local edit, SAPI speech, and Piper speech. R9 is enforced by absence — there is no
-  code in those modules that could send anything anywhere. `flow --stats` is in this band
+  code in those modules that could send anything anywhere. **The front window's title is
+  in this band too**, and it is the newest thing in it (2026-11-22): Refine reads the
+  program name and the title of the window a paste would go to, to decide which kind of
+  writing to produce (`flow/kinds.py`). It is read at that moment, matched against a short
+  list of site names, and dropped — `Session.target_title` is overwritten on the next
+  read, `diag.NEVER` refuses `title` and `window` as trace fields by name, history
+  records the process alone, and the brief a kind selects is a constant in `refine.py`
+  that carries nothing of the window. A title names what somebody is reading, so it is
+  treated as their words are. `flow --stats` is in this band
   too: it reads `~/.flow/diag.jsonl` and `~/.flow/profile.json`, prints a few lines and
   exits, and `flow/stats.py` has no opener in it to do anything else with them.
 - **Sent to Microsoft's speech service, if and only if you installed `[edge]` and chose
@@ -72,12 +80,33 @@ boundary is this:
   the only way to hear them; `flow/piper.py` is the local answer for anyone who would
   rather not. Absent the extra, no socket is opened and `flow/edge.py` is never imported.
 - **Sent to the configured agent CLI, and so to its provider.** A Refine sends the
-  draft tail (≤ `refine.MAX_CHARS`) plus the instruction; an Ask sends the question
+  draft tail (≤ `refine.MAX_CHARS`) plus the instruction — or, for a whole-text Refine,
+  one of four fixed briefs chosen by kind — and, **when an email is being written and a
+  name is set in Flow Home, that name**, because the email is signed with it; **a rewrite
+  asked for after a paste** ("make it an email", "polish that", the `rewrite` shortcut;
+  2026-11-22) sends the same thing by another door — the words Flow itself pasted, which
+  it kept for a minute to make corrections with, and never anything read back out of
+  the other program; an Ask sends the question
   tail, the thread tail, **and the workshop preamble** — which names the workspace, so
   a filesystem path leaves the machine along with the words. That is the one piece of
   non-dictated content Flow adds to an outgoing call, and it is worth stating plainly
   rather than leaving somebody to find it: a project path can identify an employer, a
   client or a codebase. Set no workspace and nothing of the kind is sent.
+  **What the CLI itself keeps of a call, on this machine, is nothing — for the two that
+  can be told** (2026-11-23). Each agent CLI writes its own history of what it is asked,
+  outside `~/.flow` and outside the History choice: until that date claude kept a
+  session file per call and codex a rollout file plus rows in two databases, with the
+  prompt as the session's title. `refine.CANDIDATES` now carries each vendor's switch —
+  `codex exec --ephemeral`, `claude --no-session-persistence` — measured through
+  `_invoke` with a marked prompt and a search of everything either CLI changed: no file
+  held it. kiro-cli has no such switch, and what a provider retains is not governed
+  from here.
+  **Nor does either run the user's hooks on the call** (2026-11-23): claude by
+  `--safe-mode`, codex by `exec --disable hooks`. A hook is handed the prompt, so until
+  that date a plugin installed for coding sessions received every dictated rewrite and
+  question that went through codex. Measured on codex-cli 0.171.0: eight `hook:` lines
+  on stderr and an answer in 9.9 s without the switch, none and 5.5 s with it. It is a
+  flag on one invocation; nothing in the user's codex settings is written.
 - **Network, but never user content.** The first decode of each tier downloads its
   model from Hugging Face, and so does a Download on Flow Home's Models page — the same
   files, from the same place, and only when asked. Parakeet — the primary engine on a PC with a GPU

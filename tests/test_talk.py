@@ -787,5 +787,39 @@ class TestItFailsTheWayTheRestOfTheSurfaceDoes(unittest.TestCase):
         self.assertEqual(h.pasted, [])
 
 
+class TestNothingIsHeardBetweenHolds(unittest.TestCase):
+    """The stream stays open for a minute after a release so the next hold starts at
+    once. Until 2026-11-23 what it delivered in that minute was discarded only if no
+    surface asked - and one stale flag in the pill was enough to ask."""
+
+    LOUD = np.full(BLOCK, 0.2, dtype=np.float32)
+
+    def setUp(self):
+        self.h = Harness()
+        self.addCleanup(self.h.session.close)
+
+    def test_a_tick_after_the_release_hears_nothing(self):
+        s = self.h.session
+        s.talk_start()
+        s.talk_end()
+        self.assertTrue(s._mic_lingering)
+        # The room goes on talking, and a surface goes on ticking.
+        for _ in range(5):
+            self.h.mic._blocks += [self.LOUD] * 4
+            s.tick()
+        self.assertEqual(s._utter, [])
+        self.assertNotEqual(s.state.value, "listening")
+        self.assertEqual(s.draft.text, "")
+
+    def test_the_next_hold_hears_again(self):
+        s = self.h.session
+        s.talk_start()
+        s.talk_end()
+        s.talk_start()
+        self.h.mic._blocks += [self.LOUD] * 4
+        s.tick()
+        self.assertTrue(s._utter)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)
