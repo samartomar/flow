@@ -511,11 +511,12 @@ class TestTheTableFollowsTheEngine(_Case):
         self.assertNotIn("pk-variant", js)  # the separate Version control is gone
         self.assertNotIn('"Which Parakeet build"', js)
 
-    def test_each_parakeet_row_has_use_this_or_download_and_use(self):
+    def test_model_download_and_activation_are_separate_actions(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         self.assertIn('data-act="pk-use"', js)
         self.assertIn("Use this", js)
-        self.assertIn("Download &amp; use", js)
+        self.assertIn('data-act="download"', js)
+        self.assertNotIn("Download &amp; use", js)
 
     def test_the_footnote_parts_are_only_under_their_own_engine(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")

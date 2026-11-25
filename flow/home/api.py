@@ -798,6 +798,17 @@ class Api:
                 raise ApiError("Flow does not know that model")
         if device is not None and device not in ("auto", "cuda", "cpu"):
             raise ApiError("the device is auto, cuda or cpu")
+        if body.get("installed_only"):
+            from ..asr import default_models, resolve_device
+
+            automatic = default_models(resolve_device(device or "auto"))
+            for selected in dict.fromkeys((partial or automatic[0], final or automatic[1])):
+                spec = BY_NAME.get(selected) or BY_RETIRED.get(selected)
+                if spec and not complete(spec.repo):
+                    raise ApiError(f"Download {selected} on the Models page first")
+            self.home.pending_models = None
+            self._call(lambda: self.session.set_models(partial, final, device))
+            return self.models({})
         waiting = []
         for tier, value in (("partial", partial), ("final", final)):
             if value in BY_NAME and not complete(BY_NAME[value].repo):
@@ -853,6 +864,8 @@ class Api:
             if why:
                 raise ApiError(why)
             if not parakeet.model_present(chosen.variant):
+                if body.get("installed_only"):
+                    raise ApiError(f"Download {chosen.name} on the Models page first")
                 # Other build waiting on its download no longer is: this choice replaces it.
                 for spec in PARAKEET_SPECS:
                     other = self.home.models.downloads.jobs().get(spec.name)

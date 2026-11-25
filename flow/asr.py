@@ -638,7 +638,7 @@ class WhisperTranscriber:
             self._drops.clear()
             return out
 
-    def load(self, final: bool | None = None) -> None:
+    def load(self, final: bool | None = None, *, local_files_only: bool = False) -> None:
         """Load one tier, or both when called with no argument.
 
         `Session.start()` preloads both on a background thread. The order matters:
@@ -668,6 +668,7 @@ class WhisperTranscriber:
                             name, device=self.device,
                             compute_type=self._compute_type,
                             revision=whisper_revision(name),
+                            local_files_only=local_files_only,
                         )
                     except Exception:
                         # A GPU that will not build a model is a GPU this session does
@@ -686,6 +687,7 @@ class WhisperTranscriber:
                             name, device="cpu",
                             compute_type=self._compute_type,
                             revision=whisper_revision(name),
+                            local_files_only=local_files_only,
                         )
                     with self._lock:
                         self._models[tier] = model

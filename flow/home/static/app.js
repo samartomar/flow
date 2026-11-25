@@ -270,11 +270,11 @@
   const switchName = (s) => s.engine === "parakeet"
     ? `Parakeet ${PK_LABEL[s.variant] || "Accurate"}` : "Whisper";
 
-  function modelActions(m, busy, sw) {
+  function modelActions(m, busy, sw, manageOnly = false) {
     if (!m.catalog) return "";
     // Under Parakeet the rows ARE the choice: a Parakeet row picks its own version, and
     // one that is not on this PC downloads first and then takes over.
-    const picks = m.engine === "parakeet";
+    const picks = m.engine === "parakeet" && !manageOnly;
     const queued = sw && (sw.state === "waiting" || sw.state === "loading")
       && sw.engine === m.engine && sw.variant === m.variant;
     const dl = m.download;
@@ -298,9 +298,7 @@
     // A model whose engine cannot run here is not offered for download: gigabytes for
     // something the page would then refuse to switch to.
     const blocked = m.blocked ? `disabled title="${esc(m.blocked)}"` : "";
-    return picks
-      ? `${failed}<button type="button" class="btn sm primary" data-act="pk-use" data-value="${esc(m.variant)}" ${blocked}>${icon("download", "#15171C", 15)}${failed ? "Retry" : "Download &amp; use"}</button>`
-      : `${failed}<button type="button" class="btn sm" data-act="download" ${blocked} data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
+    return `${failed}<button type="button" class="btn sm" data-act="download" ${blocked} data-name="${esc(m.name)}">${icon("download", C.text, 15)}${failed ? "Retry" : "Download"}</button>`;
   }
 
   // The strip that says what the speech engine is doing - from the server's own account
@@ -328,6 +326,7 @@
     return `<div class="strip ${tone}" role="status" aria-live="polite">${body}</div>`;
   }
 
+  let browsingEngine = "";
   function renderModels(d) {
     const sp = d.speech;
     const ag = d.agent;
@@ -337,11 +336,12 @@
     const onGpu = sp.device === "cuda" || sp.device === "vulkan";
     // The tier dropdowns are Whisper's: Parakeet is an engine, chosen by the control above.
     const catalog = sp.models.filter((m) => m.catalog && m.engine === "whisper");
-    const engine = sp.engine || "whisper";
+    const activeEngine = sp.engine || "whisper";
+    const engine = browsingEngine || activeEngine;
     const engines = sp.engines || [];
     const parakeet = engines.find((e) => e.id === "parakeet") || {};
     const engineControl = sp.engine_switchable && engines.length > 1 ? `
-        <div class="row wrap"><span class="note">Engine</span>
+        <div class="row wrap"><span class="note">Browse models</span>
           <div class="seg" role="group" aria-label="Speech engine">${engines.map((e) =>
             `<button type="button" aria-pressed="${e.id === engine ? "true" : "false"}" data-act="engine" data-value="${esc(e.id)}" ${e.available ? "" : "disabled"} ${e.why ? `title="${esc(e.why)}"` : ""}>${esc(e.label)} &middot; ${esc(e.maker)}</button>`).join("")}</div></div>
         ${engines.filter((e) => !e.available).map((e) => `<p class="note warn">${esc(e.why.charAt(0).toUpperCase() + e.why.slice(1))}</p>`).join("")}` : "";
@@ -350,12 +350,13 @@
     const outside = (chosen) => chosen && !catalog.some((m) => m.name === chosen)
       ? [`<option value="${esc(chosen)}" selected>${esc(chosen)} - no longer listed</option>`] : [];
     const option = (tier, chosen, auto) => [`<option value="" ${chosen ? "" : "selected"}>Automatic (${esc(auto)})</option>`]
-      .concat(catalog.map((m) => `<option value="${esc(m.name)}" ${m.name === chosen ? "selected" : ""}>${esc(m.name)}${m.installed ? "" : " - downloads first"}</option>`))
+      .concat(catalog.map((m) => `<option value="${esc(m.name)}" ${m.name === chosen ? "selected" : ""}>${esc(m.name)}${m.installed ? "" : " - download required"}</option>`))
       .concat(outside(chosen))
       .join("");
     const sstate = sp.switch || null;
     // The engine control filters the table: Whisper shows Whisper's rows, Parakeet its two.
     const shown = sp.models.filter((m) => (m.engine || "whisper") === (engine === "parakeet" ? "parakeet" : "whisper"));
+    const otherModels = sp.models.filter((m) => m.catalog && !shown.includes(m));
     const now = sp.models.filter((m) => m.in_use.length);
     const finalNow = (now.find((m) => m.in_use.includes("final")) || {}).name || sp.automatic.final;
     const partialNow = (now.find((m) => m.in_use.includes("partial")) || {}).name || sp.automatic.partial;
@@ -451,7 +452,7 @@
           <div class="row wrap"><b>${esc(gpu ? gpu.name : "No NVIDIA GPU found")}</b>${gpu && gpu.memory_mb ? `<span class="note">${Math.round(gpu.memory_mb / 1024)} GB video memory</span>` : ""}
             <span class="badge ${onGpu ? "green" : ""}">${onGpu ? '<span class="dot green"></span>speech runs on the GPU' : "speech runs on the CPU"}</span>
             ${engine !== "parakeet" && sp.compute_types.includes("int8") && onGpu && !sp.compute_types.includes("float16") ? '<span class="badge">int8</span>' : ""}</div>
-          <p class="note">${engine === "parakeet" ? (parakeet.variant === "gpu" ? `Parakeet is running on this GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}.` : "The Accurate and Light versions of Parakeet run on the CPU whatever graphics card this PC has; the card matters only to Whisper and the GPU version.") : onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
+          <p class="note">${activeEngine === "parakeet" ? (parakeet.variant === "gpu" ? `Parakeet is running on this GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}.` : "The Accurate and Light versions of Parakeet run on the CPU whatever graphics card this PC has; the card matters only to Whisper and the GPU version.") : onGpu ? (sp.compute_types.includes("float16") ? "This card has fast half-precision; Flow runs int8 on it." : "This card has no fast half-precision, so int8 is its fast path. Flow picks it for you.")
             : esc(sp.why_cpu || "The CPU runs the smaller models in time; the large ones need a GPU.")}</p>
         </div>
       </div></section>
@@ -460,24 +461,32 @@
           <span class="note">${esc(sp.cache.text)} on this PC</span><button type="button" class="btn sm" data-act="open" data-what="${engine === "parakeet" ? "parakeet" : "models"}">${icon("folder", C.text, 14)}Open folder</button></div>
         <p class="note">Parakeet from NVIDIA is the engine Flow uses on a PC with a GPU: the most accurate model measured here, and the fastest. Whisper from OpenAI is the engine for Hindi, for a PC without a GPU, and for the rest of what Parakeet does not hear. Both are downloaded from Hugging Face (the Parakeet GPU helper, parakeet.cpp, from GitHub) and run on this PC; nothing you say is sent to either.</p>
         ${engineControl}
+        <p class="note">Active engine: <b>${esc(activeEngine)}</b></p>
         ${switchStrip(sstate)}
-        ${engine === "parakeet"
+        ${engine !== activeEngine
+          ? (engine === "whisper"
+            ? '<p class="note">Download missing models in their rows, then select Whisper · OpenAI to use them.</p>'
+            : '<p class="note">Download a build below, then choose Use this.</p>')
+          : engine === "parakeet"
           ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. ${parakeet.variant === "gpu" ? `It runs on the GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}` : `It runs on the CPU, ${esc(parakeet.threads || "")} threads`}, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : parakeet.variant === "gpu" ? "The GPU version is as accurate as the accurate one, and several times faster." : "The accurate version is the most accurate model measured here, Japanese-accented English included."} Parakeet hears 25 European languages and not Hindi: for Hindi or Hinglish, choose Whisper, which writes them as English.</p>`
           : `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> for the words that get pasted, <span class="mono">${esc(partialNow)}</span> for the live preview.</p>`}
-        ${engine === "whisper" && sp.swappable ? `<div class="choose">
+        ${engine === "whisper" && activeEngine === engine && sp.swappable ? `<div class="choose">
           <label>Words that get pasted<select id="final-model">${option("final", sp.chosen.final, sp.automatic.final)}</select></label>
           <label>Live preview<select id="partial-model">${option("partial", sp.chosen.partial, sp.automatic.partial)}</select></label>
           <label>Run speech on<select id="decode-device">${[["", "Automatic"], ["cuda", "The GPU"], ["cpu", "The CPU"]].map(([v, t]) =>
             `<option value="${v}" ${(sp.device_asked === v || (!v && sp.device_asked === "auto")) ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         </div>
-        <div class="row"><button type="button" class="btn primary" data-act="use-models">Use these</button><p class="note">Applies now. A model that is not on this PC downloads first, then takes over.</p></div>`
-        : engine === "parakeet" ? "" : '<p class="note">This speech engine has no models to choose between.</p>'}
+        <div class="row"><button type="button" class="btn primary" data-act="use-models">Use these</button><p class="note">Choose Download below for any missing model.</p></div>`
+        : engine !== activeEngine || engine === "parakeet" ? "" : '<p class="note">This speech engine has no models to choose between.</p>'}
         ${engine === "parakeet" && sp.cache.legacy_bytes ? `<div class="row wrap"><p class="note grow">An earlier Flow left Parakeet files here that this version does not use (${esc(sp.cache.legacy_text)}).</p><button type="button" class="btn sm" data-act="legacy-delete">Remove them</button></div>` : ""}
         <h3 class="table-head">${engine === "parakeet" ? "Parakeet versions" : "Whisper models"}</h3>
         <div class="table" role="table" aria-label="${engine === "parakeet" ? "Parakeet versions" : "Whisper models"}">
           <div class="tr head" role="row"><span class="label" role="columnheader">Model</span><span class="label" role="columnheader">Size</span><span class="label" role="columnheader">Errors / 100 words</span><span class="label" role="columnheader">Speed</span><span role="columnheader"></span></div>
           ${rows}
         </div>
+        ${otherModels.length ? `<h3>${engine === "parakeet" ? "Whisper" : "Parakeet"} models</h3>
+          ${otherModels.map((m) => `<div class="row"><span class="mono grow">${esc(m.name)}</span>
+            <span class="note">${esc(m.size_text)}</span>${modelActions(m, sp.loading, sstate, true)}</div>`).join("")}` : ""}
         ${engine !== "parakeet" && sp.unlisted && sp.unlisted.names.length ? `<div class="row wrap"><p class="note grow">Flow no longer lists ${sp.unlisted.names.length === 1 ? "this Whisper model" : `these ${sp.unlisted.names.length} Whisper models`}, still on this PC: <span class="mono">${sp.unlisted.names.map(esc).join(", ")}</span> (${esc(sp.unlisted.text)}). They keep working if a flag names them; removing them frees the space.</p><button type="button" class="btn sm" data-act="unlisted-delete" data-names="${esc(sp.unlisted.names.join(", "))}" data-text="${esc(sp.unlisted.text)}">Remove ${sp.unlisted.names.length} model${sp.unlisted.names.length === 1 ? "" : "s"} (${esc(sp.unlisted.text)})</button></div>` : ""}
         <p class="fine">${engine === "parakeet"
           ? "Errors per 100 words were measured on 300 clips of accented English (EdAcc), the same clips as the Whisper models; speed is how many times faster than you talk. The Accurate and Light versions were measured on a CPU with 8 threads, so they are not comparable to the Whisper speeds; the GPU version was measured on the same GTX 1070 as the Whisper speeds, through CUDA or Vulkan as marked. They compare the models - your own voice is its own measurement. Parakeet is NVIDIA's model (CC-BY-4.0), run through onnx-asr and parakeet.cpp (MIT)."
@@ -1507,9 +1516,17 @@
       if (!confirm(`Delete ${el.dataset.name} from this PC? You can download it again.`)) return;
       run(() => api("models/delete", { name: el.dataset.name }), `Deleted ${el.dataset.name}`);
     },
-    engine: (el) => run(() => api("models/engine", { engine: el.dataset.value }),
-      el.dataset.value === "parakeet" ? "Choosing Parakeet" : "Choosing Whisper"),
-    "pk-use": (el) => run(() => api("models/engine", { engine: "parakeet", variant: el.dataset.value }),
+    engine: (el) => {
+      browsingEngine = el.dataset.value;
+      const sp = data.speech;
+      const required = sp.whisper_required || [sp.chosen.partial || sp.automatic.partial, sp.chosen.final || sp.automatic.final];
+      const ready = required.every((name) => sp.models.some((m) => m.name === name && m.installed));
+      if (browsingEngine === "whisper" && sp.engine !== "whisper" && ready) {
+        return run(() => api("models/engine", {engine: "whisper"}), "Choosing Whisper");
+      }
+      redraw();
+    },
+    "pk-use": (el) => run(() => api("models/engine", { engine: "parakeet", variant: el.dataset.value, installed_only: true }),
       "Choosing that Parakeet"),
     "engine-cancel": () => run(() => api("models/engine/cancel", {}), "Cancelled"),
     "unlisted-delete": (el) => {
@@ -1521,6 +1538,7 @@
       run(() => api("models/delete", { name: "sherpa-onnx-legacy" }), "Removed");
     },
     "use-models": () => run(() => api("models/use", {
+      installed_only: true,
       final: value("final-model") || null, partial: value("partial-model") || null,
       device: value("decode-device") || "auto",
     }), "Switching models - the pill shows the load"),

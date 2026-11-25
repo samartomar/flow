@@ -726,31 +726,30 @@ and need the add-on; installing it changes nothing until you choose one.
 
 **The first run on a PC with a GPU** starts on Whisper, so dictation works at once, and
 downloads the GPU build in the background through the same machinery as the Models page's
-**Download & use** — the strip shows it, and it takes over when it lands (queued while you are
+**Download** action — the strip shows it, and it takes over when it lands (queued while you are
 talking). The startup line says so, and the first run's "Getting the speech model" step shows
 this build (and the same download) instead of Whisper's pair. A failed download leaves Whisper
 running with the reason in the strip and is retried once at the next launch; **cancelling** it
 is taken as a no and remembered, so it is not fetched again unasked (Models still offers
-Download & use). None of this happens when you have chosen an engine on the Models page, named
+Download). None of this happens when you have chosen an engine on the Models page, named
 one with `--engine`, named a Whisper model with a flag, or have no GPU backend.
 
 **What Whisper is still for:** Hindi and Hinglish, which `large-v3` and `small` hear and write
 as English (Parakeet's 25 European languages do not include Hindi); any language beyond
 Parakeet's; a mis-heard command, which Whisper retries with the command words as hints and
 Parakeet cannot take; and a PC with no GPU and no add-on, where `small.en` is what a CPU
-can run in time. Choose **Whisper · OpenAI** on the Models page, or `--engine whisper`.
+can run in time. In Models, browse **Whisper · OpenAI**, download any missing models, then select **Whisper · OpenAI**.
 
 ```bash
 uv pip install -e ".[parakeet]"        # onnx-asr, about 7 MB; onnxruntime is already here
 uv run python -m flow --engine parakeet
 ```
 
-Or open **Flow Home > Models** and choose **Parakeet · NVIDIA** above the list: the table
-below it then shows only Parakeet's two versions, **Accurate** (2.4 GB, loads in about five
-seconds) and **Light** (640 MB), each with a **Use this** button — or **Download & use** when
-it is not on this PC yet, with a progress bar and a Cancel. A strip under the engine control
-says what is happening, from Flow's own state, so it is the same after a reload: downloading
-(with bytes), waiting for you to finish talking, loading, and how it ended. A switch asked
+In **Flow Home > Models**, choose **Parakeet · NVIDIA** or **Whisper · OpenAI** to
+browse the available models. The active engine keeps running. Click **Download** on
+a missing model to see transfer progress and a **Cancel** button. Once the files are
+installed, click **Use this** for a Parakeet build or select **Whisper · OpenAI** to activate Whisper.
+A switch asked
 for while you are mid-sentence, a reply is playing or a decode is running is **queued, not
 refused**: it happens the moment you stop, and the strip has a Cancel for the wait. The choice
 is remembered, and `--engine` on the command line beats it for one launch. Without the
@@ -1156,7 +1155,7 @@ grows a setting; Flow Home holds every one ([decisions.md](decisions.md), 2026-0
 | Page | What is on it |
 |---|---|
 | **Home** | The two sides — Dictate and Ask — with the keys each answers to; how much you have dictated today and the typing time that saved; what is left to set up, each with a way to do it; what you said this session (in memory only, gone when Flow quits) |
-| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and a model that is not on this PC downloads first and then takes over. The Whisper list is four models — `large-v3` and `small` (the GPU pair, which also write Hindi as English), `small.en` and `base.en` (the CPU pair); the engine control reads **Parakeet · NVIDIA** then **Whisper · OpenAI**. A model Flow stopped listing but that is still on this PC is offered for removal, by name and size, with one press; nothing is removed unasked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud, with the same **Read answers aloud** switch as Lenses; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
+| **Models** | This PC's GPU and whether speech runs on it. Every speech model Flow can run, with its size, its **errors per 100 words** and its **speed**, both measured on 300 clips of accented English on the development machine's GTX 1070 — a comparison between models, not a promise about your voice. Download with progress, cancel, delete, and choose which model writes the words that get pasted and which draws the live preview: **applied now**, not at the next launch, and download missing models explicitly before applying your choice. The Whisper list is four models — `large-v3` and `small` (the GPU pair, which also write Hindi as English), `small.en` and `base.en` (the CPU pair); the engine control reads **Parakeet · NVIDIA** then **Whisper · OpenAI**. A model Flow stopped listing but that is still on this PC is offered for removal, by name and size, with one press; nothing is removed unasked. Below: the agent CLI (automatic or pinned), the model it is asked for, its effort and how long to wait; the voice that reads answers aloud, with the same **Read answers aloud** switch as Lenses; and **Better voices** — add Piper or the Microsoft natural voices with a press, and download Piper's voices ([A better voice](#a-better-voice-if-you-want-one)) |
 | **Settings** | The microphone, chosen by name and switched now; the talk keys and whether they are hold or toggle (the gesture changes now, new keys at the next start); the Ask keys; the other seven shortcuts, Paste last and Rewrite among them; the send word, from the tested list; workspaces — add a folder, choose one, forget one; whether a panel shows while you refine and ask; whether the model loads at startup; the update check; and what leaves this PC. Where Refine's style and Ask's lens are chosen, it points to Styles and Lenses |
 | **Styles** | How Refine writes ([What Refine writes](#what-refine-writes)): the selected style; your name for emails; every style with its instructions, where it is used and when it last was, each with Edit and, for a built-in one you changed, **Back to the original**; a style of your own; and the programs that have their own style |
 | **Lenses** | Under Ask in the rail. The viewpoint Ask answers from ([Lenses](#lenses-the-viewpoint-ask-answers-from)): the selected lens; **Read answers aloud**; every lens with its instructions, each with Edit and **Back to the original** for a built-in one you changed; and a lens of your own |

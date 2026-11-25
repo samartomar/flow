@@ -4285,6 +4285,13 @@ class Session:
     def _engine_key(name: str, variant: str) -> str:
         return f"{name}:{variant}" if variant else name
 
+    def whisper_model_names(self):
+        """The tiers a switch back to Whisper would load, including launch overrides."""
+        whisper = self._engines.get("whisper")
+        if whisper is None and self.engine_factory is not None:
+            whisper = self.engine_factory("whisper", "")
+        return getattr(whisper, "names", None)
+
     def engine_hard_refusal(self, name: str, variant: str | None = None) -> str:
         """Why the engine can never change to `name` *as things stand*, or "".
 
@@ -4443,7 +4450,16 @@ class Session:
 
         def run() -> None:
             try:
-                new.load()
+                if isinstance(new, WhisperTranscriber):
+                    from .home.models import BY_NAME, BY_RETIRED, complete
+
+                    for model_name in dict.fromkeys(new.names):
+                        spec = BY_NAME.get(model_name) or BY_RETIRED.get(model_name)
+                        if spec and not complete(spec.repo):
+                            raise ValueError(f"Download {model_name} on the Models page first")
+                    new.load(local_files_only=True)
+                else:
+                    new.load()
                 warm = getattr(new, "warmup", None)
                 if callable(warm):
                     warm()

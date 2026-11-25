@@ -648,8 +648,14 @@ class ModelManager:
         if not (isinstance(asked, tuple) and len(asked) == 2):
             asked = (None, None)
         auto_partial, auto_final = default_models(device)
+        required = (asked[0] or auto_partial, asked[1] or auto_final)
+        if getattr(asr, "engine", "whisper") == "parakeet":
+            whisper_names = getattr(self.session, "whisper_model_names", None)
+            if callable(whisper_names):
+                required = whisper_names() or required
         return {
             "models": rows,
+            "whisper_required": list(dict.fromkeys(required)),
             "engine": getattr(asr, "engine", "whisper"),
             "switch": self._switch(jobs),
             "engines": engine_list,

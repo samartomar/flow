@@ -130,6 +130,21 @@ class _Case(unittest.TestCase):
 
 
 class TestSwitching(_Case):
+    def test_missing_whisper_stays_offline_and_keeps_parakeet_running(self):
+        from flow.asr import WhisperTranscriber
+
+        current = FakeEngine("parakeet")
+        self.session.asr = current
+        candidate = WhisperTranscriber("small.en", "small.en", device="cpu")
+        self.session.engine_factory = mock.Mock(return_value=candidate)
+        with mock.patch("flow.home.models.complete", return_value=False), \
+                mock.patch.object(candidate, "load") as load:
+            self.assertTrue(self.session.set_engine("whisper"))
+            self.assertTrue(pump(self.session, lambda: not self.session._switching_engine))
+            load.assert_not_called()
+        self.assertIs(self.session.asr, current)
+        self.assertIn("Download small.en", self.session.engine_switch()["reason"])
+
     def test_it_loads_the_new_engine_swaps_it_in_and_unloads_the_old_one(self):
         self.switch()
         new = self.built[0]
