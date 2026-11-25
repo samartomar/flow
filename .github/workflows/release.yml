@@ -90,6 +90,9 @@ jobs:
           dist/flow/flow.exe --help
           if ($LASTEXITCODE -ne 0) { throw "the bundled exe did not run" }
 
+      - name: Include distribution licenses and source locations
+        run: uv run --locked --extra voice --extra edge --group build python packaging/bundle_notices.py dist/flow
+
       - name: Zip it
         run: Compress-Archive -Path dist/flow -DestinationPath flow-windows-x64.zip
 

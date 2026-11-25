@@ -29,6 +29,9 @@ Description: |-
   there is no API key. English only. The agent CLI - codex or claude, on PATH and already
   signed in - is optional: without one, dictation and spoken corrections still work.
 
+  The Windows zip bundles Piper (GPL), edge-tts (LGPL), and FFmpeg with additional codecs.
+  Third-party notices and source locations accompany flow.exe.
+
   The speech models are not in the download. They are fetched to the Hugging Face cache
   the first time Flow needs them, with progress in Flow Home. The build is unsigned, so the
   first launch shows the Windows SmartScreen panel and takes More info, then Run anyway,

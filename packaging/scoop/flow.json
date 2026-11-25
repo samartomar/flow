@@ -13,7 +13,7 @@
         "download 142 MB to learn one number."
     ],
     "version": "0.8.3",
-    "description": "Local English dictation with a talk-to-it refine loop",
+    "description": "Local dictation with bundled Piper (GPL), edge-tts (LGPL), and FFmpeg with additional codecs",
     "homepage": "https://github.com/samartomar/flow",
     "license": "MIT",
     "architecture": {

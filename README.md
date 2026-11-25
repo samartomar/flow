@@ -206,9 +206,9 @@ scripted session, so it can be re-shot whenever the app changes.
 
 ## License
 
-MIT. Flow is built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and
-OpenAI's [Whisper](https://github.com/openai/whisper) models, and reads answers aloud with
-[Piper](https://github.com/OHF-Voice/piper1-gpl) if you add it.
+Flow's own code is MIT licensed. The Windows zip includes Piper for offline speech,
+edge-tts, and FFmpeg with additional codecs. Their licenses and source locations ship
+beside `flow.exe`. [Third-party notices](packaging/THIRD-PARTY-NOTICES.md)
 
 The Parakeet engine, which Flow uses on a PC with a GPU, runs NVIDIA's
 [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (CC-BY-4.0,
