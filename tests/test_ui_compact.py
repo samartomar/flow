@@ -1384,12 +1384,15 @@ class TestThePanelDraws(unittest.TestCase):
 
     def test_insert_label_tracks_target_pin_and_missing_destination(self):
         p = pill()
+        p._text_width = lambda label, font: len(label) * 5
         p.paste_target = 17
         p.lite = False
         p.session.target_app = "Outlook.EXE"
         self.assertEqual(p._insert_label(), "Insert → Outlook")
         p.pinned, p.pinned_name = 17, "Outlook"
         self.assertEqual(p._insert_label(), "Insert → Outlook (pinned)")
+        p.pinned_name = "Long application name for a narrow answer card"
+        self.assertIn("… (pinned)", p._insert_label())
         self.assertLess(p._insert_bounds(0)[2], uc._continue_rect(0)[0])
         p.paste_target = 0
         self.assertEqual(p._insert_label(), "Insert")
