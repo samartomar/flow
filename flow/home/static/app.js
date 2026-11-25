@@ -236,7 +236,8 @@
         </section>
         <section class="card side-card">
           <div class="row"><span class="disc">${glyph(C.ask, 1.15)}</span><h2 class="grow">Ask</h2>${d.mode === "ask" ? '<span class="badge violet">the pill is on Ask</span>' : ""}${keys(sc.ask)}<span class="fine">${sc.ask ? "hold, ask, let go" : ""}</span></div>
-          <p class="lead">Ask anything, like ChatGPT. With a workspace set, the answer knows your code. It is read to you and stays above the pill until you close it; Continue in Flow has the whole conversation.</p>
+          <p class="lead">Ask a question and the answer appears on a card. Choose a workspace for questions about your project.</p>
+          <p class="note">${d.read_aloud === "unavailable" ? "Spoken answers are unavailable on this PC." : `<a href="#/lenses">Read answers aloud</a> is ${d.read_aloud === "on" ? "on" : "off"}.`}</p>
           <p class="note">${askHow}</p>
           <hr class="rule">
           <div class="row">${icon("folder", d.workspace ? C.green : C.soft, 16)}<span class="mono grow ellipsis">${esc(d.workspace || "no workspace - answers are about anything")}</span><a class="btn ghost sm" href="#/settings">Change</a></div>
@@ -646,6 +647,12 @@
       </div>`;
   }
 
+  function silentHoldMessage(blocks) {
+    if (blocks == null) return "";
+    return blocks === 0 ? "No audio arrived during the last silent hold." :
+      "Audio arrived during the last silent hold, but Flow produced no words.";
+  }
+
   function renderSettings(d) {
     const mic = d.mic;
     const sh = d.shortcuts;
@@ -672,11 +679,15 @@
       <div class="split">
         <div class="col">
           <section class="card">
-            <h2>Microphone</h2>
+            <h2>Check microphone</h2>
+            <p id="silent-hold" class="note" ${mic.last_silent_blocks == null ? "hidden" : ""}>${silentHoldMessage(mic.last_silent_blocks)}</p>
+            <label for="mic">Change microphone</label>
             <div class="row"><select id="mic" class="grow" data-change="mic" aria-label="Microphone">${devices}</select>${bars(12)}</div>
             <p class="note">${mic.flag ? "Chosen by --device for this launch. " : ""}${mic.chosen || mic.flag
               ? "If it goes away, Flow keeps trying this one and tells you - it never switches to another on its own."
-              : "Follows the one Windows uses, and moves with it when you plug something in."} The level moves while Flow is listening.</p>
+              : "Follows the one Windows uses, and moves with it when you plug something in."}</p>
+            <button type="button" class="btn sm" data-act="mic-check">Test microphone</button>
+            <span id="mic-check-status" class="note" role="status"></span>
           </section>
           <section class="card"><h2>Shortcuts</h2>${hot}</section>
           <section class="card">
@@ -1311,8 +1322,21 @@
     return api(LOAD[name]);
   }
 
+  let settingsMicTest = false;
+  let finishedMicTest = false;
+  window.addEventListener("pagehide", () => {
+    if (settingsMicTest) fetch("/api/start/listen", {
+      method: "POST", keepalive: true,
+      headers: {"X-Flow-Token": TOKEN, "Content-Type": "application/json"},
+      body: JSON.stringify({action: "stop"}),
+    }).catch(() => {});
+  });
   async function show(force = false) {
     const name = current();
+    if (name !== "settings" && settingsMicTest) {
+      settingsMicTest = false;
+      await run(() => api("start/listen", {action: "stop"}), "", false);
+    }
     document.body.classList.toggle("first", name === "start");
     renderNav();
     try {
@@ -1516,6 +1540,19 @@
     "fr-next": () => (startStep === STEPS ? finishStart() : goStep(startStep + 1)),
     "fr-back": () => goStep(startStep - 1),
     "fr-skip": () => finishStart(),
+    "mic-check": (el) => run(async () => {
+      const start = !settingsMicTest;
+      el.disabled = true;
+      try {
+        await api("start/listen", {action: start ? "start" : "stop"});
+        settingsMicTest = start;
+        finishedMicTest = !start;
+        if (start && current() !== "settings") {
+          settingsMicTest = false;
+          await api("start/listen", {action: "stop"});
+        }
+      } finally { el.disabled = false; }
+    }, "", false),
     "fr-listen": () => run(() => api("start/listen", { action: "start" })),
     "fr-models": (el) => run(() => api("start/models", { action: el.dataset.value }),
       el.dataset.value === "download" ? "Downloading - you can keep going"
@@ -1680,7 +1717,11 @@
   const CHANGE = {
     cli: (el) => run(() => api("agent", { cli: el.value }), el.value === "auto" ? "Automatic" : `Pinned to ${el.value}`),
     voice: (el) => run(() => api("replies", { voice: el.value || null }), "Voice changed"),
-    mic: (el) => run(() => api("settings/mic", { name: el.value || null }), "Microphone changed"),
+    mic: (el) => run(async () => {
+      if (!settingsMicTest) return api("settings/mic", {name: el.value || null});
+      await api("start/mic", {name: el.value || null});
+      return api("settings");
+    }, "Microphone changed"),
     send: (el) => run(() => api("settings/send", { word: el.value }), `Say "${el.value}" to send`),
     ws: (el) => run(() => api("settings/workspace", { path: el.value || null }), "Workspace changed"),
     "refine-kind": (el) => run(() => api("settings/writing", { default: el.value }), "Saved"),
@@ -1751,7 +1792,29 @@
       renderStatus();
       if (live.navigate && live.navigate !== current()) location.hash = "#/" + live.navigate;
       const name = current();
-      if (name === "settings") level(document.getElementById("page"), live.capturing ? live.level_db : -90);
+      if (name === "settings") {
+        const hold = document.getElementById("silent-hold");
+        if (hold) {
+          hold.hidden = live.last_silent_blocks == null;
+          hold.textContent = silentHoldMessage(live.last_silent_blocks);
+        }
+        const test = live.mic_check;
+        const listening = test.state === "listening";
+        level(document.getElementById("page"), listening ? test.level_db : live.capturing ? live.level_db : -90);
+        const button = document.querySelector('[data-act="mic-check"]');
+        const status = document.getElementById("mic-check-status");
+        if (button && status) {
+          if (!listening && settingsMicTest) {
+            settingsMicTest = false;
+            finishedMicTest = true;
+          }
+          button.textContent = settingsMicTest ? "Stop test" : "Test microphone";
+          const message = test.error || (listening
+            ? (test.heard ? "Audio detected." : "Say a short phrase and watch the meter.")
+            : finishedMicTest ? (test.heard ? "Audio detected." : "Test ended without detecting speech.") : "");
+          if (status.textContent !== message) status.textContent = message;
+        }
+      }
       polls += 1;
       // Models refreshes while something is moving on it; Voice while it is listening;
       // Home every few seconds.

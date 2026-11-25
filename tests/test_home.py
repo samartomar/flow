@@ -310,6 +310,15 @@ class TestTheLiveStrip(unittest.TestCase):
 
 
 class TestTheHomePage(unittest.TestCase):
+    def test_read_aloud_follows_the_session_and_speaker(self):
+        h = Pumped(self)
+        h.session.speaker = mock.Mock()
+        for muted, expected in [(True, "off"), (False, "on")]:
+            h.session.muted = muted
+            self.assertEqual(h.call("GET", "/api/home")[1]["read_aloud"], expected)
+        h.session.speaker = None
+        self.assertEqual(h.call("GET", "/api/home")[1]["read_aloud"], "unavailable")
+
     def test_it_lists_six_setup_steps_and_this_sessions_words(self):
         h = Pumped(self)
         status, page = h.call("GET", "/api/home")

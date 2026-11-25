@@ -496,6 +496,8 @@ class Api:
             }
 
         data = self._call(read)
+        data["mic_check"] = self.home.voice.listen.public()
+        data["last_silent_blocks"] = getattr(self.home.surface, "last_silent_blocks", None)
         data["navigate"] = self.home.take_navigate()
         data["version"] = version()
         data["lite"] = bool(self.home.lite)
@@ -517,6 +519,8 @@ class Api:
             names = getattr(asr, "names", None)
             engine = getattr(asr, "engine", "whisper")
             return {
+                "read_aloud": "unavailable" if getattr(s, "speaker", None) is None else
+                              "off" if getattr(s, "muted", True) else "on",
                 "recent": [{"kind": role, "text": text}
                            for role, text in list(getattr(s, "recent", []))[:8]],
                 "workspace": getattr(s, "workspace", None),
@@ -582,6 +586,7 @@ class Api:
                           if today.since else None),
                 "all_words": life.words if life.counted else None,
             },
+            "read_aloud": live["read_aloud"],
             "setup": setup,
             "recent": recent,
             "mode": live["mode"],
@@ -1746,6 +1751,7 @@ class Api:
             mic = getattr(s, "mic", None)
             return {
                 "current": getattr(mic, "device_name", "") or "",
+                "last_silent_blocks": getattr(self.home.surface, "last_silent_blocks", None),
                 # A device index with no name behind it came from `--device`: the page
                 # says so, because that is the one choice this page did not make.
                 "flag": (getattr(mic, "pinned", None) is not None
@@ -1772,6 +1778,7 @@ class Api:
                 "current": live["current"],
                 "chosen": getattr(profile, "mic_device", None) if profile is not None else None,
                 "flag": live["flag"],
+                "last_silent_blocks": live["last_silent_blocks"],
             },
             "shortcuts": {
                 "available": hotkeys is not None,

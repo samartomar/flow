@@ -251,7 +251,7 @@ SAID_NOTES = ("nothing to", "still ", "only the last", "discarded",
 HEARD_NOTHING_SEC = 0.7
 
 #: What that hold is told. It names the one thing worth checking and where.
-HEARD_NOTHING = "heard nothing - if you spoke, check the microphone in Flow Home"
+HEARD_NOTHING = "Heard nothing · Check microphone →"
 
 #: And a hold that heard *something* the decoder made no words of, where the session
 #: has not already said why.
@@ -1144,6 +1144,7 @@ class CompactPill(tk.Tk):
     #: `_frame` reads it before anything has ever set it — and None on a bare
     #: fixture is the honest answer: nothing has been composited at all.
     _drawn_key = None
+    last_silent_blocks: int | None = None
 
     def __init__(
         self, session: Session, on_send=None, hotkeys=None, arm=False,
@@ -2847,6 +2848,8 @@ class CompactPill(tk.Tk):
         words = bool(pending or (draft.strip()
                                  and draft != self._draft_at_hold))
         self._draft_at_hold = draft
+        read_audio = getattr(self.session, "hold_audio", None)
+        audio = read_audio() if callable(read_audio) else None
         if self.trace is not None:
             # One line per hold: how long, in which mode, and whether anything was
             # heard. Durations and a category, never a word. A session where the
@@ -2855,15 +2858,16 @@ class CompactPill(tk.Tk):
             # And what the microphone gave it, in numbers (`Session.hold_audio`): a
             # "silence" with blocks=0 and one with a peak under the gate are different
             # faults, and the trace could not tell them apart (2026-11-24).
-            audio = getattr(self.session, "hold_audio", None)
-            heard_audio = audio() if callable(audio) else {}
+
             self.trace("hold", ms=round(held * 1000),
                        mode=mode if isinstance(mode, str) else "",
                        ok=words,
                        reason="words" if words else "break" if not send else "silence",
-                       **(heard_audio if isinstance(heard_audio, dict) else {}))
+                       **(audio if isinstance(audio, dict) else {}))
         if (send and not words and not heard and not self.panel_flows
                 and held >= HEARD_NOTHING_SEC and self._strip_is_free()):
+            self.last_silent_blocks = (audio["blocks"] + audio["deaf"]
+                                       if isinstance(audio, dict) else None)
             self._say(HEARD_NOTHING, ERROR_FRAMES)
         if send and words:
             self._send_since = time.perf_counter()
@@ -2962,6 +2966,10 @@ class CompactPill(tk.Tk):
         old constant fell inside the band, so a press on the footer chips was
         read as a press on the foot and started a hold instead of copying.
         """
+        if (e is not None and self._notice and self._notice_text == HEARD_NOTHING
+                and self.design(e.y) >= self._shell_h - NOTICE_H):
+            self._open_home("settings")
+            return
         if (self._panel_open and e is not None
                 and self.design(getattr(e, "y", self.dev(PILL_H)))
                 < self._panel_h()):
@@ -3261,6 +3269,7 @@ class CompactPill(tk.Tk):
         m.add_command(label=ws or "no workspace", state="disabled")
         m.add_separator()
         m.add_command(label="Open Flow", command=self._open_home)
+
         m.add_command(label="models, microphone, shortcuts, settings",
                       state="disabled")
 
@@ -4060,7 +4069,7 @@ class CompactPill(tk.Tk):
         elif self._spec()["send"] and _hit(layout.send, x, y):
             self._panel_send()
         elif (self._spec().get("insert")
-              and _hit(_insert_rect(layout.footer_y), x, y)):
+              and _hit(self._insert_bounds(layout.footer_y), x, y)):
             self._insert_answer()
         elif (self._spec().get("continue")
               and _hit(_continue_rect(layout.footer_y), x, y)):
@@ -4223,6 +4232,24 @@ class CompactPill(tk.Tk):
             return
         if _copy_to_clipboard(self, text):
             self._flash = FLASH_FRAMES
+
+    def _insert_label(self) -> str:
+        if not self.paste_target or self.lite:
+            return INSERT_LABEL
+        app = self.pinned_name if self.pinned else getattr(self.session, "target_app", "")
+        if not isinstance(app, str) or not app:
+            return INSERT_LABEL
+        name = app[:-4] if app.lower().endswith(".exe") else app
+        suffix = " (pinned)" if self.pinned else ""
+        limit = _continue_rect(0)[0] - _insert_rect(0)[0] - 20
+        while len(name) > 1 and self._text_width(f"Insert → {name}{suffix}", FONT_CHIP) > limit:
+            name = name[:-2] + "…"
+        return f"Insert → {name}{suffix}"
+
+    def _insert_bounds(self, y: int) -> tuple:
+        left, top, right, bottom = _insert_rect(y)
+        width = self._text_width(self._insert_label(), FONT_CHIP) + 14
+        return left, top, max(right, left + width), bottom
 
     def _insert_answer(self) -> None:
         """The Insert chip (decisions.md 2026-11-24): the answer goes where a Refine
@@ -4405,6 +4432,8 @@ class CompactPill(tk.Tk):
             # while the CLI is out - whose seconds are the one thing here that
             # moves on its own, once a second, for as long as a call is waiting.
             self._result_tag(), self._waiting_line(),
+            (self.paste_target, self.pinned_name, getattr(session, "target_app", ""))
+            if self._panel_open else None,
         )
 
     def _draw(self) -> None:
@@ -4714,12 +4743,13 @@ class CompactPill(tk.Tk):
         c.create_text(gx + 13, gy, anchor="w", text="Copy",
                       font=FONT_CHIP, fill=CODE)
         if spec.get("insert"):
-            x1, y1, x2, y2 = _insert_rect(layout.footer_y)
+            x1, y1, x2, y2 = self._insert_bounds(layout.footer_y)
             _round_rect(c, x1, y1, x2, y2, CHIP_H // 2, fill=CHIP, outline="")
-            c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=INSERT_LABEL,
+            c.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=self._insert_label(),
                           font=FONT_CHIP, fill=CODE)
-        c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
-                      text=spec["hint"], font=FONT_TAG, fill=DIM)
+        if not spec.get("insert") or self._insert_label() == INSERT_LABEL:
+            c.create_text(x2 + 10, (y1 + y2) // 2, anchor="w",
+                          text=spec["hint"], font=FONT_TAG, fill=DIM)
         if spec["send"]:
             x1, y1, x2, y2 = layout.send
             _round_rect(c, x1, y1, x2, y2, CHIP_H // 2,
