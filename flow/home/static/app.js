@@ -465,7 +465,7 @@
         ${switchStrip(sstate)}
         ${engine !== activeEngine
           ? (engine === "whisper"
-            ? '<p class="note">Download missing models in their rows, then select Whisper · OpenAI to use them.</p>'
+            ? `<p class="note">${sp.whisper_downloads_needed.length ? `Download ${esc(sp.whisper_downloads_needed.join(", "))}, then select Whisper · OpenAI to use it.` : "Select Whisper · OpenAI to use your models."}</p>`
             : '<p class="note">Download a build below, then choose Use this.</p>')
           : engine === "parakeet"
           ? `<p class="note">Now: <span class="mono">${esc(finalNow)}</span> does both the live preview and the words that get pasted &mdash; one model, so there is nothing to choose between. ${parakeet.variant === "gpu" ? `It runs on the GPU through parakeet.cpp${parakeet.backend ? ` (${esc(parakeet.backend)})` : ""}` : `It runs on the CPU, ${esc(parakeet.threads || "")} threads`}, and it cannot be steered toward command words, so a mis-heard command is not retried with a hint. ${parakeet.variant === "int8" ? "The light version is a little behind Whisper on Japanese-accented English; the accurate one is not." : parakeet.variant === "gpu" ? "The GPU version is as accurate as the accurate one, and several times faster." : "The accurate version is the most accurate model measured here, Japanese-accented English included."} Parakeet hears 25 European languages and not Hindi: for Hindi or Hinglish, choose Whisper, which writes them as English.</p>`
@@ -1519,9 +1519,7 @@
     engine: (el) => {
       browsingEngine = el.dataset.value;
       const sp = data.speech;
-      const required = sp.whisper_required || [sp.chosen.partial || sp.automatic.partial, sp.chosen.final || sp.automatic.final];
-      const ready = required.every((name) => sp.models.some((m) => m.name === name && m.installed));
-      if (browsingEngine === "whisper" && sp.engine !== "whisper" && ready) {
+      if (browsingEngine === "whisper" && sp.engine !== "whisper" && !sp.whisper_downloads_needed.length) {
         return run(() => api("models/engine", {engine: "whisper"}), "Choosing Whisper");
       }
       redraw();

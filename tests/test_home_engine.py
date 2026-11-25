@@ -71,6 +71,23 @@ class _Case(unittest.TestCase):
 
 
 class TestThePayload(_Case):
+    def test_switching_back_uses_local_and_retired_whisper_choices(self):
+        self.post("parakeet")
+        local_model = Path(self.tmp.name) / "my-whisper"
+        local_model.mkdir()
+        (local_model / "model.bin").touch()
+        retired = models_mod.RETIRED[0]
+        with mock.patch.object(self.h.session, "whisper_model_names", create=True,
+                               return_value=(str(local_model), retired.name)), \
+                mock.patch.object(models_mod, "complete", side_effect=lambda repo: repo == retired.repo):
+            self.assertEqual(self.page()["whisper_downloads_needed"], [])
+
+    def test_only_the_missing_catalog_tier_needs_a_download_before_switching(self):
+        self.post("parakeet")
+        with mock.patch.object(self.h.session, "whisper_model_names", create=True,
+                               return_value=("medium.en", "small.en")):
+            self.assertEqual(self.page()["whisper_downloads_needed"], ["small.en"])
+
     def test_it_lists_the_engines_and_which_one_is_running(self):
         sp = self.page()
         self.assertEqual(sp["engine"], "whisper")

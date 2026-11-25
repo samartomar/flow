@@ -25,15 +25,14 @@ Description: |-
   one window for the speech models, the microphone, a tuning to your voice, a history if
   you choose to keep one, and the settings.
 
-  Speech recognition runs on the machine with faster-whisper, so no audio leaves it and
-  there is no API key. English only. The agent CLI - codex or claude, on PATH and already
+  Parakeet and Whisper recognize speech on the machine. Dictation needs no API key. The agent CLI - codex or claude, on PATH and already
   signed in - is optional: without one, dictation and spoken corrections still work.
 
   The Windows zip bundles Piper (GPL), edge-tts (LGPL), and FFmpeg with additional codecs.
   Third-party notices and source locations accompany flow.exe.
 
-  The speech models are not in the download. They are fetched to the Hugging Face cache
-  the first time Flow needs them, with progress in Flow Home. The build is unsigned, so the
+  The speech models are not in the download. Flow Home shows a Download button and
+  progress for each missing model. The build is unsigned, so the
   first launch shows the Windows SmartScreen panel and takes More info, then Run anyway,
   once per machine.
 # `flow` is MadrasCheck.flow's moniker in winget, and monikers are unique there. The

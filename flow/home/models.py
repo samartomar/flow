@@ -653,9 +653,13 @@ class ModelManager:
             whisper_names = getattr(self.session, "whisper_model_names", None)
             if callable(whisper_names):
                 required = whisper_names() or required
+        # Only catalog models can be downloaded here. The offline engine loader
+        # resolves local directories, retired models and other launch overrides.
+        missing = [row["name"] for row in rows if row["name"] in required
+                   and row["name"] in BY_NAME and not row["installed"]]
         return {
             "models": rows,
-            "whisper_required": list(dict.fromkeys(required)),
+            "whisper_downloads_needed": missing,
             "engine": getattr(asr, "engine", "whisper"),
             "switch": self._switch(jobs),
             "engines": engine_list,
