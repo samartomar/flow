@@ -383,8 +383,6 @@ class TestACliThatDidNotAnswerIsNamedOnce(unittest.TestCase):
     def test_the_note_says_which_and_why_and_only_the_first_time(self):
         s = session()
         self.addCleanup(s.close)
-        s.toggle_mode(to=REFINE)
-        s.events()
 
         def passed_over(*_a, **kw):
             kw["health"].failed("codex", "codex exited 1: the model is not supported")
@@ -394,6 +392,8 @@ class TestACliThatDidNotAnswerIsNamedOnce(unittest.TestCase):
         both = [refine.named("codex"), refine.named("claude")]
         with mock.patch("flow.session.refine", side_effect=passed_over), \
                 mock.patch("flow.session.available", return_value=both):
+            s.toggle_mode(to=REFINE)
+            s.events()
             for words in ("first thing to shape", "second thing to shape"):
                 s.draft.set(words)
                 s.send()
