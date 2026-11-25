@@ -109,17 +109,6 @@ residue.
 
 ### Decisions
 
-- [ ] **The release zip is labelled MIT and bundles GPL code with no notices.** Found by
-  the 2026-11-22 readiness review, not acted on, because it is a licence decision.
-  `release.yml` builds with `--extra voice --extra edge` and `packaging/flow.spec`
-  collects both: `piper_tts` 1.8.0 declares GPL-3.0-or-later and ships espeak-ng data,
-  `edge-tts` is LGPL-3.0, and the bundled FFmpeg libraries are LGPL beside x264/x265.
-  The winget and Scoop manifests and the README say MIT. Two honest shapes: **keep Piper
-  in the zip** and ship a `THIRD-PARTY-NOTICES` with the licence texts, with the
-  manifests saying what the bundle contains; or **take it out of the zip** and let Flow
-  Home fetch it the way it fetches voices, which keeps the download MIT and costs a
-  click. The second is the same move the Parakeet GPU helper already makes.
-
 - [ ] **Nothing is signed.** `flow.exe` and the `parakeet-server.exe` Flow downloads at
   run time. For one developer it is a SmartScreen click; for an IT department it is the
   end of the conversation, because WDAC and AppLocker allow by publisher. A certificate

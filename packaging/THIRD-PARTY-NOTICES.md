@@ -11,5 +11,6 @@ download includes the following speech and media software.
 | IBM Plex fonts | SIL Open Font License. The text accompanies the fonts under _internal/flow/assets/fonts. |
 
 The licenses folder contains notices copied from the installed distributions.
-See THIRD-PARTY-SOURCES.md for the corresponding sources and build information.
+Download flow-windows-x64-sources.zip beside the executable zip on the same
+GitHub release. See THIRD-PARTY-SOURCES.md for its contents and build information.
 Voice and recognition model weights downloaded separately have their own licenses.
