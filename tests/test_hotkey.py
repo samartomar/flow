@@ -54,6 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 if sys.platform != "win32":  # pragma: no cover - the CI legs that are not Windows
     raise unittest.SkipTest("Windows-only: flow.hotkey binds user32 at import")
 
+
 import flow.hotkey as hotkey  # noqa: E402
 from flow.hotkey import (  # noqa: E402
     BAD_BLOCK_LINE,
@@ -707,6 +708,12 @@ class TestAltGrKeepsItsCharacters(unittest.TestCase):
         skipped = lines.index("hotkey  quit     not ctrl+alt+Q - AltGr+Q types @ "
                               "on the de-DE keyboard")
         self.assertLess(skipped, lines.index("hotkey  quit     ctrl+shift+Q"))
+
+
+def setUpModule():
+    from desktop_env import isolate_desktop
+
+    isolate_desktop()
 
 
 if __name__ == "__main__":

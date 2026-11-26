@@ -364,19 +364,16 @@ def cuda_dirs() -> list[str]:
     """
     from .asr import _wheel_dll_dirs
 
+    # shutil.which uses PATHEXT on Windows, which normally omits .DLL.
+    path_dirs = [entry.strip('"') for entry in os.get_exec_path() if entry.strip('"')]
     found: dict[str, str] = {}
-    for directory in _wheel_dll_dirs():
+    for directory in _wheel_dll_dirs() + path_dirs:
         for name in CUDA_DLLS:
             if name not in found and (Path(directory) / name).is_file():
                 found[name] = directory
-    for name in CUDA_DLLS:
-        if name not in found:
-            hit = shutil.which(name)
-            if hit:
-                found[name] = str(Path(hit).parent)
-    if len(found) < len(CUDA_DLLS):
-        return []
-    return sorted(set(found.values()))
+        if len(found) == len(CUDA_DLLS):
+            return sorted(set(found.values()))
+    return []
 
 
 def _vulkan_loader() -> bool:

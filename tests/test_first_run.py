@@ -543,5 +543,11 @@ class TestTheColdStartHarnessCannotFlatterItself(unittest.TestCase):
         self.assertIn("cold_start.py", guide)
 
 
+def setUpModule():
+    from desktop_env import isolate_desktop
+
+    isolate_desktop()
+
+
 if __name__ == "__main__":
     unittest.main()

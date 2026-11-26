@@ -588,20 +588,19 @@ class TestTheCudaRuntimeIsFoundInTheWheels(unittest.TestCase):
         dirs = [self.wheel("cublas", ["cublas64_12.dll", "cublasLt64_12.dll"]),
                 self.wheel("cuda_runtime", ["cudart64_12.dll"])]
         with mock.patch("flow.asr._wheel_dll_dirs", return_value=dirs), \
-                mock.patch("shutil.which", return_value=None):
+                mock.patch.dict(os.environ, {"PATH": ""}):
             self.assertEqual(parakeet.cuda_dirs(), sorted(dirs))
 
     def test_one_missing_means_none(self):
         dirs = [self.wheel("cublas", ["cublas64_12.dll", "cublasLt64_12.dll"])]
         with mock.patch("flow.asr._wheel_dll_dirs", return_value=dirs), \
-                mock.patch("shutil.which", return_value=None):
+                mock.patch.dict(os.environ, {"PATH": ""}):
             self.assertEqual(parakeet.cuda_dirs(), [])
 
     def test_a_system_cuda_install_on_path_counts(self):
         sysdir = self.wheel("toolkit", list(parakeet.CUDA_DLLS))
         with mock.patch("flow.asr._wheel_dll_dirs", return_value=[]), \
-                mock.patch("shutil.which",
-                           side_effect=lambda name: str(Path(sysdir) / name)):
+                mock.patch.dict(os.environ, {"PATH": sysdir, "PATHEXT": ".COM;.EXE;.BAT"}):
             self.assertEqual(parakeet.cuda_dirs(), [sysdir])
 
     def test_the_wheel_the_extra_adds_is_the_runtime_dll(self):
@@ -866,6 +865,21 @@ class TestTheMainPathKnowsTheGpuBuild(unittest.TestCase):
     def test_a_saved_gpu_choice_that_is_ready_is_parakeet(self):
         (engine, why), _s, fetching = self.pick("auto", "parakeet", "gpu")
         self.assertEqual(engine, "parakeet")
+        fetching.assert_not_called()
+
+    def test_saved_gpu_weights_with_the_wrong_helper_name_the_missing_backend(self):
+        from flow.__main__ import _saved_parakeet_engine
+
+        with mock.patch.object(parakeet, "gpu_backend", return_value=("vulkan", "")), \
+                mock.patch.object(parakeet, "runtime_present",
+                                  side_effect=lambda backend: backend == "cuda"), \
+                mock.patch.object(parakeet, "model_present",
+                                  side_effect=lambda key, model_dir=None: model_dir is not None), \
+                mock.patch.object(parakeet, "fetch") as fetching, \
+                mock.patch("flow.__main__.say") as say:
+            self.assertEqual(_saved_parakeet_engine("gpu")[0], "whisper")
+        self.assertIn("Vulkan helper", say.call_args.args[0])
+        self.assertIn("model files are already on this PC", say.call_args.args[0])
         fetching.assert_not_called()
 
     def test_the_flag_downloads_the_gpu_build_saying_both_sources_and_the_total(self):

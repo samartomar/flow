@@ -56,31 +56,28 @@ polish, the thread, converse mode — and Send copies the draft for you to paste
 [product.md](product.md#flow-lite--the-portable-body) for the definition and the fence.
 `--lite` runs the same code on Windows.
 
-### With `uv` — nothing to clone
+### Windows setup
 
-```bash
-uv tool install git+https://github.com/samartomar/flow
-flow
-```
-
-[`uv`](https://docs.astral.sh/uv/) is a single static binary; it fetches Python 3.12 and
-the three dependencies itself, and `uv tool install` puts `flow` on your PATH (run
-`uv tool update-shell` once if your shell has never seen uv's bin directory).
-`uv tool upgrade flow` takes a newer version, `uv tool uninstall flow` removes it.
+[Download **Flow-Setup.exe**](https://github.com/samartomar/flow/releases/latest/download/Flow-Setup.exe).
+Open it, click **Install**, then **Finish** with **Open Flow** checked. Setup installs
+for your Windows account. For later launches, search for **Flow** in the
+Start menu. If Flow is already running, this opens its Flow Home window.
+To remove it, use **Settings → Apps → Installed apps**.
 
 ### Without Python at all — the binary
 
-Download
-[`flow-windows-x64.zip`](https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip),
-unzip it anywhere, and run `flow.exe`. That URL is version-free on purpose: the asset name
-never changes, so the link serves whatever release is newest and no cached page can hand
-you a stale zip. [Releases](https://github.com/samartomar/flow/releases) is there to browse
-the notes and older builds. Nothing to install and no Python on the machine. **142 MB zipped, 350 MB
-unpacked** (measured on the v0.6.1 asset itself, downloaded from the link above; Piper, the engine
-behind [a better voice](#a-better-voice-if-you-want-one), is 14 MB of the zip). The two speech models are *not* in the zip —
-they download to your Hugging Face cache on the first decode, exactly as they do for
-every other install, and the startup line names the path. Bundling them would have made
-this a 730 MB download and frozen two files `--model` is meant to swap.
+Use the zip for a portable copy or for releases without Setup.
+
+1. [Download the Windows zip](https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip).
+2. Right-click `flow-windows-x64.zip` in Downloads and choose **Extract All**.
+3. Open the extracted **flow** folder and double-click **flow.exe**. Flow Home opens
+   on first launch. Follow the setup steps to test your microphone, prepare your
+   speech models and try dictation.
+
+Keep the extracted folder together so you can double-click `flow.exe` again.
+To reopen Flow Home while the app runs, right-click the floating pill and choose
+**Open Flow**. [Releases](https://github.com/samartomar/flow/releases) lists the
+changes and downloads for each version.
 
 The download is **unsigned**, and the honest version of that is telling you what you will
 see rather than letting it look like a virus alert: the first launch shows Windows
@@ -97,11 +94,36 @@ scoop bucket add flow https://github.com/samartomar/scoop-flow
 scoop install flow/flow
 ```
 
+After installing, open the Windows Start menu, type **Flow**, and open the app.
+
 The same zip, from Flow's own [bucket](https://github.com/samartomar/scoop-flow), checked
 against the SHA-256 each release publishes beside it. `scoop update flow` takes a newer
 one, which the bucket picks up within four hours of a release. Say `flow/flow`, with the
 bucket in front: Scoop's main bucket has a different `flow`, Facebook's JavaScript type
 checker.
+
+### With `uv` — nothing to clone
+
+```bash
+uv tool install git+https://github.com/samartomar/flow
+flow
+```
+
+Run `flow` directly after a tool install. `uv run flow` is for the source checkout.
+If the command is missing after installation, run `uv tool update-shell` and reopen
+your terminal. `uv tool upgrade flow` checks for a newer version.
+
+For Windows with an NVIDIA GPU, the following command adds the optional CUDA,
+Piper and Microsoft Natural voice packages:
+
+```powershell
+uv tool install 'flow[cuda,voice,edge] @ git+https://github.com/samartomar/flow'
+flow --home
+```
+
+The CUDA wheels are large. You can omit `cuda` if you already have CUDA 12 on PATH
+or use the Parakeet Vulkan helper. Flow Home lists its helper and model downloads
+under **Models**.
 
 ### From a clone — to change it
 
