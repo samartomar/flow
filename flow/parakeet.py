@@ -339,12 +339,26 @@ _backend_cache: tuple[str, str] | None = None
 _nvidia_cache: bool | None = None
 
 
+def _nvidia_smi() -> str | None:
+    # Match Setup's Windows driver locations before looking on PATH.
+    for variable, relative in (
+        ("SystemRoot", "System32/nvidia-smi.exe"),
+        ("ProgramFiles", "NVIDIA Corporation/NVSMI/nvidia-smi.exe"),
+    ):
+        root = os.environ.get(variable)
+        if root:
+            candidate = Path(root) / relative
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which("nvidia-smi")
+
+
 def _nvidia_present() -> bool:
     """Whether `nvidia-smi` sees a GPU. Asked once: the card does not change mid-session."""
     global _nvidia_cache
     if _nvidia_cache is None:
         _nvidia_cache = False
-        exe = shutil.which("nvidia-smi")
+        exe = _nvidia_smi()
         if exe:
             try:
                 out = subprocess.run([exe, "-L"], capture_output=True, text=True, timeout=10,
@@ -396,8 +410,9 @@ def _detect_backend() -> tuple[str, str]:
     if _vulkan_loader():
         return "vulkan", ""
     if nvidia:
-        return "", ('an NVIDIA GPU was found but not the CUDA runtime: '
-                    'uv pip install -e ".[cuda]"')
+        action = ('run Flow Setup and select NVIDIA CUDA acceleration'
+                  if getattr(sys, "frozen", False) else 'uv pip install -e ".[cuda]"')
+        return "", f"an NVIDIA GPU was found but the CUDA runtime is missing - {action}"
     return "", "no GPU with a CUDA or Vulkan driver was found"
 
 

@@ -611,6 +611,14 @@ class TestTheCudaRuntimeIsFoundInTheWheels(unittest.TestCase):
                 mock.patch.dict(os.environ, {"PATH": ""}):
             self.assertEqual(parakeet.cuda_dirs(), [local])
 
+    def test_the_driver_tool_can_live_outside_path(self):
+        tool = self.tmp / "NVIDIA Corporation" / "NVSMI" / "nvidia-smi.exe"
+        tool.parent.mkdir(parents=True)
+        tool.touch()
+        with mock.patch.dict(os.environ, {"ProgramFiles": str(self.tmp),
+                                          "SystemRoot": str(self.tmp), "PATH": ""}):
+            self.assertEqual(parakeet._nvidia_smi(), str(tool))
+
     def test_the_wheel_the_extra_adds_is_the_runtime_dll(self):
         self.assertIn("cudart64_12.dll", parakeet.CUDA_DLLS)
         text = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(
