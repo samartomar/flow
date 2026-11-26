@@ -92,6 +92,19 @@ jobs:
       - name: the entry point starts
         run: uv run flow --help
 
+      - name: Build Windows Setup
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        run: |
+          uv run --locked --extra voice --extra edge --group build pyinstaller --noconfirm packaging/flow.spec
+          if ($LASTEXITCODE -ne 0) { throw "Could not build Flow" }
+          uv run --locked --no-sync python packaging/bundle_notices.py dist/flow
+          if ($LASTEXITCODE -ne 0) { throw "Could not bundle license notices" }
+          ./packaging/build_windows_installer.ps1
+
+      - name: Test Windows Setup
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        run: ./packaging/test_windows_installer.ps1
+
   # The one part of Flow that is not Python, on the only runner that can compile it.
   #
   # `native/flow_stt.swift` is the macOS on-device decoder — the answer for machines that

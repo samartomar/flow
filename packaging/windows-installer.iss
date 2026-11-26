@@ -11,6 +11,7 @@ DefaultDirName={localappdata}\Programs\Flow
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+AppMutex=Local\SamarTomar.Flow.Running
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplicationsFilter=flow.exe,Flow Desktop.exe

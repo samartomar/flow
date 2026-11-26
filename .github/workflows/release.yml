@@ -97,24 +97,7 @@ jobs:
         run: ./packaging/build_windows_installer.ps1
 
       - name: Test Windows Setup
-        run: |
-          $testDir = Join-Path $env:RUNNER_TEMP 'Flow install smoke test'
-          $setup = Start-Process -FilePath ./Flow-Setup.exe -Wait -PassThru `
-            -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$testDir`""
-          if ($setup.ExitCode -ne 0) { throw "Setup exited with code $($setup.ExitCode)" }
-          $desktop = Join-Path $testDir 'Flow Desktop.exe'
-          $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Flow.lnk'
-          $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
-          if ($link.TargetPath -ne $desktop -or $link.Arguments -ne '--home') {
-            throw "The Flow Start menu shortcut is missing or incorrect"
-          }
-          $launch = Start-Process -FilePath $desktop -ArgumentList '--help' -Wait -PassThru
-          if ($launch.ExitCode -ne 0) { throw "The desktop executable did not start" }
-          $uninstall = Start-Process -FilePath "$testDir/unins000.exe" -Wait -PassThru `
-            -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
-          if ($uninstall.ExitCode -ne 0 -or (Test-Path $shortcut) -or (Test-Path $desktop)) {
-            throw "Uninstall did not remove Flow and its shortcut"
-          }
+        run: ./packaging/test_windows_installer.ps1
 
       - name: Gather corresponding sources for the bundled components
         run: uv run --locked python packaging/build_windows_sources.py flow-windows-x64-sources.zip

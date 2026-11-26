@@ -703,9 +703,13 @@ def main(argv: list[str] | None = None) -> int:
 
         with DesktopLaunch() as launch:
             if not launch.primary:
-                launch.reopen()
-                say("Flow is already running - opening Flow Home")
-                return 0
+                launch_args = sys.argv[1:] if argv is None else argv
+                if any(arg != "--home" for arg in launch_args):
+                    say("Flow is already running - quit it before starting with options")
+                    return 2
+                if launch.reopen():
+                    say("Flow is already running - opening Flow Home")
+                    return 0
             return _run_app(args, launch)
     return _run_app(args)
 

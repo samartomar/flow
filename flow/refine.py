@@ -1297,6 +1297,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
                 [_system_tool("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True,
                 timeout=5.0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.SubprocessError):
             pass  # fall through to the direct kill, which is better than nothing
@@ -1404,6 +1405,7 @@ def _run(cli: Cli, executable: str, prompt: str, *, timeout: float, cwd: str | N
             env=_agent_env(cli),
             encoding="utf-8",
             errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             # Its own session on POSIX, so `_kill_tree` can end the whole group. Windows
             # reaches the tree through `taskkill /T` instead.
             start_new_session=os.name != "nt",
