@@ -30,6 +30,9 @@ Name: "cuda"; Description: "Use faster NVIDIA CUDA acceleration (download up to 
 [Files]
 Source: "..\dist\flow\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"; Check: UpgradingFlow
+
 [Icons]
 Name: "{userprograms}\Flow"; Filename: "{app}\Flow Desktop.exe"; Parameters: "--home"; WorkingDir: "{app}"
 
@@ -43,6 +46,18 @@ Type: filesandordirs; Name: "{app}\cuda"
 var
   CudaChecked, HasCudaDevice: Boolean;
   DownloadPage: TDownloadWizardPage;
+
+function UpgradingFlow: Boolean;
+var
+  PreviousDir: String;
+begin
+  Result := RegQueryStringValue(HKCU64,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\SamarTomar.Flow_is1',
+    'InstallLocation', PreviousDir);
+  if Result then
+    Result := (CompareText(RemoveBackslashUnlessRoot(PreviousDir), ExpandConstant('{app}')) = 0)
+      and FileExists(ExpandConstant('{app}\flow.exe'));
+end;
 
 function MajorNumber(Value: String): Integer;
 var

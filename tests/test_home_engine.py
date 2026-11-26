@@ -623,7 +623,8 @@ class TestTheGpuRow(_Case):
     def test_its_size_is_the_model_plus_the_helper_until_it_is_here(self):
         self.with_backend("vulkan")
         self.state["gpu"] = False
-        row = self.rows()[PKG]
+        with mock.patch.object(parakeet, "runtime_present", return_value=False):
+            row = self.rows()[PKG]
         self.assertEqual(row["size"], parakeet.VARIANTS["gpu"].bytes
                          + parakeet.RUNTIMES["vulkan"].zip.size)
         self.assertFalse(row["installed"])
