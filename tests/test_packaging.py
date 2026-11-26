@@ -61,6 +61,7 @@ PUBLISHED_SHA256 = {
     "0.8.1": "408d59a1987aaad6c27c5498ec039dd213c7878bbd24620b76d31fb8c537cd3f",
     "0.8.2": "5a78dfd37f3f9b89f1984d3da260c5189d6746dcc2398a46e2aa84a1bc4e9213",
     "0.8.3": "83afee37ff9e9f8aea50100103b77da0428e2fb7c6a839aaae38e4bced970f92",
+    "0.8.4": "7d2ec0e9d7bd159a0f1b8fe965dabcb5d4df095cf1f3db5d518fcb2dcb3c8f7a",
 }
 
 

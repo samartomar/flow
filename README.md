@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/samartomar/flow/releases/latest"><strong>Download Flow for Windows</strong></a> ·
+  <a href="https://github.com/samartomar/flow/releases/latest/download/Flow-Setup.exe"><strong>Download Flow for Windows</strong></a> ·
   <a href="#install">Setup help</a> ·
   <a href="docs/guide.md">Guide</a> ·
   <a href="https://github.com/samartomar/flow/issues/new">Report a mishearing</a>
@@ -45,11 +45,13 @@ there's no account or API key, and your audio never leaves your PC.
 
 You need Windows 10 or 11 and a microphone.
 
-Choose **Flow-Setup.exe** on the [latest release page](https://github.com/samartomar/flow/releases/latest) when available.
+[Download **Flow-Setup.exe**](https://github.com/samartomar/flow/releases/latest/download/Flow-Setup.exe).
 Double-click it, choose **Install**, and leave **Open Flow** checked when you finish.
 After setup, open **Flow** from the Windows Start menu. Flow Home walks you through
 your first dictation.
 Opening Flow again brings up the running copy's Flow Home.
+On supported NVIDIA PCs, Setup offers an optional CUDA download for faster
+Parakeet dictation.
 
 For the portable version, or for a release that only has a zip:
 

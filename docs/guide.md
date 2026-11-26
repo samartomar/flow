@@ -58,7 +58,7 @@ polish, the thread, converse mode — and Send copies the draft for you to paste
 
 ### Windows setup
 
-Choose **Flow-Setup.exe** on the [latest release page](https://github.com/samartomar/flow/releases/latest) when available.
+[Download **Flow-Setup.exe**](https://github.com/samartomar/flow/releases/latest/download/Flow-Setup.exe).
 Open it, click **Install**, then **Finish** with **Open Flow** checked. Setup installs
 for your Windows account. For later launches, search for **Flow** in the
 Start menu. If Flow is already running, this opens its Flow Home window.
