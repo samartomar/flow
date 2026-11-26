@@ -16,7 +16,7 @@
 # purpose: a double-quoted YAML scalar would read `\f` as a form feed.
 #
 # `InstallerSha256` is the checksum the release published in its `.sha256` asset for the
-# version above, or the placeholder `FILL-ME-SHA256` between a version bump and that
+# version above, or the placeholder `7d2ec0e9d7bd159a0f1b8fe965dabcb5d4df095cf1f3db5d518fcb2dcb3c8f7a` between a version bump and that
 # version's zip. winget's validation rejects the placeholder, which is correct and
 # expected: this file is the prepared submission, and packaging/PUBLISHING.md carries the
 # one-liner that fills it before anything is sent.
@@ -30,6 +30,6 @@ NestedInstallerFiles:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/samartomar/flow/releases/download/v0.8.4/flow-windows-x64.zip
-    InstallerSha256: FILL-ME-SHA256
+    InstallerSha256: 7d2ec0e9d7bd159a0f1b8fe965dabcb5d4df095cf1f3db5d518fcb2dcb3c8f7a
 ManifestType: installer
 ManifestVersion: 1.28.0
