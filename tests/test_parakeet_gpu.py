@@ -603,6 +603,14 @@ class TestTheCudaRuntimeIsFoundInTheWheels(unittest.TestCase):
                 mock.patch.dict(os.environ, {"PATH": sysdir, "PATHEXT": ".COM;.EXE;.BAT"}):
             self.assertEqual(parakeet.cuda_dirs(), [sysdir])
 
+    def test_the_frozen_app_uses_setup_libraries_without_path_changes(self):
+        local = self.wheel("cuda", list(parakeet.CUDA_DLLS))
+        with mock.patch.object(sys, "frozen", True, create=True), \
+                mock.patch.object(sys, "executable", str(self.tmp / "Flow Desktop.exe")), \
+                mock.patch("flow.asr._wheel_dll_dirs", return_value=[]), \
+                mock.patch.dict(os.environ, {"PATH": ""}):
+            self.assertEqual(parakeet.cuda_dirs(), [local])
+
     def test_the_wheel_the_extra_adds_is_the_runtime_dll(self):
         self.assertIn("cudart64_12.dll", parakeet.CUDA_DLLS)
         text = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(

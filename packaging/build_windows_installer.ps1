@@ -15,6 +15,10 @@ Push-Location $repo
 try {
     $version = uv run --locked python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
     if ($LASTEXITCODE -ne 0) { throw "Could not read the Flow version" }
+    $cudaJson = uv run --locked --no-sync python -m flow.cuda_setup
+    if ($LASTEXITCODE -ne 0) { throw "Could not read the CUDA download pins" }
+    $cuda = $cudaJson | ConvertFrom-Json -AsHashtable
+    $defines = foreach ($key in $cuda.Keys) { "/DCuda$key=$($cuda[$key])" }
 
     Invoke-WebRequest -Uri $compilerUrl -OutFile $compilerSetup
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $compilerSetup).Hash -ne $compilerSha) {
@@ -24,7 +28,7 @@ try {
     $install = Start-Process -FilePath $compilerSetup -ArgumentList $compilerArgs -PassThru -Wait -WindowStyle Hidden
     if ($install.ExitCode -ne 0) { throw "Inno Setup exited with code $($install.ExitCode)" }
 
-    & (Join-Path $compilerDir 'ISCC.exe') "/DFlowVersion=$version" "/O$output" packaging/windows-installer.iss
+    & (Join-Path $compilerDir 'ISCC.exe') "/DFlowVersion=$version" @defines "/O$output" packaging/windows-installer.iss
     if ($LASTEXITCODE -ne 0) { throw "Could not build Flow Setup" }
 }
 finally {

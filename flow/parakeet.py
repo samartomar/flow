@@ -358,16 +358,15 @@ def _nvidia_present() -> bool:
 def cuda_dirs() -> list[str]:
     """Directories that together hold every DLL the CUDA helper needs, or [] if one is missing.
 
-    The wheels under `site-packages/nvidia` first (what `[cuda]` installs, and what
-    `asr.cuda_ready` already looks in), then anything already on PATH — a machine with the
-    CUDA toolkit needs nothing from here.
+    Windows Setup's private libraries first, followed by the NVIDIA wheels and PATH.
     """
     from .asr import _wheel_dll_dirs
 
     # shutil.which uses PATHEXT on Windows, which normally omits .DLL.
     path_dirs = [entry.strip('"') for entry in os.get_exec_path() if entry.strip('"')]
     found: dict[str, str] = {}
-    for directory in _wheel_dll_dirs() + path_dirs:
+    setup_dirs = [str(Path(sys.executable).parent / "cuda")] if getattr(sys, "frozen", False) else []
+    for directory in setup_dirs + _wheel_dll_dirs() + path_dirs:
         for name in CUDA_DLLS:
             if name not in found and (Path(directory) / name).is_file():
                 found[name] = directory

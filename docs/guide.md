@@ -64,6 +64,11 @@ for your Windows account. For later launches, search for **Flow** in the
 Start menu. If Flow is already running, this opens its Flow Home window.
 To remove it, use **Settings → Apps → Installed apps**.
 
+On supported NVIDIA systems, Windows Setup offers **Use faster NVIDIA CUDA
+acceleration**. Selecting it downloads NVIDIA's CUDA runtime and, if needed,
+Flow's CUDA helper. Setup shows download progress and keeps existing Parakeet v3
+GPU weights. Flow supports Vulkan on compatible systems when CUDA is unavailable.
+
 ### Without Python at all — the binary
 
 Use the zip for a portable copy or for releases without Setup.
