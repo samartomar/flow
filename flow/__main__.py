@@ -321,6 +321,12 @@ def _saved_parakeet_engine(variant: str | None = None) -> tuple[str, str]:
         say(f"Parakeet was chosen on the Models page but {why}; using whisper this time")
         return "whisper", ""
     if not parakeet.model_present(key):
+        if key == "gpu" and parakeet.model_present(key, parakeet.variant_dir(key)):
+            backend, _ = parakeet.gpu_backend()
+            label = "CUDA" if backend == "cuda" else "Vulkan"
+            say(f"Parakeet's model files are already on this PC. The {label} helper "
+                f"is missing - Flow Home > Models downloads it; using whisper this time")
+            return "whisper", ""
         say(f"Parakeet was chosen on the Models page but its {key} model is not on this PC "
             f"({parakeet.download_size(key) / 1024 ** 2:.0f} MB) - Flow Home > Models "
             f"downloads it; using whisper this time")
@@ -692,6 +698,23 @@ def main(argv: list[str] | None = None) -> int:
             say(line)
         return 0 if counted else 1
 
+    if os.name == "nt" and sys.platform == "win32":
+        from .desktop_launch import DesktopLaunch
+
+        with DesktopLaunch() as launch:
+            if not launch.primary:
+                launch_args = sys.argv[1:] if argv is None else argv
+                if any(arg != "--home" for arg in launch_args):
+                    say("Flow is already running - quit it before starting with options")
+                    return 2
+                if launch.reopen():
+                    say("Flow is already running - opening Flow Home")
+                    return 0
+            return _run_app(args, launch)
+    return _run_app(args)
+
+
+def _run_app(args, desktop_launch=None) -> int:
     # Read before anything below is chosen, because some of what gets chosen — the speech
     # models, where they run, the CLI's wait, the microphone — is remembered there now
     # (Flow Home, decisions.md 2026-09-22), and each is resolved the way `--voice` always
@@ -1393,12 +1416,24 @@ def main(argv: list[str] | None = None) -> int:
             _threading.Thread(target=warm_if_here, daemon=True, name="first-warm").start()
         else:
             session.warm()
+    def open_home() -> None:
+        # An initial opening also answers a second launch made during startup.
+        if desktop_launch is not None:
+            desktop_launch.requested()
+        home.open("start" if profile is not None and not profile.welcomed else "home")
+
     if first_run:
         # After the first frame rather than now, so the pill is on screen before a
         # browser process starts beside it.
-        pill.after(400, lambda: home.open("start"))
+        pill.after(400, open_home)
     elif args.home:
-        pill.after(300, lambda: home.open("home"))
+        pill.after(300, open_home)
+
+    def watch_for_relaunch() -> None:
+        if desktop_launch.requested():
+            home.open("start" if profile is not None and not profile.welcomed else "home")
+        pill.after(250, watch_for_relaunch)
+
     # Beside the window, not in front of it — see each one for what it used to cost.
     _threading.Thread(target=say_models, daemon=True, name="startup-lines").start()
     if not args.no_speak:
@@ -1415,6 +1450,8 @@ def main(argv: list[str] | None = None) -> int:
     # driving. Nothing below the window is torn down in between.
     try:
         while True:
+            if desktop_launch is not None:
+                pill.after(750, watch_for_relaunch)
             try:
                 pill.mainloop()
             except KeyboardInterrupt:

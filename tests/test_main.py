@@ -622,6 +622,12 @@ class TestAHotkeysBlockIsInertWhereNothingIsRegistered(unittest.TestCase):
         self.assertEqual(self.said(out), [])
 
 
+def setUpModule():
+    from desktop_env import isolate_desktop
+
+    isolate_desktop()
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -867,4 +873,3 @@ class TestTheDesignSwitch(unittest.TestCase):
     def test_and_only_once_however_many_surfaces_are_built(self):
         self.launch(["--design", "current"], asks={"current": "compact"})
         self.assertEqual(self.order, ["dpi", "current", "compact"])
-

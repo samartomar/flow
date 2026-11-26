@@ -93,6 +93,12 @@ jobs:
       - name: Include distribution licenses and source locations
         run: uv run --locked --extra voice --extra edge --group build python packaging/bundle_notices.py dist/flow
 
+      - name: Build Windows Setup
+        run: ./packaging/build_windows_installer.ps1
+
+      - name: Test Windows Setup
+        run: ./packaging/test_windows_installer.ps1
+
       - name: Gather corresponding sources for the bundled components
         run: uv run --locked python packaging/build_windows_sources.py flow-windows-x64-sources.zip
 
@@ -123,14 +129,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $download = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/Flow-Setup.exe"
+          $intro = "**[Download Flow for Windows]($download)**"
           gh release view $env:GITHUB_REF_NAME 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:GITHUB_REF_NAME `
-              flow-windows-x64.zip flow-windows-x64.zip.sha256 flow-windows-x64-sources.zip --clobber
+              Flow-Setup.exe flow-windows-x64.zip flow-windows-x64.zip.sha256 flow-windows-x64-sources.zip --clobber
             if ($LASTEXITCODE -ne 0) { throw "Release asset upload failed" }
-            gh release edit $env:GITHUB_REF_NAME --draft=false
+            gh release edit $env:GITHUB_REF_NAME --draft=false --latest
           } else {
             gh release create $env:GITHUB_REF_NAME `
-              flow-windows-x64.zip flow-windows-x64.zip.sha256 flow-windows-x64-sources.zip `
-              --title $env:GITHUB_REF_NAME --generate-notes
+              Flow-Setup.exe flow-windows-x64.zip flow-windows-x64.zip.sha256 flow-windows-x64-sources.zip `
+              --title $env:GITHUB_REF_NAME --notes $intro --generate-notes --latest --verify-tag
           }

@@ -339,12 +339,26 @@ _backend_cache: tuple[str, str] | None = None
 _nvidia_cache: bool | None = None
 
 
+def _nvidia_smi() -> str | None:
+    # Match Setup's Windows driver locations before looking on PATH.
+    for variable, relative in (
+        ("SystemRoot", "System32/nvidia-smi.exe"),
+        ("ProgramFiles", "NVIDIA Corporation/NVSMI/nvidia-smi.exe"),
+    ):
+        root = os.environ.get(variable)
+        if root:
+            candidate = Path(root) / relative
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which("nvidia-smi")
+
+
 def _nvidia_present() -> bool:
     """Whether `nvidia-smi` sees a GPU. Asked once: the card does not change mid-session."""
     global _nvidia_cache
     if _nvidia_cache is None:
         _nvidia_cache = False
-        exe = shutil.which("nvidia-smi")
+        exe = _nvidia_smi()
         if exe:
             try:
                 out = subprocess.run([exe, "-L"], capture_output=True, text=True, timeout=10,
@@ -358,25 +372,21 @@ def _nvidia_present() -> bool:
 def cuda_dirs() -> list[str]:
     """Directories that together hold every DLL the CUDA helper needs, or [] if one is missing.
 
-    The wheels under `site-packages/nvidia` first (what `[cuda]` installs, and what
-    `asr.cuda_ready` already looks in), then anything already on PATH — a machine with the
-    CUDA toolkit needs nothing from here.
+    Windows Setup's private libraries first, followed by the NVIDIA wheels and PATH.
     """
     from .asr import _wheel_dll_dirs
 
+    # shutil.which uses PATHEXT on Windows, which normally omits .DLL.
+    path_dirs = [entry.strip('"') for entry in os.get_exec_path() if entry.strip('"')]
     found: dict[str, str] = {}
-    for directory in _wheel_dll_dirs():
+    setup_dirs = [str(Path(sys.executable).parent / "cuda")] if getattr(sys, "frozen", False) else []
+    for directory in setup_dirs + _wheel_dll_dirs() + path_dirs:
         for name in CUDA_DLLS:
             if name not in found and (Path(directory) / name).is_file():
                 found[name] = directory
-    for name in CUDA_DLLS:
-        if name not in found:
-            hit = shutil.which(name)
-            if hit:
-                found[name] = str(Path(hit).parent)
-    if len(found) < len(CUDA_DLLS):
-        return []
-    return sorted(set(found.values()))
+        if len(found) == len(CUDA_DLLS):
+            return sorted(set(found.values()))
+    return []
 
 
 def _vulkan_loader() -> bool:
@@ -400,8 +410,9 @@ def _detect_backend() -> tuple[str, str]:
     if _vulkan_loader():
         return "vulkan", ""
     if nvidia:
-        return "", ('an NVIDIA GPU was found but not the CUDA runtime: '
-                    'uv pip install -e ".[cuda]"')
+        action = ('run Flow Setup and select NVIDIA CUDA acceleration'
+                  if getattr(sys, "frozen", False) else 'uv pip install -e ".[cuda]"')
+        return "", f"an NVIDIA GPU was found but the CUDA runtime is missing - {action}"
     return "", "no GPU with a CUDA or Vulkan driver was found"
 
 

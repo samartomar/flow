@@ -97,13 +97,11 @@ class Home:
             server = self.server()
         except OSError as exc:
             return f"Flow Home could not start: {exc}"
-        if self._opened_window and server.connected():
-            # A window is open and polling: it will go to `page` at its next poll, and
-            # this brings it forward. If it was closed a moment ago, `focus` finds
-            # nothing and a new one opens below.
+        if self._opened_window and window.focus(server.window_title):
+            # A minimized browser can pause polling. Use its window to decide
+            # whether to reopen, then navigate when polling resumes.
             self._navigate = page
-            if window.focus(server.window_title):
-                return ""
+            return ""
         url = self.url(page)
         app_url = url.replace("/#", f"/?{server.window_query}#", 1)
         how = window.launch(url, app_url=app_url)

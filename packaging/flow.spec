@@ -155,8 +155,22 @@ exe = EXE(  # noqa: F821
     entitlements_file=None,
 )
 
+# Start menu users get a windowed launcher. Both entry points share the same
+# Python archive and installed libraries.
+desktop = EXE(  # noqa: F821
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="Flow Desktop",
+    icon=os.path.join(ROOT, "flow", "assets", "flow.ico"),
+    console=False,
+    upx=False,
+)
+
 coll = COLLECT(  # noqa: F821
     exe,
+    desktop,
     a.binaries,
     a.datas,
     strip=False,

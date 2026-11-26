@@ -404,6 +404,7 @@ def _cli_version(name: str) -> str:
             [exe, "--version"], capture_output=True, text=True,
             timeout=_VERSION_TIMEOUT_SEC, stdin=subprocess.DEVNULL,
             encoding="utf-8", errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return ""

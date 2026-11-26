@@ -10,7 +10,16 @@ So the console script's shape is reproduced instead: import the package, call `m
 and let its return value be the exit code, exactly as `[project.scripts]` does.
 """
 
-from flow.__main__ import main
+import sys
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--install-cuda-runtime":
+        from pathlib import Path
+
+        from flow.cuda_setup import install
+
+        install(Path(sys.argv[2]), Path(sys.executable).parent)
+        raise SystemExit(0)
+    from flow.__main__ import main
+
     raise SystemExit(main())

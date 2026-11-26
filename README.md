@@ -17,7 +17,8 @@
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> ·
+  <a href="https://github.com/samartomar/flow/releases/latest"><strong>Download Flow for Windows</strong></a> ·
+  <a href="#install">Setup help</a> ·
   <a href="docs/guide.md">Guide</a> ·
   <a href="https://github.com/samartomar/flow/issues/new">Report a mishearing</a>
 </p>
@@ -42,28 +43,51 @@ there's no account or API key, and your audio never leaves your PC.
 
 ### Windows
 
-You need Windows 10 or 11 and a microphone. Download
-[`flow-windows-x64.zip`](https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip),
-unzip it anywhere and run `flow.exe`. No Python required.
+You need Windows 10 or 11 and a microphone.
+
+Choose **Flow-Setup.exe** on the [latest release page](https://github.com/samartomar/flow/releases/latest) when available.
+Double-click it, choose **Install**, and leave **Open Flow** checked when you finish.
+After setup, open **Flow** from the Windows Start menu. Flow Home walks you through
+your first dictation.
+Opening Flow again brings up the running copy's Flow Home.
+
+For the portable version, or for a release that only has a zip:
+
+1. [Download the Windows zip](https://github.com/samartomar/flow/releases/latest/download/flow-windows-x64.zip).
+2. In Downloads, right-click `flow-windows-x64.zip` and choose **Extract All**.
+3. Open the extracted **flow** folder and double-click **flow.exe**. Flow Home opens
+   on first launch and guides you through your microphone and speech models.
+
+For later launches, double-click the same `flow.exe`. You can start Flow entirely
+from File Explorer.
 
 > [!NOTE]
-> The zip isn't code-signed, so the first launch shows a SmartScreen warning. Click
+> Windows downloads are unsigned, so the first launch can show a SmartScreen warning. Click
 > **More info**, then **Run anyway**.
 
-Or get the same build through [Scoop](https://scoop.sh), which makes updating one command:
+If you already use [Scoop](https://scoop.sh), install the same build and then search
+for **Flow** in the Windows Start menu.
 
 ```powershell
 scoop bucket add flow https://github.com/samartomar/scoop-flow
 scoop install flow/flow    # flow/ matters: Scoop's main bucket has a different "flow"
 ```
 
-If you already use [uv](https://docs.astral.sh/uv/), you can install from source instead.
-It fetches Python and Flow's three dependencies (faster-whisper, sounddevice and numpy):
+#### Command-line install with uv
+
+If you already use [uv](https://docs.astral.sh/uv/), install the Python version and
+start it with `flow`.
 
 ```bash
 uv tool install git+https://github.com/samartomar/flow
 flow
 ```
+
+After a tool install, run `flow` from any directory. Use `uv run flow` inside a
+Flow source checkout. The Windows zip and Scoop build include Piper for offline
+voices and edge-tts for Natural voices. With the Python install, add those engines
+with the `voice` and `edge` extras. See [the guide](docs/guide.md#with-uv--nothing-to-clone)
+for the install command and CUDA setup.
 
 The speech models aren't part of any of these. Flow downloads them on first run and shows
 you the progress.

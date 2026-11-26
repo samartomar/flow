@@ -634,10 +634,10 @@ class TestOpeningTheWindow(unittest.TestCase):
         with urllib.request.urlopen(url) as response:
             self.assertIn(b"<title>Flow</title>", response.read())
 
-    def test_an_open_window_is_brought_forward_and_moved_instead(self):
+    def test_an_open_window_is_brought_forward_even_when_polling_paused(self):
         h = Pumped(self)
         server = h.home.server()
-        server.last_seen = time.monotonic()
+        self.assertFalse(server.connected())
         with mock.patch.object(window_mod, "launch", return_value=window_mod.ISOLATED):
             h.home.open()
         with mock.patch.object(window_mod, "focus", return_value=True) as focus, \
